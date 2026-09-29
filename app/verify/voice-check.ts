@@ -18,7 +18,7 @@ import { cleanTranscript, killLeftover } from '../src/main/voice/server.ts';
 import { createWhisper, type Whisper } from '../src/main/voice/whisper.ts';
 import { PCM_WORKLET_SOURCE } from '../src/main/voice/worklet.ts';
 import { check, finish, sleep, until } from './check.ts';
-import { bytesOf, readWav } from './wav.ts';
+import { bytesOf, say } from './wav.ts';
 
 const appDir = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const offline = process.argv.includes('--offline');
@@ -43,12 +43,6 @@ const norm = (s: string) =>
     .replace(/\s+/g, ' ')
     .trim();
 const hears = (text: string, words: string[]) => words.every((w) => norm(text).includes(w));
-
-function say(voice: string, text: string): Int16Array {
-  const path = join(dir, `${voice}-${createHash('sha1').update(text).digest('hex').slice(0, 8)}.wav`);
-  execFileSync('say', ['-v', voice, '-o', path, '--file-format=WAVE', '--data-format=LEI16@16000', text]);
-  return readWav(path);
-}
 
 // Every whisper-server this check started has the scratch folder in its command line, whatever launched it.
 function serversUnderScratch(): number[] {

@@ -1,0 +1,333 @@
+// Beta predicate item 7 in the real app. Clips made with macOS `say` are played into the microphone through Chromium's fake
+// capture device, and a real Claude employee receives the right words, in English and in Portuguese, by hold-V push-to-talk
+// and by proximity with no key. It also proves that audio arriving while an employee speaks is dropped, that pressing V
+// stops an employee who is talking, that Accurate, Auto and a dead microphone behave, and what the chip says in every state.
+// Run: pnpm build && OFFICE_CDP_PORT=9336 node verify/screen-watch.mjs node verify/cdp.mjs verify/e2e-voice.mjs
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { homedir } from 'node:os';
+import { join } from 'node:path';
+import { HAIKU, assert, claude, company, diagnoseClaude, hireClaudeInBlock, scratch, status, stepUntil, text, walkUpToClaude } from './lib.mjs';
+import { concat, roomTone, say, writeWav } from './wav.ts';
+
+const { dataDir, repo } = scratch();
+const clips = join(dataDir, 'clips');
+mkdirSync(clips);
+
+const PHRASES = {
+  en: { voice: 'Samantha', spoken: 'Please reply with the single word banana.', words: ['reply', 'single word', 'banana'], answer: /banana/i },
+  pt: { voice: 'Luciana', spoken: 'Por favor, responda apenas com a palavra abacaxi.', words: ['responda', 'apenas', 'abacaxi'], answer: /abacaxi/i },
+};
+// Three seconds of room before the phrase give a person time to reach for V. The phrase plays once each time the microphone opens.
+const LEAD_S = 3;
+const clipOf = {};
+for (const [lang, p] of Object.entries(PHRASES)) {
+  const phrase = say(p.voice, p.spoken);
+  p.seconds = phrase.length / 16_000;
+  clipOf[lang] = join(clips, `${lang}.wav`);
+  writeWav(clipOf[lang], concat(roomTone(LEAD_S), phrase, roomTone(4)));
+}
+const deadClip = join(clips, 'dead.wav');
+writeWav(deadClip, new Int16Array(16_000 * 20));
+
+const base = { OFFICE_DATA_DIR: dataDir, OFFICE_START_LEVEL: '3', OFFICE_CLAUDE_MODEL: HAIKU, OFFICE_DEBUG: '1' };
+export const env = { ...base, OFFICE_TEST_AUDIO: clipOf.en };
+
+const voiceOf = (s) => s.eval('JSON.parse(JSON.stringify(__office.store.getState().voice))');
+const measures = (s, name) => s.eval(`performance.getEntriesByName(${JSON.stringify(name)}).map(e => Math.round(e.duration))`);
+const norm = (t) =>
+  t
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/\p{M}/gu, '')
+    .replace(/[^a-z0-9 ]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+const hears = (t, words) => words.every((w) => norm(t).includes(w));
+const click = (s, label) => s.clickText('.settings .seg button', label);
+
+// What the office was told, as the main process saw it arrive. It logs each message cut at 200 characters, so a long
+// instruction that the script sends itself arrives here without its text, and only the owner's short sentences are read.
+const routed = (s) =>
+  s.mainLogs
+    .join('\n')
+    .split('\n')
+    .filter((l) => /^\[ipc\] \{"type":"(assign|interject|answer)"/.test(l))
+    .map((l) => {
+      try {
+        return JSON.parse(l.slice('[ipc] '.length));
+      } catch {
+        return { type: /"type":"(\w+)"/.exec(l)[1], truncated: true };
+      }
+    });
+const wordsOf = (m) => m.task ?? m.text;
+
+const ANNOUNCEMENT = 'This is a long announcement from your colleague, so the microphone has to stay closed while I keep on talking for several seconds without any pause at all.';
+const employeeSays = async (s, words) => s.eval(`__office.apply({ type: 'said', employeeId: ${claude}.id, text: ${JSON.stringify(words)} })`);
+
+const latencies = [];
+
+// The owner steps away, so the microphone closes, and steps back, so it opens on a fresh stream and the clip plays again.
+async function freshMic(s) {
+  const a = await s.eval('__office.state().avatars[0]');
+  await s.eval(`__office.teleport(${a.x + 9}, ${a.z + 9}, 0); __office.step(0.5)`);
+  await s.waitFor(`__office.store.getState().voice.capture.kind === 'closed'`, 5000);
+  assert(await walkUpToClaude(s), 'walked up to the employee');
+  await s.waitFor(`__office.store.getState().voice.capture.kind === 'open'`, 15000);
+  return Date.now();
+}
+
+// Nothing is being spoken and the gate has had time to reopen, so no speech is left to hide the next clip.
+async function stopTalking(s) {
+  for (let calm = 0; calm < 4; ) {
+    calm = (await s.eval('speechSynthesis.speaking')) ? 0 : calm + 1;
+    await s.sleep(400);
+  }
+}
+
+const quiet = async (s) => {
+  await s.waitFor(`${status}.kind === 'idle'`, 90000);
+  await stopTalking(s);
+};
+
+async function arrived(s, before, lang, how) {
+  const t0 = Date.now();
+  while (routed(s).length <= before && Date.now() - t0 < 30000) await s.sleep(200);
+  const all = routed(s);
+  assert(all.length === before + 1, `${how}: exactly one message reached the office (${all.length - before})`);
+  const heard = wordsOf(all.at(-1));
+  assert(hears(heard, PHRASES[lang].words), `${how}: the office received the right words: "${heard}"`);
+  assert(all.at(-1).type === 'assign', `${how}: an idle employee got it as a task`);
+  return heard;
+}
+
+function sessionSaw(sessionId, words) {
+  const file = join(homedir(), '.claude', 'projects', repo.replace(/[^A-Za-z0-9]/g, '-'), `${sessionId}.jsonl`);
+  if (!existsSync(file)) return false;
+  return readFileSync(file, 'utf8')
+    .split('\n')
+    .filter(Boolean)
+    .map((l) => JSON.parse(l))
+    .filter((e) => e.type === 'user')
+    .some((e) => hears(typeof e.message?.content === 'string' ? e.message.content : JSON.stringify(e.message?.content ?? ''), words));
+}
+
+async function employeeUnderstood(s, lang, how) {
+  await s.waitFor(`${status}.kind === 'working'`, 30000);
+  await s.waitFor(`${status}.kind === 'idle'`, 120000);
+  const lines = await s.eval(`(__office.store.getState().logs[${claude}.id] ?? []).map(l => l.line)`);
+  const said = lines.filter((l) => l.startsWith('Said:'));
+  assert(said.some((l) => PHRASES[lang].answer.test(l)), `${how}: the employee did what it was told and said the word (${said.at(-1)})`);
+  const sessionId = await s.eval(`${claude}.sessionId`);
+  assert(sessionId && sessionSaw(sessionId, PHRASES[lang].words), `${how}: the words are in the employee's own session log (${sessionId})`);
+}
+
+async function pushToTalk(s, lang, { bargeIn = false, shots = '' } = {}) {
+  const how = `hold V, ${lang}${bargeIn ? ', over an employee talking' : ''}`;
+  await quiet(s);
+  const before = routed(s).length;
+  const heardBefore = (await measures(s, 'voice:ptt')).length;
+  const opened = await freshMic(s);
+  if (bargeIn) {
+    await employeeSays(s, ANNOUNCEMENT);
+    await s.waitFor('speechSynthesis.speaking', 3000);
+    assert(await s.eval('speechSynthesis.speaking'), `${how}: an employee is talking`);
+  }
+  await s.sleep(Math.max(0, 1500 - (Date.now() - opened)));
+  await s.key('keyDown', 'KeyV', 'v');
+  assert((await voiceOf(s)).phase === 'listening', `${how}: pressing V shows Listening`);
+  if (bargeIn) {
+    await s.sleep(300);
+    assert(!(await s.eval('speechSynthesis.speaking')), `${how}: pressing V stopped the employee mid-sentence`);
+  }
+  if (shots) {
+    await s.sleep((LEAD_S + PHRASES[lang].seconds / 2) * 1000 - (Date.now() - opened));
+    assert((await s.eval(`Number(document.querySelector('.talk-badge .meter')?.style.getPropertyValue('--level') || 0)`)) > 0.05, `${how}: the meter moves while the clip plays`);
+    await s.shot(`${shots}-listening`);
+  }
+  await s.sleep(Math.max(0, (LEAD_S + PHRASES[lang].seconds + 1) * 1000 - (Date.now() - opened)));
+  await s.key('keyUp', 'KeyV', 'v');
+  if (shots) await s.shot(`${shots}-transcribing`);
+  const heard = await arrived(s, before, lang, how);
+  const [ms] = (await measures(s, 'voice:ptt')).slice(heardBefore);
+  console.log(`latency: ${how}: V released to text in ${ms} ms ("${heard}")`);
+  latencies.push({ how, ms, note: 'V released to text' });
+  await employeeUnderstood(s, lang, how);
+}
+
+// The card's Mic button listens for one answer, whatever the microphone mode. The clip only plays when the microphone
+// opens, so the owner steps away from the asker and the asker walks over, which opens it again.
+async function answerByVoice(s) {
+  const how = 'the question card, en';
+  await quiet(s);
+  assert(await click(s, 'Hold V'), `${how}: chose the Hold V microphone mode, where the detector is otherwise off`);
+  await s.eval(`window.office.send({ type: 'assign', employeeId: ${claude}.id, task: 'Call the ask_owner tool to ask me which fruit I want, with exactly two options: Banana and Apple. Then say the fruit I chose.' })`);
+  await s.waitFor(`${status}.kind === 'blocked_on_owner'`, 120000);
+  await stepUntil(s, `__office.state().askerId === ${claude}.id && !!document.querySelector('.qcard')`, 60000, 'the question card');
+  await stopTalking(s);
+  const before = routed(s).length;
+
+  const owner = await s.eval('__office.state().owner');
+  await s.eval(`__office.teleport(${owner.x + 4}, ${owner.z}, ${owner.yaw}); __office.step(0.2)`);
+  await s.waitFor(`__office.store.getState().voice.capture.kind === 'closed'`, 5000);
+  await s.eval('__office.step(5)');
+  await s.waitFor(`__office.store.getState().voice.capture.kind === 'open'`, 15000);
+  assert(await s.clickText('.qcard .btn.mic', 'Mic'), `${how}: clicked the card's Mic button`);
+  await s.sleep(200);
+  assert((await voiceOf(s)).cardMic && (await s.eval(text('.qcard .btn.mic'))) === 'Listening', `${how}: the button says Listening`);
+
+  const t0 = Date.now();
+  while (routed(s).length <= before && Date.now() - t0 < 30000) await s.sleep(200);
+  const sent = routed(s).slice(before);
+  assert(sent.length === 1 && sent[0].type === 'answer', `${how}: the spoken answer reached the office as an answer to the question (${sent.map((m) => m.type)})`);
+  assert(hears(wordsOf(sent[0]), PHRASES.en.words), `${how}: with the right words: "${wordsOf(sent[0])}"`);
+  assert(!(await voiceOf(s)).cardMic, `${how}: the card mic switched itself off after one answer`);
+  await quiet(s);
+}
+
+async function proximity(s, lang) {
+  const how = `proximity, ${lang}`;
+  await quiet(s);
+  const before = routed(s).length;
+  const heardBefore = (await measures(s, 'voice:proximity')).length;
+  await freshMic(s);
+  const heard = await arrived(s, before, lang, how);
+  const [ms] = (await measures(s, 'voice:proximity')).slice(heardBefore);
+  console.log(`latency: ${how}: end of speech detected to text in ${ms} ms, after the 600 ms the detector waits to be sure ("${heard}")`);
+  latencies.push({ how, ms, note: 'detected end of speech to text, after a 600 ms hangover' });
+  await employeeUnderstood(s, lang, how);
+}
+
+export default async (s, { launch }) => {
+  await hireClaudeInBlock(s, repo);
+  await s.waitFor(`__office.store.getState().voice.engine.kind === 'ready'`, 30000);
+  assert((await voiceOf(s)).engine.model === 'ggml-small-q5_1.bin', 'the engine is ready on the fast model');
+  await s.eval(`__office.set({ selectedId: ${claude}.id })`);
+  await s.waitFor(`!!document.querySelector('.drawer')`);
+  const [settingsBottom, drawerTop] = await s.eval(`[document.querySelector('.settings').getBoundingClientRect().bottom, document.querySelector('.drawer').getBoundingClientRect().top]`);
+  assert(settingsBottom < drawerTop, `the settings panel, with its new rows, does not overlap the employee drawer (${Math.round(settingsBottom)} above ${Math.round(drawerTop)})`);
+  await s.shot('u5-settings-and-drawer');
+  await s.eval(`__office.set({ selectedId: null })`);
+
+  assert(await click(s, 'Hold V'), 'chose the Hold V microphone mode');
+  assert(await click(s, 'English'), 'chose English');
+  await pushToTalk(s, 'en', { shots: 'u5-chip' });
+  await pushToTalk(s, 'en', { bargeIn: true });
+
+  assert(await click(s, 'Proximity'), 'chose the Proximity microphone mode');
+  await proximity(s, 'en');
+
+  await quiet(s);
+  const before = routed(s).length;
+  const measuresBefore = (await measures(s, 'voice:proximity')).length;
+  const opened = await freshMic(s);
+  await employeeSays(s, ANNOUNCEMENT);
+  await s.sleep(Math.max(0, (LEAD_S + PHRASES.en.seconds / 2) * 1000 - (Date.now() - opened)));
+  assert(await s.eval('speechSynthesis.speaking'), 'while the clip plays the employee is still talking');
+  await s.sleep(Math.max(0, (LEAD_S + PHRASES.en.seconds + 2) * 1000 - (Date.now() - opened)));
+  await quiet(s);
+  await s.sleep(1500);
+  assert(routed(s).length === before, 'the clip that played over the employee never reached the office');
+  assert((await measures(s, 'voice:proximity')).length === measuresBefore, 'and was never sent to whisper');
+  console.log('gate: the same clip was delivered a moment ago with the employee silent, and was dropped with the employee talking');
+
+  await answerByVoice(s);
+
+  assert(await click(s, 'Accurate'), 'chose Voice: Accurate');
+  await s.waitFor(`__office.store.getState().voice.engine.kind === 'ready' && __office.store.getState().voice.engine.model.includes('turbo')`, 90000);
+  assert((await voiceOf(s)).engine.model === 'ggml-large-v3-turbo-q5_0.bin', 'the engine reloaded on large-v3-turbo-q5_0');
+  assert(await click(s, 'Hold V'), 'chose the Hold V microphone mode again');
+  await pushToTalk(s, 'en');
+  assert(await click(s, 'Fast'), 'chose Voice: Fast again');
+  await s.waitFor(`__office.store.getState().voice.engine.kind === 'ready' && __office.store.getState().voice.engine.model.includes('small')`, 60000);
+  assert((await voiceOf(s)).engine.model === 'ggml-small-q5_1.bin', 'and back on small-q5_1');
+
+  await chipStates(s);
+  await s.close();
+
+  const pt = await launch({ env: { ...base, OFFICE_TEST_AUDIO: clipOf.pt } });
+  try {
+    await pt.waitFor('!!window.__office && !!window.office');
+    await pt.waitFor(`!!${company} && ${company}.employees.length === 1`);
+    await pt.eval('__office.step(25)');
+    await pt.waitFor(`__office.store.getState().voice.engine.kind === 'ready'`, 30000);
+    assert(await click(pt, 'Português'), 'chose Português');
+    assert(await click(pt, 'Hold V'), 'chose the Hold V microphone mode');
+    await pushToTalk(pt, 'pt');
+    assert(await click(pt, 'Proximity'), 'chose the Proximity microphone mode');
+    await proximity(pt, 'pt');
+    assert(await click(pt, 'Auto'), 'chose Auto, so whisper decides the language');
+    assert(await click(pt, 'Hold V'), 'chose the Hold V microphone mode');
+    await pushToTalk(pt, 'pt');
+    assert(await pt.eval(`!!document.querySelector('.settings .seg button.on')`), 'the settings still render');
+  } catch (e) {
+    await diagnoseClaude(pt, 'u5-pt-failure').catch(() => {});
+    throw e;
+  }
+  await pt.close();
+
+  const dead = await launch({ env: { ...base, OFFICE_TEST_AUDIO: deadClip } });
+  await dead.waitFor('!!window.__office && !!window.office');
+  await dead.waitFor(`!!${company} && ${company}.employees.length === 1`);
+  await dead.eval('__office.step(25)');
+  await dead.waitFor(`__office.store.getState().voice.engine.kind === 'ready'`, 30000);
+  const beforeDead = routed(dead).length;
+  assert(await walkUpToClaude(dead), 'walked up to the employee with a microphone that only ever reads zeros');
+  await dead.waitFor(`__office.store.getState().voice.access.kind === 'silent'`, 8000);
+  const chip = await dead.eval(text('.talk-badge'));
+  assert(chip.includes('The mic is silent') && chip.includes('pnpm beta'), `after one second of exact zeros the chip says so (${chip})`);
+  await dead.shot('u5-chip-silent-real');
+  await dead.key('keyDown', 'KeyV', 'v');
+  await dead.sleep(1500);
+  await dead.key('keyUp', 'KeyV', 'v');
+  await dead.sleep(2500);
+  assert(routed(dead).length === beforeDead, 'holding V over silence sends nothing to the employee');
+  await dead.close();
+
+  console.log('\nlatency summary');
+  for (const { how, ms, note } of latencies) console.log(`  ${how.padEnd(42)} ${String(ms).padStart(5)} ms  ${note}`);
+};
+
+// Everything the chip can say. Some states come from main and the OS, so they are put in the store the way main would.
+async function chipStates(s) {
+  assert(await walkUpToClaude(s), 'walked up to the employee');
+  assert(await click(s, 'Hold V'), 'chose the Hold V microphone mode');
+  await s.sleep(250);
+  assert((await s.eval(text('.talk-badge'))).includes('Hold V to talk'), 'in Hold V mode an idle chip says to hold V');
+  assert(await click(s, 'Proximity'), 'chose the Proximity microphone mode');
+  const idle = { engine: { kind: 'ready', model: 'ggml-small-q5_1.bin' }, access: { kind: 'granted' } };
+  const set = (patch) => s.eval(`__office.set({ voice: { ...__office.store.getState().voice, ...${JSON.stringify(patch)} } })`);
+  const cases = [
+    ['idle', {}, ['Just talk, or hold V'], null],
+    ['downloading', { engine: { kind: 'downloading', file: 'ggml-small-q5_1.bin', received: 71_000_000, total: 190_085_487 } }, ['Downloading the voice model 37%'], null],
+    ['starting', { engine: { kind: 'starting' } }, ['Loading the voice model'], null],
+    ['missing-binary', { engine: { kind: 'missing_binary' } }, ['brew install whisper-cpp'], 'Check again'],
+    ['engine-error', { engine: { kind: 'error', message: 'whisper-server exited with code 3' } }, ['Voice failed', 'exited with code 3'], 'Try again'],
+    ['mic-needs-prompt', { access: { kind: 'needs_prompt' } }, ['Allow the microphone in the macOS dialog'], null],
+    ['mic-denied', { access: { kind: 'denied' } }, ['Microphone access is off'], 'Open System Settings'],
+    ['mic-silent', { access: { kind: 'silent' } }, ['The mic is silent', 'pnpm beta'], null],
+    ['capture-failed', { capture: { kind: 'failed', message: 'Requested device not found' } }, ['Could not open the microphone', 'Requested device not found'], null],
+  ];
+  for (const [name, patch, parts, button] of cases) {
+    await set({ ...idle, capture: { kind: 'open' }, ...patch });
+    await s.sleep(250);
+    const chip = await s.eval(text('.talk-badge'));
+    assert(parts.every((p) => chip.includes(p)), `the chip for ${name} says: ${chip}`);
+    const buttons = await s.eval(`[...document.querySelectorAll('.talk-badge .chip-btn')].map(b => b.innerText)`);
+    assert(button ? buttons.join() === button : buttons.length === 0, `${name}: ${button ? `offers ${button}` : 'offers no button'}`);
+    await s.shot(`u5-chip-${name}`);
+  }
+  await set({ ...idle, capture: { kind: 'open' }, access: { kind: 'denied' } });
+  await s.sleep(200);
+  const before = s.mainLogs.join('\n').split('[voice] would open the microphone settings').length;
+  assert(await s.clickText('.talk-badge .chip-btn', 'Open System Settings'), 'clicked Open System Settings');
+  await s.sleep(500);
+  assert(s.mainLogs.join('\n').split('[voice] would open the microphone settings').length === before + 1, 'the click reached main, which in a test run only logs it and opens nothing');
+  await set({ ...idle, capture: { kind: 'open' } });
+}
+
+export async function diagnose(s) {
+  console.log('voice at failure:', JSON.stringify(await s.eval('__office.store.getState().voice').catch((e) => e.message)));
+  console.log('chip at failure:', await s.eval(text('.talk-badge')).catch(() => '(none)'));
+  console.log('routed to the office:', JSON.stringify(routed(s)));
+  await diagnoseClaude(s, 'u5-failure').catch(() => {});
+}

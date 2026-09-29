@@ -1,4 +1,7 @@
-import { readFileSync, writeFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 // Walks the RIFF chunks instead of assuming a 44-byte header, because macOS `say` writes a FLLR filler chunk before the samples.
 export function readWav(path: string): Int16Array {
@@ -40,3 +43,23 @@ export function writeWav(path: string, pcm: Int16Array) {
 
 // The Int16 samples as the bytes that cross the IPC boundary.
 export const bytesOf = (pcm: Int16Array) => new Uint8Array(pcm.buffer, pcm.byteOffset, pcm.byteLength);
+
+// A 16 kHz mono clip of `text` in a macOS voice.
+export function say(voice: string, text: string): Int16Array {
+  const path = join(mkdtempSync(join(tmpdir(), 'say-')), 'clip.wav');
+  execFileSync('say', ['-v', voice, '-o', path, '--file-format=WAVE', '--data-format=LEI16@16000', text]);
+  return readWav(path);
+}
+
+// A live microphone always has some noise, so a pad of quiet dither stands in for a room. Exact zeros would read as a dead mic.
+export const roomTone = (seconds: number) => Int16Array.from({ length: Math.round(seconds * 16_000) }, () => Math.round((Math.random() - 0.5) * 6));
+
+export function concat(...parts: Int16Array[]): Int16Array {
+  const out = new Int16Array(parts.reduce((n, p) => n + p.length, 0));
+  let at = 0;
+  for (const part of parts) {
+    out.set(part, at);
+    at += part.length;
+  }
+  return out;
+}

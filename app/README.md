@@ -13,7 +13,7 @@ An Electron window opens with the office. On first run, click **Choose a folder*
 
 `pnpm start` builds the app and runs it without the dev server.
 
-To talk to employees on a Mac, start the app with `pnpm beta`. It builds, then opens `Electron.app` through `open`, so macOS asks about the microphone for Electron itself. When a terminal starts Electron (`pnpm dev`, `pnpm start`), that terminal is the app macOS asks about. A terminal that cannot show the permission dialog, such as the one inside T3 Code, VS Code or Cursor, makes macOS hand the app silence, and the HUD says so. The app's console output goes to `~/Library/Logs/Online Office/beta.log`.
+To talk to employees on a Mac, start the app with `pnpm beta`. It builds, then opens `Electron.app` through `open`, so macOS asks about the microphone for Electron itself. When a terminal starts Electron (`pnpm dev`, `pnpm start`), that terminal is the app macOS asks about. A terminal that cannot show the permission dialog, such as the one inside T3 Code, VS Code or Cursor, makes macOS hand the app silence, and the HUD says so. The app's console output goes to `~/Library/Logs/Online Office/beta.log`. Quit a copy that `pnpm dev` started first, because a second instance hands over to the first and quits.
 
 | Variable | Default | Effect |
 | --- | --- | --- |
@@ -154,6 +154,7 @@ node verify/cdp.mjs verify/e2e-contract.mjs
 node verify/cdp.mjs verify/e2e-memory.mjs
 node verify/cdp.mjs verify/e2e-queue.mjs
 node verify/cdp.mjs verify/e2e-long-wait.mjs
+node verify/cdp.mjs verify/e2e-voice.mjs
 ```
 
 - `verify/nav-check.ts` needs no model or Electron. It builds the walkable grid for one, two and three blocks and checks every path against an independent oracle that samples the segments: a route from the owner's seat to a talk spot at every desk, no segment inside an obstacle grown by the owner's radius, everything inside the walls, a goal in the middle of a desk snapping outside it, and a sealed pocket having no route.
@@ -169,6 +170,7 @@ node verify/cdp.mjs verify/e2e-long-wait.mjs
 - `verify/e2e-contract.mjs` starts the app on the old-format company file and drives the messages above through the real IPC boundary with real Claude employees. It checks the migration, a refused bad mode, Always allow (an exact rule for a `node` command, with no card for the identical command and a card for a different one), `remove_allow_rule`, a live `set_model` (the next turn's `init` shows the new model), a refused model reported in the log, a `fresh_session` on a stale `sessionId`, and a background subagent that outlives the turn that launched it.
 - `verify/e2e-memory.mjs` tells an employee a fact, quits the app, deletes the employee's `sessionId`, starts the app again on the same data folder, and asks a question only the notes can answer.
 - `verify/e2e-queue.mjs` makes two subagents ask permission at the same moment, and checks that the second card waits behind the first.
+- `verify/e2e-voice.mjs` plays clips made with `say` into the microphone through Chromium's fake capture device (`OFFICE_TEST_AUDIO`). A real Claude employee receives the right words in English and Portuguese, by hold-V and by proximity, and the script reads them from the main process, the employee's answer and the employee's own session log. It also checks that a clip played while an employee is talking never arrives (the same clip arrives when the employee is silent), that pressing V stops an employee who is talking, Voice: Accurate, Language: Auto, a microphone that only reads zeros, and every state of the HUD chip. It prints the time from releasing V to the text. It needs whisper-cpp, the models, and Portuguese and English macOS voices.
 - `verify/e2e-long-wait.mjs` leaves the owner silent for 150 seconds before answering. Run it with `OFFICE_LONG_WAIT_S=330` to go past Claude Code's 5 minute default.
 
 `pnpm build` rewrites `out/`, which is what `pnpm start` runs. If you use the beta while the tests run, build the tests to their own folder with `pnpm build:verify` and set `OFFICE_OUT_DIR=out/verify` when you run `verify/cdp.mjs`.
