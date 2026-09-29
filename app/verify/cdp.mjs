@@ -1,25 +1,33 @@
 // Drives the real Electron app over the Chrome DevTools Protocol so the office can be screenshotted and poked.
 // Usage: node verify/cdp.mjs <scenario.mjs>   (run `pnpm build` first; it launches the built app)
+// If the owner runs the beta from out/, build to a separate folder so the tests never rewrite it under him:
+//   pnpm build:verify && OFFICE_OUT_DIR=out/verify node verify/cdp.mjs <scenario.mjs>
 // A scenario exports `env` (variables for the app) and a default async function that receives the driver.
+// Its second argument is `{ launch }`, so a scenario can quit the app and start it again on the same OFFICE_DATA_DIR.
+// Every instance started this way is closed when the scenario ends, whether it passed or not.
 import { spawn } from 'node:child_process';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
-import { dirname, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const APP_DIR = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const PORT = 9333;
+// Two worktrees running end-to-end tests at once need different ports, or each driver talks to the other's app.
+const PORT = Number(process.env.OFFICE_CDP_PORT ?? 9333);
 export const OUT = '/tmp/office-shots';
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const launched = [];
 
 export async function launch({ env = {}, width = 1280, height = 800 } = {}) {
   mkdirSync(OUT, { recursive: true });
   const electron = createRequire(import.meta.url)('electron');
   // Set by Electron-based hosts (editors, agent shells). With it the binary runs as plain Node and never opens a window.
   const { ELECTRON_RUN_AS_NODE: _, ...inherited } = process.env;
-  const proc = spawn(electron, ['.', `--remote-debugging-port=${PORT}`], {
+  const entry = process.env.OFFICE_OUT_DIR ? join(resolve(APP_DIR, process.env.OFFICE_OUT_DIR), 'main', 'index.js') : '.';
+  const proc = spawn(electron, [entry, `--remote-debugging-port=${PORT}`], {
     cwd: APP_DIR,
-    env: { ...inherited, ...env },
+    // OFFICE_TEST_RUN keeps the window hidden and out of the Dock. A scenario can set it to '' to watch a run by eye.
+    env: { ...inherited, OFFICE_TEST_RUN: '1', ...env },
     stdio: ['ignore', 'pipe', 'pipe'],
     // Own process group, so the fallback kill below also takes the Claude children with it.
     detached: true,
@@ -27,7 +35,12 @@ export async function launch({ env = {}, width = 1280, height = 800 } = {}) {
   const mainLogs = [];
   for (const stream of [proc.stdout, proc.stderr]) stream.on('data', (d) => mainLogs.push(d.toString().trimEnd()));
   let exited = false;
-  proc.on('exit', () => (exited = true));
+  let closing = false;
+  proc.on('exit', (code, signal) => {
+    exited = true;
+    // Quitting on purpose goes through close(). Anything else is the window being closed or the app dying.
+    if (!closing) mainLogs.push(`[driver] the app exited on its own: code=${code} signal=${signal}`);
+  });
 
   let targets = [];
   for (let i = 0; i < 100 && !exited; i++) {
@@ -57,6 +70,11 @@ export async function launch({ env = {}, width = 1280, height = 800 } = {}) {
     } else if (m.method === 'Runtime.exceptionThrown') {
       logs.push(`exception: ${m.params.exceptionDetails.exception?.description ?? m.params.exceptionDetails.text}`);
     }
+  };
+  // Without this a closed window leaves every pending call waiting, and Node exits with an unsettled top-level await.
+  ws.onclose = () => {
+    for (const { reject } of pending.values()) reject(new Error('the app closed the DevTools connection (window closed or app quit)'));
+    pending.clear();
   };
   const call = (method, params = {}) =>
     new Promise((resolve, reject) => {
@@ -107,6 +125,7 @@ export async function launch({ env = {}, width = 1280, height = 800 } = {}) {
     clickText: (selector, text) =>
       api.eval(`(() => { const b = [...document.querySelectorAll(${JSON.stringify(selector)})].find(b => b.innerText.includes(${JSON.stringify(text)})); b?.click(); return !!b; })()`),
     async close() {
+      closing = true;
       ws.close();
       if (!exited) proc.kill('SIGTERM');
       for (let i = 0; i < 50 && !exited; i++) await sleep(100);
@@ -114,6 +133,7 @@ export async function launch({ env = {}, width = 1280, height = 800 } = {}) {
       if (!exited) process.kill(-proc.pid, 'SIGKILL');
     },
   };
+  launched.push(api);
   return api;
 }
 
@@ -124,7 +144,7 @@ if (scenario) {
   let failed = false;
   try {
     await s.waitFor('!!window.__office && !!window.office');
-    await mod.default(s);
+    await mod.default(s, { launch });
   } catch (e) {
     failed = true;
     console.error('FAILED:', e.message);
@@ -134,7 +154,7 @@ if (scenario) {
     console.log('renderer console:', uniq.length ? '\n  ' + uniq.join('\n  ') : '(clean)');
     const main = s.mainLogs.join('\n').trim();
     console.log('main process output:', main ? '\n  ' + main.replace(/\n/g, '\n  ') : '(empty)');
-    await s.close();
+    for (const app of launched) await app.close();
   }
   process.exit(failed ? 1 : 0);
 }

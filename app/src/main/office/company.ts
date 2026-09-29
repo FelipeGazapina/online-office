@@ -12,14 +12,20 @@ import {
   type Company,
   type Employee,
   type EmployeeId,
+  type EmployeeStatus,
   type HarnessStatus,
   type ProjectBlock,
   type Provider,
+  type Question,
   type QuestionId,
   type Snapshot,
 } from '../../shared/protocol.ts';
 import { HARNESSES } from './adapters/index.ts';
 import type { EmployeeSession, SessionHost } from './adapters/types.ts';
+import { logger } from './debug.ts';
+import { Inbox, type Left } from './inbox.ts';
+import type { OfficeMcp } from './mcp.ts';
+import type { MemoryStore } from './memory.ts';
 
 const XP_PER_TASK = 10;
 const XP_PER_QUICK_ANSWER = 3;
@@ -39,6 +45,25 @@ export type OfficeEvents = {
   said(employeeId: EmployeeId, text: string): void;
   log(employeeId: EmployeeId, line: string, at: number): void;
 };
+
+// The things every session leans on, started before the first employee so a session can connect the moment it is built.
+export type OfficeServices = { mcp: OfficeMcp; memory: MemoryStore };
+
+// Where a blocked employee goes when the last question is answered. The adapter keeps reporting while the card is up
+// (a subagent finishes, the turn ends), and those reports land here so the card stays put.
+type Resume = { status: EmployeeStatus; activity: string; activityReported: boolean };
+
+const debug = logger('office');
+
+const short = (s: string, n: number) => {
+  const t = s.trim().replace(/\s+/g, ' ');
+  return t.length > n ? `${t.slice(0, n - 1).trimEnd()}…` : t;
+};
+
+const describeQuestion = (q: Question): string =>
+  q.kind === 'permission'
+    ? `Asking permission: ${q.tool} ${short(q.detail, 120)}`
+    : `Asking the boss: ${q.text}${q.options ? ` [${q.options.join(' / ')}]` : ''}`;
 
 export const levelForXp = (xp: number): number => {
   let level = 1;
@@ -96,12 +121,19 @@ function save(file: string, company: Company) {
 export class Office {
   private company: Company;
   private sessions = new Map<EmployeeId, EmployeeSession>();
+  // Every question an employee is waiting on. The employee's status shows the front of their line.
+  private inbox = new Inbox({ headChanged: (id, head, left) => this.onHeadChanged(id, head, left) });
+  private resumes = new Map<EmployeeId, Resume>();
+  private readonly dataFile: string;
+  private readonly harnesses: Record<Provider, HarnessStatus>;
+  private readonly events: OfficeEvents;
+  private readonly services: OfficeServices;
 
-  constructor(
-    private dataFile: string,
-    private harnesses: Record<Provider, HarnessStatus>,
-    private events: OfficeEvents,
-  ) {
+  constructor(dataFile: string, harnesses: Record<Provider, HarnessStatus>, events: OfficeEvents, services: OfficeServices) {
+    this.dataFile = dataFile;
+    this.harnesses = harnesses;
+    this.events = events;
+    this.services = services;
     this.company = load(dataFile) ?? seed();
     for (const e of this.company.employees) {
       if (e.status.kind === 'working' || e.status.kind === 'blocked_on_owner') {
@@ -118,8 +150,7 @@ export class Office {
   }
 
   shutdown() {
-    for (const s of this.sessions.values()) s.stop();
-    this.sessions.clear();
+    for (const id of [...this.sessions.keys()]) this.stopSession(id);
   }
 
   handle(msg: ClientMessage): void {
@@ -190,36 +221,41 @@ export class Office {
       (...a: A) => {
         if (this.sessions.get(employee.id) === session) f(...a);
       };
-    const host: SessionHost = {
-      employee,
-      block,
-      companyName: this.company.name,
-      setStatus: live((status) => {
-        employee.status = status;
-        this.commit();
-      }),
-      setActivity: live((text) => {
-        employee.activity = text;
-        this.commit();
-      }),
-      setSessionId: live((id) => {
-        employee.sessionId = id;
-        this.commit();
-      }),
-      said: live((text) => this.events.said(employee.id, text)),
-      log: live((line) => this.events.log(employee.id, line, Date.now())),
-      drawWhiteboard: live((title, mermaid) => {
-        block.whiteboard = { title, mermaid, by: employee.id, at: Date.now() };
-        this.commit();
-      }),
-      taskCompleted: live(() => this.addXp(XP_PER_TASK)),
-    };
     const create = HARNESSES[employee.provider].session;
     if (!create) {
       // Only reachable from a hand-edited company file: hire refuses providers that are not ready.
       employee.status = { kind: 'error', message: `${PROVIDERS[employee.provider].label} is not connected to the office yet` };
       return;
     }
+    const notebook = this.services.memory.notebook({ employeeId: employee.id, blockId: block.id, provider: employee.provider });
+    const ask: SessionHost['ask'] = (body, signal) =>
+      this.sessions.get(employee.id) === session ? this.inbox.ask(employee.id, body, signal) : Promise.resolve('');
+    // Whatever harness the employee runs on, these are the only tools it gets from the office, and the URL says whose they are.
+    const url = this.services.mcp.attach(employee.id, {
+      ask,
+      drawDiagram: (title, mermaid) => {
+        block.whiteboard = { title, mermaid, by: employee.id, at: Date.now() };
+        this.commit();
+      },
+      memory: notebook,
+    });
+    const host: SessionHost = {
+      employee,
+      block,
+      companyName: this.company.name,
+      setStatus: live((status) => this.report(employee, { status })),
+      setActivity: live((text) => this.report(employee, { activity: text })),
+      setSessionId: live((id) => {
+        employee.sessionId = id;
+        this.commit();
+      }),
+      said: live((text) => this.events.said(employee.id, text)),
+      log: live((line) => this.events.log(employee.id, line, Date.now())),
+      ask,
+      mcp: { url, name: 'office' },
+      memoryDigest: () => notebook.digest(block.name),
+      taskCompleted: live(() => this.addXp(XP_PER_TASK)),
+    };
     session = create(host);
     this.sessions.set(employee.id, session);
   }
@@ -228,6 +264,49 @@ export class Office {
     const s = this.sessions.get(id);
     this.sessions.delete(id);
     s?.stop();
+    // Cancels whatever the harness still has in flight over MCP, then releases everyone waiting on the owner.
+    this.services.mcp.detach(id);
+    this.inbox.clear(id);
+    this.resumes.delete(id);
+  }
+
+  // What an adapter says about its employee. With a question waiting on the owner the card stays up, and the report
+  // is kept for when the last question is answered.
+  private report(e: Employee, update: { status: EmployeeStatus } | { activity: string }) {
+    const resume = this.resumes.get(e.id);
+    if (resume) {
+      if ('status' in update) resume.status = update.status;
+      else Object.assign(resume, { activity: update.activity, activityReported: true });
+      return;
+    }
+    if ('status' in update) e.status = update.status;
+    else e.activity = update.activity;
+    this.commit();
+  }
+
+  // The front of an employee's line changed. Show it, or, with nothing left waiting, send them back to where they were.
+  private onHeadChanged(id: EmployeeId, head: Question | undefined, left: Left | undefined) {
+    const e = this.company.employees.find((x) => x.id === id);
+    if (!e) return;
+    if (head) {
+      const resume: Resume = this.resumes.get(id) ?? {
+        status: e.status.kind === 'blocked_on_owner' ? { kind: 'idle' } : e.status,
+        activity: e.activity,
+        activityReported: false,
+      };
+      this.resumes.set(id, resume);
+      e.status = { kind: 'blocked_on_owner', task: resume.status.kind === 'working' ? resume.status.task : resume.activity, question: head };
+      e.activity = 'Asking the boss';
+      this.events.log(id, describeQuestion(head), Date.now());
+      return this.commit();
+    }
+    const resume = this.resumes.get(id);
+    this.resumes.delete(id);
+    if (!resume) return;
+    e.status = resume.status;
+    // A permission, or a question taken back, returns to the step it was on. An answer to a question is just an answer.
+    e.activity = left?.answered && left.question.kind === 'ask' && !resume.activityReported ? 'Got the answer, back to work' : resume.activity;
+    this.commit();
   }
 
   private hire(provider: Provider, blockId: BlockId, requestedName?: string) {
@@ -278,6 +357,8 @@ export class Office {
     this.stopSession(e.id);
     this.company.employees = this.company.employees.filter((x) => x.id !== e.id);
     this.commit();
+    // Their own notes go to alumni/. The block's notes stay for whoever works there next.
+    this.services.memory.archive(e.id).catch((err) => console.error(`Could not archive ${e.name}'s notes:`, err));
   }
 
   private createBlock(dir: string, name?: string) {
@@ -334,7 +415,8 @@ export class Office {
       throw new OfficeError(`${e.name} has no open question ${questionId}`);
     }
     const { askedAt } = e.status.question;
-    this.sessionOf(e).answer(questionId, text);
+    if (!this.inbox.answer(id, questionId, text)) throw new OfficeError(`${e.name} has no open question ${questionId}`);
+    debug(`owner answered ${e.name} after ${((Date.now() - askedAt) / 1000).toFixed(1)}s: ${JSON.stringify(short(text, 120))}`);
     if (Date.now() - askedAt <= QUICK_ANSWER_MS) this.addXp(XP_PER_QUICK_ANSWER);
   }
 
@@ -342,5 +424,6 @@ export class Office {
     for (const id of [...this.sessions.keys()]) this.stopSession(id);
     this.company = seed();
     this.commit();
+    this.services.memory.wipe().catch((err) => console.error('Could not wipe memory:', err));
   }
 }

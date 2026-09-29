@@ -68,6 +68,24 @@ code {
   pointer-events: auto;
 }
 
+/* An automated test window must never be mistaken for the owner's office. */
+.test-banner {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 1000;
+  padding: 4px 12px;
+  background: var(--tomato);
+  color: #fff;
+  font: 700 13px/1.4 var(--body);
+  text-align: center;
+  pointer-events: none;
+}
+.test-run .hud {
+  top: 26px;
+}
+
 .panel {
   position: absolute;
   background: rgba(251, 249, 245, 0.94);

@@ -1,56 +1,19 @@
 // Real Electron app, real Claude employee. Everything the owner does goes through the UI.
 // Run: pnpm build && node verify/cdp.mjs verify/e2e-real.mjs
-import { execFileSync } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync, realpathSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { existsSync, readFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
+import { HAIKU, assert, claude, company, diagnoseClaude, scratch, status, stepUntil, text, typeToNearest, walkUpToClaude } from './lib.mjs';
 
-const dataDir = mkdtempSync(join(tmpdir(), 'office-data-'));
-// realpath so the picked path equals the canonical one the app stores (macOS tmp is a symlink).
-const repo = realpathSync(mkdtempSync(join(tmpdir(), 'office-repo-')));
-execFileSync('git', ['init', '-q'], { cwd: repo });
+const { dataDir, repo } = scratch();
 
 export const env = {
   OFFICE_DATA_DIR: dataDir,
   OFFICE_START_LEVEL: '3',
-  OFFICE_CLAUDE_MODEL: 'claude-haiku-4-5-20251001',
+  OFFICE_CLAUDE_MODEL: HAIKU,
   OFFICE_TEST_PICK_FOLDER: repo,
+  // Makes the main process log each MCP tool call and each Claude session's connected servers.
+  OFFICE_DEBUG: '1',
 };
-
-const company = '__office.store.getState().company';
-const claude = `${company}.employees.find(e => e.provider === 'claude-code')`;
-const status = `${claude}.status`;
-const text = (sel) => `document.querySelector(${JSON.stringify(sel)})?.innerText.replace(/\\n+/g, ' | ')`;
-
-const assert = (cond, msg) => {
-  if (!cond) throw new Error(`assertion failed: ${msg}`);
-  console.log('ok:', msg);
-};
-
-// The world only advances on animation frames, which stop while the window is hidden, so tests step it by hand.
-async function stepUntil(s, expr, ms, label) {
-  const t0 = Date.now();
-  while (Date.now() - t0 < ms) {
-    if (await s.eval(expr).catch(() => false)) return;
-    await s.eval('__office.step(1)');
-    await s.sleep(250);
-  }
-  throw new Error(`timeout waiting for ${label}`);
-}
-
-async function walkUpToClaude(s) {
-  const id = await s.eval(`${claude}.id`);
-  const a = await s.eval(`__office.state().avatars.find(a => a.id === '${id}')`);
-  await s.eval(`__office.teleport(${a.x}, ${a.z + 1.1}, 0); __office.step(0.5)`);
-  await s.sleep(300);
-  return (await s.eval('__office.state().talkingTo')) === id;
-}
-
-async function typeToNearest(s, message) {
-  await s.press('Enter');
-  await s.type(message);
-  await s.press('Enter');
-}
 
 export default async (s) => {
   await s.waitFor(`!!${company}`);
@@ -143,6 +106,12 @@ export default async (s) => {
   assert(existsSync(hello), 'hello.txt exists in the block folder');
   console.log('hello.txt =', JSON.stringify(readFileSync(hello, 'utf8')), '| activity:', await s.eval(`${claude}.activity`));
   assert(readFileSync(hello, 'utf8').startsWith('hello'), 'hello.txt starts with hello');
+  // The question travelled over the office's own MCP server, not an in-process tool.
+  const mainOut = s.mainLogs.join('\n');
+  console.log('mcp log lines:\n  ' + mainOut.split('\n').filter((l) => /\[mcp\]|mcp=/.test(l)).join('\n  '));
+  assert(/\[mcp\] listening on 127\.0\.0\.1:\d+/.test(mainOut), 'the office MCP server is listening on 127.0.0.1');
+  assert(/\[mcp\] \S+ ask_owner over http/.test(mainOut), 'main log shows ask_owner arriving over http');
+  assert(/mcp=office:connected/.test(mainOut), 'Claude reports the office MCP server as connected');
 
   // Task 2: a shell command has to ask permission, and the card shows it verbatim.
   await stepUntil(s, '__office.state().avatars[0].seated', 60000, 'the employee to sit back down');
@@ -182,8 +151,4 @@ export default async (s) => {
 };
 
 // Called by the driver when a step fails, so a timeout comes with the state that explains it.
-export async function diagnose(s) {
-  const state = await s.eval(`JSON.stringify({ status: ${status}, activity: ${claude}.activity, logs: (__office.store.getState().logs[${claude}.id] ?? []).slice(-8).map(l => l.line) }, null, 1)`);
-  console.log('employee at failure:', state);
-  await s.shot('u0-failure');
-}
+export const diagnose = (s) => diagnoseClaude(s, 'u0-failure');

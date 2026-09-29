@@ -19,14 +19,13 @@ export const PROVIDERS: Record<Provider, { label: string; color: string }> = {
 export type HarnessStatus = { kind: 'ready'; version: string } | { kind: 'missing' } | { kind: 'not_wired' };
 
 // `text` is what the employee says out loud. A permission also carries what it wants to touch, so the card can show it verbatim.
-export type Question = {
-  id: QuestionId;
-  text: string;
-  askedAt: number;
-} & (
+export type QuestionBody = { text: string } & (
   | { kind: 'ask'; options?: string[] }
   | { kind: 'permission'; tool: string; detail: string }
 );
+
+// The office stamps an id and a time on a body when it puts the question on the owner's desk.
+export type Question = QuestionBody & { id: QuestionId; askedAt: number };
 
 export type EmployeeStatus =
   | { kind: 'idle' }

@@ -1,22 +1,18 @@
-import { randomUUID } from 'node:crypto';
 import { isAbsolute, relative } from 'node:path';
 import {
-  createSdkMcpServer,
   query,
-  tool,
   type CanUseTool,
   type Query,
   type SDKMessage,
   type SDKResultMessage,
   type SDKUserMessage,
 } from '@anthropic-ai/claude-agent-sdk';
-import { z } from 'zod';
-import type { InterruptStyle, Question, QuestionId } from '../../../shared/protocol.ts';
+import type { InterruptStyle, QuestionBody } from '../../../shared/protocol.ts';
+import { logger } from '../debug.ts';
+import { persona } from '../persona.ts';
 import type { EmployeeSession, SessionFactory, SessionHost } from './types.ts';
 
-const debug = (...a: unknown[]) => {
-  if (process.env.OFFICE_DEBUG) console.log('[claude]', ...a);
-};
+const debug = logger('claude');
 
 const short = (s: string, n: number) => {
   const t = s.trim().replace(/\s+/g, ' ');
@@ -25,29 +21,38 @@ const short = (s: string, n: number) => {
 
 const str = (v: unknown) => (typeof v === 'string' ? v : '');
 
-// A Question minus what the session stamps on it when it is asked.
-type QuestionBody = { text: string } & (
-  | { kind: 'ask'; options?: string[] }
-  | { kind: 'permission'; tool: string; detail: string }
-);
+// Permission policy. Everything that decides whether a tool asks the boss is in this block, so it can be swapped
+// for the owner's own settings in one place. Every question still goes out through `host.ask` in `canUseTool`.
+const PERMISSION_MODE = 'acceptEdits' as const;
 
 // Tools that can never hurt anything, so the boss is not bothered.
 const AUTO_ALLOW = new Set(['Read', 'Glob', 'Grep', 'LS', 'WebSearch', 'WebFetch', 'TodoWrite', 'Task', 'Agent']);
 
+// The office's own tools are how an employee reaches the boss, so they never ask.
+const OFFICE_TOOL_PREFIX = 'mcp__office__';
+
+// OFFICE_BASH=allow skips the question for shell commands and everything else that would ask.
+const runsUnasked = (toolName: string) =>
+  process.env.OFFICE_BASH === 'allow' || AUTO_ALLOW.has(toolName) || toolName.startsWith(OFFICE_TOOL_PREFIX);
+
 // "Yes", "sim, pode fazer", "OK go" all count. Anything else is a no and the text goes back to the agent.
 const ALLOW_WORDS = /^\s*(allow|yes|y|sure|ok|okay|sim|pode)\b/i;
 
-const persona = (name: string, company: string, block: string) => `
-You are ${name}, an employee at ${company} on the ${block} team. The owner of the company is your boss. You work in a shared office and your working directory is the ${block} project folder.
+// Claude Code aborts an HTTP MCP call that has sent no response or progress for 5 minutes, and an owner can take longer
+// than that to answer. Only a per-server `timeout` lifts that limit: MCP_TOOL_TIMEOUT alone does not (verify/claude-timeout-probe.ts).
+// So the office server gets a day. The in-process SDK server this replaced was exempt from the limit.
+const OFFICE_MCP_TIMEOUT_MS = 24 * 60 * 60 * 1000;
 
-When you need a decision or are unsure about direction, call the ask_owner tool. You will physically walk over to the boss's desk and ask out loud. Keep the question short and easy to say aloud, and offer 2 to 4 options when that fits. Never use AskUserQuestion.
-
-Your text replies are read aloud by text to speech. Keep conversational replies to 1 to 3 plain sentences with no markdown, lists, or code fences.
-
-When you explain a design or a plan, draw it on the team whiteboard with the draw_diagram tool (mermaid) instead of describing it at length.
-
-If the boss walks over and says something in the middle of your task, acknowledge it in one sentence and adapt.
-`.trim();
+// What the session runs with. `env` replaces the environment, so it is spread over the app's own.
+// - The office keeps the notes, per employee and per block. Claude's per-repo memory would be shared with the boss's own
+//   sessions and with every other employee in the folder.
+// - If the boss's shell exports CLAUDE_AUTO_BACKGROUND_TASKS, Claude moves any MCP call that runs past 2 minutes to a
+//   background task and hands the model a placeholder instead of the answer. 0 turns that off.
+const sessionEnv = (): Record<string, string | undefined> => ({
+  ...process.env,
+  CLAUDE_CODE_DISABLE_AUTO_MEMORY: '1',
+  CLAUDE_CODE_MCP_AUTO_BACKGROUND_MS: '0',
+});
 
 function targetOf(input: Record<string, unknown>, cwd: string): string {
   const file = str(input.file_path) || str(input.notebook_path) || str(input.path);
@@ -81,10 +86,15 @@ function describeTool(name: string, input: Record<string, unknown>, cwd: string)
     case 'Task':
     case 'Agent':
       return 'Briefing a helper';
-    case 'mcp__office__ask_owner':
+    case `${OFFICE_TOOL_PREFIX}ask_owner`:
       return 'Asking the boss';
-    case 'mcp__office__draw_diagram':
+    case `${OFFICE_TOOL_PREFIX}draw_diagram`:
       return 'Drawing on the whiteboard';
+    case `${OFFICE_TOOL_PREFIX}remember`:
+      return 'Writing a note';
+    case `${OFFICE_TOOL_PREFIX}recall`:
+    case `${OFFICE_TOOL_PREFIX}forget`:
+      return 'Checking my notes';
     default:
       return `Using ${name}`;
   }
@@ -145,11 +155,14 @@ class ClaudeSession implements EmployeeSession {
   private task = '';
   private startedAt = 0;
   private lastSaid = '';
-  private pending?: { question: Question; resumeActivity: string; resolve(text: string): void };
-  // Questions queue up: the status can only carry one at a time.
-  private asking: Promise<unknown> = Promise.resolve();
+  // Ends with the process, so a permission question left open by a dead process is withdrawn from the owner's desk.
+  private life = new AbortController();
 
-  constructor(private host: SessionHost) {}
+  private readonly host: SessionHost;
+
+  constructor(host: SessionHost) {
+    this.host = host;
+  }
 
   assign(task: string) {
     this.beginTask(task);
@@ -182,19 +195,9 @@ class ClaudeSession implements EmployeeSession {
     if (!this.stopped) this.send(text, 'now');
   }
 
-  answer(questionId: QuestionId, text: string) {
-    const p = this.pending;
-    if (p?.question.id !== questionId) return;
-    this.pending = undefined;
-    this.host.setStatus({ kind: 'working', task: this.task, startedAt: this.startedAt });
-    this.host.setActivity(p.resumeActivity);
-    p.resolve(text);
-  }
-
   stop() {
     this.stopped = true;
-    this.pending?.resolve('');
-    this.pending = undefined;
+    this.life.abort();
     this.inbox.close();
     this.q?.close();
   }
@@ -217,9 +220,13 @@ class ClaudeSession implements EmployeeSession {
   }
 
   private start() {
-    const { employee, block, companyName } = this.host;
+    const { employee, block, companyName, mcp } = this.host;
     this.inbox = new PushQueue();
     this.gotInit = false;
+    this.life = new AbortController();
+    // Read once per session: a note saved while the session runs shows up in the next one, and the prompt stays put.
+    const digest = this.host.memoryDigest();
+    debug(`session start for ${employee.name}, memory digest:\n${digest || '(no notes yet)'}`);
     this.q = query({
       prompt: this.inbox,
       options: {
@@ -227,14 +234,20 @@ class ClaudeSession implements EmployeeSession {
         model: process.env.OFFICE_CLAUDE_MODEL ?? 'claude-sonnet-5-5',
         // 'project' only: the boss's global plugins and hooks must not leak into employees.
         settingSources: ['project'],
-        permissionMode: 'acceptEdits',
-        systemPrompt: { type: 'preset', preset: 'claude_code', append: persona(employee.name, companyName, block.name) },
-        mcpServers: { office: this.officeServer() },
+        permissionMode: PERMISSION_MODE,
+        systemPrompt: {
+          type: 'preset',
+          preset: 'claude_code',
+          append: persona({ name: employee.name, company: companyName, block: block.name, digest }),
+        },
+        // The office server every harness shares. alwaysLoad keeps ask_owner in the prompt instead of behind tool search.
+        mcpServers: { [mcp.name]: { type: 'http', url: mcp.url, timeout: OFFICE_MCP_TIMEOUT_MS, alwaysLoad: true } },
         // Without this the boss's claude.ai connectors (Gmail, Drive, Figma...) load into every employee.
         strictMcpConfig: true,
         // ask_owner is the only way to reach the boss; the built-in question tool would go nowhere.
         disallowedTools: ['AskUserQuestion'],
         canUseTool: this.canUseTool,
+        env: sessionEnv(),
         ...(employee.sessionId ? { resume: employee.sessionId } : {}),
       },
     });
@@ -256,8 +269,7 @@ class ClaudeSession implements EmployeeSession {
     if (!this.gotInit) this.host.setSessionId('');
     this.q?.close();
     this.q = undefined;
-    this.pending?.resolve('');
-    this.pending = undefined;
+    this.life.abort();
     this.reportError(message);
   }
 
@@ -295,7 +307,7 @@ class ClaudeSession implements EmployeeSession {
       if (block.type === 'tool_use') {
         const line = describeTool(block.name, block.input as Record<string, unknown>, host.block.cwd);
         host.setActivity(line);
-        if (block.name !== 'mcp__office__ask_owner') host.log(line); // askNow logs the question itself
+        if (block.name !== `${OFFICE_TOOL_PREFIX}ask_owner`) host.log(line); // the office logs the question itself
       } else if (block.type === 'text' && m.parent_tool_use_id === null) {
         const text = block.text.trim();
         if (!text) continue;
@@ -327,66 +339,13 @@ class ClaudeSession implements EmployeeSession {
     host.log(`Finished: ${short(text, 200) || this.task}`);
   }
 
-  private canUseTool: CanUseTool = async (toolName, input) => {
-    if (process.env.OFFICE_BASH === 'allow' || AUTO_ALLOW.has(toolName) || toolName.startsWith('mcp__office__')) {
-      return { behavior: 'allow', updatedInput: input };
-    }
+  private canUseTool: CanUseTool = async (toolName, input, { signal }) => {
+    if (runsUnasked(toolName)) return { behavior: 'allow', updatedInput: input };
     const { cwd } = this.host.block;
-    const answer = await this.ask(permissionBody(toolName, input, cwd), describeTool(toolName, input, cwd));
+    const answer = await this.host.ask(permissionBody(toolName, input, cwd), AbortSignal.any([signal, this.life.signal]));
     if (ALLOW_WORDS.test(answer)) return { behavior: 'allow', updatedInput: input };
     return { behavior: 'deny', message: `The boss did not allow this. They said: ${answer || 'no'}` };
   };
-
-  private ask(body: QuestionBody, resumeActivity = 'Got the answer, back to work'): Promise<string> {
-    const run = this.asking.then(() => this.askNow(body, resumeActivity));
-    this.asking = run.catch(() => undefined);
-    return run;
-  }
-
-  private askNow(body: QuestionBody, resumeActivity: string): Promise<string> {
-    if (this.stopped) return Promise.resolve('');
-    const question: Question = { ...body, id: randomUUID() as QuestionId, askedAt: Date.now() };
-    return new Promise((resolve) => {
-      this.pending = { question, resumeActivity, resolve };
-      this.host.setStatus({ kind: 'blocked_on_owner', task: this.task, question });
-      this.host.setActivity('Asking the boss');
-      this.host.log(
-        question.kind === 'permission'
-          ? `Asking permission: ${question.tool} ${short(question.detail, 120)}`
-          : `Asking the boss: ${question.text}${question.options ? ` [${question.options.join(' / ')}]` : ''}`,
-      );
-    });
-  }
-
-  private officeServer() {
-    return createSdkMcpServer({
-      name: 'office',
-      alwaysLoad: true,
-      tools: [
-        tool(
-          'ask_owner',
-          "Walk to the boss's desk and ask them a question out loud. Use it whenever you need a decision or are unsure about direction. Returns the boss's answer.",
-          {
-            question: z.string().describe('A short question that is easy to say aloud'),
-            options: z.array(z.string()).max(4).optional().describe('2 to 4 short answers the boss can pick from'),
-          },
-          async ({ question, options }) => ({ content: [{ type: 'text', text: await this.ask({ kind: 'ask', text: question, options }) }] }),
-        ),
-        tool(
-          'draw_diagram',
-          'Draw a mermaid diagram on the team whiteboard so the boss and coworkers can see a design or plan.',
-          {
-            title: z.string().describe('Short title shown above the diagram'),
-            mermaid: z.string().describe('Mermaid source, for example a flowchart'),
-          },
-          async ({ title, mermaid }) => {
-            this.host.drawWhiteboard(title, mermaid);
-            return { content: [{ type: 'text', text: 'Drawn on the whiteboard.' }] };
-          },
-        ),
-      ],
-    });
-  }
 }
 
 export const createClaudeSession: SessionFactory = (host) => new ClaudeSession(host);

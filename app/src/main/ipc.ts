@@ -10,7 +10,7 @@ import {
   type QuestionId,
   type ServerMessage,
 } from '../shared/protocol.ts';
-import { Office, OfficeError } from './office/company.ts';
+import { Office, OfficeError, type OfficeServices } from './office/company.ts';
 
 // The one place untrusted input becomes a ClientMessage. Ids are opaque strings to the renderer.
 const employeeId = z.string().min(1).transform((s) => s as EmployeeId);
@@ -44,27 +44,33 @@ type Options = {
   dataFile: string;
   harnesses: Record<Provider, HarnessStatus>;
   window: () => BrowserWindow | null;
+  services: OfficeServices;
 };
 
 // Owns the Office and everything that crosses the process boundary. Register once per app run, not per window.
-export function startOffice({ dataFile, harnesses, window }: Options) {
+export function startOffice({ dataFile, harnesses, window, services }: Options) {
   const emit = (msg: ServerMessage) => {
     const win = window();
     if (win && !win.isDestroyed()) win.webContents.send(IPC.event, msg);
   };
 
   let timer: NodeJS.Timeout | undefined;
-  const office = new Office(dataFile, harnesses, {
-    // State is tiny, so every change ships a full snapshot, coalesced to one per 50ms.
-    changed() {
-      timer ??= setTimeout(() => {
-        timer = undefined;
-        emit(office.snapshot());
-      }, 50);
+  const office = new Office(
+    dataFile,
+    harnesses,
+    {
+      // State is tiny, so every change ships a full snapshot, coalesced to one per 50ms.
+      changed() {
+        timer ??= setTimeout(() => {
+          timer = undefined;
+          emit(office.snapshot());
+        }, 50);
+      },
+      said: (employeeId, text) => emit({ type: 'said', employeeId, text }),
+      log: (employeeId, line, at) => emit({ type: 'log', employeeId, line, at }),
     },
-    said: (employeeId, text) => emit({ type: 'said', employeeId, text }),
-    log: (employeeId, line, at) => emit({ type: 'log', employeeId, line, at }),
-  });
+    services,
+  );
 
   // Anything that is not our own window (a frame that navigated away, a webview) gets nothing.
   const trusted = (e: IpcMainEvent | IpcMainInvokeEvent) => e.sender === window()?.webContents;
@@ -78,6 +84,7 @@ export function startOffice({ dataFile, harnesses, window }: Options) {
     if (!trusted(e)) return;
     const parsed = clientMessage.safeParse(raw);
     if (!parsed.success) return emit({ type: 'error', message: `Bad message: ${z.prettifyError(parsed.error)}` });
+    if (process.env.OFFICE_DEBUG) console.log('[ipc]', JSON.stringify(parsed.data).slice(0, 200));
     try {
       office.handle(parsed.data);
     } catch (err) {

@@ -9,8 +9,9 @@
     "skipLibCheck": true,
     "allowImportingTsExtensions": true,
     "verbatimModuleSyntax": true,
+    "erasableSyntaxOnly": true,
     "lib": ["ES2023"],
     "types": ["node"]
   },
-  "include": ["electron.vite.config.ts", "src/main", "src/preload", "src/shared"]
+  "include": ["electron.vite.config.ts", "src/main", "src/preload", "src/shared", "verify/*.ts"]
 }
