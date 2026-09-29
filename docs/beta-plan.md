@@ -29,7 +29,15 @@ Each item is checked on the real Electron app, not on a mock.
 
 ## Rigor
 
-Medium-high. Everything is reversible through git, but employees run real commands in your real project folders. Shell commands therefore still ask the owner by default. The gates are:
+Medium-high. Everything is reversible through git, but employees run real commands in your real project folders.
+
+Employees inherit the owner's own permission settings for their harness, read when each session starts:
+
+- **Claude Code** takes the permission rules, `defaultMode` and `autoMode` from `~/.claude/settings.json`, plus the block folder's `.claude/settings*.json`. It does not take the owner's plugins or hooks.
+- **Codex** takes `approval_policy`, `sandbox_mode` and `~/.codex/rules/` from `~/.codex`.
+- **Hermes** takes `approvals` and `command_allowlist` from `~/.hermes/config.yaml`.
+
+Whatever that policy leaves to "ask" becomes a walk to the owner. Tools, MCP servers, skills and memory stay isolated. The gates are:
 
 - research findings with observed output before any adapter is designed
 - one end-to-end script per harness against the real app
