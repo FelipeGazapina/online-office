@@ -17,6 +17,7 @@ export type Lang = 'en-US' | 'pt-BR';
 export type Modal = null | { kind: 'hire' } | { kind: 'block' } | { kind: 'whiteboard'; blockId: BlockId };
 
 export type LogLine = { line: string; at: number };
+export type ChatLine = { from: 'owner' | 'employee'; text: string; at: number };
 export type Toast = { id: number; text: string; tone: 'info' | 'warn' | 'ok' };
 
 // Settings the user is tuning while deciding how this should feel; kept across reloads.
@@ -37,8 +38,10 @@ type State = Settings & {
   harnesses: Record<Provider, HarnessStatus> | null;
   meetingDoor: MeetingDoor;
   logs: Record<string, LogLine[]>;
+  chat: Record<EmployeeId, ChatLine[]>;
   bubbles: Record<string, { text: string; until: number }>;
   selectedId: EmployeeId | null;
+  menu: { employeeId: EmployeeId; x: number; y: number } | null;
   modal: Modal;
   helpOpen: boolean;
   cardMinimized: boolean;
@@ -55,8 +58,10 @@ export const useStore = create<State>()(() => ({
   harnesses: null,
   meetingDoor: 'open',
   logs: {},
+  chat: {},
   bubbles: {},
   selectedId: null,
+  menu: null,
   modal: null,
   helpOpen: false,
   cardMinimized: false,
@@ -102,4 +107,22 @@ export function askedAt(e: Employee) {
   return e.status.kind === 'blocked_on_owner' ? e.status.question.askedAt : Infinity;
 }
 
-export const send = (m: ClientMessage) => window.office.send(m);
+const CHAT_CAP = 200;
+
+export function addChat(employeeId: EmployeeId, from: ChatLine['from'], text: string) {
+  set((s) => ({ chat: { ...s.chat, [employeeId]: [...(s.chat[employeeId] ?? []).slice(-(CHAT_CAP - 1)), { from, text, at: Date.now() }] } }));
+}
+
+export function send(m: ClientMessage) {
+  // Only these messages carry words the owner said, so only they join the transcript.
+  switch (m.type) {
+    case 'answer':
+    case 'interject':
+      addChat(m.employeeId, 'owner', m.text);
+      break;
+    case 'assign':
+      addChat(m.employeeId, 'owner', m.task);
+      break;
+  }
+  window.office.send(m);
+}
