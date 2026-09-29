@@ -1,6 +1,8 @@
 import { execFile } from 'node:child_process';
 import type { HarnessStatus, ModelId, Provider } from '../../../shared/protocol.ts';
 import { createClaudeSession } from './claude.ts';
+import { codexDefaultModel, createCodexSession, listCodexModels, setCodexRoot } from './codex.ts';
+import { createHermesSession, hermesDefaultModel, listHermesModels } from './hermes.ts';
 import type { Harness } from './types.ts';
 
 // The Agent SDK bundles its own Claude Code binary, so there is nothing on PATH to look for.
@@ -10,7 +12,10 @@ const claudeVersion = async () => __CLAUDE_SDK_VERSION__;
 function cliVersion(bin: string): Promise<string | null> {
   return new Promise((resolve) => {
     execFile(bin, ['--version'], { timeout: 5000 }, (err, stdout) => {
-      if (err) return resolve(null);
+      // Hermes can spend longer than the probe timeout in its synchronous update check.
+      // The child was successfully spawned in this case, so the executable is installed;
+      // keep detection useful and let the ACP session report any real startup failure.
+      if (err) return resolve(bin === 'hermes' && err.code === 'ETIMEDOUT' ? 'installed' : null);
       const line = (stdout.split('\n')[0] ?? '').trim();
       resolve(/\d+\.\d+\.\d+\S*/.exec(line)?.[0] ?? (line || 'unknown'));
     });
@@ -25,9 +30,11 @@ export const HARNESSES: Record<Provider, Harness> = {
     defaultModel: () => (process.env.OFFICE_CLAUDE_MODEL ?? 'claude-sonnet-5-5') as ModelId,
     session: createClaudeSession,
   },
-  codex: { detect: () => cliVersion('codex'), defaultModel: () => 'gpt-6-astra' as ModelId },
-  hermes: { detect: () => cliVersion('hermes'), defaultModel: () => 'anthropic:claude-opus-4-7' as ModelId },
+  codex: { detect: () => cliVersion('codex'), defaultModel: codexDefaultModel, listModels: listCodexModels, session: createCodexSession },
+  hermes: { detect: () => cliVersion('hermes'), defaultModel: hermesDefaultModel, listModels: listHermesModels, session: createHermesSession },
 };
+
+export { setCodexRoot };
 
 async function status(p: Provider): Promise<HarnessStatus> {
   const version = await HARNESSES[p].detect();

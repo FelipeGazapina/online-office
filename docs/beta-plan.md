@@ -76,7 +76,7 @@ Research agents write only to `docs/research/`. From U2 on, every implementation
 | C1 | Contract v2: the types the next wave needs (models, permission modes, Always allow, subagents, fresh session, the rules hook), the `company.json` migration, and the harness-agnostic plumbing | U1 | done |
 | U2 | Real ChatGPT (Codex) employee: app-server, isolation, the four permission modes, model list, subagent events | C1 | running |
 | U3 | Real Hermes employee: ACP, office profile, the four permission modes, model list, subagent events | C1 | running |
-| F1 | Claude employee v2 and its UI: permission modes and Always allow (card, drawer, office-side rule check), model picker and live switch, subagent dolls on the desk | C1 | |
+| F1 | Claude employee v2 and its UI: permission modes and Always allow (card, drawer, office-side rule check), model picker and live switch, subagent dolls on the desk, no markdown in speech | C1 | running |
 | F2 | Rules and boards: rule files with a watcher, delivery to live sessions, office and block boards, sticky notes on desks, notes on boards, fresh session | F1 | |
 | F3 | Owner's computer: the My Mac portal with its floating panel, the Company area with seats and level ceilings, desks per block from seats | F1 | |
 | N1 | Overview navigation: click to walk with A* around furniture, employee menu (Open chat, Go to), chat transcript in the drawer. Employees route with the same planner, so the owner's meeting room no longer traps them | U0 | done |
