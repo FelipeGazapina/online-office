@@ -151,8 +151,9 @@ export function SettingsPanel() {
 // The take-a-number board. The single loud element in the HUD, on purpose.
 export function WaitingMeter() {
   const company = useStore((s) => s.company);
+  const meetingDoor = useStore((s) => s.meetingDoor);
   const now = useNow(1000);
-  const queue = waitingQueue(company);
+  const queue = meetingDoor === 'open' ? waitingQueue(company) : [];
   const waits = queue.map((e) => (e.status.kind === 'blocked_on_owner' ? now - e.status.question.askedAt : 0));
   const longest = Math.max(0, ...waits);
   const urgent = longest > URGENT_MS;
@@ -160,11 +161,11 @@ export function WaitingMeter() {
   return (
     <>
       <div className={`vignette ${urgent ? 'urgent' : ''}`} />
-      <div className={`waiting ${queue.length ? 'some' : 'none'} ${urgent ? 'urgent' : ''}`}>
+      <div className={`waiting ${queue.length ? 'some' : 'none'} ${urgent ? 'urgent' : ''} ${meetingDoor === 'closed' ? 'door-closed' : ''}`}>
         <div className="ticket">
           <span className="num">{queue.length}</span>
           <span className="lab">
-            {queue.length === 0 ? 'Nobody waiting on you' : queue.length === 1 ? 'person waiting on you' : 'people waiting on you'}
+            {meetingDoor === 'closed' ? 'Meeting room door closed' : queue.length === 0 ? 'Nobody waiting on you' : queue.length === 1 ? 'person waiting on you' : 'people waiting on you'}
             {queue.length > 0 && <em>longest {fmtWait(longest)}</em>}
           </span>
         </div>

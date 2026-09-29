@@ -10,6 +10,7 @@ import {
   DOOR,
   deskPose,
   getLayout,
+  meetingRoomObstacles,
   pushOut,
   type DeskPose,
   type Layout,
@@ -113,13 +114,26 @@ function stepOwner(dt: number, layout: Layout, talkingTo: EmployeeId | null) {
   }
 }
 
-function stepAvatar(av: AvatarRT, e: Employee, dt: number, company: Company, layout: Layout, queueIndex: number, talking: boolean) {
+function stepAvatar(
+  av: AvatarRT,
+  e: Employee,
+  dt: number,
+  company: Company,
+  layout: Layout,
+  queueIndex: number,
+  talking: boolean,
+  meetingDoor: 'open' | 'closed',
+) {
   const seat = seatFor(e, company) ?? fallbackSeat;
   const blocked = e.status.kind === 'blocked_on_owner';
   const ownerPos = runtime.owner.pos;
 
   let target: Vec2;
-  if (blocked) {
+  if (blocked && meetingDoor === 'closed') {
+    // Permission cards remain blocked in main, but nobody walks to a closed meeting room.
+    av.leaving = false;
+    target = seat.chair;
+  } else if (blocked) {
     if (av.seated) {
       av.seated = false;
       av.leaving = true;
@@ -148,7 +162,7 @@ function stepAvatar(av: AvatarRT, e: Employee, dt: number, company: Company, lay
   }
   av.speed += (moved - av.speed) * ease(dt, 10);
 
-  if (!blocked && !av.seated && dist <= 0.03) av.seated = true;
+  if ((!blocked || meetingDoor === 'closed') && !av.seated && dist <= 0.03) av.seated = true;
 
   const nearOwner = Math.hypot(ownerPos.x - av.pos.x, ownerPos.z - av.pos.z);
   const attentive = talking || (blocked && !av.leaving && nearOwner < 3.2);
@@ -194,20 +208,24 @@ export function stepSim(rawDt: number) {
   syncAvatars(company);
 
   const state = get();
-  stepOwner(dt, layout, state.talkingTo);
+  const meetingDoor = state.meetingDoor;
+  const collision = meetingDoor === 'closed' ? [...layout.obstacles, ...meetingRoomObstacles(true)] : [...layout.obstacles, ...meetingRoomObstacles(false)];
+  const collisionLayout = { ...layout, obstacles: collision };
+  stepOwner(dt, collisionLayout, state.talkingTo);
 
   const queue = waitingQueue(company);
   for (const e of company.employees) {
     const av = runtime.avatars.get(e.id);
     if (!av) continue;
     const qi = queue.findIndex((q) => q.id === e.id);
-    stepAvatar(av, e, dt, company, layout, qi, state.talkingTo === e.id);
+    stepAvatar(av, e, dt, company, collisionLayout, qi, state.talkingTo === e.id, meetingDoor);
   }
 
   const talkingTo = nearestInRange(company, state.talkingTo);
 
   // The arrival: the first blocked employee in line has reached the owner.
-  const front = queue[0];
+  if (meetingDoor === 'closed') runtime.arrived.clear();
+  const front = meetingDoor === 'open' ? queue[0] : undefined;
   for (const id of [...runtime.arrived.keys()]) {
     if (!queue.some((q) => q.id === id)) runtime.arrived.delete(id);
   }
@@ -224,7 +242,7 @@ export function stepSim(rawDt: number) {
       }
     }
   }
-  const askerId = front && front.status.kind === 'blocked_on_owner' && runtime.arrived.get(front.id) === front.status.question.id ? front.id : null;
+  const askerId = meetingDoor === 'open' && front && front.status.kind === 'blocked_on_owner' && runtime.arrived.get(front.id) === front.status.question.id ? front.id : null;
 
   if (talkingTo !== state.talkingTo || askerId !== state.askerId) {
     set({ talkingTo, askerId, ...(askerId !== state.askerId ? { cardMinimized: false } : {}) });

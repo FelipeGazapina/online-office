@@ -1,4 +1,5 @@
 import { useFrame } from '@react-three/fiber';
+import { Html } from '@react-three/drei';
 import { useEffect, useMemo, useRef, type ReactNode } from 'react';
 import { Object3D, type Group } from 'three';
 import type { Company } from '../../../shared/protocol.ts';
@@ -9,11 +10,13 @@ import {
   DOOR,
   getLayout,
   OWNER_DESK,
+  MEETING_ROOM,
   WALL_H,
   type Bounds,
   type Layout,
 } from '../layout.ts';
-import { set } from '../store.ts';
+import { set, useStore } from '../store.ts';
+import { toggleMeetingDoor } from '../meeting.ts';
 import { Chair, Desk, Plant, RoundedPlane } from './Furniture.tsx';
 import { fitText, FONT_BODY, FONT_DISPLAY, plankTexture, roundRect, useCanvasTexture } from './textures.ts';
 
@@ -217,6 +220,52 @@ function OwnerCorner() {
   );
 }
 
+function MeetingRoom() {
+  const state = useStore((s) => s.meetingDoor);
+  const r = MEETING_ROOM;
+  const wall = '#d8c4aa';
+  const doorOpen = state === 'open';
+  const doorX = r.x1 + 0.02;
+  return (
+    <group>
+      <mesh position={[(r.x0 + r.x1) / 2, 1.35, r.z0]}>
+        <boxGeometry args={[r.x1 - r.x0, 2.7, 0.22]} />
+        <meshStandardMaterial color={wall} roughness={0.95} />
+      </mesh>
+      <mesh position={[(r.x0 + r.x1) / 2, 1.35, r.z1]}>
+        <boxGeometry args={[r.x1 - r.x0, 2.7, 0.22]} />
+        <meshStandardMaterial color={wall} roughness={0.95} />
+      </mesh>
+      <mesh position={[r.x1, 1.35, (r.z0 + r.doorZ - r.doorHalf) / 2]}>
+        <boxGeometry args={[0.22, 2.7, r.doorZ - r.doorHalf - r.z0]} />
+        <meshStandardMaterial color={wall} roughness={0.95} />
+      </mesh>
+      <mesh position={[r.x1, 1.35, (r.doorZ + r.doorHalf + r.z1) / 2]}>
+        <boxGeometry args={[0.22, 2.7, r.z1 - r.doorZ - r.doorHalf]} />
+        <meshStandardMaterial color={wall} roughness={0.95} />
+      </mesh>
+      <mesh
+        position={[doorX, 1.35, r.doorZ]}
+        onClick={(e) => {
+          e.stopPropagation();
+          toggleMeetingDoor(true);
+        }}
+        onPointerOver={() => void (document.body.style.cursor = 'pointer')}
+        onPointerOut={() => void (document.body.style.cursor = '')}
+      >
+        <boxGeometry args={[0.12, 2.5, r.doorHalf * 2]} />
+        <meshStandardMaterial color={doorOpen ? '#63b996' : '#d95d63'} roughness={0.72} transparent opacity={doorOpen ? 0.42 : 0.92} />
+      </mesh>
+      <Html position={[r.x1 - 0.2, 2.75, r.doorZ]} rotation-y={Math.PI / 2} transform pointerEvents="none">
+        <div className={`meeting-door-label ${doorOpen ? 'open' : 'closed'}`}>
+          <b>Meeting room</b>
+          <span>{doorOpen ? 'OPEN · E to close' : 'CLOSED · E to open'}</span>
+        </div>
+      </Html>
+    </group>
+  );
+}
+
 function Lights({ b }: { b: Bounds }) {
   const cx = (b.x0 + b.x1) / 2;
   const cz = (b.z0 + b.z1) / 2;
@@ -259,6 +308,7 @@ export function Office({ company }: { company: Company | null }) {
       <Floor b={b} />
       <Walls b={b} />
       <CompanySign name={company?.name ?? 'Online Office'} b={b} />
+      <MeetingRoom />
       <OwnerCorner />
       <group position={[DOOR.x, 0, DOOR.z - 1.1]}>
         <RoundedPlane w={2.6} d={1.5} r={0.3} color="#6f9a90" y={0.01} />

@@ -51,6 +51,33 @@ export const DOOR: Vec2 = { x: X0 + 8, z: Z1 };
 export const OWNER_START: Vec2 = { x: X0 + 8, z: Z1 - 4.8 };
 export const OWNER_DESK: Vec2 = { x: X0 + 1.5, z: 5.2 };
 
+// A small room around the owner's desk. The east wall has one opening so the owner can walk in and close it.
+// The same dimensions are used by the renderer and the simulation collision boxes.
+export const MEETING_ROOM = {
+  x0: -17.8,
+  x1: -11.4,
+  z0: 1.9,
+  z1: 8.3,
+  doorZ: 5.2,
+  doorHalf: 0.9,
+} as const;
+
+export function meetingRoomObstacles(closed: boolean): Box[] {
+  const r = MEETING_ROOM;
+  const wall = 0.16;
+  const span = r.x1 - r.x0;
+  const boxes: Box[] = [
+    { cx: (r.x0 + r.x1) / 2, cz: r.z0, hw: span / 2, hd: wall },
+    { cx: (r.x0 + r.x1) / 2, cz: r.z1, hw: span / 2, hd: wall },
+  ];
+  const top = (r.doorZ - r.doorHalf) - r.z0;
+  const bottom = r.z1 - (r.doorZ + r.doorHalf);
+  if (top > 0) boxes.push({ cx: r.x1, cz: (r.z0 + r.doorZ - r.doorHalf) / 2, hw: wall, hd: top / 2 });
+  if (bottom > 0) boxes.push({ cx: r.x1, cz: (r.doorZ + r.doorHalf + r.z1) / 2, hw: wall, hd: bottom / 2 });
+  if (closed) boxes.push({ cx: r.x1, cz: r.doorZ, hw: wall, hd: r.doorHalf });
+  return boxes;
+}
+
 export type Layout = {
   bounds: Bounds;
   ghostSlot: number | null;

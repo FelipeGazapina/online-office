@@ -133,6 +133,16 @@ check(/no open question/.test(stale), `an answer to a card that is not there is 
 office.handle({ type: 'interject', employeeId: ana, text: 'tap tap', style: 'next' });
 check(fa.interjected.join() === 'tap tap', 'talking to a working employee still reaches the harness');
 
+office.handle({ type: 'meeting_door', state: 'closed' });
+check(office.snapshot().meetingDoor === 'closed', 'the meeting door is main-owned snapshot state');
+const closedAsk = await fa.host.ask({ kind: 'ask', text: 'Which safe path should I choose?' });
+check(/door closed|meeting/i.test(closedAsk) && /parallel|wait/i.test(closedAsk), 'ask_owner gets contextual wait/parallel guidance during a meeting');
+const closedPermission = fa.host.ask(perm('queued while closed'));
+check(detailOf(shown(ana)) === 'queued while closed', 'permission requests remain queued while the meeting door is closed');
+office.handle({ type: 'meeting_door', state: 'open' });
+answer(ana, 'Allow');
+await closedPermission;
+
 console.log('\n# over the office MCP server');
 const client = new Client({ name: 'office-check', version: '0.0.0' });
 await client.connect(new StreamableHTTPClientTransport(new URL(fa.host.mcp.url)));

@@ -93,6 +93,7 @@ export function heard(employee: Employee, text: string) {
 
 // The arrival is the interruption: sound, voice, and an OS notification if the tab is hidden.
 export function announceArrival(employee: Employee, blockName: string) {
+  if (get().meetingDoor === 'closed') return;
   if (employee.status.kind !== 'blocked_on_owner') return;
   const q = employee.status.question;
   chime();

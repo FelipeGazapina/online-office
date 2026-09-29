@@ -23,6 +23,7 @@ export function lookFor(e: Employee): Look {
 
 export const EmployeeView = memo(function EmployeeView({ employee }: { employee: Employee }) {
   const talking = useStore((s) => s.talkingTo === employee.id);
+  const meetingDoor = useStore((s) => s.meetingDoor);
   const selected = useStore((s) => s.selectedId === employee.id);
   const ring = useRef<Mesh>(null);
 
@@ -46,13 +47,13 @@ export const EmployeeView = memo(function EmployeeView({ employee }: { employee:
         </mesh>
       )}
       <Html position={[0, 2.0, 0]} portal={labelLayer} pointerEvents="none" zIndexRange={[20, 0]}>
-        <Label employee={employee} />
+        <Label employee={employee} meetingDoor={meetingDoor} />
       </Html>
     </Person>
   );
 });
 
-function Label({ employee: e }: { employee: Employee }) {
+function Label({ employee: e, meetingDoor }: { employee: Employee; meetingDoor: 'open' | 'closed' }) {
   const now = useNow(1000);
   const bubble = useStore((s) => s.bubbles[e.id]);
   const p = PROVIDERS[e.provider];
@@ -62,7 +63,7 @@ function Label({ employee: e }: { employee: Employee }) {
   let bubbleEl;
   if (said) {
     bubbleEl = <div className="bub said">{said}</div>;
-  } else if (s.kind === 'blocked_on_owner') {
+  } else if (s.kind === 'blocked_on_owner' && meetingDoor === 'open') {
     bubbleEl = (
       <div className="bub ask">
         <span className="q">?</span>

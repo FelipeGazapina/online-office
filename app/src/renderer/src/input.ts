@@ -1,6 +1,7 @@
 import { get, set, setSetting } from './store.ts';
 import { runtime } from './runtime.ts';
 import { setPtt } from './talk.ts';
+import { toggleMeetingDoor } from './meeting.ts';
 
 const isTyping = (t: EventTarget | null) =>
   t instanceof HTMLElement && (t.isContentEditable || t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT');
@@ -28,6 +29,13 @@ export function installInput() {
       case 'Enter':
         e.preventDefault();
         return (document.getElementById('chat-input') ?? document.getElementById('card-input'))?.focus();
+      case 'KeyE':
+        // E remains the camera turn key everywhere else. Near the meeting-room door it is the physical toggle.
+        if (!e.repeat && toggleMeetingDoor(true)) {
+          e.preventDefault();
+          return;
+        }
+        break;
       case 'KeyV':
         if (!e.repeat) setPtt(true);
         return;

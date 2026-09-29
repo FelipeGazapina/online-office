@@ -141,8 +141,9 @@ export function Bottom() {
   const asker = useEmployee(s.askerId);
   const talking = useEmployee(s.talkingTo);
   const selected = useEmployee(s.selectedId);
-  const showCard = asker && asker.status.kind === 'blocked_on_owner' && !s.cardMinimized;
-  const target = talking ?? asker ?? selected;
+  const showCard = s.meetingDoor === 'open' && asker && asker.status.kind === 'blocked_on_owner' && !s.cardMinimized;
+  const visibleSelected = selected && (s.meetingDoor === 'open' || selected.status.kind !== 'blocked_on_owner') ? selected : undefined;
+  const target = talking ?? (s.meetingDoor === 'open' ? asker : undefined) ?? visibleSelected;
 
   return (
     <div className="bottom">
@@ -162,7 +163,7 @@ export function Bottom() {
         </div>
       )}
       {s.voice.interim && <div className="interim">“{s.voice.interim}”</div>}
-      {asker && s.cardMinimized && asker.status.kind === 'blocked_on_owner' && (
+      {s.meetingDoor === 'open' && asker && s.cardMinimized && asker.status.kind === 'blocked_on_owner' && (
         <button className="qmini" onClick={() => set({ cardMinimized: false })}>
           <b>{asker.name}</b> is waiting for an answer
         </button>

@@ -14,6 +14,7 @@ import {
   type EmployeeId,
   type EmployeeStatus,
   type HarnessStatus,
+  type MeetingDoor,
   type ProjectBlock,
   type Provider,
   type Question,
@@ -30,6 +31,9 @@ import type { MemoryStore } from './memory.ts';
 const XP_PER_TASK = 10;
 const XP_PER_QUICK_ANSWER = 3;
 const QUICK_ANSWER_MS = 120_000;
+
+export const MEETING_DND_RESPONSE =
+  'The owner is in a meeting with the door closed. Do not proceed on their behalf. Wait until the door reopens, or continue a parallel task and ask again when context is available.';
 
 const FIRST_NAMES = [
   'Ada', 'Ben', 'Cleo', 'Dana', 'Eli', 'Fay', 'Gus', 'Hana', 'Ivo', 'Jo', 'Kai', 'Luz',
@@ -120,6 +124,8 @@ function save(file: string, company: Company) {
 
 export class Office {
   private company: Company;
+  // Deliberately not persisted with company.json. Every app session starts with an open door.
+  private meetingDoor: MeetingDoor = 'open';
   private sessions = new Map<EmployeeId, EmployeeSession>();
   // Every question an employee is waiting on. The employee's status shows the front of their line.
   private inbox = new Inbox({ headChanged: (id, head, left) => this.onHeadChanged(id, head, left) });
@@ -146,7 +152,7 @@ export class Office {
   }
 
   snapshot(): Snapshot {
-    return { type: 'snapshot', company: this.company, harnesses: this.harnesses };
+    return { type: 'snapshot', company: this.company, harnesses: this.harnesses, meetingDoor: this.meetingDoor };
   }
 
   shutdown() {
@@ -173,6 +179,8 @@ export class Office {
         if (e.status.kind === 'blocked_on_owner') return this.answer(e.id, e.status.question.id, msg.text);
         return this.sessionOf(e).interject(msg.text, msg.style);
       }
+      case 'meeting_door':
+        return this.setMeetingDoor(msg.state);
       case 'reset_company':
         return this.reset();
       default: {
@@ -228,8 +236,13 @@ export class Office {
       return;
     }
     const notebook = this.services.memory.notebook({ employeeId: employee.id, blockId: block.id, provider: employee.provider });
-    const ask: SessionHost['ask'] = (body, signal) =>
-      this.sessions.get(employee.id) === session ? this.inbox.ask(employee.id, body, signal) : Promise.resolve('');
+    const ask: SessionHost['ask'] = (body, signal) => {
+      if (this.sessions.get(employee.id) !== session) return Promise.resolve('');
+      // Normal decisions get an immediate contextual answer while the owner is in a meeting. Permission
+      // questions are still real inbox entries: they stay blocked and hidden until the door opens.
+      if (this.meetingDoor === 'closed' && body.kind === 'ask') return Promise.resolve(MEETING_DND_RESPONSE);
+      return this.inbox.ask(employee.id, body, signal);
+    };
     // Whatever harness the employee runs on, these are the only tools it gets from the office, and the URL says whose they are.
     const url = this.services.mcp.attach(employee.id, {
       ask,
@@ -418,6 +431,12 @@ export class Office {
     if (!this.inbox.answer(id, questionId, text)) throw new OfficeError(`${e.name} has no open question ${questionId}`);
     debug(`owner answered ${e.name} after ${((Date.now() - askedAt) / 1000).toFixed(1)}s: ${JSON.stringify(short(text, 120))}`);
     if (Date.now() - askedAt <= QUICK_ANSWER_MS) this.addXp(XP_PER_QUICK_ANSWER);
+  }
+
+  private setMeetingDoor(state: MeetingDoor) {
+    if (this.meetingDoor === state) return;
+    this.meetingDoor = state;
+    this.events.changed();
   }
 
   private reset() {

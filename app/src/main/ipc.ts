@@ -6,6 +6,7 @@ import {
   type ClientMessage,
   type EmployeeId,
   type HarnessStatus,
+  type MeetingDoor,
   type Provider,
   type QuestionId,
   type ServerMessage,
@@ -17,6 +18,7 @@ const employeeId = z.string().min(1).transform((s) => s as EmployeeId);
 const blockId = z.string().min(1).transform((s) => s as BlockId);
 const questionId = z.string().min(1).transform((s) => s as QuestionId);
 const provider = z.enum(['claude-code', 'codex', 'hermes']);
+const meetingDoor = z.enum(['open', 'closed']) satisfies z.ZodType<MeetingDoor>;
 
 const clientMessage = z.discriminatedUnion('type', [
   z.object({ type: z.literal('hire'), provider, blockId, name: z.string().optional() }),
@@ -31,6 +33,7 @@ const clientMessage = z.discriminatedUnion('type', [
   z.object({ type: z.literal('assign'), employeeId, task: z.string().min(1) }),
   z.object({ type: z.literal('answer'), employeeId, questionId, text: z.string() }),
   z.object({ type: z.literal('interject'), employeeId, text: z.string().min(1), style: z.enum(['next', 'now']) }),
+  z.object({ type: z.literal('meeting_door'), state: meetingDoor }),
   z.object({ type: z.literal('reset_company') }),
 ]);
 // Compile-time proof the schema and the contract agree in both directions.

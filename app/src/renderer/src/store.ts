@@ -7,6 +7,7 @@ import type {
   EmployeeId,
   HarnessStatus,
   InterruptStyle,
+  MeetingDoor,
   Provider,
 } from '../../shared/protocol.ts';
 
@@ -34,6 +35,7 @@ function loadSettings(): Settings {
 type State = Settings & {
   company: Company | null;
   harnesses: Record<Provider, HarnessStatus> | null;
+  meetingDoor: MeetingDoor;
   logs: Record<string, LogLine[]>;
   bubbles: Record<string, { text: string; until: number }>;
   selectedId: EmployeeId | null;
@@ -51,6 +53,7 @@ export const useStore = create<State>()(() => ({
   ...loadSettings(),
   company: null,
   harnesses: null,
+  meetingDoor: 'open',
   logs: {},
   bubbles: {},
   selectedId: null,

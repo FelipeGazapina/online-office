@@ -8,6 +8,9 @@ export type QuestionId = string & { readonly __brand: 'QuestionId' };
 
 export type Provider = 'claude-code' | 'codex' | 'hermes';
 
+// The owner meeting room is session-scoped. Main owns this value and sends it in every snapshot.
+export type MeetingDoor = 'open' | 'closed';
+
 export const PROVIDERS: Record<Provider, { label: string; color: string }> = {
   'claude-code': { label: 'Claude Code', color: '#d97757' },
   codex: { label: 'ChatGPT (Codex)', color: '#10a37f' },
@@ -87,9 +90,10 @@ export type ClientMessage =
   | { type: 'assign'; employeeId: EmployeeId; task: string }
   | { type: 'answer'; employeeId: EmployeeId; questionId: QuestionId; text: string }
   | { type: 'interject'; employeeId: EmployeeId; text: string; style: InterruptStyle }
+  | { type: 'meeting_door'; state: MeetingDoor }
   | { type: 'reset_company' };
 
-export type Snapshot = { type: 'snapshot'; company: Company; harnesses: Record<Provider, HarnessStatus> };
+export type Snapshot = { type: 'snapshot'; company: Company; harnesses: Record<Provider, HarnessStatus>; meetingDoor: MeetingDoor };
 
 export type ServerMessage =
   | Snapshot

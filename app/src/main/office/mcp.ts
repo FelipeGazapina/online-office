@@ -109,7 +109,7 @@ export async function startOfficeMcp(): Promise<OfficeMcp> {
       'ask_owner',
       {
         description:
-          "Walk to the boss's desk and ask a question out loud. Use it whenever you need a decision or are unsure about direction. Returns the boss's answer.",
+          "Walk to the boss's desk and ask a question out loud. Use it whenever you need a decision or are unsure about direction. If the meeting-room door is closed, the owner is unavailable: choose a safe contextual option or continue parallel work and ask again later. Returns the boss's answer or that do-not-disturb guidance.",
         inputSchema: {
           question: z.string().min(1).max(2000).describe('A short question that is easy to say aloud'),
           options: z.array(z.string().max(200)).max(4).optional().describe('2 to 4 short answers the boss can pick from'),

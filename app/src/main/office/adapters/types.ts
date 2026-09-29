@@ -19,7 +19,8 @@ export type SessionHost = {
   log(line: string): void;
   // Puts a question on the owner's desk and resolves with what the owner answers. The office owns the question:
   // it shows the employee as blocked, and puts them back to working once the owner answers. An adapter uses this for
-  // permission cards. `ask_owner` reaches the same place through the office MCP server.
+  // Permission cards. `ask_owner` reaches the same place through the office MCP server; while the meeting-room
+  // door is closed, ask_owner returns do-not-disturb guidance but permission cards stay queued in the inbox.
   //
   // It never rejects. When `signal` aborts (the harness cancelled the tool call, or a hard stop) or the session ends
   // before an answer, the office withdraws the card and the promise resolves with '', which the caller has already
