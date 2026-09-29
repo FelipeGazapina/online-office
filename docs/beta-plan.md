@@ -23,7 +23,7 @@ Each item is checked on the real Electron app, not on a mock.
 10. **Memory scopes.** Employees save notes for themselves, their block or the whole office. The boards show those notes, and the owner can edit or delete them.
 11. **Owner's computer.** Sitting at the owner's desk offers two areas.
     - **My Mac** hides the office behind a small floating panel, so the owner works on the real computer. An employee who needs the owner shows up in that panel, speaks, and can be answered from it. One click or a global shortcut returns to the office.
-    - **Company** sets the seat count for the company and per block, up to the ceiling the current level unlocks. Blocks lay out as many desks as their seats.
+    - **Company** sets the seat count for the company and per block, up to the ceiling the current level unlocks. A block never has more seats than its bench has desks.
 12. **Subagents.** A subagent that an employee spawns appears as a matryoshka doll on that employee's desk. A nested subagent is a smaller doll. Dolls do not count as employees and disappear when the subagent finishes.
 13. **Overview navigation.** In the Overview camera, a click on the floor walks the owner there around furniture. A click on an employee opens a menu at the cursor with "Open chat" and "Go to". The chat keeps what the owner said and what the employee answered, and a message sent from it reaches the employee as if the owner stood next to them. Real mouse input proves each of these, not programmatic clicks.
 14. **Permissions.** Each employee has a permission mode that the owner changes in its drawer, and new hires take the company default from the Company area.
@@ -33,7 +33,8 @@ Each item is checked on the real Electron app, not on a mock.
     - **YOLO** bypasses every check. The employee wears a visible badge while in it.
 
     A permission card offers Allow, Always allow and Deny. Always allow adds a rule for that employee, and the same command then runs without a card. The drawer lists those rules, and the owner can remove them.
-15. Every unit is committed and pushed to `main`.
+15. **Blocks.** Every block is a bench like a real dev team's: six desks in two facing rows of three, flush, and a head desk at the east end. Hires fill the bench from the head outward, in facing pairs. The head desk is reserved for the block's orchestrator, a PO agent that does not exist yet, so nobody is hired into it.
+16. Every unit is committed and pushed to `main`.
 
 ## Running the beta
 
@@ -81,6 +82,7 @@ Research agents write only to `docs/research/`. From U2 on, every implementation
 | F3 | Owner's computer: the My Mac portal with its floating panel, the Company area with seats and level ceilings, desks per block from seats | F1 | |
 | N1 | Overview navigation: click to walk with A* around furniture, employee menu (Open chat, Go to), chat transcript in the drawer. Employees route with the same planner, so the owner's meeting room no longer traps them | U0 | done |
 | U5 | Voice through whisper.cpp: push-to-talk and proximity, and a `pnpm beta` launch so macOS asks the app, not the terminal, for the mic. Dictating a rule to a board lands with F2 | R4 | done |
+| B1 | Block bench layout: six facing desks and a reserved head desk per block, one seat table in `layout.ts` that drives rendering, seating yaw and the nav obstacles | N1 | done |
 | U6 | README, then the full end-to-end run for all three harnesses | all | |
 
 The owner moved the microphone and Overview navigation to the front. N1 runs next to U1, and U5 starts as soon as R4's doc lands. C1 runs after U1, because every later unit builds on its types. Then U2, U3 and F1 run in parallel, then F2 and F3. At most three implementation agents run at once, and each works single-threaded without helper agents of its own. Nested helpers multiplied the load and hit the account's session limit twice. The decision trail lives in `docs/decisions.tsv`.
