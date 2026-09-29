@@ -1,4 +1,4 @@
-import { dialog, ipcMain, shell, type BrowserWindow, type IpcMainEvent, type IpcMainInvokeEvent } from 'electron';
+import { app, dialog, ipcMain, shell, type BrowserWindow, type IpcMainEvent, type IpcMainInvokeEvent } from 'electron';
 import { z } from 'zod';
 import {
   IPC,
@@ -124,6 +124,32 @@ export function startOffice({ dataFile, harnesses, window, services }: Options) 
   ipcMain.on(IPC.revealFolder, (e, raw: unknown) => {
     const path = folderPath.safeParse(raw);
     if (trusted(e) && path.success) shell.showItemInFolder(path.data);
+  });
+
+  let normalBounds: Electron.Rectangle | null = null;
+  ipcMain.on(IPC.portalEnter, (e) => {
+    if (!trusted(e)) return;
+    const win = window();
+    if (!win || win.isDestroyed()) return;
+    normalBounds ??= win.getBounds();
+    win.setAlwaysOnTop(true, 'floating');
+    win.setSize(560, 410, true);
+  });
+  ipcMain.on(IPC.portalLeave, (e) => {
+    if (!trusted(e)) return;
+    const win = window();
+    if (!win || win.isDestroyed()) return;
+    win.setAlwaysOnTop(false);
+    if (normalBounds) {
+      win.setBounds(normalBounds, true);
+      normalBounds = null;
+    }
+  });
+  ipcMain.on(IPC.portalOpenHome, (e) => {
+    if (trusted(e)) void shell.openPath(app.getPath('home'));
+  });
+  ipcMain.on(IPC.portalOpenTerminal, (e) => {
+    if (trusted(e)) void shell.openPath('/System/Applications/Utilities/Terminal.app');
   });
 
   return { shutdown: () => office.shutdown() };

@@ -17,6 +17,12 @@ export function installInput() {
     if (e.metaKey || e.ctrlKey || e.altKey) return;
     const s = get();
 
+    if (s.portalMode && e.code === 'Escape') {
+      window.office.portal.leave();
+      set({ portalMode: false });
+      return;
+    }
+
     switch (e.code) {
       case 'Digit1':
         return setSetting('camera', 'follow');

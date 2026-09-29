@@ -106,6 +106,109 @@ h3 {
   color: var(--muted);
 }
 
+.computer-menu {
+  position: fixed;
+  left: 50%;
+  bottom: 28px;
+  z-index: 80;
+  width: 250px;
+  transform: translateX(-50%);
+  display: grid;
+  gap: 8px;
+}
+.computer-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.computer-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #63b996;
+  box-shadow: 0 0 0 4px rgba(99, 185, 150, 0.16);
+}
+.computer-menu p { margin: 0 0 4px; }
+.computer-menu .link { justify-self: start; }
+
+.mac-portal {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  background: linear-gradient(145deg, #202a43, #314d70 55%, #6b91a2);
+  color: #f9fbff;
+}
+.mac-bar {
+  height: 52px;
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 0 14px;
+  background: rgba(18, 24, 40, 0.72);
+  border-bottom: 1px solid rgba(255,255,255,0.16);
+}
+.mac-brand { display: flex; align-items: center; gap: 8px; }
+.mac-logo {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 7px;
+  background: #f5b84c;
+  color: #29243a;
+  font-weight: 900;
+}
+.mac-live { margin-right: auto; color: #a9e7c4; font-size: 10px; letter-spacing: .08em; }
+.mac-bar .btn { color: #fff; border-color: rgba(255,255,255,.3); background: rgba(255,255,255,.1); }
+.mac-desktop { flex: 1; padding: 22px; }
+.mac-app-window {
+  max-width: 480px;
+  margin: 0 auto;
+  overflow: hidden;
+  border: 1px solid rgba(255,255,255,.3);
+  border-radius: 13px;
+  background: rgba(250,250,252,.96);
+  color: var(--ink);
+  box-shadow: 0 20px 50px rgba(12, 20, 40, .35);
+}
+.mac-window-head {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  height: 34px;
+  padding: 0 12px;
+  border-bottom: 1px solid var(--line);
+  background: #f0eff3;
+  font-size: 12px;
+}
+.traffic { width: 9px; height: 9px; border-radius: 50%; }
+.traffic.red { background: #ef6a68; }
+.traffic.amber { background: #e5b34e; }
+.traffic.green { background: #65b877; }
+.mac-window-head b { margin: 0 auto; transform: translateX(-12px); }
+.mac-window-body { padding: 20px; }
+.mac-kicker { margin: 0; color: var(--brand); font-size: 11px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
+.mac-window-body h1 { margin-top: 3px; font-size: 28px; }
+.mac-window-body > .muted { margin: 7px 0 16px; }
+.mac-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.mac-action {
+  display: grid;
+  grid-template-columns: 28px 1fr;
+  gap: 0 8px;
+  align-items: center;
+  padding: 11px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #fff;
+  text-align: left;
+  cursor: pointer;
+}
+.mac-action:hover { border-color: var(--brand); background: #f7f7ff; }
+.mac-action span { grid-row: span 2; font-size: 21px; }
+.mac-action small { color: var(--muted); }
+.mac-footnote { margin: 17px 0 0; color: var(--muted); font-size: 11px; }
+
 /* Company panel */
 .company {
   top: 16px;

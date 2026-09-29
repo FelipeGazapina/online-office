@@ -192,6 +192,12 @@ export type OfficeApi = {
   // The OS folder picker. Resolves null when the owner cancels.
   pickFolder(): Promise<string | null>;
   revealFolder(path: string): void;
+  portal: {
+    enter(): void;
+    leave(): void;
+    openHome(): void;
+    openTerminal(): void;
+  };
   voice: VoiceApi;
 };
 
@@ -201,4 +207,8 @@ export const IPC = {
   event: 'office:event',
   pickFolder: 'office:pick-folder',
   revealFolder: 'office:reveal-folder',
+  portalEnter: 'office:portal-enter',
+  portalLeave: 'office:portal-leave',
+  portalOpenHome: 'office:portal-open-home',
+  portalOpenTerminal: 'office:portal-open-terminal',
 } as const;

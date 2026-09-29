@@ -12,6 +12,12 @@ const office: OfficeApi = {
   },
   pickFolder: () => ipcRenderer.invoke(IPC.pickFolder),
   revealFolder: (path) => ipcRenderer.send(IPC.revealFolder, path),
+  portal: {
+    enter: () => ipcRenderer.send(IPC.portalEnter),
+    leave: () => ipcRenderer.send(IPC.portalLeave),
+    openHome: () => ipcRenderer.send(IPC.portalOpenHome),
+    openTerminal: () => ipcRenderer.send(IPC.portalOpenTerminal),
+  },
   voice: voiceApi,
 };
 

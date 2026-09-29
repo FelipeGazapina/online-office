@@ -219,6 +219,28 @@ function OwnerCorner() {
     <group>
       <Desk position={[OWNER_DESK.x, 0, OWNER_DESK.z]} rotationY={Math.PI / 2} screen="idle" />
       <Chair position={[OWNER_DESK.x + 0.9, 0, OWNER_DESK.z]} rotationY={Math.PI / 2} color="#2f3a5f" />
+      <group
+        position={[OWNER_DESK.x + 0.15, 0.82, OWNER_DESK.z - 0.18]}
+        onClick={(e) => {
+          e.stopPropagation();
+          if (e.delta < 6) set({ computerMenu: true });
+        }}
+        onPointerOver={() => void (document.body.style.cursor = 'pointer')}
+        onPointerOut={() => void (document.body.style.cursor = '')}
+      >
+        <mesh castShadow>
+          <boxGeometry args={[0.9, 0.52, 0.06]} />
+          <meshStandardMaterial color="#161b2a" roughness={0.45} />
+        </mesh>
+        <mesh position={[0, -0.01, 0.035]}>
+          <planeGeometry args={[0.78, 0.4]} />
+          <meshBasicMaterial color="#3c72a8" />
+        </mesh>
+        <mesh position={[0, -0.36, 0.1]}>
+          <boxGeometry args={[0.62, 0.03, 0.28]} />
+          <meshStandardMaterial color="#d8d1c3" roughness={0.8} />
+        </mesh>
+      </group>
       <mesh position={[OWNER_DESK.x - 0.1, 0.83, OWNER_DESK.z + 0.55]} rotation={[-0.5, Math.PI / 2, 0]}>
         <planeGeometry args={[0.36, 0.14]} />
         <meshBasicMaterial map={tex} transparent />

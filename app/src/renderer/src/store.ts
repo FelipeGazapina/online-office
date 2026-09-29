@@ -56,6 +56,8 @@ type State = Settings & {
   modal: Modal;
   helpOpen: boolean;
   cardMinimized: boolean;
+  computerMenu: boolean;
+  portalMode: boolean;
   // Facts derived by the per-frame sim, published only when they change.
   talkingTo: EmployeeId | null;
   askerId: EmployeeId | null;
@@ -77,6 +79,8 @@ export const useStore = create<State>()(() => ({
   modal: null,
   helpOpen: false,
   cardMinimized: false,
+  computerMenu: false,
+  portalMode: false,
   talkingTo: null,
   askerId: null,
   voice: initialVoice,
