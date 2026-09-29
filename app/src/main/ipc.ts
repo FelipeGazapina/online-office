@@ -1,5 +1,5 @@
 import { app, dialog, ipcMain, shell, type BrowserWindow, type IpcMainEvent, type IpcMainInvokeEvent } from 'electron';
-import { autoUpdater } from 'electron-updater';
+import electronUpdater from 'electron-updater';
 import { z } from 'zod';
 import {
   IPC,
@@ -14,6 +14,8 @@ import {
   type ServerMessage,
 } from '../shared/protocol.ts';
 import { Office, OfficeError, type OfficeServices } from './office/company.ts';
+
+const { autoUpdater } = electronUpdater;
 
 // The one place untrusted input becomes a ClientMessage. Ids are opaque strings to the renderer.
 const employeeId = z.string().min(1).transform((s) => s as EmployeeId);
