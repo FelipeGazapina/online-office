@@ -11,10 +11,19 @@ import type {
   ModelCatalog,
   Provider,
 } from '../../shared/protocol.ts';
+import type { Language, VoiceQuality } from '../../shared/voice.ts';
+import { initialVoice, type VoiceState } from './voice/chip.ts';
 
 export type CameraMode = 'follow' | 'iso' | 'first';
 export type MicMode = 'proximity' | 'push';
-export type Lang = 'en-US' | 'pt-BR';
+export type Lang = 'en-US' | 'pt-BR' | 'auto';
+// What each language setting means for listening (`stt`, what whisper is told) and for the employees' voices (`tts`).
+export const LANGS: Record<Lang, { stt: Language; tts: 'en-US' | 'pt-BR' }> = {
+  'en-US': { stt: 'en', tts: 'en-US' },
+  'pt-BR': { stt: 'pt', tts: 'pt-BR' },
+  // Whisper's json answer does not say which language it heard, so the employees keep an English voice.
+  auto: { stt: 'auto', tts: 'en-US' },
+};
 export type Modal = null | { kind: 'hire' } | { kind: 'block' } | { kind: 'whiteboard'; blockId: BlockId };
 
 export type LogLine = { line: string; at: number };
@@ -22,9 +31,9 @@ export type ChatLine = { from: 'owner' | 'employee'; text: string; at: number };
 export type Toast = { id: number; text: string; tone: 'info' | 'warn' | 'ok' };
 
 // Settings the user is tuning while deciding how this should feel; kept across reloads.
-type Settings = { camera: CameraMode; interrupt: InterruptStyle; mic: MicMode; lang: Lang };
+type Settings = { camera: CameraMode; interrupt: InterruptStyle; mic: MicMode; lang: Lang; voiceQuality: VoiceQuality };
 const SETTINGS_KEY = 'online-office.settings';
-const defaults: Settings = { camera: 'follow', interrupt: 'next', mic: 'proximity', lang: 'en-US' };
+const defaults: Settings = { camera: 'follow', interrupt: 'next', mic: 'proximity', lang: 'en-US', voiceQuality: 'fast' };
 
 function loadSettings(): Settings {
   try {
@@ -50,7 +59,7 @@ type State = Settings & {
   // Facts derived by the per-frame sim, published only when they change.
   talkingTo: EmployeeId | null;
   askerId: EmployeeId | null;
-  voice: { supported: boolean; active: boolean; interim: string; note: string | null };
+  voice: VoiceState;
   toasts: Toast[];
 };
 
@@ -70,7 +79,7 @@ export const useStore = create<State>()(() => ({
   cardMinimized: false,
   talkingTo: null,
   askerId: null,
-  voice: { supported: true, active: false, interim: '', note: null },
+  voice: initialVoice,
   toasts: [],
 }));
 
@@ -82,7 +91,7 @@ export function setSetting<K extends keyof Settings>(key: K, value: Settings[K])
   const s = get();
   localStorage.setItem(
     SETTINGS_KEY,
-    JSON.stringify({ camera: s.camera, interrupt: s.interrupt, mic: s.mic, lang: s.lang }),
+    JSON.stringify({ camera: s.camera, interrupt: s.interrupt, mic: s.mic, lang: s.lang, voiceQuality: s.voiceQuality }),
   );
 }
 

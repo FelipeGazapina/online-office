@@ -1,4 +1,5 @@
 import { headcountCap, MAX_LEVEL, PROVIDERS, XP_FOR_LEVEL, type Employee } from '../../../shared/protocol.ts';
+import type { VoiceQuality } from '../../../shared/voice.ts';
 import { set, setSetting, useStore, waitingQueue, type CameraMode, type Lang, type MicMode } from '../store.ts';
 import { fmtWait, tailPath, useNow } from './hooks.ts';
 
@@ -141,8 +142,18 @@ export function SettingsPanel() {
         options={[
           ['en-US', 'English'],
           ['pt-BR', 'Português'],
+          ['auto', 'Auto'],
         ]}
         onChange={(v) => setSetting('lang', v)}
+      />
+      <label>Voice</label>
+      <Seg<VoiceQuality>
+        value={s.voiceQuality}
+        options={[
+          ['fast', 'Fast'],
+          ['accurate', 'Accurate'],
+        ]}
+        onChange={(v) => setSetting('voiceQuality', v)}
       />
     </div>
   );
@@ -187,10 +198,8 @@ export function WaitingMeter() {
 
 export function Toasts() {
   const toasts = useStore((s) => s.toasts);
-  const note = useStore((s) => s.voice.note);
   return (
     <div className="toasts">
-      {note && <div className="toast warn">{note}</div>}
       {toasts.map((t) => (
         <div key={t.id} className={`toast ${t.tone}`}>
           {t.text}

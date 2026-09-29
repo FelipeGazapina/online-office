@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
 import { PROVIDERS, type Employee } from '../../../shared/protocol.ts';
-import { routeText, cardMicOn, speechSupported, toggleCardMic } from '../talk.ts';
+import { routeText, toggleCardMic } from '../talk.ts';
 import { set, useStore, waitingQueue } from '../store.ts';
+import { chipLine, chipOf, type ChipAction } from '../voice/chip.ts';
+import { micLevel } from '../voice/mic.ts';
 import { fmtWait, useNow } from './hooks.ts';
 
 function useEmployee(id: string | null): Employee | undefined {
@@ -14,16 +16,55 @@ function routeHint(e: Employee, interrupt: string) {
   return 'Gives them a task';
 }
 
+const CHIP_ACTIONS: Record<ChipAction, { label: string; run: () => void }> = {
+  check_again: { label: 'Check again', run: () => window.office.voice.recheck() },
+  try_again: { label: 'Try again', run: () => window.office.voice.recheck() },
+  open_mic_settings: { label: 'Open System Settings', run: () => window.office.voice.mic.openSettings() },
+};
+
+// Read on a timer, so the meter moves 20 times a second without React rendering anything.
+function Meter() {
+  const ref = useRef<HTMLSpanElement>(null);
+  useEffect(() => {
+    const timer = setInterval(() => ref.current?.style.setProperty('--level', String(micLevel())), 50);
+    return () => clearInterval(timer);
+  }, []);
+  return (
+    <span className="meter" ref={ref}>
+      <span />
+    </span>
+  );
+}
+
+function VoiceChip({ name }: { name: string }) {
+  const voice = useStore((s) => s.voice);
+  const mode = useStore((s) => s.mic);
+  const chip = chipOf(voice, mode);
+  const action = chip.action && CHIP_ACTIONS[chip.action];
+  return (
+    <div className={`talk-badge ${chip.tone}`}>
+      <i className={chip.tone === 'live' ? 'live' : ''} />
+      Talking to <b>{name}</b>
+      <span>
+        {chip.text} {chip.command && <code>{chip.command}</code>}
+      </span>
+      {chip.meter && <Meter />}
+      {action && (
+        <button type="button" className="chip-btn" onClick={action.run}>
+          {action.label}
+        </button>
+      )}
+    </div>
+  );
+}
+
 function QuestionCard({ e }: { e: Employee }) {
   const now = useNow(1000);
   const company = useStore((s) => s.company);
-  const micActive = useStore((s) => s.voice.active);
-  const supported = useStore((s) => s.voice.supported);
+  const voice = useStore((s) => s.voice);
+  const mode = useStore((s) => s.mic);
+  const chip = chipOf(voice, mode);
   const [text, setText] = useState('');
-  const [micOn, setMicOn] = useState(false);
-  useEffect(() => {
-    if (!micActive) setMicOn(false);
-  }, [micActive]);
   if (e.status.kind !== 'blocked_on_owner') return null;
   const q = e.status.question;
   const block = company?.blocks.find((b) => b.id === e.blockId);
@@ -89,15 +130,12 @@ function QuestionCard({ e }: { e: Employee }) {
         />
         <button
           type="button"
-          className={`btn mic ${micOn ? 'on' : ''}`}
-          disabled={!supported}
-          title={supported ? 'Answer by voice' : 'Voice input is not available yet. Type instead.'}
-          onClick={() => {
-            toggleCardMic();
-            setMicOn(cardMicOn());
-          }}
+          className={`btn mic ${voice.cardMic ? 'on' : ''}`}
+          disabled={chip.tone === 'warn'}
+          title={chip.tone === 'warn' ? chipLine(chip) : 'Answer by voice'}
+          onClick={toggleCardMic}
         >
-          {micOn ? 'Listening' : 'Mic'}
+          {voice.cardMic ? 'Listening' : 'Mic'}
         </button>
         <button type="submit" className="btn ink" disabled={!text.trim()}>
           Answer
@@ -147,22 +185,7 @@ export function Bottom() {
 
   return (
     <div className="bottom">
-      {talking && (
-        <div className="talk-badge">
-          <i className={s.voice.active ? 'live' : ''} />
-          Talking to <b>{talking.name}</b>
-          <span>
-            {s.voice.active
-              ? 'listening'
-              : !speechSupported || s.voice.note
-                ? 'mic unavailable, press Enter to type'
-                : s.mic === 'push'
-                  ? 'hold V to talk'
-                  : 'mic starting'}
-          </span>
-        </div>
-      )}
-      {s.voice.interim && <div className="interim">“{s.voice.interim}”</div>}
+      {talking && <VoiceChip name={talking.name} />}
       {s.meetingDoor === 'open' && asker && s.cardMinimized && asker.status.kind === 'blocked_on_owner' && (
         <button className="qmini" onClick={() => set({ cardMinimized: false })}>
           <b>{asker.name}</b> is waiting for an answer
