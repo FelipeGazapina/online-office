@@ -4,6 +4,7 @@ import { startOffice } from './ipc.ts';
 import { detectHarnesses, setCodexRoot } from './office/adapters/index.ts';
 import { startOfficeMcp } from './office/mcp.ts';
 import { MemoryStore } from './office/memory.ts';
+import { startUpdater } from './updater.ts';
 import { prepareVoice, startVoice } from './voice.ts';
 
 // Tests point this at a scratch dir. Moving the whole profile, not just company.json, keeps their
@@ -74,6 +75,7 @@ else {
       services: { mcp, memory: MemoryStore.open(join(userData, 'memory')) },
     });
     const voice = startVoice({ window: () => win, userData });
+    startUpdater({ window: () => win });
     app.on('will-quit', () => {
       office.shutdown();
       void mcp.close();

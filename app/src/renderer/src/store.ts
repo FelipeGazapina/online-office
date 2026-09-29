@@ -65,7 +65,7 @@ type State = Settings & {
   askerId: EmployeeId | null;
   voice: VoiceState;
   toasts: Toast[];
-  update: UpdateState;
+  update: UpdateState | null;
 };
 
 export const useStore = create<State>()(() => ({
@@ -89,7 +89,7 @@ export const useStore = create<State>()(() => ({
   askerId: null,
   voice: initialVoice,
   toasts: [],
-  update: { status: 'idle' },
+  update: null,
 }));
 
 export const set = useStore.setState;

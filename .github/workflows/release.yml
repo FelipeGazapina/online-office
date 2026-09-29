@@ -1,46 +1,118 @@
-name: Publish desktop beta
+name: Publish Mac beta
 
 on:
   push:
     branches: [main]
+    paths: ['app/**', '.github/workflows/release.yml']
   workflow_dispatch:
 
 permissions:
   contents: write
 
+concurrency:
+  group: publish
+  cancel-in-progress: false
+
 jobs:
   publish:
-    name: Publish ${{ matrix.os }} build
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [macos-latest, windows-latest, ubuntu-latest]
+    name: Publish Mac build
+    if: github.ref == 'refs/heads/main'
+    runs-on: macos-latest
+    timeout-minutes: 30
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Plan release, deleting a stale draft of it
+        id: plan
+        run: |
+          version="$(node -p "require('./app/package.json').version.split('.').slice(0, 2).join('.')").$(git rev-list --count HEAD)"
+          tag="v$version"
+          existing=$(gh api "repos/$GITHUB_REPOSITORY/releases" --paginate --jq ".[] | select(.tag_name == \"$tag\") | \"\(.id) \(.draft)\"")
+          publish=true
+          while read -r id draft; do
+            [ -n "$id" ] || continue
+            if [ "$draft" = true ]; then
+              gh api -X DELETE "repos/$GITHUB_REPOSITORY/releases/$id"
+            else
+              publish=false
+            fi
+          done <<< "$existing"
+          {
+            echo "version=$version"
+            echo "tag=$tag"
+            echo "publish=$publish"
+          } >> "$GITHUB_OUTPUT"
 
       - uses: pnpm/action-setup@v4
+        if: steps.plan.outputs.publish == 'true'
         with:
           version: 10
 
       - uses: actions/setup-node@v4
+        if: steps.plan.outputs.publish == 'true'
         with:
           node-version: 24
           cache: pnpm
           cache-dependency-path: app/pnpm-lock.yaml
 
       - name: Install dependencies
+        if: steps.plan.outputs.publish == 'true'
         working-directory: app
         run: pnpm install --frozen-lockfile
 
-      - name: Set release version
-        working-directory: app
-        shell: bash
-        run: node -e "const fs=require('fs'); const p='package.json'; const j=JSON.parse(fs.readFileSync(p)); j.version='0.1.${{ github.run_number }}'; fs.writeFileSync(p, JSON.stringify(j, null, 2)+'\n')"
-
-      - name: Build and publish
+      - name: Build
+        if: steps.plan.outputs.publish == 'true'
         working-directory: app
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: pnpm release
+          VERSION: ${{ steps.plan.outputs.version }}
+        run: pnpm package --config.extraMetadata.version="$VERSION"
+
+      - name: Verify the update will install
+        if: steps.plan.outputs.publish == 'true'
+        working-directory: app
+        env:
+          VERSION: ${{ steps.plan.outputs.version }}
+        run: |
+          app_id=$(node -p "require('./package.json').build.appId")
+          for ext in dmg dmg.blockmap zip zip.blockmap; do test -f "dist/Online-Office-$VERSION-arm64.$ext"; done
+          zip="dist/Online-Office-$VERSION-arm64.zip"
+          tmp=$(mktemp -d)
+          ditto -x -k "$zip" "$tmp"
+          set -- "$tmp"/*.app
+          codesign --verify --deep --strict "$1"
+          codesign -d -r- "$1" 2>&1 | grep -Fx "designated => identifier \"$app_id\""
+          [ "$(plutil -extract CFBundleShortVersionString raw "$1/Contents/Info.plist")" = "$VERSION" ]
+          grep -Fx "version: $VERSION" dist/latest-mac.yml
+          [ "$(openssl dgst -sha512 -binary "$zip" | base64)" = "$(sed -n 's/^sha512: //p' dist/latest-mac.yml)" ]
+
+      # gh uploads every asset to a draft and publishes it last, so no updater sees a release before its latest-mac.yml.
+      - name: Publish
+        if: steps.plan.outputs.publish == 'true'
+        working-directory: app
+        env:
+          TAG: ${{ steps.plan.outputs.tag }}
+          VERSION: ${{ steps.plan.outputs.version }}
+          NOTES: |
+            **First install**
+
+            1. Download the `.dmg` below, open it, and drag Online Office to Applications.
+            2. Open Online Office from Applications. macOS says it cannot verify the app, because this build is signed ad hoc and not notarized.
+            3. Open System Settings > Privacy & Security, scroll to Security, and click **Open Anyway** next to Online Office.
+
+            After that, updates arrive inside the app.
+        run: |
+          gh release create "$TAG" --target "$GITHUB_SHA" --title "Online Office $VERSION" --notes "$NOTES" --generate-notes \
+            dist/*.dmg dist/*.zip dist/*.zip.blockmap dist/latest-mac.yml
+
+      - name: Check the public update feed
+        if: steps.plan.outputs.publish == 'true'
+        env:
+          VERSION: ${{ steps.plan.outputs.version }}
+        run: |
+          curl -fsSL --retry 5 --retry-all-errors --retry-delay 3 \
+            "https://github.com/$GITHUB_REPOSITORY/releases/latest/download/latest-mac.yml" | grep -Fx "version: $VERSION"

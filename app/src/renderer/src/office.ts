@@ -31,6 +31,13 @@ export function applyServerMessage(msg: ServerMessage) {
 
 export async function startOffice() {
   window.office.subscribe(applyServerMessage);
-  window.office.update.subscribe((update) => set({ update }));
+  let announced = '';
+  window.office.update.subscribe((update) => {
+    set({ update });
+    if (update.status !== 'available' || update.version === announced) return;
+    announced = update.version;
+    const mouseHint = get().camera === 'iso' ? '' : ' Press C to free the mouse.';
+    toast(`Online Office v${update.version} is available. Click Update at the top right.${mouseHint}`);
+  });
   applyServerMessage(await window.office.getSnapshot());
 }
