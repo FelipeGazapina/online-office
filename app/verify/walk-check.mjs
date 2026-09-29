@@ -1,10 +1,11 @@
 // Drives the real sim, runtime and store without Electron. Run: node --no-warnings verify/walk-check.mjs
 globalThis.window = { office: { send() {} } };
+globalThis.document = { hidden: false };
 const src = '../src/renderer/src/';
 const { get, set } = await import(`${src}store.ts`);
 const { KEYS_INTENT, runtime } = await import(`${src}runtime.ts`);
 const { stepSim, walkTo } = await import(`${src}sim.ts`);
-const { angleDiff, deskPose, getLayout, OWNER_RADIUS, OWNER_START, WALL_MARGIN } = await import(`${src}layout.ts`);
+const { angleDiff, deskPose, getLayout, MEETING_ROOM, OWNER_RADIUS, OWNER_START, WALL_MARGIN, withMeetingRoom } = await import(`${src}layout.ts`);
 const { LISTEN_RADIUS } = await import(`${src}audio.ts`);
 
 let failed = 0;
@@ -25,7 +26,7 @@ const step = (seconds) => {
 };
 const walking = () => owner.intent.kind === 'walk';
 const dest = () => (walking() ? owner.intent.path.at(-1) : null);
-const grown = (by) => layout.obstacles.filter((b) => b).map((b) => ({ cx: b.cx, cz: b.cz, hw: b.hw + by, hd: b.hd + by }));
+const grown = (by) => withMeetingRoom(layout, get().meetingDoor).obstacles.map((b) => ({ cx: b.cx, cz: b.cz, hw: b.hw + by, hd: b.hd + by }));
 const inside = (p, boxes) => boxes.find((b) => Math.abs(p.x - b.cx) < b.hw && Math.abs(p.z - b.cz) < b.hd);
 
 function reset(people = [person('ann', 'Ann', 1)]) {
@@ -40,7 +41,7 @@ function reset(people = [person('ann', 'Ann', 1)]) {
   owner.intent = KEYS_INTENT;
   runtime.queueYaw = Math.PI;
   runtime.view.yaw = Math.PI;
-  set({ company: { name: 'Test', level: 3, xp: 0, blocks: [block], employees: people }, talkingTo: null, askerId: null });
+  set({ company: { name: 'Test', level: 3, xp: 0, blocks: [block], employees: people }, talkingTo: null, askerId: null, meetingDoor: 'open' });
   step(0.1);
 }
 
@@ -171,6 +172,98 @@ reset();
 walkTo({ kind: 'point', at: inDesk });
 walkOut();
 check(!inside(owner.pos, grown(OWNER_RADIUS - 0.05)) && dist(owner.pos, inDesk) < 2, 'a click in the middle of a desk walks to the nearest free floor', `ended at ${fmt(owner.pos)}`);
+
+const asking = { kind: 'blocked_on_owner', task: 'a task', question: { id: 'q1', kind: 'ask', text: 'which one?', askedAt: 1 } };
+const chair = deskPose(0, 0).chair;
+const setStatus = (status) => set({ company: { ...get().company, employees: [{ ...get().company.employees[0], status }] } });
+const inRoom = (p) => p.x > MEETING_ROOM.x0 && p.x < MEETING_ROOM.x1 && p.z > MEETING_ROOM.z0 && p.z < MEETING_ROOM.z1;
+
+// Runs the world until `done`, noting the first time the employee stands where an avatar cannot: inside an obstacle
+// grown by 0.25, which is the 0.3 body less some slack.
+function until(done, seconds) {
+  const seen = { trespass: null, entered: false };
+  for (let i = 0; i < seconds * 30; i++) {
+    stepSim(1 / 30);
+    seen.trespass ??= ann() && inside(ann().pos, grown(0.25)) ? fmt(ann().pos) : null;
+    seen.entered ||= !!ann() && inRoom(ann().pos);
+    if (done()) return { ...seen, done: true, seconds: i / 30 };
+  }
+  return { ...seen, done: false, seconds };
+}
+
+function hireLater(desk = 0) {
+  reset([]);
+  set({ company: { ...get().company, employees: [person('ann', 'Ann', desk)] } });
+  stepSim(1 / 30);
+}
+
+hireLater();
+check(!ann().seated && dist(ann().pos, chair) > 8, 'a later hire starts at the door, far from the desk', fmt(ann().pos));
+const hired = until(() => ann().seated, 60);
+check(hired.done && dist(ann().pos, chair) < 0.05, 'a new hire walks past the meeting room and sits at its desk', `at ${fmt(ann().pos)} after ${hired.seconds.toFixed(0)} s`);
+check(hired.trespass === null, 'the new hire never stands inside a wall or a desk on the way', `at ${hired.trespass}`);
+
+for (const [where, owns] of [['outside the room', OWNER_START], ['inside the room, at his desk', { x: -16.5, z: 5.9 }]]) {
+  hireLater();
+  until(() => ann().seated, 60);
+  owner.pos.set(owns.x, 0, owns.z);
+  step(0.5);
+  setStatus(asking);
+  const came = until(() => get().askerId === 'ann', 90);
+  check(came.done, `a blocked employee reaches the owner ${where}`, `at ${fmt(ann().pos)} after ${came.seconds.toFixed(0)} s`);
+  check(came.trespass === null, `on the way to the owner ${where} it never stands inside a wall or a desk`, `at ${came.trespass}`);
+  check(came.entered === inRoom(owner.pos), `it enters the meeting room exactly when the owner is inside it (${where})`, `entered ${came.entered}`);
+  setStatus({ kind: 'idle' });
+  const back = until(() => ann().seated, 90);
+  check(back.done && dist(ann().pos, chair) < 0.05, `once released it walks back and sits at its desk again (owner ${where})`, `at ${fmt(ann().pos)} after ${back.seconds.toFixed(0)} s`);
+  check(back.trespass === null, `on the way back to the desk it never stands inside a wall or a desk (owner ${where})`, `at ${back.trespass}`);
+}
+
+hireLater();
+until(() => ann().seated, 60);
+owner.pos.set(-16.5, 0, 5.9);
+set({ meetingDoor: 'closed' });
+step(0.5);
+setStatus(asking);
+const shut = until(() => get().askerId === 'ann' || !ann().seated, 30);
+check(!shut.done && ann().seated && get().askerId === null, 'with the door closed a blocked employee waits at its desk', `at ${fmt(ann().pos)}`);
+check(dist(ann().pos, chair) < 0.05, 'and it stays exactly at its chair', `at ${fmt(ann().pos)}`);
+set({ meetingDoor: 'open' });
+const opened = until(() => get().askerId === 'ann', 90);
+check(opened.done && opened.entered, 'once the door opens it walks in through the door and arrives', `at ${fmt(ann().pos)} after ${opened.seconds.toFixed(0)} s`);
+check(opened.trespass === null, 'and it never stands inside a wall on the way', `at ${opened.trespass}`);
+
+hireLater();
+until(() => ann().seated, 60);
+owner.pos.set(-16.5, 0, 5.9);
+step(0.5);
+setStatus(asking);
+until(() => get().askerId === 'ann' && inRoom(ann().pos), 90);
+set({ meetingDoor: 'closed' });
+setStatus({ kind: 'idle' });
+const locked = until(() => ann().seated, 20);
+check(!locked.done && inRoom(ann().pos) && locked.trespass === null, 'an employee inside the room when the door shuts stays inside and never goes through the wall', `at ${fmt(ann().pos)}`);
+check(ann().speed < 0.05, 'while locked in it stands still and does not walk into the wall', `speed ${ann().speed.toFixed(2)}`);
+set({ meetingDoor: 'open' });
+const out = until(() => ann().seated, 90);
+check(out.done && dist(ann().pos, chair) < 0.05 && out.trespass === null, 'and once the door opens it walks out and sits at its desk', `at ${fmt(ann().pos)} after ${out.seconds.toFixed(0)} s`);
+const nearDoor = { x: MEETING_ROOM.x1 + 0.6, z: MEETING_ROOM.doorZ };
+
+reset();
+set({ meetingDoor: 'closed' });
+const room = { x: -14, z: 5 };
+walkTo({ kind: 'point', at: room });
+check(!walking(), 'a click inside a room whose door is closed changes nothing');
+set({ meetingDoor: 'open' });
+walkTo({ kind: 'point', at: room });
+check(walking(), 'with the door open the same click starts a walk');
+walkOut();
+check(dist(owner.pos, room) < 0.15 && inRoom(owner.pos), 'and the owner walks in through the door to the spot', `at ${fmt(owner.pos)}`);
+walkTo({ kind: 'point', at: nearDoor });
+step(0.2);
+set({ meetingDoor: 'closed' });
+stepSim(1 / 30);
+check(!walking(), 'when the door shuts under a walk that has to go through it, the walk is dropped');
 
 reset();
 set({ company: null });

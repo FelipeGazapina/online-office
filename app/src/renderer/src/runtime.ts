@@ -2,6 +2,11 @@
 import { Vector3 } from 'three';
 import type { EmployeeId } from '../../shared/protocol.ts';
 import { OWNER_START, type Vec2 } from './layout.ts';
+import type { NavGrid } from './nav.ts';
+
+// The way an avatar is taking to where it is headed. `to` is what the route was planned for and `grid` the office it
+// was planned in. A null path means there is no way there.
+export type Route = { path: Vec2[] | null; to: Vec2; grid: NavGrid };
 
 export type AvatarRT = {
   id: string;
@@ -10,6 +15,7 @@ export type AvatarRT = {
   speed: number;
   seated: boolean;
   leaving: boolean;
+  route: Route | null;
 };
 
 export type WalkGoal = { kind: 'point'; at: Vec2 } | { kind: 'employee'; employeeId: EmployeeId };

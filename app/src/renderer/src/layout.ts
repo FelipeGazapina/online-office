@@ -89,6 +89,22 @@ export type Layout = {
   plants: Vec2[];
 };
 
+const withRooms = new WeakMap<Layout, Record<'open' | 'closed', Layout>>();
+
+// The layout with the meeting room in it, whose door is an opening or a wall. There is one object per layout and door
+// state, so whatever is keyed on the layout, like the nav grid, is built once and not every frame.
+export function withMeetingRoom(layout: Layout, door: 'open' | 'closed'): Layout {
+  let byDoor = withRooms.get(layout);
+  if (!byDoor) {
+    byDoor = {
+      open: { ...layout, obstacles: [...layout.obstacles, ...meetingRoomObstacles(false)] },
+      closed: { ...layout, obstacles: [...layout.obstacles, ...meetingRoomObstacles(true)] },
+    };
+    withRooms.set(layout, byDoor);
+  }
+  return byDoor[door];
+}
+
 let cacheKey = '';
 let cache: Layout | null = null;
 
