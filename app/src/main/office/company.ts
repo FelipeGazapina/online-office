@@ -78,7 +78,16 @@ const describeQuestion = (q: Question): string =>
     ? `Asking permission: ${q.tool} ${short(q.detail, 120)}`
     : `Asking the boss: ${q.text}${q.options ? ` [${q.options.join(' / ')}]` : ''}`;
 
-const ruleLabel = (rule: AllowRule): string => (rule.kind === 'command' ? rule.prefix : rule.name);
+const ruleLabel = (rule: AllowRule): string => {
+  switch (rule.kind) {
+    case 'command':
+      return rule.prefix;
+    case 'exact':
+      return rule.command;
+    case 'tool':
+      return rule.name;
+  }
+};
 
 export const levelForXp = (xp: number): number => {
   let level = 1;

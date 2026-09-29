@@ -24,6 +24,7 @@ const meetingDoor = z.enum(['open', 'closed']) satisfies z.ZodType<MeetingDoor>;
 const permissionMode = z.enum(['inherit', 'ask', 'auto', 'yolo']);
 const allowRule = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('command'), prefix: z.string().min(1) }),
+  z.object({ kind: z.literal('exact'), command: z.string().min(1) }),
   z.object({ kind: z.literal('tool'), name: z.string().min(1) }),
 ]);
 

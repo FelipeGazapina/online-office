@@ -2,7 +2,7 @@
 // settings. The Contract v2 messages then go through the real IPC and zod boundary, and each result is read back from
 // the snapshot, from company.json and from what the real Claude session did.
 // Run: pnpm build:verify && OFFICE_OUT_DIR=out/verify node verify/cdp.mjs verify/e2e-contract.mjs
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { HAIKU, assert, company, scratch } from './lib.mjs';
 
@@ -68,23 +68,33 @@ export default async (s) => {
   assert((await s.eval(`${emp('Cy')}.model`)) === ALIAS && (await s.eval('__office.store.getState().catalogs["claude-code"].kind')) === 'unknown', 'hire takes a model, and asking a harness that cannot list models leaves its catalog unknown');
 
   const benId = await s.eval(`${emp('Ben')}.id`);
-  const node = (file) => `Use the Bash tool, not Write, to run exactly this command: node -e "require('fs').writeFileSync('${file}', 'x')"`;
+  const command = (file) => `node -e "require('fs').writeFileSync('${file}', 'x')"`;
+  const node = (file) => `Use the Bash tool, not Write, to run exactly this command: ${command(file)}`;
+  const flat = (text) => text.replace(/\s+/g, ' ');
   await send({ type: 'assign', employeeId: benId, task: node('one.txt') });
   const card = await answerCard('Ben', { always: true });
   assert(card.tool === 'Bash' && card.detail.includes('writeFileSync'), 'the first run of the command puts a permission card on the desk');
   await idle('Ben');
-  assert(existsSync(join(repo, 'one.txt')) && JSON.stringify(await s.eval(`${emp('Ben')}.permissions.alwaysAllow`)) === JSON.stringify([{ kind: 'command', prefix: 'node' }]), 'Allow with always ran it and added a rule for the executable');
-  assert(JSON.stringify(storedEmployee('Ben').permissions.alwaysAllow) === JSON.stringify([{ kind: 'command', prefix: 'node' }]), 'the rule is in company.json');
+  const rules = await s.eval(`${emp('Ben')}.permissions.alwaysAllow`);
+  assert(existsSync(join(repo, 'one.txt')) && rules.length === 1 && rules[0].kind === 'exact' && flat(rules[0].command) === flat(card.detail), 'Allow with always ran it and added an exact rule for that command, because node can run any code');
+  assert(JSON.stringify(storedEmployee('Ben').permissions.alwaysAllow) === JSON.stringify(rules), 'the rule is in company.json');
   await s.eval(`(() => { window.__cards = 0; __office.store.subscribe((st) => { if (st.company.employees.find((e) => e.name === 'Ben').status.kind === 'blocked_on_owner') window.__cards++; }); })()`);
-  await runTask('Ben', node('two.txt'));
-  assert(existsSync(join(repo, 'two.txt')) && (await s.eval('window.__cards')) === 0, 'the same command ran again with no card');
-  assert((await logs('Ben')).some((l) => l.startsWith('Allowed by your rule "node": Bash node -e')), 'and the log says the rule allowed it');
-  await send({ type: 'remove_allow_rule', employeeId: benId, rule: { kind: 'command', prefix: 'node' } });
+  rmSync(join(repo, 'one.txt'));
+  await runTask('Ben', node('one.txt'));
+  assert(existsSync(join(repo, 'one.txt')) && (await s.eval('window.__cards')) === 0, 'the identical command ran again with no card');
+  assert((await logs('Ben')).some((l) => l.startsWith('Allowed by your rule "node -e') && l.includes('one.txt')), 'and the log says the rule allowed it');
+  await send({ type: 'assign', employeeId: benId, task: node('two.txt') });
+  const other = await answerCard('Ben', {});
+  assert(other.kind === 'permission' && other.detail.includes('two.txt'), 'another node command still asks, because the rule covers only the command it was made from');
+  await idle('Ben');
+  assert(existsSync(join(repo, 'two.txt')), 'and runs once the owner allows it');
+  await send({ type: 'remove_allow_rule', employeeId: benId, rule: rules[0] });
   await s.waitFor(`${emp('Ben')}.permissions.alwaysAllow.length === 0`, 5000);
-  await send({ type: 'assign', employeeId: benId, task: node('three.txt') });
+  rmSync(join(repo, 'one.txt'));
+  await send({ type: 'assign', employeeId: benId, task: node('one.txt') });
   await answerCard('Ben', {});
   await idle('Ben');
-  assert(existsSync(join(repo, 'three.txt')), 'after remove_allow_rule the command asks again');
+  assert(existsSync(join(repo, 'one.txt')), 'after remove_allow_rule the identical command asks again');
 
   await send({ type: 'set_model', employeeId: benId, model: ALIAS });
   assert(await untilMainLog(new RegExp(`model switched to ${ALIAS}`)), 'the live session accepted the new model');

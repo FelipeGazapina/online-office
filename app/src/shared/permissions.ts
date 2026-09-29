@@ -49,29 +49,55 @@ const EXECUTABLE = /^[\w./@+][\w./@:+-]*$/;
 // `test`, `status`, `build:prod`. A flag, a path, a file name or a number is an argument, not a subcommand.
 const SUBCOMMAND = /^[a-z][a-z0-9_:-]*$/;
 
-// The rule text for a shell command: the executable plus its subcommand when it has one, so `npm test -- --watch` gives
-// `npm test` and `git status --short` gives `git status`. Undefined when no rule can stand for the command.
-export function commandPrefix(command: string): string | undefined {
-  const [exe, sub] = simpleWords(command) ?? [];
-  if (!exe || !EXECUTABLE.test(exe)) return undefined;
-  return sub && SUBCOMMAND.test(sub) ? `${exe} ${sub}` : exe;
-}
+// Programs that run any code they are given, run other commands, or destroy data. A rule for one of these must not
+// cover every use of it, so Always allow on one makes an exact rule.
+export const EXACT_ONLY = new Set([
+  'bash', 'sh', 'zsh', 'fish', 'node', 'deno', 'bun', 'python', 'python3', 'ruby', 'perl', 'php', 'osascript', 'pwsh',
+  'env', 'xargs', 'nohup', 'time', 'timeout', 'nice', 'watch', 'exec', 'eval', 'command',
+  'find', 'rm', 'rmdir', 'dd', 'mkfs', 'chmod', 'chown', 'chgrp', 'truncate', 'shred', 'kill', 'killall', 'pkill',
+  'launchctl', 'diskutil',
+]);
 
-// The rule an Always allow click on this card adds, or undefined when the command is too tangled for a safe one.
+// These run the rest of the command as someone else, so no rule can stand for it, not even an exact one.
+const NO_RULE = new Set(['sudo', 'doas']);
+
+// The program behind a path or a name, so that `/bin/bash`, `BASH`, `python3.12` and `mkfs.ext4` count as `bash`,
+// `bash`, `python` and `mkfs`. The disk on a Mac ignores case, and a versioned interpreter is still an interpreter.
+const programOf = (exe: string): string => exe.slice(exe.lastIndexOf('/') + 1).toLowerCase().split('.')[0]!.replace(/\d+$/, '');
+
+// The rule an Always allow click on this card adds, or undefined when no safe rule can stand for it. Another tool gets
+// a rule for the tool. A shell command gets its executable plus its subcommand when it has one, so `npm test -- --watch`
+// gives `npm test` and `git status --short` gives `git status`. A program in EXACT_ONLY gets that command and no other.
 export function ruleFor(body: PermissionBody): AllowRule | undefined {
   if (body.tool !== SHELL_TOOL) return { kind: 'tool', name: body.tool };
-  const prefix = commandPrefix(body.detail);
-  return prefix ? { kind: 'command', prefix } : undefined;
+  const words = simpleWords(body.detail);
+  const [exe, sub] = words ?? [];
+  if (!words || !exe || !EXECUTABLE.test(exe)) return undefined;
+  const program = programOf(exe);
+  if (NO_RULE.has(program)) return undefined;
+  if (EXACT_ONLY.has(program)) return { kind: 'exact', command: words.join(' ') };
+  return { kind: 'command', prefix: sub && SUBCOMMAND.test(sub) ? `${exe} ${sub}` : exe };
 }
 
-// Word by word, so `npm test` covers `npm test -- --watch` and not `npm testing`. A command that chains or redirects is
-// never covered, whatever it starts with.
+// A command rule matches word by word, so `npm test` covers `npm test -- --watch` and not `npm testing`. An exact rule
+// covers a command whose words are the same, and nothing that only starts with them. A command that chains or
+// redirects is never covered, whatever it starts with.
 export function covers(rule: AllowRule, body: PermissionBody): boolean {
   if (rule.kind === 'tool') return body.tool === rule.name;
-  if (body.tool !== SHELL_TOOL) return false;
-  const words = simpleWords(body.detail);
-  return !!words && rule.prefix.split(' ').every((w, i) => words[i] === w);
+  const words = body.tool === SHELL_TOOL ? simpleWords(body.detail) : undefined;
+  if (!words) return false;
+  if (rule.kind === 'command') return rule.prefix.split(' ').every((w, i) => words[i] === w);
+  const wanted = simpleWords(rule.command);
+  return wanted?.length === words.length && wanted.every((w, i) => words[i] === w);
 }
 
-export const sameRule = (a: AllowRule, b: AllowRule): boolean =>
-  a.kind === 'command' ? b.kind === 'command' && a.prefix === b.prefix : b.kind === 'tool' && a.name === b.name;
+export function sameRule(a: AllowRule, b: AllowRule): boolean {
+  switch (a.kind) {
+    case 'command':
+      return b.kind === 'command' && a.prefix === b.prefix;
+    case 'exact':
+      return b.kind === 'exact' && a.command === b.command;
+    case 'tool':
+      return b.kind === 'tool' && a.name === b.name;
+  }
+}

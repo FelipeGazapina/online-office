@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
-import { commandPrefix, covers, isAllow, ruleFor, sameRule, type PermissionBody } from '../src/shared/permissions.ts';
+import { covers, isAllow, ruleFor, sameRule, type PermissionBody } from '../src/shared/permissions.ts';
 import { SEAT_CEILING, type AllowRule, type Company, type Employee, type EmployeeId, type EmployeeStatus, type HarnessStatus, type ModelCatalog, type ModelId, type PermissionPolicy, type Provider, type Question, type Subagent } from '../src/shared/protocol.ts';
 import { HARNESSES } from '../src/main/office/adapters/index.ts';
 import type { SessionHost } from '../src/main/office/adapters/types.ts';
@@ -75,24 +75,51 @@ const detailOf = (q: Question | undefined) => (q?.kind === 'permission' ? q.deta
 const perm = (detail: string) => ({ kind: 'permission' as const, text: 'Can I run a shell command?', tool: 'Bash', detail });
 
 console.log('# allow rules');
-const prefixes: [command: string, prefix: string | undefined][] = [
-  ['npm test', 'npm test'],
-  ['npm test -- --watch=false', 'npm test'],
-  ['git status', 'git status'],
-  ['git status --short', 'git status'],
-  ['  git   push  origin main ', 'git push'],
-  ['git commit -m "fix(api): handle x; retry"', 'git commit'],
-  ["git commit -m 'a; b'", 'git commit'],
-  ['npm run build', 'npm run'],
-  ['pnpm test:unit', 'pnpm test:unit'],
-  ['./scripts/deploy.sh --prod', './scripts/deploy.sh'],
-  ['/usr/bin/git log', '/usr/bin/git log'],
-  ['ls', 'ls'],
-  ['ls -la', 'ls'],
-  ['sleep 5', 'sleep'],
-  ['cat README.md', 'cat'],
-  ["node -e \"require('fs').writeFileSync('done.txt', 'done')\"", 'node'],
-  ['git -C /tmp status', 'git'],
+const shell = (detail: string): PermissionBody => ({ kind: 'permission', text: 'Can I run a shell command?', tool: 'Bash', detail });
+const use = (tool: string, detail: string): PermissionBody => ({ kind: 'permission', text: `Can I use ${tool}?`, tool, detail });
+const cmd = (prefix: string): AllowRule => ({ kind: 'command', prefix });
+const exact = (command: string): AllowRule => ({ kind: 'exact', command });
+const tool = (name: string): AllowRule => ({ kind: 'tool', name });
+
+const derived: [command: string, want: AllowRule | undefined][] = [
+  ['npm test', cmd('npm test')],
+  ['npm test -- --watch', cmd('npm test')],
+  ['npm test -- --watch=false', cmd('npm test')],
+  ['git status', cmd('git status')],
+  ['git status --short', cmd('git status')],
+  ['  git   push  origin main ', cmd('git push')],
+  ['git commit -m "fix(api): handle x; retry"', cmd('git commit')],
+  ["git commit -m 'a; b'", cmd('git commit')],
+  ['npm run build', cmd('npm run')],
+  ['pnpm test:unit', cmd('pnpm test:unit')],
+  ['./scripts/deploy.sh --prod', cmd('./scripts/deploy.sh')],
+  ['/usr/bin/git log', cmd('/usr/bin/git log')],
+  ['ls', cmd('ls')],
+  ['ls -la', cmd('ls')],
+  ['sleep 5', cmd('sleep')],
+  ['cat README.md', cmd('cat')],
+  ['git -C /tmp status', cmd('git')],
+  ["bash -c 'x; y'", exact("bash -c 'x; y'")],
+  ['bash -c "echo hi"', exact('bash -c "echo hi"')],
+  ["node -e \"require('fs').writeFileSync('done.txt', 'done')\"", exact("node -e \"require('fs').writeFileSync('done.txt', 'done')\"")],
+  ['python -c "import os; os.system(\'id\')"', exact('python -c "import os; os.system(\'id\')"')],
+  ['rm -rf dist', exact('rm -rf dist')],
+  ['rm   -rf\tdist  ', exact('rm -rf dist')],
+  ['find . -name "*.log" -delete', exact('find . -name "*.log" -delete')],
+  ['env FOO=1 npm test', exact('env FOO=1 npm test')],
+  ['time npm test', exact('time npm test')],
+  ["/bin/bash -c 'x'", exact("/bin/bash -c 'x'")],
+  ['/usr/local/bin/node script.js', exact('/usr/local/bin/node script.js')],
+  ['NODE -e "1"', exact('NODE -e "1"')],
+  ['python3.12 -c "print(1)"', exact('python3.12 -c "print(1)"')],
+  ['ruby3.2 -e 1', exact('ruby3.2 -e 1')],
+  ['perl5.36 -e 1', exact('perl5.36 -e 1')],
+  ['mkfs.ext4 /dev/disk9', exact('mkfs.ext4 /dev/disk9')],
+  ['sudo ls', undefined],
+  ['doas ls', undefined],
+  ['/usr/bin/sudo ls', undefined],
+  ['SUDO ls', undefined],
+  ['sudo rm -rf dist', undefined],
   ['npm test && rm -rf /', undefined],
   ['npm test; rm -rf /', undefined],
   ['npm test ; rm -rf /', undefined],
@@ -100,28 +127,33 @@ const prefixes: [command: string, prefix: string | undefined][] = [
   ['npm test | sh', undefined],
   ['npm test & evil', undefined],
   ['npm test > out.txt', undefined],
+  ['rm -rf dist && ls', undefined],
+  ['bash -c "$(evil)"', undefined],
+  ['bash -c "echo $HOME"', undefined],
   ['echo $(whoami)', undefined],
   ['echo `whoami`', undefined],
   ['echo "$HOME"', undefined],
-  ['echo \\;', undefined],
+  ['echo \;', undefined],
   ['git log\nrm -rf /', undefined],
   ['FOO=1 npm test', undefined],
   ['"my prog" run', undefined],
   ['echo "unterminated', undefined],
   ['', undefined],
 ];
-for (const [command, want] of prefixes) {
-  const got = commandPrefix(command);
-  check(got === want, `${JSON.stringify(command)} makes ${want === undefined ? 'no rule' : `the rule "${want}"`} (got ${JSON.stringify(got)})`);
+for (const [command, want] of derived) {
+  const got = ruleFor(shell(command));
+  check(JSON.stringify(got) === JSON.stringify(want), `${JSON.stringify(command)} makes ${want === undefined ? 'no rule' : JSON.stringify(want)}`, `got ${JSON.stringify(got)}`);
 }
-
-const shell = (detail: string): PermissionBody => ({ kind: 'permission', text: 'Can I run a shell command?', tool: 'Bash', detail });
-const use = (tool: string, detail: string): PermissionBody => ({ kind: 'permission', text: `Can I use ${tool}?`, tool, detail });
-const cmd = (prefix: string): AllowRule => ({ kind: 'command', prefix });
-const tool = (name: string): AllowRule => ({ kind: 'tool', name });
-check(JSON.stringify(ruleFor(shell('git status --short'))) === JSON.stringify(cmd('git status')), 'a shell card makes a command rule');
+const exactOnly = [
+  'bash', 'sh', 'zsh', 'fish', 'node', 'deno', 'bun', 'python', 'python3', 'ruby', 'perl', 'php', 'osascript', 'pwsh',
+  'env', 'xargs', 'nohup', 'time', 'timeout', 'nice', 'watch', 'exec', 'eval', 'command',
+  'find', 'rm', 'rmdir', 'dd', 'mkfs', 'chmod', 'chown', 'chgrp', 'truncate', 'shred', 'kill', 'killall', 'pkill', 'launchctl', 'diskutil',
+];
+for (const program of exactOnly) {
+  const got = ruleFor(shell(`${program} x`));
+  check(JSON.stringify(got) === JSON.stringify(exact(`${program} x`)), `${program} can run any code or destroy data, so its rule is exact`, `got ${JSON.stringify(got)}`);
+}
 check(JSON.stringify(ruleFor(use('Write', 'src/a.ts'))) === JSON.stringify(tool('Write')), 'any other tool makes a tool rule');
-check(ruleFor(shell('npm test && curl evil | sh')) === undefined, 'a chained command makes no rule at all, not a rule for the tool');
 
 const covered: [rule: AllowRule, body: PermissionBody, want: boolean][] = [
   [cmd('npm test'), shell('npm test'), true],
@@ -144,6 +176,22 @@ const covered: [rule: AllowRule, body: PermissionBody, want: boolean][] = [
   [cmd('ls'), shell('ls -la src'), true],
   [cmd('ls'), shell('lsof'), false],
   [cmd('npm test'), use('Write', 'npm test'), false],
+  [exact('rm -rf dist'), shell('rm -rf dist'), true],
+  [exact('rm -rf dist'), shell('rm   -rf\tdist'), true],
+  [exact('rm -rf dist'), shell('rm -rf ~'), false],
+  [exact('rm -rf dist'), shell('rm -rf dist ~'), false],
+  [exact('rm -rf dist'), shell('rm -rf'), false],
+  [exact('rm -rf dist'), shell('rm -rf dist2'), false],
+  [exact('rm -rf dist'), shell('rm -r dist'), false],
+  [exact('rm -rf dist'), shell('rm -rf dist; rm -rf ~'), false],
+  [exact('rm -rf dist'), shell('rm -rf dist && ls'), false],
+  [exact('rm -rf dist'), shell('rm -rf $(echo dist)'), false],
+  [exact('rm -rf dist'), use('Write', 'rm -rf dist'), false],
+  [exact("bash -c 'x; y'"), shell("bash -c 'x; y'"), true],
+  [exact("bash -c 'x; y'"), shell("bash -c 'x; z'"), false],
+  [exact("bash -c 'x; y'"), shell("bash -c 'x;  y'"), false],
+  [exact("bash -c 'x; y'"), shell('bash -c "x; y"'), false],
+  [exact('rm -rf dist; ls'), shell('rm -rf dist; ls'), false],
   [tool('Write'), use('Write', 'src/a.ts'), true],
   [tool('Write'), use('Edit', 'src/a.ts'), false],
   [tool('Write'), shell('npm test'), false],
@@ -152,6 +200,7 @@ for (const [rule, body, want] of covered) {
   check(covers(rule, body) === want, `${JSON.stringify(rule)} ${want ? 'covers' : 'does not cover'} ${body.tool} ${JSON.stringify(body.detail)}`);
 }
 check(sameRule(cmd('npm test'), cmd('npm test')) && !sameRule(cmd('npm test'), cmd('npm')) && !sameRule(cmd('Write'), tool('Write')) && sameRule(tool('Write'), tool('Write')), 'two rules are the same when kind and text match');
+check(sameRule(exact('rm -rf dist'), exact('rm -rf dist')) && !sameRule(exact('rm -rf dist'), exact('rm -rf ~')) && !sameRule(exact('npm test'), cmd('npm test')) && !sameRule(cmd('npm test'), exact('npm test')), 'an exact rule is only the same as an exact rule for the same command');
 check(['Allow', 'allow it', 'yes', 'Sim, pode fazer', 'OK go'].every(isAllow) && !['Deny', 'no', "don't allow it", '', 'allowed'].some(isAllow), 'an owner answer allows on Allow, yes and sim, and everything else is a no');
 
 console.log('\n# hire');
@@ -392,6 +441,40 @@ labAnswer(dia, 'Deny');
 await asksAgain;
 lab.handle({ type: 'remove_allow_rule', employeeId: dia, rule: cmd('npm test') });
 check(fakeOf(dia).policies.length === told + 1, 'removing a rule that is not there changes nothing and tells nobody');
+
+console.log('\n# exact rules');
+const rmDist = fakeOf(dia).host.ask(perm('rm -rf dist'));
+check(detailOf(labShown(dia)) === 'rm -rf dist', 'a command that can destroy data asks like any other');
+labAnswer(dia, 'Allow', true);
+await promptly(rmDist);
+check(rulesOf(dia) === JSON.stringify([tool('Write'), exact('rm -rf dist')]) && labLogs.includes('Always allow: rm -rf dist'), 'Always allow on it adds an exact rule for that command, not a rule for rm');
+check((await promptly(fakeOf(dia).host.ask(perm('rm   -rf  dist')))) === 'Allow' && labShown(dia) === undefined, 'the same command, spaced differently, then runs with no card');
+for (const other of ['rm -rf ~', 'rm -rf dist ~', 'rm -rf']) {
+  const asked = fakeOf(dia).host.ask(perm(other));
+  check(detailOf(labShown(dia)) === other, `${other} still asks`);
+  labAnswer(dia, 'Deny');
+  await promptly(asked);
+}
+const script = fakeOf(dia).host.ask(perm("bash -c 'echo a; echo b'"));
+labAnswer(dia, 'Allow', true);
+await promptly(script);
+check(rulesOf(dia) === JSON.stringify([tool('Write'), exact('rm -rf dist'), exact("bash -c 'echo a; echo b'")]), 'a shell script in quotes gets an exact rule too');
+check((await promptly(fakeOf(dia).host.ask(perm("bash -c 'echo a; echo b'")))) === 'Allow', 'and only that script runs unasked');
+const otherScript = fakeOf(dia).host.ask(perm("bash -c 'echo a; rm -rf ~'"));
+check(detailOf(labShown(dia)) === "bash -c 'echo a; rm -rf ~'", 'another script still asks');
+labAnswer(dia, 'Deny');
+await promptly(otherScript);
+const asRoot = fakeOf(dia).host.ask(perm('sudo ls'));
+labAnswer(dia, 'Allow', true);
+await promptly(asRoot);
+check(rulesOf(dia) === JSON.stringify([tool('Write'), exact('rm -rf dist'), exact("bash -c 'echo a; echo b'")]) && labLogs.some((l) => l.startsWith('No rule can stand for that command') && l.includes('sudo ls')), 'Always allow on sudo makes no rule and says the command was allowed once');
+lab.handle({ type: 'remove_allow_rule', employeeId: dia, rule: exact("bash -c 'echo a; echo b'") });
+lab.handle({ type: 'remove_allow_rule', employeeId: dia, rule: exact('rm -rf dist') });
+check(rulesOf(dia) === JSON.stringify([tool('Write')]) && labLogs.includes('Rule removed: rm -rf dist'), 'remove_allow_rule takes an exact rule out by its command');
+const rmAgain = fakeOf(dia).host.ask(perm('rm -rf dist'));
+check(detailOf(labShown(dia)) === 'rm -rf dist', 'and the command asks again');
+labAnswer(dia, 'Deny');
+await promptly(rmAgain);
 
 console.log('\n# model lists');
 const catalogOf = (provider: Provider) => lab.snapshot().catalogs[provider];

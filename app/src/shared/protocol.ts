@@ -36,7 +36,9 @@ export type ModelCatalog =
 export type PermissionMode = 'inherit' | 'ask' | 'auto' | 'yolo';
 
 // Added by Always allow on a permission card. The office checks these before it shows a card, for every harness.
-export type AllowRule = { kind: 'command'; prefix: string } | { kind: 'tool'; name: string };
+// A `command` rule covers every command that starts with its words, an `exact` rule only that command, and a `tool`
+// rule every use of the tool.
+export type AllowRule = { kind: 'command'; prefix: string } | { kind: 'exact'; command: string } | { kind: 'tool'; name: string };
 
 export type PermissionPolicy = { mode: PermissionMode; alwaysAllow: AllowRule[] };
 
