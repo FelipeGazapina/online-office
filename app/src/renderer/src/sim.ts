@@ -286,12 +286,27 @@ function stepAvatar(
   }
 }
 
-function nearestInRange(company: Company, current: EmployeeId | null): EmployeeId | null {
+function nearbyInRange(company: Company): EmployeeId[] {
+  if (get().meetingDoor === 'closed' && ownerInsideMeetingRoom()) return [];
+  const { pos } = runtime.owner;
+  return company.employees
+    .map((e) => {
+      const av = runtime.avatars.get(e.id);
+      return { id: e.id, d: av ? Math.hypot(av.pos.x - pos.x, av.pos.z - pos.z) : Infinity };
+    })
+    .filter(({ d }) => d <= LISTEN_RADIUS)
+    .sort((a, b) => a.d - b.d || a.id.localeCompare(b.id))
+    .map(({ id }) => id);
+}
+
+function nearestInRange(company: Company, current: EmployeeId | null, nearby = nearbyInRange(company)): EmployeeId | null {
   if (get().meetingDoor === 'closed' && ownerInsideMeetingRoom()) return null;
   const { pos } = runtime.owner;
-  let best: EmployeeId | null = null;
+  let best: EmployeeId | null = nearby[0] ?? null;
   let bestD = Infinity;
-  for (const e of company.employees) {
+  for (const id of nearby) {
+    const e = company.employees.find((candidate) => candidate.id === id);
+    if (!e) continue;
     const av = runtime.avatars.get(e.id);
     if (!av) continue;
     const d = Math.hypot(av.pos.x - pos.x, av.pos.z - pos.z);
@@ -303,8 +318,8 @@ function nearestInRange(company: Company, current: EmployeeId | null): EmployeeI
   if (current) {
     const av = runtime.avatars.get(current);
     const dCur = av ? Math.hypot(av.pos.x - pos.x, av.pos.z - pos.z) : Infinity;
-    // Hysteresis so standing on the edge of the radius does not flicker the listener on and off.
-    if (dCur <= LISTEN_EXIT && (best === current || dCur <= bestD + 0.25)) return current;
+    // Keep the current employee just outside the radius, but switch immediately when another is closer.
+    if (dCur <= LISTEN_EXIT && best === current) return current;
   }
   return bestD <= LISTEN_RADIUS ? best : null;
 }
@@ -335,7 +350,8 @@ export function stepSim(rawDt: number) {
     stepAvatar(av, e, dt, company, collisionLayout, grid, qi, state.talkingTo === e.id, meetingDoor);
   }
 
-  const talkingTo = nearestInRange(company, state.talkingTo);
+  const nearbyIds = nearbyInRange(company);
+  const talkingTo = nearestInRange(company, state.talkingTo, nearbyIds);
 
   // The arrival: the first blocked employee in line has reached the owner.
   if (meetingDoor === 'closed') runtime.arrived.clear();
@@ -358,7 +374,15 @@ export function stepSim(rawDt: number) {
   }
   const askerId = meetingDoor === 'open' && front && front.status.kind === 'blocked_on_owner' && runtime.arrived.get(front.id) === front.status.question.id ? front.id : null;
 
-  if (talkingTo !== state.talkingTo || askerId !== state.askerId) {
-    set({ talkingTo, askerId, ...(askerId !== state.askerId ? { cardMinimized: false } : {}) });
+  const nearbyChanged = nearbyIds.length !== state.nearbyIds.length || nearbyIds.some((id, i) => id !== state.nearbyIds[i]);
+  if (talkingTo !== state.talkingTo || askerId !== state.askerId || nearbyChanged) {
+    set({
+      talkingTo,
+      nearbyIds,
+      askerId,
+      // Proximity opens the side chat and follows the closest person as the owner moves.
+      ...(talkingTo && talkingTo !== state.talkingTo ? { selectedId: talkingTo } : {}),
+      ...(askerId !== state.askerId ? { cardMinimized: false } : {}),
+    });
   }
 }

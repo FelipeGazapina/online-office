@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState } from 'react';
-import { DESKS_PER_BLOCK, PROVIDERS } from '../../../shared/protocol.ts';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { DESKS_PER_BLOCK, PROVIDERS, type Employee } from '../../../shared/protocol.ts';
 import { get, send, set, useStore } from '../store.ts';
 import { fmtWait, useNow } from './hooks.ts';
 
@@ -12,6 +12,7 @@ export function Drawer() {
   const block = useStore((s) => s.company?.blocks.find((b) => b.id === e?.blockId));
   const logs = useStore((s) => (id ? s.logs[id] : undefined));
   const lines = useStore((s) => (id ? s.chat[id] : undefined)) ?? [];
+  const nearbyIds = useStore((s) => s.nearbyIds);
   const now = useNow(1000);
   const [draft, setDraft] = useState('');
   const [confirm, setConfirm] = useState(false);
@@ -19,6 +20,11 @@ export function Drawer() {
   const input = useRef<HTMLInputElement>(null);
   const threadEnd = useRef<HTMLDivElement>(null);
   const logEnd = useRef<HTMLDivElement>(null);
+  const groupMembers = useStore((s) =>
+    nearbyIds
+      .map((nearbyId) => s.company?.employees.find((employee) => employee.id === nearbyId))
+      .filter((employee): employee is Employee => Boolean(employee)),
+  );
 
   useEffect(() => {
     threadEnd.current?.scrollIntoView({ block: 'end' });
@@ -33,6 +39,7 @@ export function Drawer() {
   }, [id]);
 
   if (!e) return null;
+  if (groupMembers.length > 1) return <GroupDrawer members={groupMembers} />;
   const p = PROVIDERS[e.provider];
   const s = e.status;
 
@@ -123,6 +130,65 @@ export function Drawer() {
       >
         {confirm ? `Really fire ${e.name}?` : 'Fire'}
       </button>
+    </aside>
+  );
+}
+
+function GroupDrawer({ members }: { members: Employee[] }) {
+  const [draft, setDraft] = useState('');
+  const threadEnd = useRef<HTMLDivElement>(null);
+  const chats = useStore((s) => s.chat);
+  const lines = useMemo(
+    () =>
+      members
+        .flatMap((member) => (chats[member.id] ?? []).map((line) => ({ ...line, employee: member.name })))
+        .sort((a, b) => a.at - b.at),
+    [chats, members],
+  );
+  useEffect(() => {
+    threadEnd.current?.scrollIntoView({ block: 'end' });
+  }, [lines.length]);
+
+  return (
+    <aside className="drawer" key="group">
+      <header>
+        <div>
+          <h2>Nearby team</h2>
+          <div className="sub">{members.map((member) => member.name).join(' · ')}</div>
+        </div>
+        <button className="x" title="Close (Esc)" onClick={() => set({ selectedId: null })}>
+          ×
+        </button>
+      </header>
+      <div className="facts">
+        <span className="pill working">Group chat</span>
+        <span>{members.length} employees in earshot</span>
+      </div>
+      <div className="thread" role="log">
+        {lines.length === 0 && <p className="muted">Nothing said yet. Messages here reach everyone nearby.</p>}
+        {lines.map((line, i) => (
+          <div key={`${line.at}-${i}`} className={`msg ${line.from}`}>
+            <small className="group-speaker">{line.employee}</small>
+            {line.text}
+          </div>
+        ))}
+        <div ref={threadEnd} />
+      </div>
+      <form
+        className="compose"
+        onSubmit={(ev) => {
+          ev.preventDefault();
+          const text = draft.trim();
+          if (!text) return;
+          for (const member of members) send({ type: 'interject', employeeId: member.id, text, style: get().interrupt });
+          setDraft('');
+        }}
+      >
+        <input autoFocus value={draft} onChange={(ev) => setDraft(ev.target.value)} placeholder="Message everyone nearby" />
+        <button type="submit" className="btn ink" disabled={!draft.trim()}>
+          Send
+        </button>
+      </form>
     </aside>
   );
 }

@@ -60,6 +60,7 @@ type State = Settings & {
   portalMode: boolean;
   // Facts derived by the per-frame sim, published only when they change.
   talkingTo: EmployeeId | null;
+  nearbyIds: EmployeeId[];
   askerId: EmployeeId | null;
   voice: VoiceState;
   toasts: Toast[];
@@ -82,6 +83,7 @@ export const useStore = create<State>()(() => ({
   computerMenu: false,
   portalMode: false,
   talkingTo: null,
+  nearbyIds: [],
   askerId: null,
   voice: initialVoice,
   toasts: [],

@@ -951,6 +951,13 @@ h3 {
   background: white;
   border: 1px solid var(--line);
 }
+.group-speaker {
+  display: block;
+  margin-bottom: 2px;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 700;
+}
 .compose {
   display: flex;
   gap: 8px;
