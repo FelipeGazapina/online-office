@@ -30,6 +30,11 @@ export type SessionHost = {
   // Permission cards. `ask_owner` reaches the same place through the office MCP server; while the meeting-room
   // door is closed, ask_owner returns do-not-disturb guidance but permission cards stay queued in the inbox.
   //
+  // A permission body sends a shell command as `tool: SHELL_TOOL` with the bare command in `detail`, with no shell
+  // wrapper around it. The office checks the employee's Always-allow rules against `tool` and `detail`, and resolves
+  // with ALLOW_ANSWER at once, with no card, when one covers it. To tell an owner's allow from a deny, use
+  // `isAllow(answer)` (shared/permissions.ts) and send the text back to the harness when it is a deny.
+  //
   // It never rejects. When `signal` aborts (the harness cancelled the tool call, or a hard stop) or the session ends
   // before an answer, the office withdraws the card and the promise resolves with '', which the caller has already
   // stopped listening for. One employee can have several questions open at once. The owner sees them first in,
@@ -51,6 +56,16 @@ export interface EmployeeSession {
   assign(task: string): void;
   // Company routes interjections to a blocked employee into the question it is waiting on, so this only sees idle/working/error.
   interject(text: string, style: InterruptStyle): void;
+  // The owner picked another model. `host.model` already returns it. Apply it from the next turn, and never interrupt
+  // the turn that is running. Claude switches the live session with `Query.setModel`, Codex sends `model` on the next
+  // `turn/start`, and Hermes calls `session/set_model`. None of them validates the id up front, so a model the harness
+  // rejects fails the next turn. Report that like any failed turn, with `setStatus({ kind: 'error' })`.
+  setModel(model: ModelId): void;
+  // The policy changed: the owner picked another mode, or an Always-allow rule was added or removed. `host.permissions`
+  // already returns it. Apply a new `mode` as soon as the harness allows, live if it can and from the next turn or the
+  // next session start if not (docs/beta-plan.md maps each mode onto each harness's switches). Ignore a change that is
+  // only in `alwaysAllow`, because the office enforces those rules itself.
+  permissionsChanged(policy: PermissionPolicy): void;
   stop(): void;
 }
 

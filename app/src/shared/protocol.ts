@@ -146,14 +146,19 @@ export type CompanySettings = {
 export type InterruptStyle = 'next' | 'now';
 
 export type ClientMessage =
-  | { type: 'hire'; provider: Provider; blockId: BlockId; name?: string }
+  | { type: 'hire'; provider: Provider; blockId: BlockId; name?: string; model?: ModelId }
   | { type: 'fire'; employeeId: EmployeeId }
   | { type: 'create_block'; cwd: string; name?: string }
   | { type: 'update_block'; blockId: BlockId; name?: string; cwd?: string }
   | { type: 'assign'; employeeId: EmployeeId; task: string }
-  | { type: 'answer'; employeeId: EmployeeId; questionId: QuestionId; text: string }
+  // `always` counts only on a permission card, and only when `text` allows it. The office then adds a rule for that
+  // employee that covers the same command or tool from now on.
+  | { type: 'answer'; employeeId: EmployeeId; questionId: QuestionId; text: string; always?: boolean }
   | { type: 'interject'; employeeId: EmployeeId; text: string; style: InterruptStyle }
   | { type: 'meeting_door'; state: MeetingDoor }
+  | { type: 'set_model'; employeeId: EmployeeId; model: ModelId }
+  | { type: 'set_permissions'; employeeId: EmployeeId; mode: PermissionMode }
+  | { type: 'remove_allow_rule'; employeeId: EmployeeId; rule: AllowRule }
   | { type: 'reset_company' };
 
 export type Snapshot = { type: 'snapshot'; company: Company; harnesses: Record<Provider, HarnessStatus>; meetingDoor: MeetingDoor };

@@ -2,13 +2,14 @@ import { isAbsolute, relative } from 'node:path';
 import {
   query,
   type CanUseTool,
+  type Options,
   type Query,
   type SDKMessage,
   type SDKResultMessage,
   type SDKUserMessage,
 } from '@anthropic-ai/claude-agent-sdk';
 import { SHELL_TOOL, isAllow } from '../../../shared/permissions.ts';
-import type { InterruptStyle, QuestionBody } from '../../../shared/protocol.ts';
+import type { InterruptStyle, ModelId, PermissionPolicy, QuestionBody } from '../../../shared/protocol.ts';
 import { logger } from '../debug.ts';
 import { persona } from '../persona.ts';
 import type { EmployeeSession, SessionFactory, SessionHost } from './types.ts';
@@ -24,7 +25,8 @@ const str = (v: unknown) => (typeof v === 'string' ? v : '');
 
 // Permission policy. Everything that decides whether a tool asks the boss is in this block, so it can be swapped
 // for the owner's own settings in one place. Every question still goes out through `host.ask` in `canUseTool`.
-const PERMISSION_MODE = 'acceptEdits' as const;
+// F1 maps the four modes onto Claude's here. Until then every mode runs the way it always has.
+const permissionModeFor = (_policy: PermissionPolicy) => 'acceptEdits' as const;
 
 // Tools that can never hurt anything, so the boss is not bothered.
 const AUTO_ALLOW = new Set(['Read', 'Glob', 'Grep', 'LS', 'WebSearch', 'WebFetch', 'TodoWrite', 'Task', 'Agent']);
@@ -111,8 +113,12 @@ function permissionBody(name: string, input: Record<string, unknown>, cwd: strin
   };
 }
 
+// The part of the SDK's Query that a session uses, so a check can stand in for the SDK.
+type Live = AsyncIterable<SDKMessage> & Pick<Query, 'interrupt' | 'setModel' | 'close'>;
+export type ClaudeRun = (params: { prompt: AsyncIterable<SDKUserMessage>; options: Options }) => Live;
+
 // The SDK's streaming input takes an async iterable. This is the smallest one we can push into.
-class PushQueue<T> implements AsyncIterable<T> {
+export class PushQueue<T> implements AsyncIterable<T> {
   private items: T[] = [];
   private waiting?: (r: IteratorResult<T>) => void;
   private closed = false;
@@ -145,8 +151,8 @@ class PushQueue<T> implements AsyncIterable<T> {
   }
 }
 
-class ClaudeSession implements EmployeeSession {
-  private q?: Query;
+export class ClaudeSession implements EmployeeSession {
+  private q?: Live;
   private inbox = new PushQueue<SDKUserMessage>();
   private stopped = false;
   private gotInit = false;
@@ -158,10 +164,16 @@ class ClaudeSession implements EmployeeSession {
   // Ends with the process, so a permission question left open by a dead process is withdrawn from the owner's desk.
   private life = new AbortController();
 
-  private readonly host: SessionHost;
+  // What the last `permissionsChanged` said. The next process starts on it.
+  private policy: PermissionPolicy;
 
-  constructor(host: SessionHost) {
+  private readonly host: SessionHost;
+  private readonly run: ClaudeRun;
+
+  constructor(host: SessionHost, run: ClaudeRun) {
     this.host = host;
+    this.run = run;
+    this.policy = host.permissions;
   }
 
   assign(task: string) {
@@ -193,6 +205,18 @@ class ClaudeSession implements EmployeeSession {
       debug('interrupt failed:', e);
     }
     if (!this.stopped) this.send(text, 'now');
+  }
+
+  // A live session switches models for its next turn. Without one, the next start reads `host.model`.
+  setModel(model: ModelId) {
+    this.q?.setModel(model).then(
+      () => debug(`model switched to ${model}`),
+      (e: unknown) => debug('setModel failed:', e),
+    );
+  }
+
+  permissionsChanged(policy: PermissionPolicy) {
+    this.policy = policy;
   }
 
   stop() {
@@ -227,14 +251,14 @@ class ClaudeSession implements EmployeeSession {
     // Read once per session: a note saved while the session runs shows up in the next one, and the prompt stays put.
     const digest = this.host.memoryDigest();
     debug(`session start for ${employee.name}, memory digest:\n${digest || '(no notes yet)'}`);
-    this.q = query({
+    this.q = this.run({
       prompt: this.inbox,
       options: {
         cwd: block.cwd,
         model: this.host.model,
         // 'project' only: the boss's global plugins and hooks must not leak into employees.
         settingSources: ['project'],
-        permissionMode: PERMISSION_MODE,
+        permissionMode: permissionModeFor(this.policy),
         systemPrompt: {
           type: 'preset',
           preset: 'claude_code',
@@ -254,7 +278,7 @@ class ClaudeSession implements EmployeeSession {
     void this.pump(this.q);
   }
 
-  private async pump(q: Query) {
+  private async pump(q: Live) {
     try {
       for await (const m of q) this.onMessage(m);
       if (!this.stopped) this.fail('The session ended unexpectedly');
@@ -348,4 +372,4 @@ class ClaudeSession implements EmployeeSession {
   };
 }
 
-export const createClaudeSession: SessionFactory = (host) => new ClaudeSession(host);
+export const createClaudeSession: SessionFactory = (host) => new ClaudeSession(host, query);

@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { mkdirSync, readFileSync, realpathSync, renameSync, statSync, writeFileSync } from 'node:fs';
 import { basename, dirname, isAbsolute } from 'node:path';
+import { ALLOW_ANSWER, covers, isAllow, ruleFor, sameRule, type PermissionBody } from '../../shared/permissions.ts';
 import {
   DESKS_PER_BLOCK,
   MAX_LEVEL,
@@ -8,6 +9,7 @@ import {
   XP_FOR_LEVEL,
   headcountCap,
   seatCeiling,
+  type AllowRule,
   type BlockId,
   type ClientMessage,
   type Company,
@@ -17,6 +19,9 @@ import {
   type EmployeeStatus,
   type HarnessStatus,
   type MeetingDoor,
+  type ModelId,
+  type PermissionMode,
+  type PermissionPolicy,
   type ProjectBlock,
   type Provider,
   type Question,
@@ -70,6 +75,8 @@ const describeQuestion = (q: Question): string =>
   q.kind === 'permission'
     ? `Asking permission: ${q.tool} ${short(q.detail, 120)}`
     : `Asking the boss: ${q.text}${q.options ? ` [${q.options.join(' / ')}]` : ''}`;
+
+const ruleLabel = (rule: AllowRule): string => (rule.kind === 'command' ? rule.prefix : rule.name);
 
 export const levelForXp = (xp: number): number => {
   let level = 1;
@@ -191,7 +198,7 @@ export class Office {
   handle(msg: ClientMessage): void {
     switch (msg.type) {
       case 'hire':
-        return this.hire(msg.provider, msg.blockId, msg.name);
+        return this.hire(msg.provider, msg.blockId, msg.name, msg.model);
       case 'fire':
         return this.fire(msg.employeeId);
       case 'create_block':
@@ -201,7 +208,7 @@ export class Office {
       case 'assign':
         return this.assign(msg.employeeId, msg.task);
       case 'answer':
-        return this.answer(msg.employeeId, msg.questionId, msg.text);
+        return this.answer(msg.employeeId, msg.questionId, msg.text, msg.always);
       case 'interject': {
         const e = this.employee(msg.employeeId);
         // A boss speaking to someone who is waiting on a decision is the decision.
@@ -210,6 +217,12 @@ export class Office {
       }
       case 'meeting_door':
         return this.setMeetingDoor(msg.state);
+      case 'set_model':
+        return this.setModel(msg.employeeId, msg.model);
+      case 'set_permissions':
+        return this.setPermissions(msg.employeeId, msg.mode);
+      case 'remove_allow_rule':
+        return this.removeAllowRule(msg.employeeId, msg.rule);
       case 'reset_company':
         return this.reset();
       default: {
@@ -272,6 +285,14 @@ export class Office {
       // Normal decisions get an immediate contextual answer while the owner is in a meeting. Permission
       // questions are still real inbox entries: they stay blocked and hidden until the door opens.
       if (this.meetingDoor === 'closed' && body.kind === 'ask') return Promise.resolve(MEETING_DND_RESPONSE);
+      // Always allow is the office's, so every harness gets it: a covered request never reaches the owner.
+      if (body.kind === 'permission') {
+        const rule = employee.permissions.alwaysAllow.find((r) => covers(r, body));
+        if (rule) {
+          this.events.log(employee.id, `Allowed by your rule "${ruleLabel(rule)}": ${body.tool} ${short(body.detail, 120)}`, Date.now());
+          return Promise.resolve(ALLOW_ANSWER);
+        }
+      }
       return this.inbox.ask(employee.id, body, signal);
     };
     // Whatever harness the employee runs on, these are the only tools it gets from the office, and the URL says whose they are.
@@ -359,7 +380,7 @@ export class Office {
     this.commit();
   }
 
-  private hire(provider: Provider, blockId: BlockId, requestedName?: string) {
+  private hire(provider: Provider, blockId: BlockId, requestedName?: string, requestedModel?: ModelId) {
     const { company } = this;
     const block = this.block(blockId);
     const harness = this.harnesses[provider];
@@ -386,7 +407,7 @@ export class Office {
       desk,
       status: { kind: 'idle' },
       activity: 'Just started, settling in at my desk',
-      model: company.settings.defaultModels[provider] ?? HARNESSES[provider].defaultModel(),
+      model: requestedModel ?? company.settings.defaultModels[provider] ?? HARNESSES[provider].defaultModel(),
       permissions: { mode: company.settings.defaultPermissions, alwaysAllow: [] },
       subagents: [],
       hiredAt: Date.now(),
@@ -462,15 +483,50 @@ export class Office {
     this.sessionOf(e).assign(task.trim());
   }
 
-  private answer(id: EmployeeId, questionId: QuestionId, text: string) {
+  private answer(id: EmployeeId, questionId: QuestionId, text: string, always = false) {
     const e = this.employee(id);
     if (e.status.kind !== 'blocked_on_owner' || e.status.question.id !== questionId) {
       throw new OfficeError(`${e.name} has no open question ${questionId}`);
     }
-    const { askedAt } = e.status.question;
+    const { question } = e.status;
     if (!this.inbox.answer(id, questionId, text)) throw new OfficeError(`${e.name} has no open question ${questionId}`);
-    debug(`owner answered ${e.name} after ${((Date.now() - askedAt) / 1000).toFixed(1)}s: ${JSON.stringify(short(text, 120))}`);
-    if (Date.now() - askedAt <= QUICK_ANSWER_MS) this.addXp(XP_PER_QUICK_ANSWER);
+    debug(`owner answered ${e.name} after ${((Date.now() - question.askedAt) / 1000).toFixed(1)}s: ${JSON.stringify(short(text, 120))}`);
+    if (always && question.kind === 'permission' && isAllow(text)) this.allowAlways(e, question);
+    if (Date.now() - question.askedAt <= QUICK_ANSWER_MS) this.addXp(XP_PER_QUICK_ANSWER);
+  }
+
+  // Always allow on a card. A command too tangled for a safe rule is allowed this once, and the log says so.
+  private allowAlways(e: Employee, question: PermissionBody) {
+    const rule = ruleFor(question);
+    if (!rule) return this.events.log(e.id, `No rule can stand for that command, so it was allowed only this once: ${short(question.detail, 120)}`, Date.now());
+    if (e.permissions.alwaysAllow.some((r) => sameRule(r, rule))) return;
+    this.changePermissions(e, { alwaysAllow: [...e.permissions.alwaysAllow, rule] }, `Always allow: ${ruleLabel(rule)}`);
+  }
+
+  private setModel(id: EmployeeId, model: ModelId) {
+    const e = this.employee(id);
+    e.model = model;
+    this.events.log(id, `Model: ${model}, from the next turn`, Date.now());
+    this.sessions.get(id)?.setModel(model);
+    this.commit();
+  }
+
+  private setPermissions(id: EmployeeId, mode: PermissionMode) {
+    this.changePermissions(this.employee(id), { mode }, `Permissions: ${mode}`);
+  }
+
+  private removeAllowRule(id: EmployeeId, rule: AllowRule) {
+    const e = this.employee(id);
+    const alwaysAllow = e.permissions.alwaysAllow.filter((r) => !sameRule(r, rule));
+    if (alwaysAllow.length !== e.permissions.alwaysAllow.length) this.changePermissions(e, { alwaysAllow }, `Rule removed: ${ruleLabel(rule)}`);
+  }
+
+  // The one way a policy changes. Each change is a new object, so nothing that was handed the old policy sees it move.
+  private changePermissions(e: Employee, change: Partial<PermissionPolicy>, logLine: string) {
+    e.permissions = { ...e.permissions, ...change };
+    this.events.log(e.id, logLine, Date.now());
+    this.sessions.get(e.id)?.permissionsChanged(e.permissions);
+    this.commit();
   }
 
   private setMeetingDoor(state: MeetingDoor) {
