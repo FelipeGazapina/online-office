@@ -37,7 +37,7 @@ Each item is checked on the real Electron app, not on a mock.
 
 ## Running the beta
 
-The owner runs the beta from `~/projetos/online-office-beta/app`, a git worktree detached at the last verified commit on `main`. Agents never write there. The orchestrator moves it forward after each verified unit, so `pnpm dev` there always runs code that passed its checks.
+The owner runs the beta from `~/projetos/online-office-beta/app`, a git worktree detached at the last verified commit on `main`. Agents never write there. The orchestrator moves it forward after each verified unit, so `pnpm dev` there always runs code that passed its checks. The owner's own employees also work there, because one of his blocks is this folder. Before moving it, the orchestrator saves any uncommitted work of theirs on a local branch.
 
 ## Known blockers
 
@@ -70,17 +70,17 @@ Research agents write only to `docs/research/`. From U2 on, every implementation
 | R1 | Research: drive Codex through `codex app-server` | none | done |
 | R2 | Research: drive Hermes through ACP | none | done |
 | R3 | Research: memory, and what the office should own | none | done |
-| R4 | Research: whisper.cpp on this Mac, and speech inside Electron | none | running |
+| R4 | Research: whisper.cpp on this Mac, and speech inside Electron | none | done |
 | U0 | Electron shell: office in the main process, IPC, folder picker, fakes deleted | none | done |
-| U1 | Office MCP server over local HTTP, the owner's question inbox, the memory store, Claude moved onto them | U0, R1, R2, R3 | running |
-| C1 | Contract v2: the types below, the `company.json` migration, and no-op stubs. No behavior change | U1 | |
+| U1 | Office MCP server over local HTTP, the owner's question inbox, the memory store, Claude moved onto them | U0, R1, R2, R3 | done |
+| C1 | Contract v2: the types the next wave needs (models, permission modes, Always allow, subagents, fresh session, the rules hook), the `company.json` migration, and the harness-agnostic plumbing | U1 | running |
 | U2 | Real ChatGPT (Codex) employee: app-server, isolation, the four permission modes, model list, subagent events | C1 | |
 | U3 | Real Hermes employee: ACP, office profile, the four permission modes, model list, subagent events | C1 | |
 | F1 | Claude employee v2 and its UI: permission modes and Always allow (card, drawer, office-side rule check), model picker and live switch, subagent dolls on the desk | C1 | |
 | F2 | Rules and boards: rule files with a watcher, delivery to live sessions, office and block boards, sticky notes on desks, notes on boards, fresh session | F1 | |
 | F3 | Owner's computer: the My Mac portal with its floating panel, the Company area with seats and level ceilings, desks per block from seats | F1 | |
 | N1 | Overview navigation: click to walk with A* around furniture, employee menu (Open chat, Go to), chat transcript in the drawer | U0 | running |
-| U5 | Voice through whisper.cpp: push-to-talk and proximity. Dictating a rule to a board lands with F2 | R4 | next |
+| U5 | Voice through whisper.cpp: push-to-talk and proximity, and a `pnpm beta` launch so macOS asks the app, not the terminal, for the mic. Dictating a rule to a board lands with F2 | R4 | running |
 | U6 | README, then the full end-to-end run for all three harnesses | all | |
 
 The owner moved the microphone and Overview navigation to the front. N1 runs next to U1, and U5 starts as soon as R4's doc lands. C1 runs after U1, because every later unit builds on its types. Then U2, U3 and F1 run in parallel, then F2 and F3. At most three implementation agents run at once, which keeps the session under its rate limit. The decision trail lives in `docs/decisions.tsv`.
