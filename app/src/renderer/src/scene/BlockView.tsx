@@ -1,4 +1,4 @@
-import { memo, useMemo } from 'react';
+import { memo, useEffect, useMemo, useState } from 'react';
 import { Color } from 'three';
 import { PROVIDERS, type Employee, type ProjectBlock } from '../../../shared/protocol.ts';
 import { BLOCK_D, BLOCK_W, blockCenter, deskPose, signPose, whiteboardPose } from '../layout.ts';
@@ -119,6 +119,71 @@ function Whiteboard({ block, authorName }: { block: ProjectBlock; authorName: st
   );
 }
 
+type GithubBoardItem = { title: string; state: 'open' | 'closed'; pull_request?: unknown };
+
+function GithubWhiteboard({ block }: { block: ProjectBlock }) {
+  const [items, setItems] = useState<GithubBoardItem[]>([]);
+  const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading');
+  useEffect(() => {
+    if (!block.githubRepo) return;
+    try {
+      const url = new URL(block.githubRepo);
+      const path = url.pathname.replace(/^\//, '').replace(/\.git$/, '');
+      if (url.hostname !== 'github.com' || path.split('/').length !== 2) throw new Error('invalid repository');
+      fetch(`https://api.github.com/repos/${path}/issues?state=all&per_page=100`, { headers: { Accept: 'application/vnd.github+json' } })
+        .then((response) => (response.ok ? response.json() : Promise.reject(new Error('GitHub request failed'))))
+        .then((next: GithubBoardItem[]) => { setItems(next); setStatus('ready'); })
+        .catch(() => setStatus('error'));
+    } catch {
+      setStatus('error');
+    }
+  }, [block.githubRepo]);
+
+  const tex = useCanvasTexture(1536, 840, (g) => {
+    g.fillStyle = '#fbfbf8';
+    g.fillRect(0, 0, 1536, 840);
+    g.fillStyle = '#2b2e44';
+    g.font = `700 60px ${FONT_DISPLAY}`;
+    g.fillText('GitHub board', 70, 100);
+    g.font = `400 32px ${FONT_BODY}`;
+    g.fillStyle = '#7b7e93';
+    g.fillText(status === 'loading' ? 'Loading pull requests and issues…' : status === 'error' ? 'Could not load GitHub data' : block.githubRepo ?? '', 72, 150);
+    const columns = [
+      { title: 'Open', items: items.filter((item) => item.state === 'open') },
+      { title: 'Closed', items: items.filter((item) => item.state === 'closed') },
+    ];
+    columns.forEach((column, i) => {
+      const x = 60 + i * 710;
+      g.fillStyle = '#eeeef2';
+      roundRect(g, x, 200, 650, 570, 24);
+      g.fill();
+      g.fillStyle = '#2b2e44';
+      g.font = `700 40px ${FONT_DISPLAY}`;
+      g.fillText(`${column.title} · ${column.items.length}`, x + 28, 255);
+      g.font = `500 27px ${FONT_BODY}`;
+      column.items.slice(0, 4).forEach((item, j) => {
+        const y = 300 + j * 105;
+        g.fillStyle = '#ffffff';
+        roundRect(g, x + 22, y, 606, 82, 14);
+        g.fill();
+        g.fillStyle = '#2b2e44';
+        g.fillText(`${item.pull_request ? 'PR' : 'Issue'} · ${item.title.slice(0, 34)}`, x + 42, y + 48);
+      });
+    });
+  }, [block.githubRepo, items, status]);
+
+  return (
+    <group
+      onClick={(e) => { e.stopPropagation(); if (e.delta < 6) set({ modal: { kind: 'github', blockId: block.id } }); }}
+      onPointerOver={() => void (document.body.style.cursor = 'pointer')}
+      onPointerOut={() => void (document.body.style.cursor = '')}
+    >
+      <mesh castShadow position={[0, 1.85, 0]}><boxGeometry args={[4.4, 2.4, 0.1]} /><meshStandardMaterial color="#c9cdd8" metalness={0.3} roughness={0.5} /></mesh>
+      <mesh position={[0, 1.85, 0.056]}><planeGeometry args={[4.24, 2.32]} /><meshStandardMaterial map={tex} roughness={0.35} emissive="#ffffff" emissiveMap={tex} emissiveIntensity={0.3} /></mesh>
+    </group>
+  );
+}
+
 export const BlockView = memo(function BlockView({ block, employees }: { block: ProjectBlock; employees: Employee[] }) {
   const c = blockCenter(block.slot);
   const s = signPose(block.slot);
@@ -147,7 +212,7 @@ export const BlockView = memo(function BlockView({ block, employees }: { block: 
         <Sign name={block.name} cwd={block.cwd} color={block.color} />
       </group>
       <group position={[w.x, 0, w.z]}>
-        <Whiteboard block={block} authorName={author} />
+        {block.githubRepo ? <GithubWhiteboard block={block} /> : <Whiteboard block={block} authorName={author} />}
       </group>
     </group>
   );
