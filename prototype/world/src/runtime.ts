@@ -1,0 +1,33 @@
+// Per-frame mutable world state. Lives outside React so the sim can write it 60 times a second.
+import { Vector3 } from 'three';
+import { OWNER_START } from './layout.ts';
+
+export type AvatarRT = {
+  id: string;
+  pos: Vector3;
+  yaw: number;
+  speed: number;
+  seated: boolean;
+  leaving: boolean;
+};
+
+export const runtime = {
+  owner: {
+    pos: new Vector3(OWNER_START.x, 0, OWNER_START.z),
+    vel: new Vector3(),
+    yaw: Math.PI,
+    speed: 0,
+    running: false,
+  },
+  // Direction the owner last travelled. The queue trails this, not the body yaw,
+  // so turning to look at the first asker does not swing the whole line around.
+  queueYaw: Math.PI,
+  // yaw is where the camera looks; isoYawTarget is the 90 degree step the overview eases toward.
+  view: { yaw: Math.PI, pitch: 0.44, dist: 6.2, isoDist: 44, fpPitch: 0, isoYawTarget: (-3 * Math.PI) / 4 },
+  avatars: new Map<string, AvatarRT>(),
+  // employee id -> question id already announced (chime, TTS, card)
+  arrived: new Map<string, string>(),
+  keys: new Set<string>(),
+  seeded: false,
+  time: 0,
+};

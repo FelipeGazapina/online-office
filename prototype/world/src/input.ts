@@ -1,0 +1,59 @@
+import { get, set, setSetting } from './store.ts';
+import { runtime } from './runtime.ts';
+import { setPtt } from './talk.ts';
+
+const isTyping = (t: EventTarget | null) =>
+  t instanceof HTMLElement && (t.isContentEditable || t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT');
+
+const MOVE_KEYS = new Set(['KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'ShiftLeft', 'ShiftRight', 'KeyQ', 'KeyE']);
+
+export function installInput() {
+  window.addEventListener('keydown', (e) => {
+    if (isTyping(e.target)) {
+      if (e.key === 'Escape') (e.target as HTMLElement).blur();
+      return;
+    }
+    if (e.metaKey || e.ctrlKey || e.altKey) return;
+    const s = get();
+
+    switch (e.code) {
+      case 'Digit1':
+        return setSetting('camera', 'follow');
+      case 'Digit2':
+        return setSetting('camera', 'iso');
+      case 'Digit3':
+        return setSetting('camera', 'first');
+      case 'KeyH':
+        return set({ helpOpen: !s.helpOpen });
+      case 'Enter':
+        e.preventDefault();
+        return (document.getElementById('chat-input') ?? document.getElementById('card-input'))?.focus();
+      case 'KeyV':
+        if (!e.repeat) setPtt(true);
+        return;
+      case 'Escape':
+        if (s.helpOpen) return set({ helpOpen: false });
+        if (s.modal) return set({ modal: null });
+        return set({ selectedId: null });
+    }
+
+    if (s.modal) return;
+    if (MOVE_KEYS.has(e.code)) {
+      e.preventDefault();
+      if (!e.repeat && s.camera === 'iso' && (e.code === 'KeyQ' || e.code === 'KeyE')) {
+        runtime.view.isoYawTarget += e.code === 'KeyQ' ? Math.PI / 2 : -Math.PI / 2;
+      }
+      runtime.keys.add(e.code);
+    }
+  });
+
+  window.addEventListener('keyup', (e) => {
+    runtime.keys.delete(e.code);
+    if (e.code === 'KeyV') setPtt(false);
+  });
+
+  window.addEventListener('blur', () => {
+    runtime.keys.clear();
+    setPtt(false);
+  });
+}
