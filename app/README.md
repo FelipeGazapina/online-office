@@ -11,7 +11,7 @@ pnpm dev
 
 An Electron window opens with the office. On first run, click **Choose a folder** and pick a project folder. That folder becomes a block, and its employees work inside it. Then click **Hire**.
 
-`pnpm build && pnpm start` runs the built app without the dev server.
+`pnpm start` builds the app and runs it without the dev server.
 
 | Variable | Default | Effect |
 | --- | --- | --- |

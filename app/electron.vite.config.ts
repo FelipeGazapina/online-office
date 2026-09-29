@@ -14,6 +14,10 @@ const csp = [
   "worker-src 'self' blob:",
 ].join('; ');
 
+// Terminals inside Electron apps (T3 Code, VS Code, Cursor) export this, and electron-vite passes its env to
+// the app it spawns. With it set, Electron starts as plain Node and `import { app } from 'electron'` fails.
+delete process.env.ELECTRON_RUN_AS_NODE;
+
 const sdk = JSON.parse(readFileSync('node_modules/@anthropic-ai/claude-agent-sdk/package.json', 'utf8')) as { version: string };
 
 export default defineConfig({

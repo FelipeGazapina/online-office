@@ -28,9 +28,10 @@
     "vite": "^8.3.1"
   },
   "scripts": {
+    "postinstall": "install-electron",
     "dev": "electron-vite dev",
     "build": "electron-vite build",
-    "start": "electron-vite preview --skipBuild",
+    "start": "electron-vite preview",
     "typecheck": "tsc -p tsconfig.node.json --noEmit --composite false && tsc -p tsconfig.web.json --noEmit --composite false"
   }
 }
