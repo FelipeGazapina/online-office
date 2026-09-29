@@ -1,5 +1,6 @@
 import { contextBridge, ipcRenderer } from 'electron';
 import { IPC, type OfficeApi, type ServerMessage } from '../shared/protocol.ts';
+import { voiceApi } from './voice.ts';
 
 const office: OfficeApi = {
   getSnapshot: () => ipcRenderer.invoke(IPC.snapshot),
@@ -11,6 +12,7 @@ const office: OfficeApi = {
   },
   pickFolder: () => ipcRenderer.invoke(IPC.pickFolder),
   revealFolder: (path) => ipcRenderer.send(IPC.revealFolder, path),
+  voice: voiceApi,
 };
 
 contextBridge.exposeInMainWorld('office', office);

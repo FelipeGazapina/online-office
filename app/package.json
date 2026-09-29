@@ -36,6 +36,7 @@
     "build": "electron-vite build",
     "build:verify": "electron-vite build --outDir out/verify",
     "start": "electron-vite preview",
+    "beta": "node scripts/beta.mjs",
     "typecheck": "tsc -p tsconfig.node.json --noEmit --composite false && tsc -p tsconfig.web.json --noEmit --composite false"
   }
 }
