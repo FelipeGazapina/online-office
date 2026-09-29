@@ -4,6 +4,7 @@ import { startOffice } from './ipc.ts';
 import { detectHarnesses, setCodexRoot } from './office/adapters/index.ts';
 import { startOfficeMcp } from './office/mcp.ts';
 import { MemoryStore } from './office/memory.ts';
+import { prepareVoice, startVoice } from './voice.ts';
 
 // Tests point this at a scratch dir. Moving the whole profile, not just company.json, keeps their
 // localStorage and lock file apart from the real app's.
@@ -15,6 +16,8 @@ setCodexRoot(join(app.getPath('userData'), 'codex'));
 const testRun = !!process.env.OFFICE_TEST_RUN;
 
 let win: BrowserWindow | null = null;
+
+prepareVoice();
 
 function createWindow() {
   win = new BrowserWindow({
@@ -70,9 +73,11 @@ else {
       window: () => win,
       services: { mcp, memory: MemoryStore.open(join(userData, 'memory')) },
     });
+    const voice = startVoice({ window: () => win, userData });
     app.on('will-quit', () => {
       office.shutdown();
       void mcp.close();
+      voice.shutdown();
     });
 
     createWindow();

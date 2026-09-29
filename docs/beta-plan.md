@@ -41,7 +41,7 @@ The owner runs the beta from `~/projetos/online-office-beta/app`, a git worktree
 
 ## Known blockers
 
-- **Speech recognition.** The browser speech API does not work inside Electron, so listening needs local whisper.cpp or another engine.
+- **Speech recognition.** The browser speech API does not work inside Electron, so listening uses local whisper.cpp (U5). The macOS mic permission goes to whatever app launched Electron, so the owner starts the beta with `pnpm beta`, which opens Electron.app through LaunchServices.
 - **Tool timeouts.** `ask_owner` blocks until you answer, which can take minutes. Codex and Hermes may time out MCP tool calls first.
 - **Leaking config.** Employees inherit your permission settings, but not your connectors, MCP servers, plugins, hooks, skills or memory. v0 already found connectors leaking with Claude Code.
 - **Tooling version.** electron-vite 5 supports Vite up to 7, and the repo is on Vite 8.
@@ -74,13 +74,13 @@ Research agents write only to `docs/research/`. From U2 on, every implementation
 | U0 | Electron shell: office in the main process, IPC, folder picker, fakes deleted | none | done |
 | U1 | Office MCP server over local HTTP, the owner's question inbox, the memory store, Claude moved onto them | U0, R1, R2, R3 | done |
 | C1 | Contract v2: the types the next wave needs (models, permission modes, Always allow, subagents, fresh session, the rules hook), the `company.json` migration, and the harness-agnostic plumbing | U1 | done |
-| U2 | Real ChatGPT (Codex) employee: app-server, isolation, the four permission modes, model list, subagent events | C1 | |
-| U3 | Real Hermes employee: ACP, office profile, the four permission modes, model list, subagent events | C1 | |
-| F1 | Claude employee v2 and its UI: permission modes and Always allow (card, drawer, office-side rule check), model picker and live switch, subagent dolls on the desk | C1 | |
+| U2 | Real ChatGPT (Codex) employee: app-server, isolation, the four permission modes, model list, subagent events | C1 | running |
+| U3 | Real Hermes employee: ACP, office profile, the four permission modes, model list, subagent events | C1 | running |
+| F1 | Claude employee v2 and its UI: permission modes and Always allow (card, drawer, office-side rule check), model picker and live switch, subagent dolls on the desk, no markdown in speech | C1 | running |
 | F2 | Rules and boards: rule files with a watcher, delivery to live sessions, office and block boards, sticky notes on desks, notes on boards, fresh session | F1 | |
 | F3 | Owner's computer: the My Mac portal with its floating panel, the Company area with seats and level ceilings, desks per block from seats | F1 | |
 | N1 | Overview navigation: click to walk with A* around furniture, employee menu (Open chat, Go to), chat transcript in the drawer. Employees route with the same planner, so the owner's meeting room no longer traps them | U0 | done |
-| U5 | Voice through whisper.cpp: push-to-talk and proximity, and a `pnpm beta` launch so macOS asks the app, not the terminal, for the mic. Dictating a rule to a board lands with F2 | R4 | running |
+| U5 | Voice through whisper.cpp: push-to-talk and proximity, and a `pnpm beta` launch so macOS asks the app, not the terminal, for the mic. Dictating a rule to a board lands with F2 | R4 | done |
 | U6 | README, then the full end-to-end run for all three harnesses | all | |
 
 The owner moved the microphone and Overview navigation to the front. N1 runs next to U1, and U5 starts as soon as R4's doc lands. C1 runs after U1, because every later unit builds on its types. Then U2, U3 and F1 run in parallel, then F2 and F3. At most three implementation agents run at once, and each works single-threaded without helper agents of its own. Nested helpers multiplied the load and hit the account's session limit twice. The decision trail lives in `docs/decisions.tsv`.

@@ -13,6 +13,8 @@ An Electron window opens with the office. On first run, click **Choose a folder*
 
 `pnpm start` builds the app and runs it without the dev server.
 
+To talk to employees on a Mac, start the app with `pnpm beta`. It builds, then opens `Electron.app` through `open`, so macOS asks about the microphone for Electron itself. When a terminal starts Electron (`pnpm dev`, `pnpm start`), that terminal is the app macOS asks about. A terminal that cannot show the permission dialog, such as the one inside T3 Code, VS Code or Cursor, makes macOS hand the app silence, and the HUD says so. The app's console output goes to `~/Library/Logs/Online Office/beta.log`. Quit a copy that `pnpm dev` started first, because a second instance hands over to the first and quits.
+
 | Variable | Default | Effect |
 | --- | --- | --- |
 | `OFFICE_START_LEVEL` | `1` | Level (and seat count) of a freshly created company. |
@@ -21,6 +23,7 @@ An Electron window opens with the office. On first run, click **Choose a folder*
 | `OFFICE_DEBUG=1` | unset | Log MCP tool calls, each Claude session start with its memory digest, owner answers, and every message from the window. |
 | `OFFICE_DATA_DIR` | Electron `userData` | Where the company, the memory notes, and the app profile live. Tests point it at a scratch folder. |
 | `OFFICE_TEST_PICK_FOLDER` | unset | Tests only. The folder picker returns this path instead of opening. |
+| `OFFICE_TEST_AUDIO` | unset | Tests only, with `OFFICE_TEST_RUN`. Chromium plays this 16 kHz mono WAV as the microphone. Without it a test run gets Chromium's own beep, so a test never opens the real microphone or makes macOS ask for it. |
 | `OFFICE_TEST_RUN` | unset | Tests only. The window is never shown, the Dock icon is hidden, and the page shows an "Automated test" banner. `verify/cdp.mjs` sets it. |
 | `OFFICE_CDP_PORT` | `9333` | Tests only. The DevTools port `verify/cdp.mjs` uses. Give each worktree its own when tests run in parallel. |
 | `OFFICE_OUT_DIR` | `out` | Tests only. The build folder `verify/cdp.mjs` launches. |
@@ -33,7 +36,7 @@ An Electron window opens with the office. On first run, click **Choose a folder*
 | WASD / arrows, Shift | Walk, run |
 | 1 / 2 / 3 | Camera: follow, overview, first person |
 | Enter | Type to the nearest employee |
-| V (hold) | Push-to-talk, when mic mode is "Hold V" |
+| V (hold) | Push-to-talk, in either mic mode. Releasing sends what you said, and pressing it stops an employee who is talking |
 | H | Key help |
 
 Click an employee, on the avatar or the name tag, for a menu with **Open chat** and **Go to**. In the Overview camera, click the floor to walk there and drag to turn the view. Click a whiteboard to enlarge it. Click **Reveal** on a block to open its folder in Finder.
@@ -47,7 +50,7 @@ Click an employee, on the avatar or the name tag, for a menu with **Open chat** 
 - Each Claude Code employee is one long-lived Agent SDK session that connects to the office MCP server over HTTP. Shell commands also become questions ("Can I run `npm test`?"). Claude's own auto memory is off.
 - `src/main/office/adapters/types.ts` is the contract for a harness (`Harness`, `SessionHost`, `EmployeeSession`). Its comments say what each call must do, so an adapter can be written from that file alone.
 - ChatGPT (Codex) and Hermes show in the hire menu when installed, but cannot be hired until their adapters land.
-- Voice input does not work yet: Electron has no speech recognition backend. Type with Enter for now. Voices use `speechSynthesis`.
+- Your voice is transcribed on this Mac by whisper.cpp, and it reaches an employee the way typed text does. The employees' voices use `speechSynthesis`. See Voice below.
 
 ## The office MCP server
 
@@ -122,6 +125,16 @@ When a harness session starts, the persona carries the titles of the employee's 
 
 Firing an employee moves their notes to `alumni/`. Notes of the block stay. Resetting the company deletes all notes.
 
+## Voice
+
+Install whisper.cpp once with `brew install whisper-cpp`.
+
+- `src/main/voice/` runs `whisper-server` on `127.0.0.1`, on a random port and behind a random request path. It imports nothing from Electron, so `verify/voice-check.ts` runs it. It finds the binary on `PATH`, in the Homebrew folders, or through your login shell. Models live in `~/Library/Caches/online-office/whisper/` and download on first use, with resume and a SHA-256 check. The server runs under a shell that holds a pipe to the app, so it ends when the app dies, whatever killed the app, in about 0.4 s. Windows has no `sh`, so there a killed app leaves the server until the next launch kills it through the pid file in the app's data folder.
+- **Voice: Fast** runs `small-q5_1` (190 MB, about 0.3 s an utterance). **Accurate** runs `large-v3-turbo-q5_0` (574 MB, about 1.4 s), and is best with a fixed language, because **Auto** makes whisper encode twice.
+- The HUD chip shows one line for whatever is in the way: whisper is missing, a model is downloading, macOS denies the microphone, or the microphone is silent.
+- The microphone is open only while you stand within 1.5 m of an employee. The renderer captures 16 kHz audio through an AudioWorklet into a 60 second ring. **Hold V** sends the slice from 0.2 s before the press to the release. **Proximity** mode cuts utterances with Silero, through `@ricky0123/vad-web`. Nothing is transcribed while an employee speaks, or for 0.4 s after.
+- The page reads the worklet, the Silero model and onnxruntime-web through the `office-voice://assets` protocol, because `fetch` does not work on `file://`. `src/main/voice/assets.ts` serves only those five files, found by module resolution from the main bundle, so it does not matter which folder the app was started from.
+
 ## Verify
 
 ```sh
@@ -130,6 +143,8 @@ pnpm build
 node verify/nav-check.ts
 node --no-warnings verify/walk-check.mjs
 node --no-warnings verify/chat-check.mjs
+node verify/voice-check.ts
+node verify/voice-logic-check.ts
 node verify/mcp-check.ts
 node verify/office-check.ts
 node verify/claude-check.ts
@@ -139,11 +154,14 @@ node verify/cdp.mjs verify/e2e-contract.mjs
 node verify/cdp.mjs verify/e2e-memory.mjs
 node verify/cdp.mjs verify/e2e-queue.mjs
 node verify/cdp.mjs verify/e2e-long-wait.mjs
+node verify/cdp.mjs verify/e2e-voice.mjs
 ```
 
 - `verify/nav-check.ts` needs no model or Electron. It builds the walkable grid for one, two and three blocks and checks every path against an independent oracle that samples the segments: a route from the owner's seat to a talk spot at every desk, no segment inside an obstacle grown by the owner's radius, everything inside the walls, a goal in the middle of a desk snapping outside it, and a sealed pocket having no route.
 - `verify/walk-check.mjs` needs no model or Electron. It runs the real sim and store. It checks click walks that detour around desks, steering keys winning over a walk, going to an employee and re-planning when they move, and employees routing around the meeting room: a new hire sits, a blocked employee arrives with the owner outside or inside, and a closed door keeps everyone at their desk until it opens.
 - `verify/chat-check.mjs` needs no model or Electron. It checks that what the owner says and what an employee says land in that employee's transcript, in order, capped at 200 lines.
+- `verify/voice-check.ts` runs the real whisper service against the real `whisper-server` and models, with clips made by `say`. It checks English and Portuguese, that requests wait their turn, downloads that resume, and that no server outlives the service. It needs macOS and whisper-cpp. `--offline` skips the one download from Hugging Face.
+- `verify/voice-logic-check.ts` needs neither. It checks the ring buffer, the half-duplex gate, and the line the HUD chip shows for every state.
 - `verify/mcp-check.ts` needs no model. It starts the MCP server, the inbox, and the memory store in a scratch folder, and drives them with an MCP client. It checks the Origin, Host, and token rules, `ask_owner` waiting, cancelling, and queueing, and the memory limits, secret refusal, block visibility, firing, and the digest size. It exits 1 on any failed check.
 - `verify/office-check.ts` needs no model or Electron either. It runs the real `Office` with a scripted stand-in for a harness and checks what you would see: the cards, their order, where an employee goes back to after an answer or a cancel, and what firing and resetting do to sessions and notes. It also migrates `verify/fixtures/company-v1.json`, tables how a card becomes an Always-allow rule and what a rule covers, and checks each message in the table above, subagents, and that nothing ephemeral reaches the file.
 - `verify/claude-check.ts` needs no model or network. It runs the real Claude adapter against a scripted stand-in for the Agent SDK's `query()`. It checks what the adapter starts the SDK with, the permission card bodies, how it delivers a model switch and a rule change, and how it reports subagents. The foreground, background and interrupted subagent streams follow what a real Haiku session sent with SDK 0.3.283. The nested one follows the SDK's documented shapes.
@@ -152,6 +170,7 @@ node verify/cdp.mjs verify/e2e-long-wait.mjs
 - `verify/e2e-contract.mjs` starts the app on the old-format company file and drives the messages above through the real IPC boundary with real Claude employees. It checks the migration, a refused bad mode, Always allow (an exact rule for a `node` command, with no card for the identical command and a card for a different one), `remove_allow_rule`, a live `set_model` (the next turn's `init` shows the new model), a refused model reported in the log, a `fresh_session` on a stale `sessionId`, and a background subagent that outlives the turn that launched it.
 - `verify/e2e-memory.mjs` tells an employee a fact, quits the app, deletes the employee's `sessionId`, starts the app again on the same data folder, and asks a question only the notes can answer.
 - `verify/e2e-queue.mjs` makes two subagents ask permission at the same moment, and checks that the second card waits behind the first.
+- `verify/e2e-voice.mjs` plays clips made with `say` into the microphone through Chromium's fake capture device (`OFFICE_TEST_AUDIO`). A real Claude employee receives the right words in English and Portuguese, by hold-V and by proximity, and the script reads them from the main process, the employee's answer and the employee's own session log. It also checks that a clip played while an employee is talking never arrives (the same clip arrives when the employee is silent), that pressing V stops an employee who is talking, Voice: Accurate, Language: Auto, a microphone that only reads zeros, and every state of the HUD chip. It prints the time from releasing V to the text. It needs whisper-cpp, the models, and Portuguese and English macOS voices.
 - `verify/e2e-long-wait.mjs` leaves the owner silent for 150 seconds before answering. Run it with `OFFICE_LONG_WAIT_S=330` to go past Claude Code's 5 minute default.
 
 `pnpm build` rewrites `out/`, which is what `pnpm start` runs. If you use the beta while the tests run, build the tests to their own folder with `pnpm build:verify` and set `OFFICE_OUT_DIR=out/verify` when you run `verify/cdp.mjs`.

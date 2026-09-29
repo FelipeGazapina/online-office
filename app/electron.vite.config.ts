@@ -1,16 +1,18 @@
 import { readFileSync } from 'node:fs';
 import react from '@vitejs/plugin-react';
 import { defineConfig } from 'electron-vite';
+import { VOICE_ORIGIN } from './src/shared/voice.ts';
 
 // Only the built page gets a CSP: the dev server's HMR needs inline scripts and a websocket.
-// Style is 'unsafe-inline' because mermaid's SVG and drei's labels carry inline styles.
+// Style is 'unsafe-inline' because mermaid's SVG and drei's labels carry inline styles. Voice needs the office-voice origin,
+// where the worklet, the Silero model and onnxruntime-web are served, and wasm-unsafe-eval to compile onnxruntime's wasm.
 const csp = [
   "default-src 'self'",
-  "script-src 'self'",
+  `script-src 'self' 'wasm-unsafe-eval' ${VOICE_ORIGIN}`,
   "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
   "font-src https://fonts.gstatic.com",
   "img-src 'self' data: blob:",
-  "connect-src 'self'",
+  `connect-src 'self' ${VOICE_ORIGIN}`,
   "worker-src 'self' blob:",
 ].join('; ');
 

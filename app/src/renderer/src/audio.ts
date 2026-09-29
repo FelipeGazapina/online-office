@@ -1,7 +1,8 @@
 import type { Employee } from '../../shared/protocol.ts';
 import { hash } from './layout.ts';
-import { get, set } from './store.ts';
+import { get, LANGS, set } from './store.ts';
 import { runtime } from './runtime.ts';
+import { gate } from './voice/gate.ts';
 
 export const LISTEN_RADIUS = 1.5;
 export const EAR_RADIUS = 4;
@@ -54,7 +55,7 @@ export function chime() {
 const NOVELTY = /^(Albert|Bad News|Bahh|Bells|Boing|Bubbles|Cellos|Deranged|Good News|Hysterical|Jester|Organ|Superstar|Trinoids|Whisper|Wobble|Zarvox|Fred|Junior|Ralph|Kathy)\b/;
 
 function pickVoice(id: string): SpeechSynthesisVoice | undefined {
-  const { lang } = get();
+  const lang = LANGS[get().lang].tts;
   const norm = (l: string) => l.replace('_', '-').toLowerCase();
   const all = speechSynthesis.getVoices().filter((v) => !NOVELTY.test(v.name));
   const exact = all.filter((v) => norm(v.lang) === norm(lang));
@@ -62,20 +63,32 @@ function pickVoice(id: string): SpeechSynthesisVoice | undefined {
   return pool.length ? pool[hash(id) % pool.length] : undefined;
 }
 
+// Chromium can collect an utterance nobody holds while it is still speaking, and its end event goes with it.
+const utterances = new Set<SpeechSynthesisUtterance>();
+
 export function speak(employeeId: string, text: string, opts: { cancel?: boolean } = {}) {
   if (!('speechSynthesis' in window)) return;
   if (opts.cancel) speechSynthesis.cancel();
   const u = new SpeechSynthesisUtterance(text);
   const v = pickVoice(employeeId);
   if (v) u.voice = v;
-  u.lang = get().lang;
+  u.lang = LANGS[get().lang].tts;
   u.pitch = 0.85 + (hash(employeeId, 1) % 36) / 100;
   u.rate = 0.95 + (hash(employeeId, 2) % 16) / 100;
+  // The microphone hears the employees too, so it stops listening while one speaks. The gate's tail bridges the gap to a queued
+  // utterance, and cancel() ends the utterance with an error event.
+  utterances.add(u);
+  u.onstart = () => gate.speaking(true);
+  u.onend = u.onerror = () => {
+    utterances.delete(u);
+    gate.speaking(false);
+  };
   speechSynthesis.speak(u);
 }
 
-export function isSpeaking() {
-  return 'speechSynthesis' in window && speechSynthesis.speaking;
+// Pressing V is the owner interrupting: whoever is talking stops.
+export function cancelSpeech() {
+  if ('speechSynthesis' in window) speechSynthesis.cancel();
 }
 
 export function isAudible(employee: Employee) {

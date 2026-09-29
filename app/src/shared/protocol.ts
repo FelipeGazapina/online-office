@@ -2,6 +2,8 @@
 // Main is the source of truth for *logical* state. The renderer derives every avatar pose from it:
 // an employee whose status is `blocked_on_owner` walks to the owner; everyone else walks back to their desk.
 
+import type { VoiceApi } from './voice.ts';
+
 export type EmployeeId = string & { readonly __brand: 'EmployeeId' };
 export type BlockId = string & { readonly __brand: 'BlockId' };
 export type QuestionId = string & { readonly __brand: 'QuestionId' };
@@ -189,6 +191,7 @@ export type OfficeApi = {
   // The OS folder picker. Resolves null when the owner cancels.
   pickFolder(): Promise<string | null>;
   revealFolder(path: string): void;
+  voice: VoiceApi;
 };
 
 export const IPC = {
