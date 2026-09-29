@@ -1,6 +1,7 @@
 // Per-frame mutable world state. Lives outside React so the sim can write it 60 times a second.
 import { Vector3 } from 'three';
-import { OWNER_START } from './layout.ts';
+import type { EmployeeId } from '../../shared/protocol.ts';
+import { OWNER_START, type Vec2 } from './layout.ts';
 
 export type AvatarRT = {
   id: string;
@@ -11,6 +12,15 @@ export type AvatarRT = {
   leaving: boolean;
 };
 
+export type WalkGoal = { kind: 'point'; at: Vec2 } | { kind: 'employee'; employeeId: EmployeeId };
+
+// What steers the owner. `path` holds the waypoints still to visit, and its last one is where the walk ends.
+export type OwnerIntent = { kind: 'keys' } | { kind: 'walk'; path: Vec2[]; goal: WalkGoal };
+export const KEYS_INTENT: OwnerIntent = { kind: 'keys' };
+
+// A walk yields to any of these, whether held or only tapped.
+export const STEER_KEYS: readonly string[] = ['KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'];
+
 export const runtime = {
   owner: {
     pos: new Vector3(OWNER_START.x, 0, OWNER_START.z),
@@ -18,6 +28,7 @@ export const runtime = {
     yaw: Math.PI,
     speed: 0,
     running: false,
+    intent: KEYS_INTENT,
   },
   // Direction the owner last travelled. The queue trails this, not the body yaw,
   // so turning to look at the first asker does not swing the whole line around.

@@ -11,12 +11,13 @@ import {
   deskPose,
   getLayout,
   meetingRoomObstacles,
+  OWNER_RADIUS,
   pushOut,
   type DeskPose,
   type Layout,
   type Vec2,
 } from './layout.ts';
-import { runtime, type AvatarRT } from './runtime.ts';
+import { runtime, type AvatarRT, type WalkGoal } from './runtime.ts';
 import { get, set, waitingQueue } from './store.ts';
 import { ownerInsideMeetingRoom } from './meeting.ts';
 
@@ -74,6 +75,8 @@ function syncAvatars(company: Company) {
   runtime.seeded = true;
 }
 
+export function walkTo(_goal: WalkGoal) {}
+
 function stepOwner(dt: number, layout: Layout, talkingTo: EmployeeId | null) {
   const { owner, view, keys } = runtime;
   const down = (...codes: string[]) => codes.some((c) => keys.has(c));
@@ -95,7 +98,7 @@ function stepOwner(dt: number, layout: Layout, talkingTo: EmployeeId | null) {
   owner.vel.z += (dz * top - owner.vel.z) * a;
   owner.pos.x += owner.vel.x * dt;
   owner.pos.z += owner.vel.z * dt;
-  pushOut(owner.pos, 0.35, layout.obstacles);
+  pushOut(owner.pos, OWNER_RADIUS, layout.obstacles);
   clampToBounds(owner.pos, layout.bounds);
   owner.speed = Math.hypot(owner.vel.x, owner.vel.z);
 

@@ -10,6 +10,10 @@ export const X0 = -18;
 export const LOBBY_Z0 = -1;
 export const Z1 = 9;
 export const WALL_H = 3.2;
+// The owner's body. Collision pushes out by this radius and walking paths keep this far from furniture.
+export const OWNER_RADIUS = 0.35;
+// How close anyone may come to the outer walls.
+export const WALL_MARGIN = 0.6;
 
 export type Vec2 = { x: number; z: number };
 export type Box = { cx: number; cz: number; hw: number; hd: number };
@@ -149,7 +153,7 @@ export function pushOut(p: { x: number; z: number }, radius: number, boxes: read
   return p;
 }
 
-export function clampToBounds(p: { x: number; z: number }, bounds: Bounds, margin = 0.6) {
+export function clampToBounds(p: { x: number; z: number }, bounds: Bounds, margin = WALL_MARGIN) {
   p.x = Math.max(bounds.x0 + margin, Math.min(bounds.x1 - margin, p.x));
   p.z = Math.max(bounds.z0 + margin, Math.min(bounds.z1 - margin, p.z));
   return p;
