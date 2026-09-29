@@ -26,7 +26,13 @@ Each item is checked on the real Electron app, not on a mock.
     - **Company** sets the seat count for the company and per block, up to the ceiling the current level unlocks. Blocks lay out as many desks as their seats.
 12. **Subagents.** A subagent that an employee spawns appears as a matryoshka doll on that employee's desk. A nested subagent is a smaller doll. Dolls do not count as employees and disappear when the subagent finishes.
 13. **Overview navigation.** In the Overview camera, a click on the floor walks the owner there around furniture. A click on an employee opens a menu at the cursor with "Open chat" and "Go to". The chat keeps what the owner said and what the employee answered, and a message sent from it reaches the employee as if the owner stood next to them. Real mouse input proves each of these, not programmatic clicks.
-14. **Permissions.** Each employee runs with the owner's permission settings for its harness (see Rigor). A command those settings allow runs without a card. A command they leave to "ask" walks to the owner.
+14. **Permissions.** Each employee has a permission mode that the owner changes in its drawer, and new hires take the company default from the Company area.
+    - **Inherit** follows the owner's own settings for the harness (see Rigor). It is the default.
+    - **Ask** asks before every command and every edit outside the block folder.
+    - **Auto** lets the harness decide what is safe, and asks for the rest.
+    - **YOLO** bypasses every check. The employee wears a visible badge while in it.
+
+    A permission card offers Allow, Always allow and Deny. Always allow adds a rule for that employee, and the same command then runs without a card. The drawer lists those rules, and the owner can remove them.
 15. Every unit is committed and pushed to `main`.
 
 ## Running the beta
@@ -50,7 +56,7 @@ Employees inherit the owner's own permission settings for their harness, read wh
 - **Codex** takes `approval_policy`, `sandbox_mode` and `~/.codex/rules/` from `~/.codex`.
 - **Hermes** takes `approvals` and `command_allowlist` from `~/.hermes/config.yaml`.
 
-Whatever that policy leaves to "ask" becomes a walk to the owner. Tools, MCP servers, skills and memory stay isolated. The gates are:
+That is the Inherit mode, and each employee can switch to Ask, Auto or YOLO (see Done means). Whatever the active mode leaves to "ask" becomes a walk to the owner. Tools, MCP servers, skills and memory stay isolated. The gates are:
 
 - research findings with observed output before any adapter is designed
 - one end-to-end script per harness against the real app
@@ -68,9 +74,9 @@ Research agents write only to `docs/research/`. From U2 on, every implementation
 | U0 | Electron shell: office in the main process, IPC, folder picker, fakes deleted | none | done |
 | U1 | Office MCP server over local HTTP, the owner's question inbox, the memory store, Claude moved onto them | U0, R1, R2, R3 | running |
 | C1 | Contract v2: the types below, the `company.json` migration, and no-op stubs. No behavior change | U1 | |
-| U2 | Real ChatGPT (Codex) employee: app-server, isolation, inherited approvals, model list, subagent events | C1 | |
-| U3 | Real Hermes employee: ACP, office profile, inherited approvals, model list, subagent events | C1 | |
-| F1 | Claude employee v2 and its UI: inherited permissions, model picker and live switch, subagent dolls on the desk | C1 | |
+| U2 | Real ChatGPT (Codex) employee: app-server, isolation, the four permission modes, model list, subagent events | C1 | |
+| U3 | Real Hermes employee: ACP, office profile, the four permission modes, model list, subagent events | C1 | |
+| F1 | Claude employee v2 and its UI: permission modes and Always allow (card, drawer, office-side rule check), model picker and live switch, subagent dolls on the desk | C1 | |
 | F2 | Rules and boards: rule files with a watcher, delivery to live sessions, office and block boards, sticky notes on desks, notes on boards, fresh session | F1 | |
 | F3 | Owner's computer: the My Mac portal with its floating panel, the Company area with seats and level ceilings, desks per block from seats | F1 | |
 | N1 | Overview navigation: click to walk with A* around furniture, employee menu (Open chat, Go to), chat transcript in the drawer | U0 | running |
@@ -103,7 +109,7 @@ export type ModelCatalog =
   | { kind: 'ready'; models: ModelOption[]; defaultModel: ModelId }
   | { kind: 'error'; message: string };
 
-export type CompanySettings = { seats: Seats; defaultModels: Partial<Record<Provider, ModelId>> };
+export type CompanySettings = { seats: Seats; defaultModels: Partial<Record<Provider, ModelId>>; defaultPermissions: PermissionMode };
 
 // Rules are the owner's instructions. Every session loads the rules of its office, block and employee in full.
 // A session rule belongs to one employee's current session and is dropped when that employee starts fresh.
@@ -123,16 +129,31 @@ export type NoteScope =
   | { kind: 'employee'; employeeId: EmployeeId };
 export type NoteSummary = { id: NoteId; scope: NoteScope; title: string; author: EmployeeId; updatedAt: number };
 
+// How much an employee may do without asking. `inherit` follows the owner's own settings for the harness.
+export type PermissionMode = 'inherit' | 'ask' | 'auto' | 'yolo';
+// Added by "Always allow" on a permission card. The office checks these before it shows a card, for every harness.
+export type AllowRule = { kind: 'command'; prefix: string } | { kind: 'tool'; name: string };
+export type PermissionPolicy = { mode: PermissionMode; alwaysAllow: AllowRule[] };
+
 // A running subagent. `parentId` is null for one the employee spawned itself, or another subagent's id.
 export type Subagent = { id: string; parentId: string | null; label: string; startedAt: number };
 ```
 
-- `Employee` gains `model: ModelId` and `subagents: Subagent[]`. Subagents are never persisted.
+- `Employee` gains `model: ModelId`, `permissions: PermissionPolicy` and `subagents: Subagent[]`. Subagents are never persisted.
 - `Company` gains `settings: CompanySettings`. The snapshot gains `catalogs: Record<Provider, ModelCatalog>`, `rules: Rule[]` and `notes: NoteSummary[]`.
-- `ClientMessage` gains `update_settings`, `load_models`, `set_model`, `fresh_session`, `add_rule`, `edit_rule`, `delete_rule`, `edit_note` and `delete_note`. `hire` gains an optional `model`.
+- `ClientMessage` gains `update_settings`, `load_models`, `set_model`, `fresh_session`, `add_rule`, `edit_rule`, `delete_rule`, `edit_note`, `delete_note`, `set_permissions` and `remove_allow_rule`. `hire` gains an optional `model`. An `answer` to a permission card gains `always?: boolean`.
 - `OfficeApi` gains `openRulesFile(scope)`, which opens the scope's rule file in the OS editor, and `portal.enter()` and `portal.leave()`.
 - `EmployeeSession` gains `setModel(model)`, applied from the next turn, and `rulesChanged(text)`, a notice delivered to a live session at its next step.
 - `SessionHost` gains the rules in scope as text, frozen at session start, and `subagentStarted` and `subagentFinished`.
 - Each harness entry gains `listModels(): Promise<ModelCatalog>`.
+
+Each harness maps the modes onto its own switches:
+
+| Mode | Claude Code | Codex | Hermes |
+| --- | --- | --- | --- |
+| Inherit | The owner's permission rules, `defaultMode` and `autoMode` | The owner's `approval_policy`, `sandbox_mode` and `rules/` | The owner's `approvals` and `command_allowlist` |
+| Ask | `default` mode, so every non-read tool asks | `untrusted` with `workspace-write` | `manual` plus a hook that makes every shell command ask |
+| Auto | `auto` mode | `on-request` with `workspace-write` | `manual`, where only dangerous commands ask |
+| YOLO | `bypassPermissions` | `never` with `danger-full-access` | `off` |
 
 Rule files live in the app's data folder as `rules/office.md`, `rules/blocks/<blockId>.md` and `rules/employees/<employeeId>.md`, one rule per list item. The file is the source of truth. The boards edit it, the owner can edit it in any editor, and a watcher reloads it. Session rules live in `company.json` on the employee.
