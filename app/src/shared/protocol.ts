@@ -124,7 +124,8 @@ export type Company = {
 
 export const MAX_LEVEL = 5;
 export const XP_FOR_LEVEL = [0, 0, 30, 80, 150, 250] as const;
-export const DESKS_PER_BLOCK = 5;
+// The bench seats in renderer/layout.ts. The head desk is not one of them.
+export const DESKS_PER_BLOCK = 6;
 export const headcountCap = (level: number) => Math.min(level, MAX_LEVEL);
 
 // The level unlocks a ceiling, and the owner picks a number up to it in the Company area. Indexed by level.

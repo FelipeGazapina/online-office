@@ -60,6 +60,7 @@ const fallbackSeat: DeskPose = {
   desk: { x: DOOR.x + 4, z: DOOR.z - 3 },
   chair: { x: DOOR.x + 4, z: DOOR.z - 2 },
   exit: { x: DOOR.x + 4, z: DOOR.z - 1 },
+  yaw: Math.PI,
 };
 
 function syncAvatars(company: Company) {

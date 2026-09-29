@@ -68,7 +68,7 @@ export default async (s) => {
   assert((await state(s)).camera === 'iso', 'key 2 switched to the Overview camera');
   await settle(s);
 
-  const target = { x: -12, z: -4.95 };
+  const target = { x: -11, z: -6.9 };
   await floorClick(s, target.x, target.z);
   await s.waitFor(`__office.state().intent.kind === 'walk'`);
   const walk = (await state(s)).intent;
@@ -111,7 +111,7 @@ export default async (s) => {
   assert((await s.eval('__office.store.getState().selectedId')) === null, 'Esc closed the menu and nothing else');
 
   await menuAt(s, chest, `${name}'s avatar again`);
-  await floorClick(s, -6, 3);
+  await floorClick(s, far.x, far.z);
   await s.waitFor(`!${menuOpen}`);
   assert((await state(s)).intent.kind === 'keys', 'a click anywhere else closes the menu and does not start a walk');
 

@@ -1,16 +1,22 @@
 // Proves the walkable grid and the path search in plain Node. Run: node verify/nav-check.ts
 import {
+  BENCH,
+  blockCenter,
   deskPose,
   getLayout,
+  headPose,
   OWNER_DESK,
   OWNER_START,
+  RUG_D,
+  RUG_W,
   WALL_MARGIN,
   type Box,
+  type DeskPose,
   type Layout,
   type Vec2,
 } from '../src/renderer/src/layout.ts';
 import { buildNavGrid, findApproach, findPath, navFor, type NavGrid } from '../src/renderer/src/nav.ts';
-import type { BlockId, ProjectBlock } from '../src/shared/protocol.ts';
+import { DESKS_PER_BLOCK, type BlockId, type ProjectBlock } from '../src/shared/protocol.ts';
 import { check, finish } from './check.ts';
 
 const CELL = 0.25;
@@ -58,6 +64,11 @@ const walked = (trips: Trip[]) => trips.flatMap((t) => (t.path ? [{ ...t, path: 
 const report = (names: string[]) => names.slice(0, 3).join('; ');
 
 const seat = { x: OWNER_DESK.x + 0.9, z: OWNER_DESK.z };
+const SEATS = DESKS_PER_BLOCK + 1;
+const seatsOf = (slot: number) => [
+  ...BENCH.map((_, d) => ({ name: `block ${slot} desk ${d}`, pose: deskPose(slot, d) })),
+  { name: `block ${slot} head desk`, pose: headPose(slot) },
+];
 const layouts = [1, 2, 3].map((n) => ({ n, label: `${n} block${n > 1 ? 's' : ''}`, layout: getLayout(blocksOf(n)) }));
 
 for (const { n, label, layout } of layouts) {
@@ -66,23 +77,31 @@ for (const { n, label, layout } of layouts) {
 
   const approaches: Trip[] = [];
   const snaps: Trip[] = [];
+  const exits: Trip[] = [];
   for (let slot = 0; slot < n; slot++) {
-    for (let d = 0; d < 5; d++) {
-      const pose = deskPose(slot, d);
-      const where = `block ${slot} desk ${d}`;
+    for (const { name: where, pose } of seatsOf(slot)) {
       for (const [name, from] of [['the seat', seat], ['the start', OWNER_START]] as const) {
         const path = findApproach(nav, from, pose.chair, { dist: 1, others: [] });
         approaches.push({ name: `${name} to ${where}`, from, goal: pose.chair, path });
       }
       snaps.push({ name: `the start to the middle of ${where}`, from: OWNER_START, goal: pose.desk, path: findPath(nav, OWNER_START, pose.desk) });
+      exits.push({ name: `the start to the exit of ${where}`, from: OWNER_START, goal: pose.exit, path: findPath(nav, OWNER_START, pose.exit) });
     }
   }
   const spots = walked(approaches);
   const snapped = walked(snaps);
-  const routes = [...spots, ...snapped];
+  const stepOuts = walked(exits);
+  const routes = [...spots, ...snapped, ...stepOuts];
 
-  const missing = [...approaches, ...snaps].filter((t) => !t.path).map((t) => t.name);
-  check(missing.length === 0 && spots.length === 10 * n && snapped.length === 5 * n, `${label}: ${spots.length} talk spots and ${snapped.length} desk-center goals all have a path`, report(missing));
+  const missing = [...approaches, ...snaps, ...exits].filter((t) => !t.path).map((t) => t.name);
+  check(
+    missing.length === 0 && spots.length === 2 * SEATS * n && snapped.length === SEATS * n && stepOuts.length === SEATS * n,
+    `${label}: ${spots.length} talk spots, ${snapped.length} desk-center goals and ${stepOuts.length} exits all have a path`,
+    report(missing),
+  );
+
+  const blockedExits = stepOuts.filter((t) => boxes.some((o) => insideBox(t.goal, o)) || !insideWalk(t.goal, layout) || dist(last(t.path), t.goal) > 1e-9);
+  check(blockedExits.length === 0, `${label}: every exit is walkable ground that a path ends on exactly`, report(blockedExits.map((t) => t.name)));
 
   const offRing = spots.filter((t) => Math.abs(dist(last(t.path), t.goal) - 1) > 1e-9);
   check(offRing.length === 0, `${label}: every talk spot is exactly 1 m from its chair`, report(offRing.map((t) => `${t.name} ends ${dist(last(t.path), t.goal)} m away`)));
@@ -133,6 +152,107 @@ for (const { n, label, layout } of layouts) {
   const leaves = fromDesk !== null && firstHit(fromDesk, boxes) === null && !boxes.some((o) => insideBox(fromDesk[0], o));
   check(leaves, `${label}: a walk that starts inside the owner's desk leaves it and never re-enters an obstacle`, JSON.stringify(fromDesk));
 }
+
+const EPS = 1e-9;
+const heading = (yaw: number): Vec2 => ({ x: Math.sin(yaw), z: Math.cos(yaw) });
+// A 1.6 x 0.8 desk whose long side runs across the line of sight of the person at it.
+const footprint = (p: DeskPose) => {
+  const s = Math.abs(Math.sin(p.yaw));
+  const c = Math.abs(Math.cos(p.yaw));
+  return box(p.desk.x, p.desk.z, 0.8 * c + 0.4 * s, 0.8 * s + 0.4 * c);
+};
+const overlaps = (a: Box, b: Box) => Math.abs(a.cx - b.cx) < a.hw + b.hw - EPS && Math.abs(a.cz - b.cz) < a.hd + b.hd - EPS;
+// How far along the ray a box is first met, 0 when the ray starts inside it, null when it never is.
+function rayEnters(from: Vec2, dir: Vec2, b: Box): number | null {
+  let near = 0;
+  let far = Infinity;
+  for (const [o, d, lo, hi] of [[from.x, dir.x, b.cx - b.hw, b.cx + b.hw], [from.z, dir.z, b.cz - b.hd, b.cz + b.hd]]) {
+    if (Math.abs(d) < EPS) {
+      if (o < lo || o > hi) return null;
+      continue;
+    }
+    near = Math.max(near, Math.min((lo - o) / d, (hi - o) / d));
+    far = Math.min(far, Math.max((lo - o) / d, (hi - o) / d));
+  }
+  return near <= far ? near : null;
+}
+
+const benchLayout = layouts[2].layout;
+const seatBlocks = [0, 1, 2].map((slot) => ({ slot, seats: seatsOf(slot).map((s) => ({ ...s, box: footprint(s.pose) })) }));
+const allSeats = seatBlocks.flatMap((b) => b.seats);
+const bench = seatBlocks[0].seats.slice(0, BENCH.length);
+const head = seatBlocks[0].seats[BENCH.length];
+
+check(BENCH.length === DESKS_PER_BLOCK, `the bench has one seat for each of the ${DESKS_PER_BLOCK} desks a hire can be given`);
+const headHome = headPose(0).desk;
+check(
+  [-1, ...BENCH.keys(), BENCH.length, 99].every((d) => dist(deskPose(0, d).desk, headHome) > 1),
+  'no desk index, in range or not, puts anyone at the head desk',
+);
+
+const notFacing = allSeats.filter(({ pose }) => {
+  const toDesk = { x: pose.desk.x - pose.chair.x, z: pose.desk.z - pose.chair.z };
+  const f = heading(pose.yaw);
+  return Math.abs(toDesk.x / Math.hypot(toDesk.x, toDesk.z) - f.x) > 1e-6 || Math.abs(toDesk.z / Math.hypot(toDesk.x, toDesk.z) - f.z) > 1e-6;
+});
+check(notFacing.length === 0, `every one of ${allSeats.length} seats has its desk straight ahead of its chair`, report(notFacing.map((s) => `${s.name} faces yaw ${s.pose.yaw.toFixed(2)}`)));
+
+const staring = seatBlocks.flatMap(({ seats }) =>
+  seats.flatMap((s) => {
+    let nearest: { name: string; t: number } | null = null;
+    for (const other of seats) {
+      const t = rayEnters(s.pose.chair, heading(s.pose.yaw), other.box);
+      if (t !== null && (!nearest || t < nearest.t)) nearest = { name: other.name, t };
+    }
+    return nearest?.name === s.name ? [] : [`${s.name} looks at ${nearest ? nearest.name : 'nothing'} instead of its own desk`];
+  }),
+);
+check(staring.length === 0, 'looking straight ahead from its chair, everyone meets their own desk first', report(staring));
+
+const apart = seatBlocks.flatMap(({ seats }) =>
+  [0, 2, 4].flatMap((d) => {
+    const [a, b] = [seats[d], seats[d + 1]];
+    const between = { x: b.pose.chair.x - a.pose.chair.x, z: b.pose.chair.z - a.pose.chair.z };
+    const f = heading(a.pose.yaw);
+    const along = between.x * f.x + between.z * f.z;
+    const aside = Math.abs(between.x * f.z - between.z * f.x);
+    const g = heading(b.pose.yaw);
+    return along > 0 && aside < 1e-6 && Math.abs(f.x + g.x) < 1e-6 && Math.abs(f.z + g.z) < 1e-6 ? [] : [`${a.name} and desk ${d + 1}`];
+  }),
+);
+check(apart.length === 0, 'the seats of each pair sit on one line and face each other', report(apart));
+
+const clashes = allSeats.flatMap((a, i) => allSeats.slice(i + 1).filter((b) => overlaps(a.box, b.box)).map((b) => `${a.name} and ${b.name}`));
+check(clashes.length === 0, `no two of ${allSeats.length} desks overlap`, report(clashes));
+
+const benchBoxes = bench.map((s) => s.box);
+const benchWest = Math.min(...benchBoxes.map((b) => b.cx - b.hw));
+const benchEast = Math.max(...benchBoxes.map((b) => b.cx + b.hw));
+const benchNorth = Math.min(...benchBoxes.map((b) => b.cz - b.hd));
+const benchSouth = Math.max(...benchBoxes.map((b) => b.cz + b.hd));
+const deskArea = benchBoxes.reduce((sum, b) => sum + 4 * b.hw * b.hd, 0);
+const benchArea = (benchEast - benchWest) * (benchSouth - benchNorth);
+check(Math.abs(benchArea - deskArea) < 1e-6, `the six bench desks fill one solid ${(benchEast - benchWest).toFixed(1)} x ${(benchSouth - benchNorth).toFixed(1)} m block with no gap`, `${deskArea.toFixed(3)} m2 of desks in ${benchArea.toFixed(3)} m2`);
+check(
+  Math.abs(head.box.cx - head.box.hw - benchEast) < 1e-6 && Math.abs(head.box.cz - (benchNorth + benchSouth) / 2) < 1e-6 && head.pose.chair.x > head.pose.desk.x,
+  'the head desk touches the east end of the bench on its axis, with its chair beyond it',
+  `head desk spans x ${(head.box.cx - head.box.hw).toFixed(2)} to ${(head.box.cx + head.box.hw).toFixed(2)}, the bench ends at ${benchEast.toFixed(2)}`,
+);
+
+const wrongObstacle = allSeats.filter((s) => !benchLayout.obstacles.some((o) => Math.abs(o.cx - s.box.cx) < 1e-6 && Math.abs(o.cz - s.box.cz) < 1e-6 && Math.abs(o.hw - s.box.hw) < 1e-6 && Math.abs(o.hd - s.box.hd) < 1e-6));
+check(wrongObstacle.length === 0, 'every desk is an obstacle of its own footprint, turned where the person faces east or west', report(wrongObstacle.map((s) => s.name)));
+
+// The chair seat is 0.5 m wide and its back stands 0.25 m behind the middle.
+const CHAIR_HALF = 0.3;
+const offRug = seatBlocks.flatMap(({ slot, seats }) => {
+  const c = blockCenter(slot);
+  const on = (x: number, z: number, hw: number, hd: number) => Math.abs(x - c.x) + hw <= RUG_W / 2 && Math.abs(z - c.z) + hd <= RUG_D / 2;
+  return seats.flatMap((s) => [
+    ...(on(s.box.cx, s.box.cz, s.box.hw, s.box.hd) ? [] : [`${s.name} desk`]),
+    ...(on(s.pose.chair.x, s.pose.chair.z, CHAIR_HALF, CHAIR_HALF) ? [] : [`${s.name} chair`]),
+  ]);
+});
+check(offRug.length === 0, `every desk and chair lies on the ${RUG_W} x ${RUG_D} m rug`, report(offRug));
 
 const enclosed = [box(10, 7, 3.5, 0.5), box(10, 13, 3.5, 0.5), box(7, 10, 0.5, 3.5), box(13, 10, 0.5, 3.5)];
 const pocket = { x: 10, z: 10 };

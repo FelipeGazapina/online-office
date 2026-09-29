@@ -4,6 +4,8 @@ import type { ProjectBlock } from '../../shared/protocol.ts';
 
 export const BLOCK_W = 10;
 export const BLOCK_D = 8;
+export const RUG_W = BLOCK_W - 1;
+export const RUG_D = BLOCK_D - 1;
 export const AISLE = 2;
 export const COLS = 3;
 export const X0 = -18;
@@ -29,16 +31,54 @@ export function blockCenter(slot: number): Vec2 {
   };
 }
 
-export type DeskPose = { desk: Vec2; chair: Vec2; exit: Vec2 };
+// A seat is a desk center and the way the person sitting at it faces, in meters from the block center.
+export type Seat = { x: number; z: number; yaw: number };
+export type DeskPose = { desk: Vec2; chair: Vec2; exit: Vec2; yaw: number };
+
+const DESK_W = 1.6;
+const DESK_D = 0.8;
+const CHAIR_BACK = 0.9;
+const EXIT_BACK = 2.0;
+
+const FACE_SOUTH = 0;
+const FACE_NORTH = Math.PI;
+const FACE_WEST = -Math.PI / 2;
+
+// Two facing rows of three desks, flush like one long bench that runs east to west. The head desk closes its east end
+// to make a T. The bench runs along x because three desks, the head desk and its chair need more room along z than
+// the whiteboard leaves. Shifting the bench 0.65 m west puts the whole T, chair included, about on the block center.
+const BENCH_X = -0.65;
+
+// Indexed by Employee.desk, from the head outward. Each pair sits across from each other, the south seat first.
+export const BENCH: readonly Seat[] = [1, 0, -1].flatMap((column) => [
+  { x: BENCH_X + column * DESK_W, z: DESK_D / 2, yaw: FACE_NORTH },
+  { x: BENCH_X + column * DESK_W, z: -DESK_D / 2, yaw: FACE_SOUTH },
+]);
+
+// Reserved for the block's orchestrator. It is not a desk index, so nobody is hired into it.
+export const HEAD: Seat = { x: BENCH_X + DESK_W + (DESK_W + DESK_D) / 2, z: 0, yaw: FACE_WEST };
+
+// The person sits in a chair behind the desk they face and steps out to the exit farther back.
+function poseOf(slot: number, seat: Seat): DeskPose {
+  const c = blockCenter(slot);
+  const fx = Math.sin(seat.yaw);
+  const fz = Math.cos(seat.yaw);
+  const back = (d: number) => ({ x: c.x + seat.x - fx * d, z: c.z + seat.z - fz * d });
+  return { desk: back(0), chair: back(CHAIR_BACK), exit: back(EXIT_BACK), yaw: seat.yaw };
+}
 
 export function deskPose(slot: number, desk: number): DeskPose {
-  const c = blockCenter(slot);
-  const i = Math.max(0, Math.min(4, desk));
-  const front = i < 3;
-  const x = c.x + (front ? (i - 1) * 3.2 : (i - 3.5) * 3.2);
-  const z = c.z + (front ? 1.4 : -1.3);
-  // The chair is south of the desk; the employee faces north at the monitor.
-  return { desk: { x, z }, chair: { x, z: z + 0.9 }, exit: { x, z: z + 2.0 } };
+  return poseOf(slot, BENCH[Math.max(0, Math.min(BENCH.length - 1, desk))]);
+}
+
+export function headPose(slot: number): DeskPose {
+  return poseOf(slot, HEAD);
+}
+
+// A desk is wide across the person's line of sight, so one that faces east or west is turned on the floor plan.
+function deskBox(pose: DeskPose): Box {
+  const sideways = Math.abs(Math.sin(pose.yaw)) > 0.5;
+  return { cx: pose.desk.x, cz: pose.desk.z, hw: (sideways ? DESK_D : DESK_W) / 2, hd: (sideways ? DESK_W : DESK_D) / 2 };
 }
 
 export function whiteboardPose(slot: number): Vec2 {
@@ -133,10 +173,7 @@ function computeLayout(blocks: readonly ProjectBlock[]): Layout {
 
   const obstacles: Box[] = [{ cx: OWNER_DESK.x, cz: OWNER_DESK.z, hw: 0.45, hd: 1.0 }];
   for (const b of blocks) {
-    for (let d = 0; d < 5; d++) {
-      const p = deskPose(b.slot, d).desk;
-      obstacles.push({ cx: p.x, cz: p.z, hw: 0.8, hd: 0.4 });
-    }
+    for (const pose of [...BENCH.map((_, d) => deskPose(b.slot, d)), headPose(b.slot)]) obstacles.push(deskBox(pose));
     const wb = whiteboardPose(b.slot);
     obstacles.push({ cx: wb.x, cz: wb.z, hw: 2.3, hd: 0.15 });
   }

@@ -55,7 +55,7 @@ function walkOut(seconds = 40) {
   return trace;
 }
 
-const target = { x: -12, z: -4.8 };
+const target = { x: -12, z: -6.9 };
 const straightCrossesDesk = Array.from({ length: 401 }, (_, i) => ({ x: OWNER_START.x + ((target.x - OWNER_START.x) * i) / 400, z: OWNER_START.z + ((target.z - OWNER_START.z) * i) / 400 })).some((p) => inside(p, grown(OWNER_RADIUS)));
 check(straightCrossesDesk, 'the straight line from the start to the target goes through a desk, so the walk has to detour');
 
