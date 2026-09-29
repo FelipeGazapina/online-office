@@ -221,6 +221,7 @@ const KEYS: [string, string][] = [
   ['W A S D / arrows', 'Walk, relative to the camera. Cancels a click walk'],
   ['Shift', 'Run'],
   ['Q / E', 'Turn the camera (90 degree steps in overview)'],
+  ['C', 'Capture or release the mouse for FPS look in first person'],
   ['Drag / wheel', 'Orbit and zoom (follow), look (first person), turn and zoom (overview)'],
   ['1 / 2 / 3', 'Follow, overview, first person'],
   ['Enter', 'Type to the nearest employee, or whoever is asking'],
