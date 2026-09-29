@@ -15,7 +15,8 @@ const transcribeRequest = z.object({
 const quality = z.enum(QUALITIES);
 
 // Models are big and shared by every profile, so they live in the OS cache folder and not in userData.
-const cacheDir = () => join(process.platform === 'darwin' ? join(homedir(), 'Library/Caches') : (process.env.XDG_CACHE_HOME ?? join(homedir(), '.cache')), 'online-office', 'whisper');
+const cacheHome = () => (process.platform === 'darwin' ? join(homedir(), 'Library/Caches') : (process.env.XDG_CACHE_HOME ?? join(homedir(), '.cache')));
+const cacheDir = () => join(cacheHome(), 'online-office', 'whisper');
 
 const MIC_SETTINGS = 'x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone';
 
@@ -29,7 +30,12 @@ export function prepareVoice() {
   if (!testRun) return;
   app.commandLine.appendSwitch('use-fake-ui-for-media-stream');
   app.commandLine.appendSwitch('use-fake-device-for-media-stream');
-  if (process.env.OFFICE_TEST_AUDIO) app.commandLine.appendSwitch('use-file-for-fake-audio-capture', process.env.OFFICE_TEST_AUDIO);
+  const wav = process.env.OFFICE_TEST_AUDIO;
+  if (!wav) return;
+  // %noloop plays the file once, so a phrase is not heard again on every lap. Chromium's audio service is sandboxed and
+  // cannot read the file (it logs "Try disabling the sandbox"), so only a run that plays a WAV drops the sandbox.
+  app.commandLine.appendSwitch('use-file-for-fake-audio-capture', `${wav}%noloop`);
+  app.commandLine.appendSwitch('no-sandbox');
 }
 
 function osMicAccess(): OsMicAccess {
