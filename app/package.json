@@ -42,8 +42,7 @@
     "build": "electron-vite build",
     "build:verify": "electron-vite build --outDir out/verify",
     "start": "electron-vite preview",
-    "package": "pnpm build && electron-builder",
-    "release": "pnpm build && electron-builder --publish always",
+    "package": "pnpm build && electron-builder --publish never",
     "beta": "node scripts/beta.mjs",
     "typecheck": "tsc -p tsconfig.node.json --noEmit --composite false && tsc -p tsconfig.web.json --noEmit --composite false"
   },
@@ -52,9 +51,16 @@
     "productName": "Online Office",
     "asar": true,
     "files": ["out/**/*", "package.json"],
+    "afterSign": "scripts/after-sign.cjs",
     "mac": {
       "category": "public.app-category.productivity",
-      "target": ["dmg", "zip"],
+      "target": [
+        { "target": "dmg", "arch": "arm64" },
+        { "target": "zip", "arch": "arm64" }
+      ],
+      "artifactName": "Online-Office-${version}-${arch}.${ext}",
+      "identity": "-",
+      "hardenedRuntime": false,
       "extendInfo": {
         "NSMicrophoneUsageDescription": "Online Office uses the microphone so you can talk to your AI employees.",
         "NSUserNotificationUsageDescription": "Online Office uses notifications to let you know when an employee needs your attention."
