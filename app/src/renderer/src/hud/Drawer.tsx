@@ -100,7 +100,7 @@ export function Drawer() {
           input.current?.focus();
         }}
       >
-        <input id="drawer-input" ref={input} autoFocus value={draft} onChange={(ev) => setDraft(ev.target.value)} placeholder={`Message ${e.name}`} />
+        <input id="drawer-input" ref={input} value={draft} onChange={(ev) => setDraft(ev.target.value)} placeholder={`Message ${e.name}`} />
         <button type="submit" className="btn ink" disabled={!draft.trim()}>
           Send
         </button>
@@ -187,7 +187,7 @@ function GroupDrawer({ members }: { members: Employee[] }) {
           setDraft('');
         }}
       >
-        <input autoFocus value={draft} onChange={(ev) => setDraft(ev.target.value)} placeholder="Message everyone nearby" />
+        <input value={draft} onChange={(ev) => setDraft(ev.target.value)} placeholder="Message everyone nearby" />
         <button type="submit" className="btn ink" disabled={!draft.trim()}>
           Send
         </button>
