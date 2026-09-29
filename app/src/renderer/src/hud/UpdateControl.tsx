@@ -1,8 +1,7 @@
 import type { UpdateState } from '../../../shared/protocol.ts';
 import { useStore } from '../store.ts';
 
-// How one update state reads to the owner.
-type View = { label: string; run?: () => void; note?: string };
+type View = { label: string; run?: () => void; note?: string; chip?: 'ready' | 'busy' | 'failed' };
 
 function view(u: UpdateState): View {
   const { check, install } = window.office.update;
@@ -14,17 +13,27 @@ function view(u: UpdateState): View {
     case 'check-failed':
       return { label: 'Check again', run: check, note: `Could not check: ${u.message}` };
     case 'available':
-      return { label: `Update to v${u.version} and restart`, run: install };
+      return { label: `Update to v${u.version} and restart`, run: install, chip: 'ready' };
     case 'downloading':
-      return { label: `Downloading v${u.version} ${Math.round(u.percent)}%` };
+      return { label: `Downloading v${u.version} ${Math.round(u.percent)}%`, chip: 'busy' };
     case 'installing':
-      return { label: 'Restarting…' };
+      return { label: 'Restarting…', chip: 'busy' };
     case 'update-failed':
-      return { label: 'Update failed. Check again', run: check, note: u.message };
+      return { label: 'Update failed. Check again', run: check, note: u.message, chip: 'failed' };
   }
 }
 
-// The Settings row: always there once main reports, and the only place a manual check lives.
+export function UpdateChip() {
+  const update = useStore((s) => s.update);
+  const v = update && view(update);
+  if (!v?.chip) return null;
+  return (
+    <button className={`btn update-chip ${v.chip}`} disabled={!v.run} title={v.note} onClick={() => v.run?.()}>
+      {v.label}
+    </button>
+  );
+}
+
 export function UpdateSetting() {
   const update = useStore((s) => s.update);
   if (!update) return null;
