@@ -72,7 +72,8 @@ type Options = { window: () => BrowserWindow | null; userData: string };
 
 // Owns the whisper service and everything voice-related that crosses the process boundary. Register once per app run.
 export function startVoice({ window, userData }: Options) {
-  const assets = voiceAssets(app.getAppPath());
+  // Resolved from this bundle, so it does not matter which folder the app was started from.
+  const assets = voiceAssets(import.meta.url);
   protocol.handle(VOICE_SCHEME, (request) => assets(request.url));
 
   const whisper = createWhisper({

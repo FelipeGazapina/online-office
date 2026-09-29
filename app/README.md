@@ -133,7 +133,7 @@ Install whisper.cpp once with `brew install whisper-cpp`.
 - **Voice: Fast** runs `small-q5_1` (190 MB, about 0.3 s an utterance). **Accurate** runs `large-v3-turbo-q5_0` (574 MB, about 1.4 s), and is best with a fixed language, because **Auto** makes whisper encode twice.
 - The HUD chip shows one line for whatever is in the way: whisper is missing, a model is downloading, macOS denies the microphone, or the microphone is silent.
 - The microphone is open only while you stand within 1.5 m of an employee. The renderer captures 16 kHz audio through an AudioWorklet into a 60 second ring. **Hold V** sends the slice from 0.2 s before the press to the release. **Proximity** mode cuts utterances with Silero, through `@ricky0123/vad-web`. Nothing is transcribed while an employee speaks, or for 0.4 s after.
-- The page reads the worklet, the Silero model and onnxruntime-web through the `office-voice://assets` protocol, because `fetch` does not work on `file://`. `src/main/voice/assets.ts` serves only those five files.
+- The page reads the worklet, the Silero model and onnxruntime-web through the `office-voice://assets` protocol, because `fetch` does not work on `file://`. `src/main/voice/assets.ts` serves only those five files, found by module resolution from the main bundle, so it does not matter which folder the app was started from.
 
 ## Verify
 

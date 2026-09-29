@@ -8,7 +8,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, 
 import { createServer, type Server } from 'node:http';
 import { homedir, tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import vm from 'node:vm';
 import type { VoiceEngine } from '../src/shared/voice.ts';
 import { voiceAssets } from '../src/main/voice/assets.ts';
@@ -132,7 +132,7 @@ await section('the worklet', async () => {
 });
 
 await section('the asset protocol', async () => {
-  const serve = voiceAssets(appDir);
+  const serve = voiceAssets();
   const wasm = await serve('office-voice://assets/ort-wasm-simd-threaded.wasm');
   const onDisk = statSync(join(appDir, 'node_modules/onnxruntime-web/dist/ort-wasm-simd-threaded.wasm')).size;
   check(wasm.status === 200 && wasm.headers.get('content-type') === 'application/wasm', 'the wasm is served as application/wasm, which streaming compilation needs');
@@ -143,6 +143,12 @@ await section('the asset protocol', async () => {
   check((await (await serve('office-voice://assets/pcm-worklet.js')).text()) === PCM_WORKLET_SOURCE, 'the worklet is served from its source string');
   check((await serve('office-voice://assets/ort-wasm-simd-threaded.mjs')).headers.get('content-type') === 'text/javascript', 'the onnxruntime loader is served as a JavaScript module');
   check((await serve('office-voice://assets/vad.worklet.bundle.min.js')).status === 200, 'the vad-web worklet is served');
+  for (const entry of ['out/main/index.js', 'out/verify/main/index.js', 'src/main/voice/assets.ts']) {
+    const fromEntry = await voiceAssets(pathToFileURL(join(appDir, entry)))('office-voice://assets/ort-wasm-simd-threaded.wasm');
+    check(fromEntry.status === 200 && (await fromEntry.arrayBuffer()).byteLength === onDisk, `the assets are found from an app entry at ${entry}, so where the app starts from cannot matter`);
+  }
+  const lost = await voiceAssets(pathToFileURL(join(dir, 'nowhere/main/index.js')))('office-voice://assets/silero_vad_v5.onnx');
+  check(lost.status === 500, 'an entry outside the app tree gets a 500 for a package it cannot find and not a crash');
   for (const bad of ['office-voice://assets/../package.json', 'office-voice://assets/%2e%2e/package.json', 'office-voice://assets/constructor', 'office-voice://assets/', 'office-voice://elsewhere/pcm-worklet.js', 'https://assets/pcm-worklet.js']) {
     check((await serve(bad)).status === 404, `${bad} is a 404`);
   }
