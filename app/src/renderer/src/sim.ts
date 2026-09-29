@@ -17,7 +17,8 @@ import {
   type Layout,
   type Vec2,
 } from './layout.ts';
-import { runtime, type AvatarRT, type WalkGoal } from './runtime.ts';
+import { findApproach, findPath, navFor } from './nav.ts';
+import { KEYS_INTENT, runtime, STEER_KEYS, type AvatarRT, type OwnerIntent, type WalkGoal } from './runtime.ts';
 import { get, set, waitingQueue } from './store.ts';
 import { ownerInsideMeetingRoom } from './meeting.ts';
 
@@ -26,6 +27,14 @@ const OWNER_RUN = 5.4;
 const EMPLOYEE_WALK = 1.4;
 const QUEUE_SPACING = 1.2;
 const LISTEN_EXIT = LISTEN_RADIUS + 0.3;
+// Where the owner stands when walking to someone.
+const TALK_SPOT = 1.0;
+// A walk to someone is planned again once it would end this far from them. TALK_REPLAN + ARRIVE stays under
+// LISTEN_RADIUS, so a walk always ends within earshot.
+const TALK_REPLAN = 1.35;
+// The owner has arrived within this distance of the last waypoint, and moves on from the others within CORNER.
+const ARRIVE = 0.1;
+const CORNER = 0.2;
 
 const dist2 = (a: Vec2, b: Vec2) => Math.hypot(a.x - b.x, a.z - b.z);
 const ease = (dt: number, rate: number) => 1 - Math.exp(-dt * rate);
@@ -75,14 +84,74 @@ function syncAvatars(company: Company) {
   runtime.seeded = true;
 }
 
-export function walkTo(_goal: WalkGoal) {}
+type Walk = Extract<OwnerIntent, { kind: 'walk' }>;
 
-function stepOwner(dt: number, layout: Layout, talkingTo: EmployeeId | null) {
+function plan(goal: WalkGoal, layout: Layout): Walk | null {
+  const grid = navFor(layout);
+  const from = runtime.owner.pos;
+  switch (goal.kind) {
+    case 'point': {
+      const path = findPath(grid, from, goal.at);
+      return path && { kind: 'walk', path, goal };
+    }
+    case 'employee': {
+      const target = runtime.avatars.get(goal.employeeId);
+      if (!target) return null;
+      const others = [...runtime.avatars.values()].filter((a) => a !== target).map((a) => a.pos);
+      const path = findApproach(grid, from, target.pos, { dist: TALK_SPOT, others });
+      return path && { kind: 'walk', path, goal };
+    }
+    default: {
+      const unreachable: never = goal;
+      return unreachable;
+    }
+  }
+}
+
+// A walk that cannot be planned leaves the owner doing what they were doing.
+export function walkTo(goal: WalkGoal) {
+  const walk = plan(goal, getLayout(get().company?.blocks ?? []));
+  if (walk) runtime.owner.intent = walk;
+}
+
+// A walk to someone follows them: it is planned again when they have moved too far from where it ends, and dropped
+// when they are gone.
+function keepUp(walk: Walk, layout: Layout): OwnerIntent {
+  const { goal, path } = walk;
+  if (goal.kind !== 'employee') return walk;
+  const target = runtime.avatars.get(goal.employeeId);
+  if (!target) return KEYS_INTENT;
+  if (dist2(path[path.length - 1], target.pos) <= TALK_REPLAN) return walk;
+  return plan(goal, layout) ?? KEYS_INTENT;
+}
+
+// The velocity the walk asks for this frame, or null when the owner is not walking or has just arrived.
+function walkVelocity(layout: Layout): Vec2 | null {
+  const { owner } = runtime;
+  if (owner.intent.kind === 'walk') owner.intent = keepUp(owner.intent, layout);
+  const { intent } = owner;
+  if (intent.kind !== 'walk') return null;
+  const { path } = intent;
+  while (path.length > 1 && dist2(owner.pos, path[0]) < CORNER) path.shift();
+  const next = path[0];
+  const left = dist2(owner.pos, next);
+  const last = path.length === 1;
+  if (last && left < ARRIVE) {
+    owner.intent = KEYS_INTENT;
+    return null;
+  }
+  // Into the last waypoint the speed falls with the distance left. At 3 m/s per meter the owner stops on it, where a
+  // steeper ramp overshoots because the velocity only eases toward what is asked.
+  const top = owner.running ? OWNER_RUN : OWNER_WALK;
+  const speed = last ? Math.min(top, 3 * left) : top;
+  return { x: ((next.x - owner.pos.x) / left) * speed, z: ((next.z - owner.pos.z) / left) * speed };
+}
+
+function keyVelocity(): Vec2 {
   const { owner, view, keys } = runtime;
   const down = (...codes: string[]) => codes.some((c) => keys.has(c));
   const fwd = (down('KeyW', 'ArrowUp') ? 1 : 0) - (down('KeyS', 'ArrowDown') ? 1 : 0);
   const str = (down('KeyD', 'ArrowRight') ? 1 : 0) - (down('KeyA', 'ArrowLeft') ? 1 : 0);
-  owner.running = down('ShiftLeft', 'ShiftRight');
 
   // Movement is relative to where the camera looks, in every camera mode.
   let dx = Math.sin(view.yaw) * fwd - Math.cos(view.yaw) * str;
@@ -93,9 +162,19 @@ function stepOwner(dt: number, layout: Layout, talkingTo: EmployeeId | null) {
     dx /= len;
     dz /= len;
   }
+  return { x: dx * top, z: dz * top };
+}
+
+function stepOwner(dt: number, layout: Layout, talkingTo: EmployeeId | null) {
+  const { owner, view, keys } = runtime;
+  owner.running = keys.has('ShiftLeft') || keys.has('ShiftRight');
+  // Keys always win. input.ts also drops the walk on the key down itself, because a tap can end between two frames.
+  if (STEER_KEYS.some((c) => keys.has(c))) owner.intent = KEYS_INTENT;
+
+  const want = walkVelocity(layout) ?? keyVelocity();
   const a = ease(dt, 12);
-  owner.vel.x += (dx * top - owner.vel.x) * a;
-  owner.vel.z += (dz * top - owner.vel.z) * a;
+  owner.vel.x += (want.x - owner.vel.x) * a;
+  owner.vel.z += (want.z - owner.vel.z) * a;
   owner.pos.x += owner.vel.x * dt;
   owner.pos.z += owner.vel.z * dt;
   pushOut(owner.pos, OWNER_RADIUS, layout.obstacles);

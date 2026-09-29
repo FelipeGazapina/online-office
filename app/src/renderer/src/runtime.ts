@@ -28,7 +28,8 @@ export const runtime = {
     yaw: Math.PI,
     speed: 0,
     running: false,
-    intent: KEYS_INTENT,
+    // Widened on purpose: the constant alone would type this field as only the keys variant.
+    intent: KEYS_INTENT as OwnerIntent,
   },
   // Direction the owner last travelled. The queue trails this, not the body yaw,
   // so turning to look at the first asker does not swing the whole line around.
