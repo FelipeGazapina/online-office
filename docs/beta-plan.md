@@ -79,7 +79,7 @@ Research agents write only to `docs/research/`. From U2 on, every implementation
 | F1 | Claude employee v2 and its UI: permission modes and Always allow (card, drawer, office-side rule check), model picker and live switch, subagent dolls on the desk | C1 | |
 | F2 | Rules and boards: rule files with a watcher, delivery to live sessions, office and block boards, sticky notes on desks, notes on boards, fresh session | F1 | |
 | F3 | Owner's computer: the My Mac portal with its floating panel, the Company area with seats and level ceilings, desks per block from seats | F1 | |
-| N1 | Overview navigation: click to walk with A* around furniture, employee menu (Open chat, Go to), chat transcript in the drawer. Employees route with the same planner, which lands the owner's meeting room (`codex/meeting-room`) without trapping them | U0 | running |
+| N1 | Overview navigation: click to walk with A* around furniture, employee menu (Open chat, Go to), chat transcript in the drawer. Employees route with the same planner, so the owner's meeting room no longer traps them | U0 | done |
 | U5 | Voice through whisper.cpp: push-to-talk and proximity, and a `pnpm beta` launch so macOS asks the app, not the terminal, for the mic. Dictating a rule to a board lands with F2 | R4 | running |
 | U6 | README, then the full end-to-end run for all three harnesses | all | |
 
