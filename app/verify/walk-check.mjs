@@ -198,6 +198,20 @@ const hired = until(() => ann().seated, 60);
 check(hired.done && dist(ann().pos, chair) < 0.05, 'a new hire walks past the meeting room and sits at its desk', `at ${fmt(ann().pos)} after ${hired.seconds.toFixed(0)} s`);
 check(hired.trespass === null, 'the new hire never stands inside a wall or a desk on the way', `at ${hired.trespass}`);
 
+const facing = (d) => Math.abs(angleDiff(runtime.avatars.get(`p${d}`).yaw, deskPose(0, d).yaw));
+const team = Array.from({ length: 6 }, (_, d) => person(`p${d}`, `P${d}`, d));
+reset(team);
+check(team.every((_, d) => runtime.avatars.get(`p${d}`).seated && dist(runtime.avatars.get(`p${d}`).pos, deskPose(0, d).chair) < 0.01), 'a team of six present at the first snapshot sits in its six chairs');
+check(team.every((_, d) => facing(d) < 0.01), 'and each of them sits facing their own desk, whichever way it faces', team.map((_, d) => facing(d).toFixed(2)).join(' '));
+for (const av of runtime.avatars.values()) av.yaw = 1.5;
+step(2);
+check(team.every((_, d) => facing(d) < 0.05), 'a seated employee turned away swings back to face their own desk', team.map((_, d) => facing(d).toFixed(2)).join(' '));
+
+hireLater(1);
+const seatedNorth = until(() => ann().seated, 60);
+step(1.5);
+check(seatedNorth.done && Math.abs(angleDiff(ann().yaw, deskPose(0, 1).yaw)) < 0.05, 'a new hire who walked in facing the door sits down facing a desk that faces south', `${angleDiff(ann().yaw, deskPose(0, 1).yaw).toFixed(2)} rad off`);
+
 for (const [where, owns] of [['outside the room', OWNER_START], ['inside the room, at his desk', { x: -16.5, z: 5.9 }]]) {
   hireLater();
   until(() => ann().seated, 60);

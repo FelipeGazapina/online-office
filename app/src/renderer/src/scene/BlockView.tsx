@@ -1,7 +1,7 @@
 import { memo, useEffect, useMemo, useState } from 'react';
 import { Color } from 'three';
 import { PROVIDERS, type Employee, type ProjectBlock } from '../../../shared/protocol.ts';
-import { BLOCK_D, BLOCK_W, blockCenter, deskPose, signPose, whiteboardPose } from '../layout.ts';
+import { BENCH, blockCenter, deskPose, headPose, RUG_D, RUG_W, signPose, whiteboardPose, type DeskPose } from '../layout.ts';
 import { set } from '../store.ts';
 import { Chair, Desk, RoundedPlane } from './Furniture.tsx';
 import { fitText, FONT_BODY, FONT_DISPLAY, roundRect, useCanvasTexture } from './textures.ts';
@@ -184,30 +184,41 @@ function GithubWhiteboard({ block }: { block: ProjectBlock }) {
   );
 }
 
+// The Desk and Chair models have the chair on their +z side, so their rotationY is the seat's yaw turned half a turn.
+function Workstation({ pose, employee, chairColor }: { pose: DeskPose; employee?: Employee; chairColor: string }) {
+  const rotationY = pose.yaw - Math.PI;
+  return (
+    <group>
+      <Desk
+        position={[pose.desk.x, 0, pose.desk.z]}
+        rotationY={rotationY}
+        screen={employee ? employee.status.kind : 'none'}
+        color={employee ? PROVIDERS[employee.provider].color : '#888'}
+      />
+      <Chair position={[pose.chair.x, 0, pose.chair.z]} rotationY={rotationY} color={chairColor} />
+    </group>
+  );
+}
+
 export const BlockView = memo(function BlockView({ block, employees }: { block: ProjectBlock; employees: Employee[] }) {
   const c = blockCenter(block.slot);
   const s = signPose(block.slot);
   const w = whiteboardPose(block.slot);
   const rug = useMemo(() => new Color(block.color).lerp(FLOOR, 0.12).getStyle(), [block.color]);
+  const chairColor = useMemo(() => shade(block.color, 0.75), [block.color]);
   const trim = useMemo(() => new Color(block.color).multiplyScalar(0.8).getStyle(), [block.color]);
   const author = block.whiteboard ? employees.find((e) => e.id === block.whiteboard!.by)?.name : undefined;
 
   return (
     <group>
       <group position={[c.x, 0, c.z]}>
-        <RoundedPlane w={BLOCK_W - 0.5} d={BLOCK_D - 0.5} r={0.5} color={trim} y={0.008} />
-        <RoundedPlane w={BLOCK_W - 1.0} d={BLOCK_D - 1.0} r={0.35} color={rug} y={0.014} />
+        <RoundedPlane w={RUG_W + 0.5} d={RUG_D + 0.5} r={0.5} color={trim} y={0.008} />
+        <RoundedPlane w={RUG_W} d={RUG_D} r={0.35} color={rug} y={0.014} />
       </group>
-      {[0, 1, 2, 3, 4].map((i) => {
-        const p = deskPose(block.slot, i);
-        const e = employees.find((x) => x.desk === i);
-        return (
-          <group key={i}>
-            <Desk position={[p.desk.x, 0, p.desk.z]} screen={e ? e.status.kind : 'none'} color={e ? PROVIDERS[e.provider].color : '#888'} />
-            <Chair position={[p.chair.x, 0, p.chair.z]} color={shade(block.color, 0.75)} />
-          </group>
-        );
-      })}
+      {BENCH.map((_, i) => (
+        <Workstation key={i} pose={deskPose(block.slot, i)} employee={employees.find((e) => e.desk === i)} chairColor={chairColor} />
+      ))}
+      <Workstation pose={headPose(block.slot)} chairColor={chairColor} />
       <group position={[s.x, 0, s.z]}>
         <Sign name={block.name} cwd={block.cwd} color={block.color} />
       </group>

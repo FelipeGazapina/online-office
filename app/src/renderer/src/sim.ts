@@ -79,7 +79,7 @@ function syncAvatars(company: Company) {
     runtime.avatars.set(e.id, {
       id: e.id,
       pos: new Vector3(start.x, 0, start.z),
-      yaw: Math.PI,
+      yaw: seated ? seat.yaw : Math.PI,
       speed: 0,
       seated,
       leaving: false,
@@ -283,7 +283,7 @@ function stepAvatar(
   if (attentive && (av.seated || dist <= 0.25)) {
     av.yaw += angleDiff(av.yaw, Math.atan2(ownerPos.x - av.pos.x, ownerPos.z - av.pos.z)) * ease(dt, 8);
   } else if (av.seated) {
-    av.yaw += angleDiff(av.yaw, Math.PI) * ease(dt, 6);
+    av.yaw += angleDiff(av.yaw, seat.yaw) * ease(dt, 6);
   }
 }
 
