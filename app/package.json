@@ -54,7 +54,11 @@
     "files": ["out/**/*", "package.json"],
     "mac": {
       "category": "public.app-category.productivity",
-      "target": ["dmg", "zip"]
+      "target": ["dmg", "zip"],
+      "extendInfo": {
+        "NSMicrophoneUsageDescription": "Online Office uses the microphone so you can talk to your AI employees.",
+        "NSUserNotificationUsageDescription": "Online Office uses notifications to let you know when an employee needs your attention."
+      }
     },
     "win": { "target": ["nsis"] },
     "linux": {
