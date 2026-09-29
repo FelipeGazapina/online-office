@@ -9,12 +9,30 @@ import {
   type SDKUserMessage,
 } from '@anthropic-ai/claude-agent-sdk';
 import { SHELL_TOOL, isAllow } from '../../../shared/permissions.ts';
-import type { InterruptStyle, ModelId, PermissionPolicy, QuestionBody } from '../../../shared/protocol.ts';
+import type { InterruptStyle, ModelCatalog, ModelId, ModelOption, PermissionPolicy, QuestionBody } from '../../../shared/protocol.ts';
 import { logger } from '../debug.ts';
 import { persona } from '../persona.ts';
 import type { EmployeeSession, SessionFactory, SessionHost } from './types.ts';
 
 const debug = logger('claude');
+
+const claudeDefaultModel = () => (process.env.OFFICE_CLAUDE_MODEL ?? 'claude-sonnet-5-5') as ModelId;
+
+// Claude's model list is part of the SDK initialization response. Use a short-lived
+// query so opening the hire dialog does not create an employee session.
+export async function listClaudeModels(): Promise<ModelCatalog> {
+  const q = query({ prompt: '', options: { cwd: process.cwd() } });
+  try {
+    const models = await q.supportedModels();
+    const options: ModelOption[] = models
+      .filter((m) => m.value.trim())
+      .map((m) => ({ id: m.value as ModelId, label: m.displayName || m.value }));
+    const defaultModel = claudeDefaultModel();
+    return { kind: 'ready', models: options, defaultModel: options.some((m) => m.id === defaultModel) ? defaultModel : (options[0]?.id ?? defaultModel) };
+  } finally {
+    q.close();
+  }
+}
 
 const short = (s: string, n: number) => {
   const t = s.trim().replace(/\s+/g, ' ');

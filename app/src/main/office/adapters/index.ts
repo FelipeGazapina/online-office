@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process';
 import type { HarnessStatus, ModelId, Provider } from '../../../shared/protocol.ts';
-import { createClaudeSession } from './claude.ts';
+import { createClaudeSession, listClaudeModels } from './claude.ts';
 import { codexDefaultModel, createCodexSession, listCodexModels, setCodexRoot } from './codex.ts';
 import { createHermesSession, hermesDefaultModel, listHermesModels } from './hermes.ts';
 import type { Harness } from './types.ts';
@@ -28,6 +28,7 @@ export const HARNESSES: Record<Provider, Harness> = {
   'claude-code': {
     detect: claudeVersion,
     defaultModel: () => (process.env.OFFICE_CLAUDE_MODEL ?? 'claude-sonnet-5-5') as ModelId,
+    listModels: listClaudeModels,
     session: createClaudeSession,
   },
   codex: { detect: () => cliVersion('codex'), defaultModel: codexDefaultModel, listModels: listCodexModels, session: createCodexSession },
