@@ -1,6 +1,6 @@
 import type { ServerMessage } from '../../shared/protocol.ts';
 import { heard } from './audio.ts';
-import { employeeById, set, toast } from './store.ts';
+import { employeeById, get, set, toast } from './store.ts';
 
 const LOG_CAP = 200;
 
@@ -16,7 +16,7 @@ export function applyServerMessage(msg: ServerMessage) {
     case 'said': {
       const e = employeeById(msg.employeeId);
       addLog(msg.employeeId, `says: ${msg.text}`, Date.now());
-      if (e) heard(e, msg.text);
+      if (e && get().meetingDoor === 'open') heard(e, msg.text);
       break;
     }
     case 'log':

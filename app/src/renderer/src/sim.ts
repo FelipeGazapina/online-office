@@ -18,6 +18,7 @@ import {
 } from './layout.ts';
 import { runtime, type AvatarRT } from './runtime.ts';
 import { get, set, waitingQueue } from './store.ts';
+import { ownerInsideMeetingRoom } from './meeting.ts';
 
 const OWNER_WALK = 3.0;
 const OWNER_RUN = 5.4;
@@ -174,6 +175,7 @@ function stepAvatar(
 }
 
 function nearestInRange(company: Company, current: EmployeeId | null): EmployeeId | null {
+  if (get().meetingDoor === 'closed' && ownerInsideMeetingRoom()) return null;
   const { pos } = runtime.owner;
   let best: EmployeeId | null = null;
   let bestD = Infinity;
