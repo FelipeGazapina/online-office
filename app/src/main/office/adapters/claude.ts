@@ -7,6 +7,7 @@ import {
   type SDKResultMessage,
   type SDKUserMessage,
 } from '@anthropic-ai/claude-agent-sdk';
+import { SHELL_TOOL, isAllow } from '../../../shared/permissions.ts';
 import type { InterruptStyle, QuestionBody } from '../../../shared/protocol.ts';
 import { logger } from '../debug.ts';
 import { persona } from '../persona.ts';
@@ -34,9 +35,6 @@ const OFFICE_TOOL_PREFIX = 'mcp__office__';
 // OFFICE_BASH=allow skips the question for shell commands and everything else that would ask.
 const runsUnasked = (toolName: string) =>
   process.env.OFFICE_BASH === 'allow' || AUTO_ALLOW.has(toolName) || toolName.startsWith(OFFICE_TOOL_PREFIX);
-
-// "Yes", "sim, pode fazer", "OK go" all count. Anything else is a no and the text goes back to the agent.
-const ALLOW_WORDS = /^\s*(allow|yes|y|sure|ok|okay|sim|pode)\b/i;
 
 // Claude Code aborts an HTTP MCP call that has sent no response or progress for 5 minutes, and an owner can take longer
 // than that to answer. Only a per-server `timeout` lifts that limit: MCP_TOOL_TIMEOUT alone does not (verify/claude-timeout-probe.ts).
@@ -100,14 +98,16 @@ function describeTool(name: string, input: Record<string, unknown>, cwd: string)
   }
 }
 
-// What the card shows next to Allow / Deny: the shell command, or the file the tool wants to touch.
+// What the card shows next to Allow / Deny: the shell command, or the file the tool wants to touch. The office matches
+// Always allow rules against `tool` and `detail`, so a shell command must go out as SHELL_TOOL with the bare command.
 function permissionBody(name: string, input: Record<string, unknown>, cwd: string): QuestionBody {
   const target = targetOf(input, cwd);
+  const shell = name === 'Bash';
   return {
     kind: 'permission',
-    text: name === 'Bash' ? 'Can I run a shell command?' : `Can I use ${name}?`,
-    tool: name,
-    detail: name === 'Bash' ? str(input.command).trim() : target || short(JSON.stringify(input), 200),
+    text: shell ? 'Can I run a shell command?' : `Can I use ${name}?`,
+    tool: shell ? SHELL_TOOL : name,
+    detail: shell ? str(input.command).trim() : target || short(JSON.stringify(input), 200),
   };
 }
 
@@ -343,7 +343,7 @@ class ClaudeSession implements EmployeeSession {
     if (runsUnasked(toolName)) return { behavior: 'allow', updatedInput: input };
     const { cwd } = this.host.block;
     const answer = await this.host.ask(permissionBody(toolName, input, cwd), AbortSignal.any([signal, this.life.signal]));
-    if (ALLOW_WORDS.test(answer)) return { behavior: 'allow', updatedInput: input };
+    if (isAllow(answer)) return { behavior: 'allow', updatedInput: input };
     return { behavior: 'deny', message: `The boss did not allow this. They said: ${answer || 'no'}` };
   };
 }

