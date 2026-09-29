@@ -36,18 +36,37 @@ export function CameraRig() {
   useEffect(() => {
     const el = gl.domElement;
     let drag: { x: number; y: number; ox: number; oy: number; far: boolean } | null = null;
+    let overScene = false;
+    const enter = () => { overScene = true; };
+    const leave = () => { overScene = false; };
     const down = (e: PointerEvent) => {
       drag = { x: e.clientX, y: e.clientY, ox: e.clientX, oy: e.clientY, far: false };
     };
     const move = (e: PointerEvent) => {
+      const { view } = runtime;
+      const m = get().camera;
+      // Follow and first-person look continuously while the office is focused;
+      // they do not require the owner to hold the mouse button. movementX/Y
+      // are relative deltas, so looking keeps working after the cursor reaches
+      // a screen edge. Drag state remains for click detection and overview.
+      if (!drag && overScene && document.hasFocus() && (m === 'follow' || m === 'first')) {
+        const dx = e.movementX;
+        const dy = e.movementY;
+        if (m === 'follow') {
+          view.yaw -= dx * 0.006;
+          view.pitch = clamp(view.pitch + dy * 0.004, 0.08, 1.3);
+        } else {
+          view.yaw -= dx * 0.004;
+          view.fpPitch = clamp(view.fpPitch - dy * 0.004, -1.25, 1.25);
+        }
+        return;
+      }
       if (!drag) return;
       const dx = e.clientX - drag.x;
       const dy = e.clientY - drag.y;
       drag.x = e.clientX;
       drag.y = e.clientY;
       drag.far ||= Math.hypot(e.clientX - drag.ox, e.clientY - drag.oy) >= DRAG_PX;
-      const { view } = runtime;
-      const m = get().camera;
       if (m === 'follow') {
         view.yaw -= dx * 0.006;
         view.pitch = clamp(view.pitch + dy * 0.004, 0.08, 1.3);
@@ -69,11 +88,15 @@ export function CameraRig() {
       if (m === 'iso') view.isoDist = clamp(view.isoDist + e.deltaY * 0.03, 18, 72);
     };
     el.addEventListener('pointerdown', down);
+    el.addEventListener('pointerenter', enter);
+    el.addEventListener('pointerleave', leave);
     window.addEventListener('pointermove', move);
     window.addEventListener('pointerup', up);
     el.addEventListener('wheel', wheel, { passive: true });
     return () => {
       el.removeEventListener('pointerdown', down);
+      el.removeEventListener('pointerenter', enter);
+      el.removeEventListener('pointerleave', leave);
       window.removeEventListener('pointermove', move);
       window.removeEventListener('pointerup', up);
       el.removeEventListener('wheel', wheel);
