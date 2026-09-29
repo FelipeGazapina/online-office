@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { execFileSync } from 'node:child_process';
 import { mkdirSync, readFileSync, realpathSync, renameSync, statSync, writeFileSync } from 'node:fs';
 import { basename, dirname, isAbsolute } from 'node:path';
 import { ALLOW_ANSWER, covers, isAllow, ruleFor, sameRule, type PermissionBody } from '../../shared/permissions.ts';
@@ -109,6 +110,20 @@ function canonicalDir(path: string): string {
   throw new OfficeError(`${path} is not a folder that exists`);
 }
 
+function githubRemote(cwd: string): string | undefined {
+  try {
+    const remote = execFileSync('git', ['-C', cwd, 'remote', 'get-url', 'origin'], { encoding: 'utf8', timeout: 2000 }).trim();
+    const ssh = /^git@github\.com:([^/]+\/[^/]+?)(?:\.git)?$/.exec(remote);
+    if (ssh) return `https://github.com/${ssh[1]}`;
+    const url = new URL(remote);
+    if (url.hostname !== 'github.com') return undefined;
+    const path = url.pathname.replace(/^\//, '').replace(/\.git$/, '');
+    return path.split('/').length === 2 ? `https://github.com/${path}` : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 function seed(): Company {
   const requested = Number.parseInt(process.env.OFFICE_START_LEVEL ?? '1', 10);
   const level = Math.min(Math.max(Number.isNaN(requested) ? 1 : requested, 1), MAX_LEVEL);
@@ -137,6 +152,7 @@ function migrate(c: StoredCompany): Company {
   return {
     ...c,
     settings,
+    blocks: c.blocks.map((b) => ({ ...b, githubRepo: b.githubRepo ?? githubRemote(b.cwd) })),
     employees: c.employees.map((e) => ({
       ...e,
       model: e.model ?? HARNESSES[e.provider].defaultModel(),
@@ -482,7 +498,8 @@ export class Office {
     while (slots.has(slot)) slot++;
     const usedColors = new Set(blocks.map((b) => b.color));
     const color = BLOCK_COLORS.find((c) => !usedColors.has(c)) ?? BLOCK_COLORS[slot % BLOCK_COLORS.length]!;
-    blocks.push({ id: newId<BlockId>(), name: name?.trim() || basename(cwd), cwd, color, slot, ...(githubRepo && { githubRepo: githubRepo.trim().replace(/\/$/, '') }) });
+    const repo = githubRepo?.trim().replace(/\/$/, '') || githubRemote(cwd);
+    blocks.push({ id: newId<BlockId>(), name: name?.trim() || basename(cwd), cwd, color, slot, ...(repo && { githubRepo: repo }) });
     this.commit();
   }
 
