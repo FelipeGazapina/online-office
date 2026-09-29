@@ -7,9 +7,11 @@ import {
   PROVIDERS,
   XP_FOR_LEVEL,
   headcountCap,
+  seatCeiling,
   type BlockId,
   type ClientMessage,
   type Company,
+  type CompanySettings,
   type Employee,
   type EmployeeId,
   type EmployeeStatus,
@@ -96,8 +98,33 @@ function seed(): Company {
     name: 'Gazapina Labs',
     level,
     xp: XP_FOR_LEVEL[level],
+    settings: { seats: seatCeiling(level), defaultModels: {}, defaultPermissions: 'inherit' },
     blocks: [],
     employees: [],
+  };
+}
+
+// What company.json holds: the company as it was before the fields below existed, or since.
+type StoredEmployee = Omit<Employee, 'model' | 'permissions' | 'subagents'> & Partial<Pick<Employee, 'model' | 'permissions'>>;
+type StoredCompany = Omit<Company, 'settings' | 'employees'> & { settings?: Partial<CompanySettings>; employees: StoredEmployee[] };
+
+// Every field added after the first release gets its default here and nowhere else, so an old file and a new one
+// load to the same company, and saving what this returns is the same file again.
+function migrate(c: StoredCompany): Company {
+  const settings: CompanySettings = {
+    seats: c.settings?.seats ?? seatCeiling(c.level),
+    defaultModels: c.settings?.defaultModels ?? {},
+    defaultPermissions: c.settings?.defaultPermissions ?? 'inherit',
+  };
+  return {
+    ...c,
+    settings,
+    employees: c.employees.map((e) => ({
+      ...e,
+      model: e.model ?? HARNESSES[e.provider].defaultModel(),
+      permissions: e.permissions ?? { mode: settings.defaultPermissions, alwaysAllow: [] },
+      subagents: [],
+    })),
   };
 }
 
@@ -109,16 +136,18 @@ function load(file: string): Company | undefined {
     return undefined;
   }
   // Only this process writes the file, so a shape check is enough; anything odd falls back to a fresh seed.
-  const c = raw as Partial<Company> | null;
+  const c = raw as Partial<StoredCompany> | null;
   if (!c || typeof c.name !== 'string' || typeof c.level !== 'number' || typeof c.xp !== 'number') return undefined;
   if (!Array.isArray(c.blocks) || !Array.isArray(c.employees)) return undefined;
-  return c as Company;
+  return migrate(c as StoredCompany);
 }
 
+// Subagents belong to a running session, so they are never written.
 function save(file: string, company: Company) {
   mkdirSync(dirname(file), { recursive: true });
   const tmp = `${file}.tmp`;
-  writeFileSync(tmp, JSON.stringify(company, null, 2));
+  const stored = { ...company, employees: company.employees.map(({ subagents: _, ...e }) => e) };
+  writeFileSync(tmp, JSON.stringify(stored, null, 2));
   renameSync(tmp, file);
 }
 
@@ -221,6 +250,8 @@ export class Office {
 
   private startSession(employee: Employee) {
     const block = this.block(employee.blockId);
+    // Whatever the last session had running died with it.
+    employee.subagents = [];
     let session: EmployeeSession | undefined;
     // A stopped session (fired, reset, block moved) can still have a message in flight.
     // Dropping its callbacks here keeps it from touching a newer company.
@@ -256,6 +287,12 @@ export class Office {
       employee,
       block,
       companyName: this.company.name,
+      get model() {
+        return employee.model;
+      },
+      get permissions() {
+        return employee.permissions;
+      },
       setStatus: live((status) => this.report(employee, { status })),
       setActivity: live((text) => this.report(employee, { activity: text })),
       setSessionId: live((id) => {
@@ -349,6 +386,9 @@ export class Office {
       desk,
       status: { kind: 'idle' },
       activity: 'Just started, settling in at my desk',
+      model: company.settings.defaultModels[provider] ?? HARNESSES[provider].defaultModel(),
+      permissions: { mode: company.settings.defaultPermissions, alwaysAllow: [] },
+      subagents: [],
       hiredAt: Date.now(),
     };
     company.employees.push(employee);

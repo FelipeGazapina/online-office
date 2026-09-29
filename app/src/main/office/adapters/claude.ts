@@ -231,7 +231,7 @@ class ClaudeSession implements EmployeeSession {
       prompt: this.inbox,
       options: {
         cwd: block.cwd,
-        model: process.env.OFFICE_CLAUDE_MODEL ?? 'claude-sonnet-5-5',
+        model: this.host.model,
         // 'project' only: the boss's global plugins and hooks must not leak into employees.
         settingSources: ['project'],
         permissionMode: PERMISSION_MODE,

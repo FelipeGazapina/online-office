@@ -2,6 +2,8 @@ import type {
   Employee,
   EmployeeStatus,
   InterruptStyle,
+  ModelId,
+  PermissionPolicy,
   ProjectBlock,
   QuestionBody,
 } from '../../../shared/protocol.ts';
@@ -12,6 +14,12 @@ export type SessionHost = {
   readonly employee: Readonly<Employee>;
   readonly block: Readonly<ProjectBlock>;
   readonly companyName: string;
+  // The model this employee runs on now, in the words of its harness. Read it whenever a session or a turn starts.
+  readonly model: ModelId;
+  // How much this employee may do without asking, now. `inherit` means the owner's own settings for the harness.
+  // The office answers `alwaysAllow` itself, before a card reaches the owner, so an adapter only maps `mode` onto
+  // its harness's switches.
+  readonly permissions: PermissionPolicy;
   setStatus(status: EmployeeStatus): void;
   setActivity(text: string): void;
   setSessionId(id: string): void;
@@ -47,3 +55,14 @@ export interface EmployeeSession {
 }
 
 export type SessionFactory = (host: SessionHost) => EmployeeSession;
+
+// One entry per provider in HARNESSES, so adding a provider to the contract fails typecheck until it is described here.
+export type Harness = {
+  // Resolves to the harness version, or null when it is not installed.
+  detect(): Promise<string | null>;
+  // The model a new employee starts on when the owner picks none, in the harness's own words. A function so the
+  // environment is read when someone is hired, not when the module loads.
+  defaultModel(): ModelId;
+  // A harness without a `session` factory is installed but not wired: the hire modal shows it, and hiring it is refused.
+  session?: SessionFactory;
+};

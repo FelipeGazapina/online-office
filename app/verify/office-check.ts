@@ -1,13 +1,13 @@
 // No model, no Electron. The real Office, MCP server, inbox and memory store, with a scripted stand-in for the harness.
 // It checks what the owner would see: cards, the order they come in, and where an employee goes back to afterwards.
 // Run from app/: node verify/office-check.ts   Exits 1 on any failed check.
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, realpathSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { commandPrefix, covers, isAllow, ruleFor, sameRule, type PermissionBody } from '../src/shared/permissions.ts';
-import type { AllowRule, Employee, EmployeeId, EmployeeStatus, Question } from '../src/shared/protocol.ts';
+import { SEAT_CEILING, type AllowRule, type Company, type Employee, type EmployeeId, type EmployeeStatus, type HarnessStatus, type ModelId, type Provider, type Question } from '../src/shared/protocol.ts';
 import { HARNESSES } from '../src/main/office/adapters/index.ts';
 import type { SessionHost } from '../src/main/office/adapters/types.ts';
 import { Office, OfficeError } from '../src/main/office/company.ts';
@@ -16,6 +16,7 @@ import { MemoryStore } from '../src/main/office/memory.ts';
 import { check, finish, until } from './check.ts';
 
 process.env.OFFICE_START_LEVEL = '3';
+delete process.env.OFFICE_CLAUDE_MODEL;
 
 const dir = realpathSync(mkdtempSync(join(tmpdir(), 'office-check-')));
 const repo = join(dir, 'repo');
@@ -28,6 +29,7 @@ const mcp = await startOfficeMcp();
 type Fake = { host: SessionHost; assigned: string[]; interjected: string[]; stopped: boolean };
 const fakes: Fake[] = [];
 HARNESSES['claude-code'] = {
+  ...HARNESSES['claude-code'],
   detect: async () => 'fake',
   session: (host) => {
     const fake: Fake = { host, assigned: [], interjected: [], stopped: false };
@@ -251,6 +253,53 @@ check(fb.host.memoryDigest().includes('- Standup is at 09:40') && fb.host.memory
 await client.callTool({ name: 'remember', arguments: { scope: 'me', title: 'Ana likes short plans', body: 'x' } });
 check(fa.host.memoryDigest().includes('About you\n- Ana likes short plans') && !fb.host.memoryDigest().includes('short plans'), 'personal notes reach only their owner');
 await client.close().catch(() => undefined);
+
+console.log('\n# an old company.json');
+const statuses: Record<Provider, HarnessStatus> = { 'claude-code': { kind: 'ready', version: 'fake' }, codex: { kind: 'missing' }, hermes: { kind: 'missing' } };
+const quiet = { changed() {}, said() {}, log() {} };
+const fixture = readFileSync(new URL('./fixtures/company-v1.json', import.meta.url), 'utf8').replaceAll('__REPO__', repo);
+const stored = (file: string) => JSON.parse(readFileSync(file, 'utf8')) as Company;
+const oldFile = join(dir, 'old', 'company.json');
+mkdirSync(join(dir, 'old'));
+writeFileSync(oldFile, fixture);
+check(!fixture.includes('"model"') && !fixture.includes('"permissions"') && !fixture.includes('"settings"'), 'the fixture is a company.json from before models, permissions and settings');
+
+process.env.OFFICE_CLAUDE_MODEL = 'env-model';
+const loaded = new Office(oldFile, statuses, quiet, { mcp, memory });
+const migrated = loaded.snapshot().company;
+check(migrated.employees.length === 2 && migrated.employees.every((e) => e.model === 'env-model'), 'a Claude employee without a model gets OFFICE_CLAUDE_MODEL');
+check(migrated.employees.every((e) => JSON.stringify(e.permissions) === '{"mode":"inherit","alwaysAllow":[]}' && e.subagents.length === 0), 'every employee gets the inherit mode, no rules and no subagents');
+check(JSON.stringify(migrated.settings) === JSON.stringify({ seats: SEAT_CEILING[3], defaultModels: {}, defaultPermissions: 'inherit' }) && migrated.settings.seats !== SEAT_CEILING[3], 'the company settings default to the seat ceiling of level 3, a copy, with no default models and inherit');
+check(migrated.employees[0]!.name === 'Ana' && migrated.employees[0]!.sessionId === '7f2c5e0a-1111-4222-8333-944455556666' && migrated.blocks[0]!.whiteboard?.title === 'Billing flow' && migrated.xp === 90, 'what the old file held is still there');
+check(migrated.employees[1]!.status.kind === 'idle' && migrated.employees[1]!.activity === 'Back from a break (app restarted)', 'the restart rule for a busy employee still applies');
+const onDisk = stored(oldFile);
+check(onDisk.employees.every((e) => e.model === 'env-model' && e.permissions.mode === 'inherit') && onDisk.settings.seats.total === 4, 'the migrated file is written back');
+check(!readFileSync(oldFile, 'utf8').includes('subagents'), 'no subagents key is written');
+const once = readFileSync(oldFile, 'utf8');
+loaded.shutdown();
+const reloaded = new Office(oldFile, statuses, quiet, { mcp, memory });
+check(readFileSync(oldFile, 'utf8') === once, 'loading the migrated file again writes the same bytes');
+reloaded.shutdown();
+
+delete process.env.OFFICE_CLAUDE_MODEL;
+writeFileSync(oldFile, fixture);
+const fallback = new Office(oldFile, statuses, quiet, { mcp, memory });
+check(fallback.snapshot().company.employees.every((e) => e.model === 'claude-sonnet-5-5'), 'without OFFICE_CLAUDE_MODEL the model is the harness default');
+fallback.shutdown();
+
+const partial = { ...JSON.parse(fixture), settings: { defaultPermissions: 'yolo', defaultModels: { 'claude-code': 'company-pick' } } };
+const partialFile = join(dir, 'old', 'partial.json');
+writeFileSync(partialFile, JSON.stringify(partial));
+const withSettings = new Office(partialFile, statuses, quiet, { mcp, memory });
+const settled = withSettings.snapshot().company;
+check(settled.settings.defaultPermissions === 'yolo' && settled.settings.seats.perBlock === 3 && settled.employees.every((e) => e.permissions.mode === 'yolo'), 'a file with some settings keeps them, fills the rest, and its old employees take the company default mode');
+withSettings.handle({ type: 'hire', provider: 'claude-code', blockId: settled.blocks[0]!.id, name: 'Cy' });
+const cy = withSettings.snapshot().company.employees.find((e) => e.name === 'Cy')!;
+check(cy.model === ('company-pick' as ModelId) && cy.permissions.mode === 'yolo' && cy.subagents.length === 0, 'a new hire takes the company default model and mode');
+withSettings.shutdown();
+
+check(JSON.stringify(company().settings) === JSON.stringify({ seats: SEAT_CEILING[3], defaultModels: {}, defaultPermissions: 'inherit' }), 'a company started from scratch has the same defaults');
+check(company().employees.every((e) => e.model === 'claude-sonnet-5-5' && e.permissions.mode === 'inherit'), 'and so do its hires');
 
 console.log('\n# fire, reset, shutdown');
 const pending = fa.host.ask({ kind: 'ask', text: 'Any last words?' });

@@ -66,6 +66,11 @@ export type Employee = {
   desk: number;
   status: EmployeeStatus;
   activity: string;
+  // What the harness runs on from the next turn. Chosen at hire, changed with `set_model`.
+  model: ModelId;
+  permissions: PermissionPolicy;
+  // The subagents running now. They live and die with the session, so company.json never holds them.
+  subagents: Subagent[];
   sessionId?: string;
   hiredAt: number;
 };
@@ -105,6 +110,7 @@ export type Company = {
   name: string;
   level: number;
   xp: number;
+  settings: CompanySettings;
   blocks: ProjectBlock[];
   employees: Employee[];
 };
