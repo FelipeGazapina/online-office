@@ -383,6 +383,8 @@ export function stepSim(rawDt: number) {
       askerId,
       // Proximity opens the side chat and follows the closest person as the owner moves.
       ...(talkingTo && talkingTo !== state.talkingTo ? { selectedId: talkingTo } : {}),
+      // Close the drawer when the owner leaves the employee who opened it through proximity chat.
+      ...(state.talkingTo && !talkingTo && state.selectedId === state.talkingTo ? { selectedId: null } : {}),
       ...(askerId !== state.askerId ? { cardMinimized: false } : {}),
     });
   }

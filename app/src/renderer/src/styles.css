@@ -113,6 +113,7 @@ h3 {
   margin-top: 5px;
   font-size: 11px;
 }
+.board-page iframe { display: block; width: 100%; height: min(72vh, 680px); border: 0; background: white; border-radius: 10px; }
 
 .computer-menu {
   position: fixed;
