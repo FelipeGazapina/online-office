@@ -77,6 +77,9 @@ export default async (s) => {
   await s.waitFor(`[...document.querySelectorAll('.toast')].some(t => t.innerText.includes('not connected to the office'))`);
   assert((await s.eval(`${company}.employees.length`)) === 1, 'main refused to hire a provider that is not wired');
 
+  const hired = await s.eval(claude);
+  assert(hired.model === HAIKU && hired.permissions.mode === 'inherit' && hired.permissions.alwaysAllow.length === 0 && hired.subagents.length === 0, `the hire took OFFICE_CLAUDE_MODEL and the company default mode (${hired.model})`);
+
   const name = await s.eval(`${claude}.name`);
   await s.eval('__office.step(25)');
   assert(await walkUpToClaude(s), `walked up to ${name}`);
@@ -133,9 +136,49 @@ export default async (s) => {
   await s.waitFor(`${status}.kind === 'idle'`, 120000);
   assert(existsSync(join(repo, 'done.txt')), 'the allowed command ran (done.txt exists)');
 
+  // Claude runs a subagent in the background unless told not to, and the call that launched it then returns at once.
+  // So the check times the doll. One that ended with that call would last a few milliseconds, and a subagent needs at
+  // least a model call and two reads.
+  await stepUntil(s, '__office.state().avatars[0].seated', 60000, 'the employee to sit back down');
+  assert(await walkUpToClaude(s), `walked up to ${name} a third time`);
+  await s.eval(`(() => {
+    window.__dolls = [];
+    __office.store.subscribe((state) => {
+      const e = state.company?.employees.find((x) => x.provider === 'claude-code');
+      const n = e?.subagents.length ?? 0;
+      if (n !== (window.__dolls.at(-1)?.n ?? 0)) window.__dolls.push({ n, at: Date.now(), status: e.status.kind, labels: e.subagents.map((x) => x.label), parents: e.subagents.map((x) => x.parentId) });
+    });
+  })()`);
+  await typeToNearest(
+    s,
+    'Use the Agent tool exactly once. Give the subagent this prompt: "Read hello.txt and done.txt in the current folder one at a time, then reply with the word DONE." Then tell me what it replied.',
+  );
+  let heldSubagent = false;
+  const watchFrom = Date.now();
+  while (!(await s.eval('window.__dolls.some((d) => d.n > 0) && window.__dolls.at(-1).n === 0'))) {
+    if (Date.now() - watchFrom > 180000) throw new Error('timeout waiting for a subagent to show up and end');
+    heldSubagent ||= readFileSync(join(dataDir, 'company.json'), 'utf8').includes('"subagents"');
+    if ((await s.eval(`${status}.kind`)) === 'blocked_on_owner') {
+      console.log('the subagent asked permission:', JSON.stringify(await s.eval(`${status}.question`)));
+      await s.eval(`window.office.send({ type: 'answer', employeeId: ${claude}.id, questionId: ${status}.question.id, text: 'Allow' })`);
+    }
+    await s.sleep(100);
+  }
+  const dolls = await s.eval('window.__dolls');
+  console.log('subagents seen on the desk:', JSON.stringify(dolls));
+  assert(dolls[0].n >= 1 && dolls[0].labels[0]?.length > 0 && dolls[0].parents[0] === null, `a subagent showed on the employee while it ran, labelled "${dolls[0].labels[0]}"`);
+  const lifetime = dolls.at(-1).at - dolls[0].at;
+  assert(lifetime >= 1500, `the doll stayed for the whole run of the subagent, ${(lifetime / 1000).toFixed(1)}s, not just for the call that launched it`);
+  assert(dolls.at(-1).n === 0 && (await s.eval(`${claude}.subagents.length`)) === 0, 'and it was gone once it ended');
+  console.log(`the employee was ${dolls[0].status} when the doll appeared and ${dolls.at(-1).status} when it left`);
+  assert(!heldSubagent, 'company.json never held the subagent while it ran');
+  await s.waitFor(`${status}.kind === 'idle'`, 120000);
+
   // The company file lives under the data dir, and holds the block and the employee.
   const saved = JSON.parse(readFileSync(join(dataDir, 'company.json'), 'utf8'));
   assert(saved.blocks.length === 1 && saved.employees.length === 1, `company.json in OFFICE_DATA_DIR has 1 block and 1 employee (xp ${saved.xp})`);
+  const [savedEmployee] = saved.employees;
+  assert(savedEmployee.model === HAIKU && savedEmployee.permissions.mode === 'inherit' && !('subagents' in savedEmployee) && saved.settings.defaultPermissions === 'inherit', 'company.json holds the model, the policy and the settings, and no subagents');
 
   // Whiteboard: mermaid must still render under the built page's CSP.
   await s.eval(`(() => {

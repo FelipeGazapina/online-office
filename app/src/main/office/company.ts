@@ -113,7 +113,7 @@ function seed(): Company {
   };
 }
 
-// What company.json holds: the company as it was before the fields below existed, or since.
+// What company.json can hold: a company from before models, permissions and settings existed, or from after.
 type StoredEmployee = Omit<Employee, 'model' | 'permissions' | 'subagents'> & Partial<Pick<Employee, 'model' | 'permissions'>>;
 type StoredCompany = Omit<Company, 'settings' | 'employees'> & { settings?: Partial<CompanySettings>; employees: StoredEmployee[] };
 
@@ -579,8 +579,8 @@ export class Office {
     this.events.changed();
   }
 
-  // The old session is stopped with its questions, and the conversation it kept is never resumed: with no sessionId,
-  // the new one has nothing to resume. The employee keeps their notes, model and rules.
+  // The old session stops with its questions. With no sessionId left, the new one has no conversation to resume.
+  // The employee keeps their notes, model and rules.
   private freshSession(id: EmployeeId) {
     const e = this.employee(id);
     this.stopSession(id);
