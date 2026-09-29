@@ -185,7 +185,7 @@ function GithubWhiteboard({ block }: { block: ProjectBlock }) {
 }
 
 // The Desk and Chair models have the chair on their +z side, so their rotationY is the seat's yaw turned half a turn.
-function Workstation({ pose, employee, chairColor }: { pose: DeskPose; employee?: Employee; chairColor: string }) {
+function Workstation({ pose, employee, chairColor, plate }: { pose: DeskPose; employee?: Employee; chairColor: string; plate?: string }) {
   const rotationY = pose.yaw - Math.PI;
   return (
     <group>
@@ -194,6 +194,7 @@ function Workstation({ pose, employee, chairColor }: { pose: DeskPose; employee?
         rotationY={rotationY}
         screen={employee ? employee.status.kind : 'none'}
         color={employee ? PROVIDERS[employee.provider].color : '#888'}
+        plate={plate}
       />
       <Chair position={[pose.chair.x, 0, pose.chair.z]} rotationY={rotationY} color={chairColor} />
     </group>
@@ -218,7 +219,7 @@ export const BlockView = memo(function BlockView({ block, employees }: { block: 
       {BENCH.map((_, i) => (
         <Workstation key={i} pose={deskPose(block.slot, i)} employee={employees.find((e) => e.desk === i)} chairColor={chairColor} />
       ))}
-      <Workstation pose={headPose(block.slot)} chairColor={chairColor} />
+      <Workstation pose={headPose(block.slot)} chairColor={chairColor} plate="PO" />
       <group position={[s.x, 0, s.z]}>
         <Sign name={block.name} cwd={block.cwd} color={block.color} />
       </group>

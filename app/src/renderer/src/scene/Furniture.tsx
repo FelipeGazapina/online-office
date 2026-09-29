@@ -2,7 +2,7 @@ import { useFrame } from '@react-three/fiber';
 import { useEffect, useMemo, useRef } from 'react';
 import { Color, Shape, ShapeGeometry, type MeshStandardMaterial } from 'three';
 import type { Employee } from '../../../shared/protocol.ts';
-import { codeTexture } from './textures.ts';
+import { codeTexture, FONT_DISPLAY, fitText, roundRect, useCanvasTexture } from './textures.ts';
 
 export type ScreenKind = Employee['status']['kind'] | 'none';
 
@@ -44,18 +44,46 @@ function Screen({ kind, color }: { kind: ScreenKind; color: string }) {
   );
 }
 
+// A nameplate on the desktop, turned away from the person at the desk so it reads to whoever looks at the desk.
+function Nameplate({ text }: { text: string }) {
+  const tex = useCanvasTexture(256, 96, (g) => {
+    g.fillStyle = '#20263a';
+    roundRect(g, 0, 0, 256, 96, 16);
+    g.fill();
+    g.fillStyle = '#f3e7c9';
+    g.textAlign = 'center';
+    g.textBaseline = 'middle';
+    fitText(g, text, 220, 72, 800, FONT_DISPLAY);
+    g.fillText(text, 128, 52);
+  }, [text]);
+  return (
+    <group position={[0, 0.755, -0.3]} rotation-y={Math.PI}>
+      <mesh castShadow position={[0, 0.07, 0]}>
+        <boxGeometry args={[0.4, 0.14, 0.02]} />
+        <meshStandardMaterial color="#20263a" roughness={0.6} />
+      </mesh>
+      <mesh position={[0, 0.07, 0.0105]}>
+        <planeGeometry args={[0.4, 0.14]} />
+        <meshStandardMaterial map={tex} transparent roughness={0.5} />
+      </mesh>
+    </group>
+  );
+}
+
 export function Desk({
   position,
   rotationY = 0,
   screen,
   color = '#6f7cff',
   tall = false,
+  plate,
 }: {
   position: [number, number, number];
   rotationY?: number;
   screen: ScreenKind;
   color?: string;
   tall?: boolean;
+  plate?: string;
 }) {
   return (
     <group position={position} rotation-y={rotationY}>
@@ -97,6 +125,7 @@ export function Desk({
         </mesh>
         <Screen kind={screen} color={color} />
       </group>
+      {plate && <Nameplate text={plate} />}
     </group>
   );
 }
