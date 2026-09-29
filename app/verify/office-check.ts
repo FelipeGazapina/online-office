@@ -26,7 +26,7 @@ const memory = MemoryStore.open(memRoot);
 const mcp = await startOfficeMcp();
 
 // What a harness adapter does, reduced to its calls into the host.
-type Fake = { host: SessionHost; assigned: string[]; interjected: string[]; models: string[]; policies: PermissionPolicy[]; stopped: boolean };
+type Fake = { host: SessionHost; assigned: string[]; interjected: string[]; models: string[]; policies: PermissionPolicy[]; notices: string[]; stopped: boolean };
 const fakes: Fake[] = [];
 let listing: { resolve(catalog: ModelCatalog): void; reject(err: Error): void } | undefined;
 let listCalls = 0;
@@ -38,7 +38,7 @@ HARNESSES['claude-code'] = {
     return new Promise((resolve, reject) => void (listing = { resolve, reject }));
   },
   session: (host) => {
-    const fake: Fake = { host, assigned: [], interjected: [], models: [], policies: [], stopped: false };
+    const fake: Fake = { host, assigned: [], interjected: [], models: [], policies: [], notices: [], stopped: false };
     fakes.push(fake);
     return {
       assign: (task) => {
@@ -49,6 +49,7 @@ HARNESSES['claude-code'] = {
       interject: (text) => void fake.interjected.push(text),
       setModel: (model) => void fake.models.push(model),
       permissionsChanged: (policy) => void fake.policies.push(policy),
+      rulesChanged: (text) => void fake.notices.push(text),
       stop: () => void (fake.stopped = true),
     };
   },
@@ -164,6 +165,7 @@ const [fa, fb] = fakes as [Fake, Fake];
 check(fakes.length === 2, 'each hire builds a session from the harness factory');
 check(/^http:\/\/127\.0\.0\.1:\d+\/mcp\/[0-9a-f]{64}$/.test(fa.host.mcp.url) && fa.host.mcp.name === 'office' && fa.host.mcp.url !== fb.host.mcp.url, 'each host carries its own office MCP URL');
 check(fa.host.memoryDigest() === '', 'the digest is empty before any note is saved');
+check(fa.host.rules() === '' && fb.host.rules() === '', 'no rules are in scope until F2 reads the rule files');
 
 console.log('\n# owner questions');
 office.handle({ type: 'assign', employeeId: ana, task: 'Refactor billing' });

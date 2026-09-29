@@ -49,6 +49,10 @@ export type SessionHost = {
   // Titles of this employee's and this block's saved notes, read now. Call it once when the harness session starts and
   // reuse the string for that whole session, so a note saved mid-session changes nothing until the next one.
   memoryDigest(): string;
+  // The owner's rules that apply to this employee, as text for the persona. Empty when there are none. Read it once when
+  // a harness session starts and reuse it for that whole session, and pass it to `persona()` with the digest. Rules that
+  // change later arrive through `rulesChanged`.
+  rules(): string;
   // Company awards the XP. Adapters call this once per finished task.
   taskCompleted(): void;
   // Report each subagent the harness starts for this employee, the moment it starts: what the harness's own delegation
@@ -79,6 +83,12 @@ export interface EmployeeSession {
   // next session start if not (docs/beta-plan.md maps each mode onto each harness's switches). Ignore a change that is
   // only in `alwaysAllow`, because the office enforces those rules itself.
   permissionsChanged(policy: PermissionPolicy): void;
+  // The owner's rules changed while a session may be running. `text` is a complete notice for the model, and each call
+  // stands on its own. Deliver it like an interjection with style 'next': the agent reads it at its next step and keeps
+  // the turn it is on (Codex `turn/steer`, which can land 30 seconds late while a tool runs, Hermes a plain
+  // `session/prompt` during a turn). With no turn running, put it in front of the next task. With no harness process
+  // running, do nothing, because the next start reads `host.rules()`.
+  rulesChanged(text: string): void;
   stop(): void;
 }
 

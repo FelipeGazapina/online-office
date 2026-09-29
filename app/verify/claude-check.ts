@@ -48,6 +48,7 @@ function scripted(model = 'm1', policy: PermissionPolicy = { mode: 'inherit', al
   const started: Subagent[] = [];
   const finished: string[] = [];
   let answer = 'Allow';
+  let rules = '';
   const host: SessionHost = {
     employee,
     block: { id: employee.blockId, name: 'repo', cwd: '/work/repo', color: '#000', slot: 0 },
@@ -66,11 +67,12 @@ function scripted(model = 'm1', policy: PermissionPolicy = { mode: 'inherit', al
     ask: async (body) => (asked.push(body), answer),
     mcp: { url: 'http://127.0.0.1:1/mcp/scripted', name: 'office' },
     memoryDigest: () => '',
+    rules: () => rules,
     taskCompleted() {},
     subagentStarted: (subagent) => void started.push(subagent),
     subagentFinished: (id) => void finished.push(id),
   };
-  return { employee, host, asked, said, logs, started, finished, answers: (text: string) => void (answer = text), session: new ClaudeSession(host, run) };
+  return { employee, host, asked, said, logs, started, finished, answers: (text: string) => void (answer = text), setRules: (text: string) => void (rules = text), session: new ClaudeSession(host, run) };
 }
 const canUse = (p: Process) => async (name: string, input: Record<string, unknown>) => {
   const decision = await p.options.canUseTool!(name, input, { signal: new AbortController().signal, toolUseID: 'toolu_x' } as Parameters<CanUseTool>[2]);
@@ -165,7 +167,57 @@ stream.out.close();
 await until(() => sub.employee.status.kind === 'error');
 check(sub.finished.join() === 'fg,bg,inner,halted,outer', 'a process that dies takes its open subagents with it');
 
+console.log('\n# rules');
+const persona = (p: Process) => (p.options.systemPrompt as { append: string }).append;
+check(!persona(first).includes('rules your boss'), 'a session with no rules has no rules section in its persona');
+const ruled = scripted();
+ruled.setRules('- Never touch the billing folder');
+ruled.session.assign('start');
+const ruledProc = processes.at(-1)!;
+check(persona(ruledProc).includes('The rules your boss set for you') && persona(ruledProc).includes('- Never touch the billing folder'), 'the rules in scope are in the persona the session starts with');
+await until(() => ruledProc.sent.length === 1);
+ruled.session.rulesChanged('New rule: answer in Portuguese');
+await until(() => ruledProc.sent.length === 2);
+const notice = ruledProc.sent[1]!;
+check(notice.priority === 'next' && typeof notice.message.content === 'string' && notice.message.content.includes('New rule: answer in Portuguese') && ruled.employee.status.kind === 'working', 'a rule change while the employee works goes to the live session as a next-priority message');
+await feed(ruledProc, init('sess-rules'), turnEnd());
+check(ruled.employee.status.kind === 'idle', 'the turn ends');
+ruled.session.rulesChanged('First change');
+ruled.session.rulesChanged('Second change');
+await sleep(30);
+check(ruledProc.sent.length === 2, 'a rule change between tasks sends nothing');
+ruled.session.assign('the next task');
+await until(() => ruledProc.sent.length === 3);
+const carried = ruledProc.sent[2]!.message.content as string;
+check(carried.indexOf('First change') < carried.indexOf('Second change') && carried.endsWith('\n\nthe next task') && ruledProc.sent[2]!.priority === undefined, 'both changes go in front of the next task, in order');
+await feed(ruledProc, turnEnd());
+ruled.session.assign('a third task');
+await until(() => ruledProc.sent.length === 4);
+check(ruledProc.sent[3]!.message.content === 'a third task', 'and only once');
+await feed(ruledProc, turnEnd());
+ruled.session.rulesChanged('Held for the boss to walk over');
+ruled.session.interject('hey', 'next');
+await until(() => ruledProc.sent.length === 5);
+check((ruledProc.sent[4]!.message.content as string).startsWith('[Your boss changed the rules') && (ruledProc.sent[4]!.message.content as string).endsWith('said out loud]: hey'), 'a message that wakes an idle employee carries the held change too');
+
+const cold = scripted();
+cold.session.rulesChanged('Nobody is running');
+cold.session.assign('first task');
+const coldProc = processes.at(-1)!;
+await until(() => coldProc.sent.length === 1);
+check(coldProc.sent[0]!.message.content === 'first task', 'with no process running a rule change is dropped, because the next start reads the rules');
+await feed(coldProc, turnEnd());
+cold.session.rulesChanged('Held, then the process dies');
+coldProc.out.close();
+await until(() => cold.employee.status.kind === 'error');
+cold.session.assign('after the crash');
+const revived = processes.at(-1)!;
+await until(() => revived.sent.length === 1);
+check(revived.sent[0]!.message.content === 'after the crash', 'a change held when the process died is dropped with it');
+
 ana.session.stop();
 idle.session.stop();
 sub.session.stop();
+ruled.session.stop();
+cold.session.stop();
 finish();

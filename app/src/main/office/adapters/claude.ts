@@ -172,6 +172,8 @@ export class ClaudeSession implements EmployeeSession {
   private policy: PermissionPolicy;
   // The subagents this process has started and not seen end. The office keeps the list the owner sees.
   private subagents = new Set<string>();
+  // Rule changes that arrived between tasks. They go in front of the next task.
+  private notices: string[] = [];
 
   private readonly host: SessionHost;
   private readonly run: ClaudeRun;
@@ -184,7 +186,7 @@ export class ClaudeSession implements EmployeeSession {
 
   assign(task: string) {
     this.beginTask(task);
-    this.send(task);
+    this.send(this.withNotices(task));
   }
 
   interject(text: string, style: InterruptStyle) {
@@ -193,7 +195,7 @@ export class ClaudeSession implements EmployeeSession {
     this.host.log(`Boss said: ${text}`);
     if (kind === 'idle' || kind === 'error') {
       this.beginTask(short(text, 80));
-      this.send(framed);
+      this.send(this.withNotices(framed));
     } else if (style === 'now') {
       void this.interruptThenSend(framed);
     } else {
@@ -223,6 +225,20 @@ export class ClaudeSession implements EmployeeSession {
 
   permissionsChanged(policy: PermissionPolicy) {
     this.policy = policy;
+  }
+
+  // A process that is not running reads the rules when it starts.
+  rulesChanged(text: string) {
+    if (!this.q) return;
+    const notice = `[Your boss changed the rules you work by. Acknowledge it in one sentence, then follow it]: ${text}`;
+    const { kind } = this.host.employee.status;
+    if (kind === 'idle' || kind === 'error') this.notices.push(notice);
+    else this.send(notice, 'next');
+  }
+
+  private withNotices(text: string): string {
+    const notices = this.notices.splice(0);
+    return notices.length ? `${notices.join('\n\n')}\n\n${text}` : text;
   }
 
   stop() {
@@ -256,6 +272,7 @@ export class ClaudeSession implements EmployeeSession {
     this.life = new AbortController();
     // Read once per session: a note saved while the session runs shows up in the next one, and the prompt stays put.
     const digest = this.host.memoryDigest();
+    const rules = this.host.rules();
     debug(`session start for ${employee.name}, memory digest:\n${digest || '(no notes yet)'}`);
     this.q = this.run({
       prompt: this.inbox,
@@ -268,7 +285,7 @@ export class ClaudeSession implements EmployeeSession {
         systemPrompt: {
           type: 'preset',
           preset: 'claude_code',
-          append: persona({ name: employee.name, company: companyName, block: block.name, digest }),
+          append: persona({ name: employee.name, company: companyName, block: block.name, digest, rules }),
         },
         // The office server every harness shares. alwaysLoad keeps ask_owner in the prompt instead of behind tool search.
         mcpServers: { [mcp.name]: { type: 'http', url: mcp.url, timeout: OFFICE_MCP_TIMEOUT_MS, alwaysLoad: true } },
@@ -302,6 +319,8 @@ export class ClaudeSession implements EmployeeSession {
     this.life.abort();
     for (const id of this.subagents) this.host.subagentFinished(id);
     this.subagents.clear();
+    // The next process reads the rules as they are then.
+    this.notices = [];
     this.reportError(message);
   }
 

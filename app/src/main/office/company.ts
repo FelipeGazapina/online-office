@@ -333,6 +333,8 @@ export class Office {
       ask,
       mcp: { url, name: 'office' },
       memoryDigest: () => notebook.digest(block.name),
+      // F2 reads the rule files here.
+      rules: () => '',
       taskCompleted: live(() => this.addXp(XP_PER_TASK)),
       subagentStarted: live((subagent) => this.startSubagent(employee, subagent)),
       subagentFinished: live((id) => this.finishSubagent(employee, id)),
