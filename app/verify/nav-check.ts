@@ -11,12 +11,7 @@ import {
 } from '../src/renderer/src/layout.ts';
 import { buildNavGrid, findApproach, findPath, navFor, type NavGrid } from '../src/renderer/src/nav.ts';
 import type { BlockId, ProjectBlock } from '../src/shared/protocol.ts';
-
-let failed = 0;
-const check = (ok: boolean, what: string, detail = '') => {
-  console.log(ok ? `ok: ${what}` : `FAIL: ${what}${detail && ` | ${detail}`}`);
-  if (!ok) failed++;
-};
+import { check, finish } from './check.ts';
 
 const CELL = 0.25;
 const CLEARANCE = 0.35;
@@ -190,4 +185,4 @@ const deskBoxes = grow(layouts[0].layout.obstacles);
 check(firstHit(through, deskBoxes) !== null, 'the oracle flags a segment that goes through a desk');
 check(firstHit(graze, deskBoxes) === null, 'the oracle lets a segment that only grazes the grown desk edge pass');
 
-process.exit(failed ? 1 : 0);
+finish();

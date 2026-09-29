@@ -9,12 +9,7 @@ globalThis.window = {
 };
 const { get, send, set } = await import('../src/renderer/src/store.ts');
 const { applyServerMessage } = await import('../src/renderer/src/office.ts');
-
-let failed = false;
-const check = (ok, message) => {
-  console.log(`${ok ? 'ok' : 'FAIL'}: ${message}`);
-  failed ||= !ok;
-};
+const { check, finish } = await import('./check.ts');
 
 const person = (id, name) => ({ id, name, provider: 'claude-code', blockId: 'b1', desk: 0, status: { kind: 'idle' }, activity: '', hiredAt: 0 });
 set({ company: { name: 'Test', level: 3, xp: 0, blocks: [], employees: [person('ann', 'Ann'), person('bob', 'Bob')] } });
@@ -59,4 +54,4 @@ check(lines('ann').length === 200, 'after 250 lines only 200 remain');
 check(lines('ann')[0].text === 'line 51', 'the oldest kept line is line 51');
 check(lines('ann').at(-1).text === 'line 250', 'the newest line is line 250');
 
-process.exit(failed ? 1 : 0);
+finish();

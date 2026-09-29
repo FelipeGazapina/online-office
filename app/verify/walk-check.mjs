@@ -7,12 +7,7 @@ const { KEYS_INTENT, runtime } = await import(`${src}runtime.ts`);
 const { stepSim, walkTo } = await import(`${src}sim.ts`);
 const { angleDiff, deskPose, getLayout, MEETING_ROOM, OWNER_RADIUS, OWNER_START, WALL_MARGIN, withMeetingRoom } = await import(`${src}layout.ts`);
 const { LISTEN_RADIUS } = await import(`${src}audio.ts`);
-
-let failed = 0;
-const check = (ok, what, detail = '') => {
-  console.log(ok ? `ok: ${what}` : `FAIL: ${what}${detail && ` | ${detail}`}`);
-  if (!ok) failed++;
-};
+const { check, finish } = await import('./check.ts');
 
 const TALK_REPLAN = 1.35;
 const block = { id: 'b1', name: 'Block', cwd: '/work/b1', color: '#5b8def', slot: 0 };
@@ -283,4 +278,4 @@ step(1);
 check(Math.abs(owner.pos.x + 8.500000003088955) < 1e-3 && Math.abs(owner.pos.z + 3.834018187966559) < 1e-3, 'running with the keys covers the same ground as before click walking existed', fmt(owner.pos));
 runtime.keys.clear();
 
-process.exit(failed ? 1 : 0);
+finish();
