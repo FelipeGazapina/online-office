@@ -16,7 +16,7 @@ import {
   type Vec2,
 } from '../src/renderer/src/layout.ts';
 import { buildNavGrid, findApproach, findPath, navFor, type NavGrid } from '../src/renderer/src/nav.ts';
-import { DESKS_PER_BLOCK, type BlockId, type ProjectBlock } from '../src/shared/protocol.ts';
+import { DESKS_PER_BLOCK, MAX_LEVEL, seatCeiling, type BlockId, type ProjectBlock } from '../src/shared/protocol.ts';
 import { check, finish } from './check.ts';
 
 const CELL = 0.25;
@@ -184,6 +184,8 @@ const bench = seatBlocks[0].seats.slice(0, BENCH.length);
 const head = seatBlocks[0].seats[BENCH.length];
 
 check(BENCH.length === DESKS_PER_BLOCK, `the bench has one seat for each of the ${DESKS_PER_BLOCK} desks a hire can be given`);
+const overBench = [-1, ...Array.from({ length: MAX_LEVEL + 1 }, (_, level) => level), MAX_LEVEL + 3].filter((level) => seatCeiling(level).perBlock > BENCH.length);
+check(overBench.length === 0, `no level lets the owner set more seats per block than the bench's ${BENCH.length}`, overBench.map((level) => `level ${level} allows ${seatCeiling(level).perBlock}`).join('; '));
 const headHome = headPose(0).desk;
 check(
   [-1, ...BENCH.keys(), BENCH.length, 99].every((d) => dist(deskPose(0, d).desk, headHome) > 1),

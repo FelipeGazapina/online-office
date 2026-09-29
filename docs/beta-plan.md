@@ -97,7 +97,7 @@ export const SEAT_CEILING = [
   { total: 2, perBlock: 2 },
   { total: 4, perBlock: 3 },
   { total: 6, perBlock: 5 },
-  { total: 10, perBlock: 8 },
+  { total: 10, perBlock: 6 },
 ] as const; // indexed by level
 export type Seats = { total: number; perBlock: number };
 

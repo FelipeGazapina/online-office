@@ -129,13 +129,14 @@ export const DESKS_PER_BLOCK = 6;
 export const headcountCap = (level: number) => Math.min(level, MAX_LEVEL);
 
 // The level unlocks a ceiling, and the owner picks a number up to it in the Company area. Indexed by level.
+// No level's perBlock exceeds DESKS_PER_BLOCK, because a block has no more bench seats than that.
 export const SEAT_CEILING = [
   { total: 0, perBlock: 0 },
   { total: 1, perBlock: 1 },
   { total: 2, perBlock: 2 },
   { total: 4, perBlock: 3 },
   { total: 6, perBlock: 5 },
-  { total: 10, perBlock: 8 },
+  { total: 10, perBlock: 6 },
 ] as const;
 export type Seats = { total: number; perBlock: number };
 // A copy, so the seats a company holds are never the shared constant.
