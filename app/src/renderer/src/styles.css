@@ -204,6 +204,51 @@ h3 {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.github-link {
+  margin: 5px 0 0 20px;
+  font-size: 11.5px;
+}
+.github-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 12px 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+.github-summary span {
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 4px 9px;
+}
+.github-columns {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+.github-columns section {
+  min-width: 0;
+  background: var(--paper-2);
+  border-radius: 12px;
+  padding: 10px;
+}
+.github-columns h3 {
+  margin-bottom: 8px;
+  font-size: 14px;
+}
+.github-card {
+  display: grid;
+  gap: 4px;
+  margin-top: 7px;
+  padding: 9px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: white;
+  color: var(--ink);
+  text-decoration: none;
+}
+.github-card:hover { border-color: var(--ink); }
+.github-card span { color: var(--muted); font-size: 11px; }
 .b-people {
   margin: 6px 0 0 20px;
   display: flex;

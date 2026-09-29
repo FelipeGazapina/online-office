@@ -107,6 +107,7 @@ export type ProjectBlock = {
   cwd: string;
   color: string;
   slot: number;
+  githubRepo?: string;
   whiteboard?: Whiteboard;
 };
 
@@ -152,8 +153,8 @@ export type InterruptStyle = 'next' | 'now';
 export type ClientMessage =
   | { type: 'hire'; provider: Provider; blockId: BlockId; name?: string; model?: ModelId }
   | { type: 'fire'; employeeId: EmployeeId }
-  | { type: 'create_block'; cwd: string; name?: string }
-  | { type: 'update_block'; blockId: BlockId; name?: string; cwd?: string }
+  | { type: 'create_block'; cwd: string; name?: string; githubRepo?: string }
+  | { type: 'update_block'; blockId: BlockId; name?: string; cwd?: string; githubRepo?: string }
   | { type: 'assign'; employeeId: EmployeeId; task: string }
   // `always` counts only on a permission card, and only when `text` allows it. The office then adds a rule for that
   // employee that covers the same command or tool from now on.

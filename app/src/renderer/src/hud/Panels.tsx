@@ -75,6 +75,9 @@ export function CompanyPanel() {
             <div className="b-cwd" title={b.cwd}>
               {tailPath(b.cwd, 34)}
             </div>
+            <button className="link github-link" onClick={() => set({ modal: { kind: b.githubRepo ? 'github' : 'github_setup', blockId: b.id } })}>
+              {b.githubRepo ? 'GitHub board' : 'Connect GitHub'}
+            </button>
             <div className="b-people">
               {company.employees
                 .filter((e) => e.blockId === b.id)

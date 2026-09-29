@@ -156,6 +156,7 @@ function BlockModal() {
   const blocks = useStore((s) => s.company?.blocks ?? []);
   const [cwd, setCwd] = useState<string | null>(null);
   const [name, setName] = useState('');
+  const [githubRepo, setGithubRepo] = useState('');
   // Once the owner types a name, picking another folder must not overwrite it.
   const [renamed, setRenamed] = useState(false);
   const clash = cwd ? blocks.find((b) => b.cwd === cwd) : undefined;
@@ -173,7 +174,7 @@ function BlockModal() {
         onSubmit={(e) => {
           e.preventDefault();
           if (!cwd || clash) return;
-          send({ type: 'create_block', cwd, ...(name.trim() && { name: name.trim() }) });
+          send({ type: 'create_block', cwd, ...(name.trim() && { name: name.trim() }), ...(githubRepo.trim() && { githubRepo: githubRepo.trim() }) });
           close();
         }}
       >
@@ -199,6 +200,12 @@ function BlockModal() {
             placeholder="Defaults to the folder name"
           />
         </label>
+        <label className="field">
+          <span>
+            GitHub repository <span className="muted">optional</span>
+          </span>
+          <input value={githubRepo} onChange={(e) => setGithubRepo(e.target.value)} placeholder="https://github.com/owner/repository" type="url" />
+        </label>
         {clash && <p className="err-text">{clash.name} already works in this folder.</p>}
         <p className="muted">A block is a project. Everyone sitting in it works in that folder.</p>
         <div className="actions">
@@ -211,6 +218,96 @@ function BlockModal() {
         </div>
       </form>
     </Modal>
+  );
+}
+
+type GithubItem = { id: number; title: string; html_url: string; state: 'open' | 'closed'; user?: { login: string }; pull_request?: unknown };
+
+function GithubSetupModal({ blockId }: { blockId: BlockId }) {
+  const block = useStore((s) => s.company?.blocks.find((b) => b.id === blockId));
+  const [repo, setRepo] = useState(block?.githubRepo ?? '');
+  if (!block) return null;
+  return (
+    <Modal title={`Connect GitHub to ${block.name}`}>
+      <form onSubmit={(event) => {
+        event.preventDefault();
+        const value = repo.trim();
+        if (!value) return;
+        send({ type: 'update_block', blockId, githubRepo: value });
+        set({ modal: { kind: 'github', blockId } });
+      }}>
+        <label className="field">
+          <span>Repository URL</span>
+          <input autoFocus type="url" value={repo} onChange={(event) => setRepo(event.target.value)} placeholder="https://github.com/owner/repository" />
+        </label>
+        <p className="muted">The board reads public pull requests and issues from GitHub.</p>
+        <div className="actions"><button type="button" className="btn ghost" onClick={close}>Cancel</button><button className="btn primary" disabled={!repo.trim()}>Connect</button></div>
+      </form>
+    </Modal>
+  );
+}
+
+function GithubBoardModal({ blockId }: { blockId: BlockId }) {
+  const block = useStore((s) => s.company?.blocks.find((b) => b.id === blockId));
+  const [items, setItems] = useState<GithubItem[]>([]);
+  const [state, setState] = useState<'loading' | 'ready' | 'error'>('loading');
+  const [message, setMessage] = useState('');
+
+  useEffect(() => {
+    if (!block?.githubRepo) return;
+    const repo = block.githubRepo.replace(/\/$/, '');
+    let apiUrl: string;
+    try {
+      const url = new URL(repo);
+      if (url.hostname !== 'github.com') throw new Error('Use a github.com repository URL');
+      const path = url.pathname.replace(/^\//, '').replace(/\.git$/, '');
+      if (path.split('/').length !== 2) throw new Error('Use a repository URL like https://github.com/owner/repository');
+      apiUrl = `https://api.github.com/repos/${path}/issues?state=all&per_page=100`;
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : String(error));
+      setState('error');
+      return;
+    }
+    setState('loading');
+    fetch(apiUrl, {
+      headers: { Accept: 'application/vnd.github+json' },
+    })
+      .then(async (response) => {
+        if (!response.ok) throw new Error(`GitHub returned ${response.status}`);
+        return (await response.json()) as GithubItem[];
+      })
+      .then((next) => {
+        setItems(next);
+        setState('ready');
+      })
+      .catch((error: unknown) => {
+        setMessage(error instanceof Error ? error.message : String(error));
+        setState('error');
+      });
+  }, [block?.githubRepo]);
+
+  if (!block) return null;
+  const prs = items.filter((item) => item.pull_request);
+  const issues = items.filter((item) => !item.pull_request);
+  const open = items.filter((item) => item.state === 'open');
+  const closed = items.filter((item) => item.state === 'closed');
+  const cards = (list: GithubItem[]) => list.map((item) => <a className="github-card" key={item.id} href={item.html_url} target="_blank" rel="noreferrer">
+    <b>{item.title}</b>
+    <span>{item.pull_request ? 'Pull request' : 'Issue'} · #{item.id} · {item.user?.login ?? 'unknown'}</span>
+  </a>);
+
+  return (
+    <div className="scrim" onMouseDown={close}>
+      <div className="modal wide github-board" onMouseDown={(e) => e.stopPropagation()} onKeyDown={(e) => e.key === 'Escape' && close()}>
+        <div className="wb-head"><div><h2>GitHub board</h2><p className="muted">{block.name} · {block.githubRepo}</p></div><button className="btn ink" onClick={close}>Close</button></div>
+        {state === 'loading' && <p className="muted">Loading pull requests and issues…</p>}
+        {state === 'error' && <p className="err-text">Could not load GitHub data: {message}</p>}
+        {state === 'ready' && <>
+          <div className="github-summary"><span>{prs.length} pull requests</span><span>{issues.length} issues</span><span>{open.length} open</span><span>{closed.length} closed</span></div>
+          <div className="github-columns"><section><h3>Open</h3>{cards(open)}</section><section><h3>Closed</h3>{cards(closed)}</section></div>
+        </>}
+      </div>
+    </div>
   );
 }
 
@@ -265,5 +362,7 @@ export function Modals() {
   if (!modal) return null;
   if (modal.kind === 'hire') return <HireModal />;
   if (modal.kind === 'block') return <BlockModal />;
+  if (modal.kind === 'github_setup') return <GithubSetupModal blockId={modal.blockId} />;
+  if (modal.kind === 'github') return <GithubBoardModal blockId={modal.blockId} />;
   return <WhiteboardModal blockId={modal.blockId} />;
 }

@@ -215,9 +215,9 @@ export class Office {
       case 'fire':
         return this.fire(msg.employeeId);
       case 'create_block':
-        return this.createBlock(msg.cwd, msg.name);
+        return this.createBlock(msg.cwd, msg.name, msg.githubRepo);
       case 'update_block':
-        return this.updateBlock(msg.blockId, msg.name, msg.cwd);
+        return this.updateBlock(msg.blockId, msg.name, msg.cwd, msg.githubRepo);
       case 'assign':
         return this.assign(msg.employeeId, msg.task);
       case 'answer':
@@ -473,7 +473,7 @@ export class Office {
     this.services.memory.archive(e.id).catch((err) => console.error(`Could not archive ${e.name}'s notes:`, err));
   }
 
-  private createBlock(dir: string, name?: string) {
+  private createBlock(dir: string, name?: string, githubRepo?: string) {
     const cwd = canonicalDir(dir);
     this.assertFolderFree(cwd);
     const { blocks } = this.company;
@@ -482,7 +482,7 @@ export class Office {
     while (slots.has(slot)) slot++;
     const usedColors = new Set(blocks.map((b) => b.color));
     const color = BLOCK_COLORS.find((c) => !usedColors.has(c)) ?? BLOCK_COLORS[slot % BLOCK_COLORS.length]!;
-    blocks.push({ id: newId<BlockId>(), name: name?.trim() || basename(cwd), cwd, color, slot });
+    blocks.push({ id: newId<BlockId>(), name: name?.trim() || basename(cwd), cwd, color, slot, ...(githubRepo && { githubRepo: githubRepo.trim().replace(/\/$/, '') }) });
     this.commit();
   }
 
@@ -491,9 +491,10 @@ export class Office {
     if (clash) throw new OfficeError(`${clash.name} already works in ${cwd}.`);
   }
 
-  private updateBlock(blockId: BlockId, name?: string, cwd?: string) {
+  private updateBlock(blockId: BlockId, name?: string, cwd?: string, githubRepo?: string) {
     const block = this.block(blockId);
     if (name) block.name = name.trim();
+    if (githubRepo !== undefined) block.githubRepo = githubRepo.trim().replace(/\/$/, '') || undefined;
     if (cwd) {
       const next = canonicalDir(cwd);
       if (next !== block.cwd) {
