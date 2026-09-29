@@ -28,18 +28,37 @@ export function CameraRig() {
 
   useEffect(() => {
     const { view, owner } = runtime;
+    if (mode === 'iso' && document.pointerLockElement === gl.domElement) document.exitPointerLock();
     if (mode === 'follow') view.yaw = owner.yaw;
     if (mode === 'iso') view.isoYawTarget = Math.round((view.yaw + (3 * Math.PI) / 4) / (Math.PI / 2)) * (Math.PI / 2) - (3 * Math.PI) / 4;
     if (mode === 'first') view.fpPitch = 0;
-  }, [mode]);
+  }, [gl, mode]);
 
   useEffect(() => {
     const el = gl.domElement;
     let drag: { x: number; y: number; ox: number; oy: number; far: boolean } | null = null;
     let overScene = false;
+    let locked = false;
     const enter = () => { overScene = true; };
     const leave = () => { overScene = false; };
+    const lock = () => {
+      if (!document.hasFocus() || get().camera === 'iso' || document.pointerLockElement === el) return;
+      void el.requestPointerLock({ unadjustedMovement: true }).catch(() => {
+        // Pointer lock can be refused until the Electron window has focus.
+      });
+    };
+    const lockChange = () => {
+      locked = document.pointerLockElement === el;
+      el.style.cursor = locked ? 'none' : '';
+      if (!locked) drag = null;
+    };
+    const refocus = () => { if (overScene) lock(); };
+    const toggleLock = () => {
+      if (document.pointerLockElement === el) document.exitPointerLock();
+      else lock();
+    };
     const down = (e: PointerEvent) => {
+      if (locked) return;
       drag = { x: e.clientX, y: e.clientY, ox: e.clientX, oy: e.clientY, far: false };
     };
     const move = (e: PointerEvent) => {
@@ -89,17 +108,27 @@ export function CameraRig() {
     };
     el.addEventListener('pointerdown', down);
     el.addEventListener('pointerenter', enter);
+    el.addEventListener('pointerenter', lock);
     el.addEventListener('pointerleave', leave);
+    document.addEventListener('pointerlockchange', lockChange);
+    window.addEventListener('focus', refocus);
+    window.addEventListener('office:toggle-pointer-lock', toggleLock);
     window.addEventListener('pointermove', move);
     window.addEventListener('pointerup', up);
     el.addEventListener('wheel', wheel, { passive: true });
     return () => {
       el.removeEventListener('pointerdown', down);
       el.removeEventListener('pointerenter', enter);
+      el.removeEventListener('pointerenter', lock);
       el.removeEventListener('pointerleave', leave);
+      document.removeEventListener('pointerlockchange', lockChange);
+      window.removeEventListener('focus', refocus);
+      window.removeEventListener('office:toggle-pointer-lock', toggleLock);
       window.removeEventListener('pointermove', move);
       window.removeEventListener('pointerup', up);
       el.removeEventListener('wheel', wheel);
+      if (document.pointerLockElement === el) document.exitPointerLock();
+      el.style.cursor = '';
     };
   }, [gl]);
 

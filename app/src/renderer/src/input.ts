@@ -25,6 +25,12 @@ export function installInput() {
 
     if (s.portalMode && e.code !== 'Escape') return;
 
+    if ((e.code === 'KeyC' || e.code === 'KeyF') && (s.camera === 'follow' || s.camera === 'first')) {
+      e.preventDefault();
+      window.dispatchEvent(new Event('office:toggle-pointer-lock'));
+      return;
+    }
+
     switch (e.code) {
       case 'Digit1':
         return setSetting('camera', 'follow');
