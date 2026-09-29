@@ -83,7 +83,7 @@ Research agents write only to `docs/research/`. From U2 on, every implementation
 | U5 | Voice through whisper.cpp: push-to-talk and proximity, and a `pnpm beta` launch so macOS asks the app, not the terminal, for the mic. Dictating a rule to a board lands with F2 | R4 | running |
 | U6 | README, then the full end-to-end run for all three harnesses | all | |
 
-The owner moved the microphone and Overview navigation to the front. N1 runs next to U1, and U5 starts as soon as R4's doc lands. C1 runs after U1, because every later unit builds on its types. Then U2, U3 and F1 run in parallel, then F2 and F3. At most three implementation agents run at once, which keeps the session under its rate limit. The decision trail lives in `docs/decisions.tsv`.
+The owner moved the microphone and Overview navigation to the front. N1 runs next to U1, and U5 starts as soon as R4's doc lands. C1 runs after U1, because every later unit builds on its types. Then U2, U3 and F1 run in parallel, then F2 and F3. At most three implementation agents run at once, and each works single-threaded without helper agents of its own. Nested helpers multiplied the load and hit the account's session limit twice. The decision trail lives in `docs/decisions.tsv`.
 
 ## Contract v2
 
