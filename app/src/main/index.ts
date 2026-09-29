@@ -1,13 +1,14 @@
 import { join } from 'node:path';
 import { app, BrowserWindow, session, type WebContents } from 'electron';
 import { startOffice } from './ipc.ts';
-import { detectHarnesses } from './office/adapters/index.ts';
+import { detectHarnesses, setCodexRoot } from './office/adapters/index.ts';
 import { startOfficeMcp } from './office/mcp.ts';
 import { MemoryStore } from './office/memory.ts';
 
 // Tests point this at a scratch dir. Moving the whole profile, not just company.json, keeps their
 // localStorage and lock file apart from the real app's.
 if (process.env.OFFICE_DATA_DIR) app.setPath('userData', process.env.OFFICE_DATA_DIR);
+setCodexRoot(join(app.getPath('userData'), 'codex'));
 
 // Set by the test driver. A test run is not the owner's office, so its window is never shown, has no Dock icon,
 // and says what it is if it ever becomes visible.

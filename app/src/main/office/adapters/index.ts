@@ -1,6 +1,8 @@
 import { execFile } from 'node:child_process';
 import type { HarnessStatus, ModelId, Provider } from '../../../shared/protocol.ts';
 import { createClaudeSession } from './claude.ts';
+import { codexDefaultModel, createCodexSession, listCodexModels, setCodexRoot } from './codex.ts';
+import { createHermesSession, hermesDefaultModel, listHermesModels } from './hermes.ts';
 import type { Harness } from './types.ts';
 
 // The Agent SDK bundles its own Claude Code binary, so there is nothing on PATH to look for.
@@ -25,9 +27,11 @@ export const HARNESSES: Record<Provider, Harness> = {
     defaultModel: () => (process.env.OFFICE_CLAUDE_MODEL ?? 'claude-sonnet-5-5') as ModelId,
     session: createClaudeSession,
   },
-  codex: { detect: () => cliVersion('codex'), defaultModel: () => 'gpt-6-astra' as ModelId },
-  hermes: { detect: () => cliVersion('hermes'), defaultModel: () => 'anthropic:claude-opus-4-7' as ModelId },
+  codex: { detect: () => cliVersion('codex'), defaultModel: codexDefaultModel, listModels: listCodexModels, session: createCodexSession },
+  hermes: { detect: () => cliVersion('hermes'), defaultModel: hermesDefaultModel, listModels: listHermesModels, session: createHermesSession },
 };
+
+export { setCodexRoot };
 
 async function status(p: Provider): Promise<HarnessStatus> {
   const version = await HARNESSES[p].detect();
