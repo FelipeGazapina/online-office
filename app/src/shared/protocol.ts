@@ -21,6 +21,30 @@ export const PROVIDERS: Record<Provider, { label: string; color: string }> = {
 // `not_wired` means the CLI is installed but the office has no adapter for it yet.
 export type HarnessStatus = { kind: 'ready'; version: string } | { kind: 'missing' } | { kind: 'not_wired' };
 
+// A model id in the harness's own words, as its own model list gives it.
+export type ModelId = string & { readonly __brand: 'ModelId' };
+export type ModelOption = { id: ModelId; label: string };
+
+// What one harness offers. `unknown` until someone asks (`load_models`), `loading` while the harness answers.
+export type ModelCatalog =
+  | { kind: 'unknown' }
+  | { kind: 'loading' }
+  | { kind: 'ready'; models: ModelOption[]; defaultModel: ModelId }
+  | { kind: 'error'; message: string };
+
+// How much an employee may do without asking. `inherit` follows the owner's own settings for the harness.
+export type PermissionMode = 'inherit' | 'ask' | 'auto' | 'yolo';
+
+// Added by Always allow on a permission card. The office checks these before it shows a card, for every harness.
+// A `command` rule covers every command that starts with its words, an `exact` rule only that command, and a `tool`
+// rule every use of the tool.
+export type AllowRule = { kind: 'command'; prefix: string } | { kind: 'exact'; command: string } | { kind: 'tool'; name: string };
+
+export type PermissionPolicy = { mode: PermissionMode; alwaysAllow: AllowRule[] };
+
+// A running subagent. `parentId` is null for one the employee spawned itself, or the id of the subagent that spawned it.
+export type Subagent = { id: string; parentId: string | null; label: string; startedAt: number };
+
 // `text` is what the employee says out loud. A permission also carries what it wants to touch, so the card can show it verbatim.
 export type QuestionBody = { text: string } & (
   | { kind: 'ask'; options?: string[] }
@@ -44,9 +68,29 @@ export type Employee = {
   desk: number;
   status: EmployeeStatus;
   activity: string;
+  // What the harness runs on from the next turn. Chosen at hire, changed with `set_model`.
+  model: ModelId;
+  permissions: PermissionPolicy;
+  // The subagents running now. They live and die with the session, so company.json never holds them.
+  subagents: Subagent[];
   sessionId?: string;
   hiredAt: number;
 };
+
+// Rules are the owner's instructions. Every session loads the rules of its office, block and employee in full.
+// A session rule belongs to one employee's current session and is dropped when that employee starts fresh.
+export type RuleId = string & { readonly __brand: 'RuleId' };
+export type RuleScope =
+  | { kind: 'office' }
+  | { kind: 'block'; blockId: BlockId }
+  | { kind: 'employee'; employeeId: EmployeeId }
+  | { kind: 'session'; employeeId: EmployeeId };
+export type Rule = { id: RuleId; scope: RuleScope; text: string; updatedAt: number };
+
+// Notes are what employees save with `remember`. Sessions see their titles and fetch bodies with `recall`.
+export type NoteId = string & { readonly __brand: 'NoteId' };
+export type NoteScope = { kind: 'office' } | { kind: 'block'; blockId: BlockId } | { kind: 'employee'; employeeId: EmployeeId };
+export type NoteSummary = { id: NoteId; scope: NoteScope; title: string; author: EmployeeId; updatedAt: number };
 
 export type Whiteboard = {
   title: string;
@@ -68,6 +112,7 @@ export type Company = {
   name: string;
   level: number;
   xp: number;
+  settings: CompanySettings;
   blocks: ProjectBlock[];
   employees: Employee[];
 };
@@ -77,23 +122,58 @@ export const XP_FOR_LEVEL = [0, 0, 30, 80, 150, 250] as const;
 export const DESKS_PER_BLOCK = 5;
 export const headcountCap = (level: number) => Math.min(level, MAX_LEVEL);
 
+// The level unlocks a ceiling, and the owner picks a number up to it in the Company area. Indexed by level.
+export const SEAT_CEILING = [
+  { total: 0, perBlock: 0 },
+  { total: 1, perBlock: 1 },
+  { total: 2, perBlock: 2 },
+  { total: 4, perBlock: 3 },
+  { total: 6, perBlock: 5 },
+  { total: 10, perBlock: 8 },
+] as const;
+export type Seats = { total: number; perBlock: number };
+// A copy, so the seats a company holds are never the shared constant.
+export const seatCeiling = (level: number): Seats => ({ ...SEAT_CEILING[Math.min(Math.max(level, 0), MAX_LEVEL)]! });
+
+export type CompanySettings = {
+  seats: Seats;
+  // What a new hire of each provider starts on when the owner picks nothing at hire.
+  defaultModels: Partial<Record<Provider, ModelId>>;
+  defaultPermissions: PermissionMode;
+};
+
 // How an interjection from the owner lands in a running session.
 // `next`: tap on the shoulder, the agent reads it at its next step.
 // `now`: hard stop, the agent drops the current step and listens.
 export type InterruptStyle = 'next' | 'now';
 
 export type ClientMessage =
-  | { type: 'hire'; provider: Provider; blockId: BlockId; name?: string }
+  | { type: 'hire'; provider: Provider; blockId: BlockId; name?: string; model?: ModelId }
   | { type: 'fire'; employeeId: EmployeeId }
   | { type: 'create_block'; cwd: string; name?: string }
   | { type: 'update_block'; blockId: BlockId; name?: string; cwd?: string }
   | { type: 'assign'; employeeId: EmployeeId; task: string }
-  | { type: 'answer'; employeeId: EmployeeId; questionId: QuestionId; text: string }
+  // `always` counts only on a permission card, and only when `text` allows it. The office then adds a rule for that
+  // employee that covers the same command or tool from now on.
+  | { type: 'answer'; employeeId: EmployeeId; questionId: QuestionId; text: string; always?: boolean }
   | { type: 'interject'; employeeId: EmployeeId; text: string; style: InterruptStyle }
   | { type: 'meeting_door'; state: MeetingDoor }
+  // Asks a harness for its model list. The answer arrives as that provider's catalog in the next snapshots.
+  | { type: 'load_models'; provider: Provider }
+  | { type: 'set_model'; employeeId: EmployeeId; model: ModelId }
+  | { type: 'set_permissions'; employeeId: EmployeeId; mode: PermissionMode }
+  | { type: 'remove_allow_rule'; employeeId: EmployeeId; rule: AllowRule }
+  // Stops the employee's session and starts another with no memory of the conversation. Notes, model and rules stay.
+  | { type: 'fresh_session'; employeeId: EmployeeId }
   | { type: 'reset_company' };
 
-export type Snapshot = { type: 'snapshot'; company: Company; harnesses: Record<Provider, HarnessStatus>; meetingDoor: MeetingDoor };
+export type Snapshot = {
+  type: 'snapshot';
+  company: Company;
+  harnesses: Record<Provider, HarnessStatus>;
+  catalogs: Record<Provider, ModelCatalog>;
+  meetingDoor: MeetingDoor;
+};
 
 export type ServerMessage =
   | Snapshot

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { DESKS_PER_BLOCK, PROVIDERS } from '../../../shared/protocol.ts';
-import { send, set, useStore } from '../store.ts';
+import { get, send, set, useStore } from '../store.ts';
 import { fmtWait, useNow } from './hooks.ts';
 
 const STATUS_LABEL = { idle: 'Idle', working: 'Working', blocked_on_owner: 'Waiting on you', error: 'Error' } as const;
@@ -11,15 +11,26 @@ export function Drawer() {
   const e = useStore((s) => s.company?.employees.find((x) => x.id === id));
   const block = useStore((s) => s.company?.blocks.find((b) => b.id === e?.blockId));
   const logs = useStore((s) => (id ? s.logs[id] : undefined));
+  const lines = useStore((s) => (id ? s.chat[id] : undefined)) ?? [];
   const now = useNow(1000);
-  const [task, setTask] = useState('');
+  const [draft, setDraft] = useState('');
   const [confirm, setConfirm] = useState(false);
-  const end = useRef<HTMLDivElement>(null);
+  const [showLog, setShowLog] = useState(false);
+  const input = useRef<HTMLInputElement>(null);
+  const threadEnd = useRef<HTMLDivElement>(null);
+  const logEnd = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    end.current?.scrollIntoView({ block: 'end' });
-  }, [logs?.length, id]);
-  useEffect(() => setConfirm(false), [id]);
+    threadEnd.current?.scrollIntoView({ block: 'end' });
+  }, [lines.length, id]);
+  useEffect(() => {
+    logEnd.current?.scrollIntoView({ block: 'end' });
+  }, [logs?.length, showLog]);
+  useEffect(() => {
+    setConfirm(false);
+    setShowLog(false);
+    setDraft('');
+  }, [id]);
 
   if (!e) return null;
   const p = PROVIDERS[e.provider];
@@ -58,9 +69,38 @@ export function Drawer() {
         )}
       </section>
 
-      <section className="grow">
-        <h3>Live log</h3>
-        <div className="log">
+      <div className="thread" role="log">
+        {lines.length === 0 && <p className="muted">Nothing said yet. Type below and it reaches {e.name} as if you stood at their desk.</p>}
+        {lines.map((l, i) => (
+          <div key={i} className={`msg ${l.from}`}>
+            {l.text}
+          </div>
+        ))}
+        <div ref={threadEnd} />
+      </div>
+
+      <form
+        className="compose"
+        onSubmit={(ev) => {
+          ev.preventDefault();
+          const text = draft.trim();
+          if (!text) return;
+          send({ type: 'interject', employeeId: e.id, text, style: get().interrupt });
+          setDraft('');
+          input.current?.focus();
+        }}
+      >
+        <input id="drawer-input" ref={input} autoFocus value={draft} onChange={(ev) => setDraft(ev.target.value)} placeholder={`Message ${e.name}`} />
+        <button type="submit" className="btn ink" disabled={!draft.trim()}>
+          Send
+        </button>
+      </form>
+
+      <button className="link" onClick={() => setShowLog(!showLog)}>
+        {showLog ? 'Hide tool log' : `Tool log (${logs?.length ?? 0})`}
+      </button>
+      {showLog && (
+        <div className="log tool-log">
           {(logs ?? []).length === 0 && <p className="muted">Nothing yet.</p>}
           {logs?.map((l, i) => (
             <div key={i} className={l.line.startsWith('says:') ? 'say' : ''}>
@@ -68,24 +108,9 @@ export function Drawer() {
               <span>{l.line}</span>
             </div>
           ))}
-          <div ref={end} />
+          <div ref={logEnd} />
         </div>
-      </section>
-
-      <form
-        className="assign"
-        onSubmit={(ev) => {
-          ev.preventDefault();
-          if (!task.trim()) return;
-          send({ type: 'assign', employeeId: e.id, task: task.trim() });
-          setTask('');
-        }}
-      >
-        <input value={task} onChange={(ev) => setTask(ev.target.value)} placeholder={`Give ${e.name} a task`} />
-        <button className="btn ink" disabled={!task.trim()}>
-          Assign
-        </button>
-      </form>
+      )}
 
       <button
         className={`btn danger ${confirm ? 'armed' : ''}`}

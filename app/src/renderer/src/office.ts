@@ -1,6 +1,6 @@
 import type { ServerMessage } from '../../shared/protocol.ts';
 import { heard } from './audio.ts';
-import { employeeById, get, set, toast } from './store.ts';
+import { addChat, employeeById, get, set, toast } from './store.ts';
 
 const LOG_CAP = 200;
 
@@ -11,11 +11,12 @@ export function addLog(employeeId: string, line: string, at: number) {
 export function applyServerMessage(msg: ServerMessage) {
   switch (msg.type) {
     case 'snapshot':
-      set({ company: msg.company, harnesses: msg.harnesses, meetingDoor: msg.meetingDoor });
+      set({ company: msg.company, harnesses: msg.harnesses, catalogs: msg.catalogs, meetingDoor: msg.meetingDoor });
       break;
     case 'said': {
       const e = employeeById(msg.employeeId);
       addLog(msg.employeeId, `says: ${msg.text}`, Date.now());
+      addChat(msg.employeeId, 'employee', msg.text);
       if (e && get().meetingDoor === 'open') heard(e, msg.text);
       break;
     }

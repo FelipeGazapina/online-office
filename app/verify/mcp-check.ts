@@ -285,9 +285,12 @@ for (let i = 0; i < 25; i++) await nb.remember('me', `${String(i).padStart(2, '0
 for (let i = 0; i < 40; i++) await nb.remember('block', `${String(i).padStart(2, '0')} ${'q'.repeat(57)}`, 'x');
 const full = nb.digest('a very very long project folder name that keeps going and going');
 check(full.length <= LIMITS.digestChars && full.split('\n').filter((l) => l.startsWith('- ')).length === 65, `a full notebook digest is ${full.length} characters, cap ${LIMITS.digestChars}`);
-const p = persona({ name: 'Ana', company: 'Gazapina Labs', block: 'Gazapina Web', digest: digestA });
+const p = persona({ name: 'Ana', company: 'Gazapina Labs', block: 'Gazapina Web', digest: digestA, rules: '' });
 check(p.includes('- Standup is at 09:40') && p.includes('remember, recall and forget') && p.includes('You are Ana'), 'the persona carries the memory rules and the digest');
-check(!persona({ name: 'Ana', company: 'x', block: 'y', digest: '' }).includes('What you remember'), 'the persona omits the digest when nothing is saved');
+check(!persona({ name: 'Ana', company: 'x', block: 'y', digest: '', rules: '' }).includes('What you remember'), 'the persona omits the digest when nothing is saved');
+const ruled = persona({ name: 'Ana', company: 'x', block: 'y', digest: digestA, rules: '- Never edit the billing folder' });
+check(ruled.includes('The rules your boss set for you') && ruled.includes('- Never edit the billing folder') && ruled.indexOf('billing') < ruled.indexOf('What you remember'), 'the persona carries the owner rules ahead of the digest');
+check(!persona({ name: 'Ana', company: 'x', block: 'y', digest: '', rules: '' }).includes('rules your boss'), 'the persona omits the rules heading when there are none');
 
 console.log('\n# lifecycle');
 await memory.archive(A);

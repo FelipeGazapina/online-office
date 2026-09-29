@@ -124,6 +124,32 @@ export async function launch({ env = {}, width = 1280, height = 800 } = {}) {
     // Clicks the first element matching `selector` whose text contains `text`. Returns whether one was found.
     clickText: (selector, text) =>
       api.eval(`(() => { const b = [...document.querySelectorAll(${JSON.stringify(selector)})].find(b => b.innerText.includes(${JSON.stringify(text)})); b?.click(); return !!b; })()`),
+    // Real pointer input at viewport pixels. These are trusted events, so they reach the pointer handlers of the 3D
+    // scene, which element.click() never does. A scenario about clicking uses these and nothing else.
+    async mouse(type, x, y, buttons = 0) {
+      // A release names the button that came up, even though no button is held afterwards.
+      await call('Input.dispatchMouseEvent', { type, x, y, button: type === 'mouseMoved' && !buttons ? 'none' : 'left', buttons, clickCount: type === 'mouseMoved' ? 0 : 1 });
+    },
+    async click(x, y) {
+      await api.mouse('mouseMoved', x, y);
+      await api.mouse('mousePressed', x, y, 1);
+      await api.mouse('mouseReleased', x, y);
+    },
+    async drag(from, to, steps = 10) {
+      await api.mouse('mouseMoved', from.x, from.y);
+      await api.mouse('mousePressed', from.x, from.y, 1);
+      for (let i = 1; i <= steps; i++) await api.mouse('mouseMoved', from.x + ((to.x - from.x) * i) / steps, from.y + ((to.y - from.y) * i) / steps, 1);
+      await api.mouse('mouseReleased', to.x, to.y);
+    },
+    // The center of the first element matching `selector` whose text contains `text`, or null.
+    center: (selector, text = '') =>
+      api.eval(`(() => { const el = [...document.querySelectorAll(${JSON.stringify(selector)})].find((e) => e.innerText.includes(${JSON.stringify(text)})); if (!el) return null; const r = el.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; })()`),
+    async clickOn(selector, text) {
+      const at = await api.center(selector, text);
+      if (!at) throw new Error(`nothing to click for ${selector} ${text ?? ''}`);
+      await api.click(at.x, at.y);
+      return at;
+    },
     async close() {
       closing = true;
       ws.close();

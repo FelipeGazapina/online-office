@@ -6,6 +6,7 @@ import { CameraRig, SimDriver } from './CameraRig.tsx';
 import { EmployeeView } from './EmployeeView.tsx';
 import { Office } from './Office.tsx';
 import { OwnerView } from './OwnerView.tsx';
+import { WalkMarker } from './WalkMarker.tsx';
 
 function World() {
   const company = useStore((s) => s.company);
@@ -18,6 +19,7 @@ function World() {
         <BlockView key={b.id} block={b} employees={company.employees.filter((e) => e.blockId === b.id)} />
       ))}
       <OwnerView />
+      <WalkMarker />
       {company?.employees.map((e) => (
         <EmployeeView key={e.id} employee={e} />
       ))}

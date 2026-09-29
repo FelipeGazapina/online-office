@@ -4,9 +4,7 @@ import { randomBytes } from 'node:crypto';
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync } from 'node:fs';
 import { mkdir, rename, rm, unlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import type { BlockId, EmployeeId, Provider } from '../../shared/protocol.ts';
-
-export type NoteId = string & { readonly __brand: 'NoteId' };
+import type { BlockId, EmployeeId, NoteId, Provider } from '../../shared/protocol.ts';
 
 // What the model calls a scope. `me` is the employee's own notebook, `block` is shared by the whole project team.
 export type ScopeName = 'me' | 'block';

@@ -2,12 +2,14 @@ import { isAbsolute, relative } from 'node:path';
 import {
   query,
   type CanUseTool,
+  type Options,
   type Query,
   type SDKMessage,
   type SDKResultMessage,
   type SDKUserMessage,
 } from '@anthropic-ai/claude-agent-sdk';
-import type { InterruptStyle, QuestionBody } from '../../../shared/protocol.ts';
+import { SHELL_TOOL, isAllow } from '../../../shared/permissions.ts';
+import type { InterruptStyle, ModelId, PermissionPolicy, QuestionBody } from '../../../shared/protocol.ts';
 import { logger } from '../debug.ts';
 import { persona } from '../persona.ts';
 import type { EmployeeSession, SessionFactory, SessionHost } from './types.ts';
@@ -23,10 +25,15 @@ const str = (v: unknown) => (typeof v === 'string' ? v : '');
 
 // Permission policy. Everything that decides whether a tool asks the boss is in this block, so it can be swapped
 // for the owner's own settings in one place. Every question still goes out through `host.ask` in `canUseTool`.
-const PERMISSION_MODE = 'acceptEdits' as const;
+// F1 maps the four modes onto Claude's here. Until then every mode runs the way it always has.
+const permissionModeFor = (_policy: PermissionPolicy) => 'acceptEdits' as const;
 
 // Tools that can never hurt anything, so the boss is not bothered.
 const AUTO_ALLOW = new Set(['Read', 'Glob', 'Grep', 'LS', 'WebSearch', 'WebFetch', 'TodoWrite', 'Task', 'Agent']);
+
+// The tools that start a subagent. Claude runs them in the background unless told otherwise: the tool_result of the call
+// is then a "launched" placeholder, and only a task_notification says the subagent is done.
+const SUBAGENT_TOOLS = new Set(['Agent', 'Task']);
 
 // The office's own tools are how an employee reaches the boss, so they never ask.
 const OFFICE_TOOL_PREFIX = 'mcp__office__';
@@ -34,9 +41,6 @@ const OFFICE_TOOL_PREFIX = 'mcp__office__';
 // OFFICE_BASH=allow skips the question for shell commands and everything else that would ask.
 const runsUnasked = (toolName: string) =>
   process.env.OFFICE_BASH === 'allow' || AUTO_ALLOW.has(toolName) || toolName.startsWith(OFFICE_TOOL_PREFIX);
-
-// "Yes", "sim, pode fazer", "OK go" all count. Anything else is a no and the text goes back to the agent.
-const ALLOW_WORDS = /^\s*(allow|yes|y|sure|ok|okay|sim|pode)\b/i;
 
 // Claude Code aborts an HTTP MCP call that has sent no response or progress for 5 minutes, and an owner can take longer
 // than that to answer. Only a per-server `timeout` lifts that limit: MCP_TOOL_TIMEOUT alone does not (verify/claude-timeout-probe.ts).
@@ -100,19 +104,25 @@ function describeTool(name: string, input: Record<string, unknown>, cwd: string)
   }
 }
 
-// What the card shows next to Allow / Deny: the shell command, or the file the tool wants to touch.
+// What the card shows next to Allow / Deny: the shell command, or the file the tool wants to touch. The office matches
+// Always allow rules against `tool` and `detail`, so a shell command must go out as SHELL_TOOL with the bare command.
 function permissionBody(name: string, input: Record<string, unknown>, cwd: string): QuestionBody {
   const target = targetOf(input, cwd);
+  const shell = name === 'Bash';
   return {
     kind: 'permission',
-    text: name === 'Bash' ? 'Can I run a shell command?' : `Can I use ${name}?`,
-    tool: name,
-    detail: name === 'Bash' ? str(input.command).trim() : target || short(JSON.stringify(input), 200),
+    text: shell ? 'Can I run a shell command?' : `Can I use ${name}?`,
+    tool: shell ? SHELL_TOOL : name,
+    detail: shell ? str(input.command).trim() : target || short(JSON.stringify(input), 200),
   };
 }
 
+// The part of the SDK's Query that a session uses, so a check can stand in for the SDK.
+type Live = AsyncIterable<SDKMessage> & Pick<Query, 'interrupt' | 'setModel' | 'close'>;
+export type ClaudeRun = (params: { prompt: AsyncIterable<SDKUserMessage>; options: Options }) => Live;
+
 // The SDK's streaming input takes an async iterable. This is the smallest one we can push into.
-class PushQueue<T> implements AsyncIterable<T> {
+export class PushQueue<T> implements AsyncIterable<T> {
   private items: T[] = [];
   private waiting?: (r: IteratorResult<T>) => void;
   private closed = false;
@@ -145,8 +155,8 @@ class PushQueue<T> implements AsyncIterable<T> {
   }
 }
 
-class ClaudeSession implements EmployeeSession {
-  private q?: Query;
+export class ClaudeSession implements EmployeeSession {
+  private q?: Live;
   private inbox = new PushQueue<SDKUserMessage>();
   private stopped = false;
   private gotInit = false;
@@ -158,15 +168,25 @@ class ClaudeSession implements EmployeeSession {
   // Ends with the process, so a permission question left open by a dead process is withdrawn from the owner's desk.
   private life = new AbortController();
 
-  private readonly host: SessionHost;
+  // What the last `permissionsChanged` said. The next process starts on it.
+  private policy: PermissionPolicy;
+  // The subagents this process has started and not seen end. The office keeps the list the owner sees.
+  private subagents = new Set<string>();
+  // Rule changes that arrived between tasks. They go in front of the next task.
+  private notices: string[] = [];
 
-  constructor(host: SessionHost) {
+  private readonly host: SessionHost;
+  private readonly run: ClaudeRun;
+
+  constructor(host: SessionHost, run: ClaudeRun) {
     this.host = host;
+    this.run = run;
+    this.policy = host.permissions;
   }
 
   assign(task: string) {
     this.beginTask(task);
-    this.send(task);
+    this.send(this.withNotices(task));
   }
 
   interject(text: string, style: InterruptStyle) {
@@ -175,7 +195,7 @@ class ClaudeSession implements EmployeeSession {
     this.host.log(`Boss said: ${text}`);
     if (kind === 'idle' || kind === 'error') {
       this.beginTask(short(text, 80));
-      this.send(framed);
+      this.send(this.withNotices(framed));
     } else if (style === 'now') {
       void this.interruptThenSend(framed);
     } else {
@@ -193,6 +213,33 @@ class ClaudeSession implements EmployeeSession {
       debug('interrupt failed:', e);
     }
     if (!this.stopped) this.send(text, 'now');
+  }
+
+  // A live session switches models for its next turn. Without one, the next start reads `host.model`. The SDK refuses an
+  // id its bundled Claude Code does not describe, even one that works as a start option, so the owner is told.
+  setModel(model: ModelId) {
+    this.q?.setModel(model).then(
+      () => debug(`model switched to ${model}`),
+      (e: unknown) => this.host.log(`Could not switch to ${model}, still on the previous model: ${e instanceof Error ? e.message : String(e)}`),
+    );
+  }
+
+  permissionsChanged(policy: PermissionPolicy) {
+    this.policy = policy;
+  }
+
+  // A process that is not running reads the rules when it starts.
+  rulesChanged(text: string) {
+    if (!this.q) return;
+    const notice = `[Your boss changed the rules you work by. Acknowledge it in one sentence, then follow it]: ${text}`;
+    const { kind } = this.host.employee.status;
+    if (kind === 'idle' || kind === 'error') this.notices.push(notice);
+    else this.send(notice, 'next');
+  }
+
+  private withNotices(text: string): string {
+    const notices = this.notices.splice(0);
+    return notices.length ? `${notices.join('\n\n')}\n\n${text}` : text;
   }
 
   stop() {
@@ -226,19 +273,20 @@ class ClaudeSession implements EmployeeSession {
     this.life = new AbortController();
     // Read once per session: a note saved while the session runs shows up in the next one, and the prompt stays put.
     const digest = this.host.memoryDigest();
+    const rules = this.host.rules();
     debug(`session start for ${employee.name}, memory digest:\n${digest || '(no notes yet)'}`);
-    this.q = query({
+    this.q = this.run({
       prompt: this.inbox,
       options: {
         cwd: block.cwd,
-        model: process.env.OFFICE_CLAUDE_MODEL ?? 'claude-sonnet-5-5',
+        model: this.host.model,
         // 'project' only: the boss's global plugins and hooks must not leak into employees.
         settingSources: ['project'],
-        permissionMode: PERMISSION_MODE,
+        permissionMode: permissionModeFor(this.policy),
         systemPrompt: {
           type: 'preset',
           preset: 'claude_code',
-          append: persona({ name: employee.name, company: companyName, block: block.name, digest }),
+          append: persona({ name: employee.name, company: companyName, block: block.name, digest, rules }),
         },
         // The office server every harness shares. alwaysLoad keeps ask_owner in the prompt instead of behind tool search.
         mcpServers: { [mcp.name]: { type: 'http', url: mcp.url, timeout: OFFICE_MCP_TIMEOUT_MS, alwaysLoad: true } },
@@ -254,7 +302,7 @@ class ClaudeSession implements EmployeeSession {
     void this.pump(this.q);
   }
 
-  private async pump(q: Query) {
+  private async pump(q: Live) {
     try {
       for await (const m of q) this.onMessage(m);
       if (!this.stopped) this.fail('The session ended unexpectedly');
@@ -263,13 +311,17 @@ class ClaudeSession implements EmployeeSession {
     }
   }
 
-  // The process is gone. The next assign starts a new one, resuming the stored session.
+  // The process is gone, and its subagents with it. The next assign starts a new one, resuming the stored session.
   private fail(message: string) {
     // A resume that dies before init means the stored session is gone. Start clean next time.
     if (!this.gotInit) this.host.setSessionId('');
     this.q?.close();
     this.q = undefined;
     this.life.abort();
+    for (const id of this.subagents) this.host.subagentFinished(id);
+    this.subagents.clear();
+    // The next process reads the rules as they are then.
+    this.notices = [];
     this.reportError(message);
   }
 
@@ -292,9 +344,29 @@ class ClaudeSession implements EmployeeSession {
       );
     } else if (m.type === 'assistant') {
       this.onAssistant(m);
+    } else if (m.type === 'system' && m.subtype === 'task_notification') {
+      this.subagentEnded(m.tool_use_id);
+    } else if (m.type === 'user') {
+      this.onUser(m);
     } else if (m.type === 'result') {
       this.onResult(m);
     }
+  }
+
+  private subagentStarted(id: string, parentId: string | null, input: Record<string, unknown>) {
+    this.subagents.add(id);
+    this.host.subagentStarted({ id, parentId, label: short(str(input.description), 60) || 'Helper', startedAt: Date.now() });
+  }
+
+  private subagentEnded(id: string | undefined) {
+    if (id && this.subagents.delete(id)) this.host.subagentFinished(id);
+  }
+
+  // A tool_result that is an error also ends the subagent: a launch that failed, or a run the owner interrupted.
+  private onUser(m: SDKUserMessage) {
+    const { content } = m.message;
+    if (typeof content === 'string') return;
+    for (const block of content) if (block.type === 'tool_result' && block.is_error) this.subagentEnded(block.tool_use_id);
   }
 
   private onAssistant(m: Extract<SDKMessage, { type: 'assistant' }>) {
@@ -305,7 +377,9 @@ class ClaudeSession implements EmployeeSession {
     }
     for (const block of m.message.content) {
       if (block.type === 'tool_use') {
-        const line = describeTool(block.name, block.input as Record<string, unknown>, host.block.cwd);
+        const input = block.input as Record<string, unknown>;
+        if (SUBAGENT_TOOLS.has(block.name)) this.subagentStarted(block.id, m.parent_tool_use_id, input);
+        const line = describeTool(block.name, input, host.block.cwd);
         host.setActivity(line);
         if (block.name !== `${OFFICE_TOOL_PREFIX}ask_owner`) host.log(line); // the office logs the question itself
       } else if (block.type === 'text' && m.parent_tool_use_id === null) {
@@ -343,9 +417,9 @@ class ClaudeSession implements EmployeeSession {
     if (runsUnasked(toolName)) return { behavior: 'allow', updatedInput: input };
     const { cwd } = this.host.block;
     const answer = await this.host.ask(permissionBody(toolName, input, cwd), AbortSignal.any([signal, this.life.signal]));
-    if (ALLOW_WORDS.test(answer)) return { behavior: 'allow', updatedInput: input };
+    if (isAllow(answer)) return { behavior: 'allow', updatedInput: input };
     return { behavior: 'deny', message: `The boss did not allow this. They said: ${answer || 'no'}` };
   };
 }
 
-export const createClaudeSession: SessionFactory = (host) => new ClaudeSession(host);
+export const createClaudeSession: SessionFactory = (host) => new ClaudeSession(host, query);

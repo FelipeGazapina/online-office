@@ -2,8 +2,12 @@ import type {
   Employee,
   EmployeeStatus,
   InterruptStyle,
+  ModelCatalog,
+  ModelId,
+  PermissionPolicy,
   ProjectBlock,
   QuestionBody,
+  Subagent,
 } from '../../../shared/protocol.ts';
 
 // What the company hands each session. `employee` and `block` are live views of company state;
@@ -12,6 +16,12 @@ export type SessionHost = {
   readonly employee: Readonly<Employee>;
   readonly block: Readonly<ProjectBlock>;
   readonly companyName: string;
+  // The model this employee runs on now, in the words of its harness. Read it whenever a session or a turn starts.
+  readonly model: ModelId;
+  // How much this employee may do without asking, now. `inherit` means the owner's own settings for the harness.
+  // The office answers `alwaysAllow` itself, before a card reaches the owner, so an adapter only maps `mode` onto
+  // its harness's switches.
+  readonly permissions: PermissionPolicy;
   setStatus(status: EmployeeStatus): void;
   setActivity(text: string): void;
   setSessionId(id: string): void;
@@ -21,6 +31,11 @@ export type SessionHost = {
   // it shows the employee as blocked, and puts them back to working once the owner answers. An adapter uses this for
   // Permission cards. `ask_owner` reaches the same place through the office MCP server; while the meeting-room
   // door is closed, ask_owner returns do-not-disturb guidance but permission cards stay queued in the inbox.
+  //
+  // A permission body sends a shell command as `tool: SHELL_TOOL` with the bare command in `detail`, with no shell
+  // wrapper around it. The office checks the employee's Always-allow rules against `tool` and `detail`, and resolves
+  // with ALLOW_ANSWER at once, with no card, when one covers it. To tell an owner's allow from a deny, use
+  // `isAllow(answer)` (shared/permissions.ts) and send the text back to the harness when it is a deny.
   //
   // It never rejects. When `signal` aborts (the harness cancelled the tool call, or a hard stop) or the session ends
   // before an answer, the office withdraws the card and the promise resolves with '', which the caller has already
@@ -34,8 +49,23 @@ export type SessionHost = {
   // Titles of this employee's and this block's saved notes, read now. Call it once when the harness session starts and
   // reuse the string for that whole session, so a note saved mid-session changes nothing until the next one.
   memoryDigest(): string;
+  // The owner's rules that apply to this employee, as text for the persona. Empty when there are none. Read it once when
+  // a harness session starts and reuse it for that whole session, and pass it to `persona()` with the digest. Rules that
+  // change later arrive through `rulesChanged`.
+  rules(): string;
   // Company awards the XP. Adapters call this once per finished task.
   taskCompleted(): void;
+  // Report each subagent the harness starts for this employee, the moment it starts: what the harness's own delegation
+  // tool spawns (Claude `Agent`, Hermes `delegate_task`). `id` is any string that is unique within this session.
+  // `parentId` is the id of the subagent that spawned this one, or null when the employee did. Report a parent before
+  // its children, or the office treats the child as the employee's own. The owner sees one doll per subagent on the
+  // employee's desk. A subagent is not an employee and takes no seat.
+  subagentStarted(subagent: Subagent): void;
+  // Report the same subagent when it ends, however it ends. Ending one ends everything under it. An id the office does
+  // not know is ignored, so ending twice is safe. A subagent that runs in the background ends when the harness says it
+  // is done, not when the call that launched it returns. There is no need to report ends when the session stops: the
+  // office clears every subagent then.
+  subagentFinished(id: string): void;
 };
 
 // One per employee. Construction must be cheap: the real adapter starts its process on first message.
@@ -43,7 +73,41 @@ export interface EmployeeSession {
   assign(task: string): void;
   // Company routes interjections to a blocked employee into the question it is waiting on, so this only sees idle/working/error.
   interject(text: string, style: InterruptStyle): void;
+  // The owner picked another model. `host.model` already returns it. Apply it from the next turn, and never interrupt
+  // the turn that is running. Claude switches the live session with `Query.setModel`, Codex sends `model` on the next
+  // `turn/start`, and Hermes calls `session/set_model`. Claude refuses an id it does not know at once, and Codex and
+  // Hermes fail the next turn instead. Say so in `log`, and report a failed turn like any other, with
+  // `setStatus({ kind: 'error' })`. The office keeps the id on the employee, and the next session start tries it again.
+  setModel(model: ModelId): void;
+  // The policy changed: the owner picked another mode, or an Always-allow rule was added or removed. `host.permissions`
+  // already returns it. Apply a new `mode` as soon as the harness allows, live if it can and from the next turn or the
+  // next session start if not (docs/beta-plan.md maps each mode onto each harness's switches). Ignore a change that is
+  // only in `alwaysAllow`, because the office enforces those rules itself.
+  permissionsChanged(policy: PermissionPolicy): void;
+  // The owner's rules changed while a session may be running. `text` is a complete notice for the model, and each call
+  // stands on its own. Deliver it like an interjection with style 'next': the agent reads it at its next step and keeps
+  // the turn it is on (Codex `turn/steer`, which can land 30 seconds late while a tool runs, Hermes a plain
+  // `session/prompt` during a turn). With no turn running, put it in front of the next task. With no harness process
+  // running, do nothing, because the next start reads `host.rules()`.
+  rulesChanged(text: string): void;
   stop(): void;
 }
 
 export type SessionFactory = (host: SessionHost) => EmployeeSession;
+
+// One entry per provider in HARNESSES, so adding a provider to the contract fails typecheck until it is described here.
+export type Harness = {
+  // Resolves to the harness version, or null when it is not installed.
+  detect(): Promise<string | null>;
+  // The model a new employee starts on when the owner picks none, in the harness's own words. A function so the
+  // environment is read when someone is hired, not when the module loads.
+  defaultModel(): ModelId;
+  // A harness without a `session` factory is installed but not wired: the hire modal shows it, and hiring it is refused.
+  session?: SessionFactory;
+  // The models this harness offers, asked of the harness itself. The office calls it when the owner asks
+  // (`load_models`), never twice at once, so it may start the CLI and take seconds. Resolve `ready` with every model
+  // the owner can pick and the id the harness starts on when given none (Claude `Query.supportedModels()`, Codex
+  // `model/list` with its `isDefault` entry, Hermes the `models` of `session/new`), or `error` with a reason the owner
+  // can read. A rejection becomes `error` too. Leave it out until the harness can list its models.
+  listModels?(): Promise<ModelCatalog>;
+};

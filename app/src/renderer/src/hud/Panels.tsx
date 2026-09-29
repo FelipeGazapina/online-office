@@ -204,14 +204,15 @@ export function Toasts() {
 }
 
 const KEYS: [string, string][] = [
-  ['W A S D / arrows', 'Walk, relative to the camera'],
+  ['W A S D / arrows', 'Walk, relative to the camera. Cancels a click walk'],
   ['Shift', 'Run'],
   ['Q / E', 'Turn the camera (90 degree steps in overview)'],
-  ['Drag / wheel', 'Orbit and zoom (follow), look (first person), zoom (overview)'],
+  ['Drag / wheel', 'Orbit and zoom (follow), look (first person), turn and zoom (overview)'],
   ['1 / 2 / 3', 'Follow, overview, first person'],
   ['Enter', 'Type to the nearest employee, or whoever is asking'],
   ['Hold V', 'Push to talk (when the mic is set to Hold V)'],
-  ['Click an employee', 'Open their drawer'],
+  ['Click an employee', 'Open a menu: chat, or walk to them'],
+  ['Click the floor', 'Walk there (overview camera)'],
   ['Click the whiteboard', 'Open the diagram large'],
   ['Esc', 'Close whatever is open'],
   ['H', 'This help'],

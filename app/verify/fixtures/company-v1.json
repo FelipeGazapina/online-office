@@ -1,0 +1,49 @@
+{
+  "name": "Gazapina Labs",
+  "level": 3,
+  "xp": 90,
+  "blocks": [
+    {
+      "id": "36598e6c-e4fa-4fb6-b293-08c30e40c955",
+      "name": "Billing",
+      "cwd": "__REPO__",
+      "color": "#5b8def",
+      "slot": 0,
+      "whiteboard": {
+        "title": "Billing flow",
+        "mermaid": "flowchart LR\n A-->B",
+        "by": "b2553ea3-a201-4d8b-88e7-cb980bd017eb",
+        "at": 1790678190360
+      }
+    }
+  ],
+  "employees": [
+    {
+      "id": "b2553ea3-a201-4d8b-88e7-cb980bd017eb",
+      "name": "Ana",
+      "provider": "claude-code",
+      "blockId": "36598e6c-e4fa-4fb6-b293-08c30e40c955",
+      "desk": 0,
+      "status": {
+        "kind": "idle"
+      },
+      "activity": "Finished the invoice export",
+      "hiredAt": 1790678190337,
+      "sessionId": "7f2c5e0a-1111-4222-8333-944455556666"
+    },
+    {
+      "id": "55cc7c57-d3e6-4eea-82e5-fc2739637ecd",
+      "name": "Ben",
+      "provider": "claude-code",
+      "blockId": "36598e6c-e4fa-4fb6-b293-08c30e40c955",
+      "desk": 1,
+      "status": {
+        "kind": "working",
+        "task": "Refactor billing",
+        "startedAt": 1790000000000
+      },
+      "activity": "Running npm test",
+      "hiredAt": 1790678190338
+    }
+  ]
+}

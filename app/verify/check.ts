@@ -1,11 +1,11 @@
 // Shared by the no-model check scripts. A failed check is printed and counted, and `finish()` turns the count into the exit code.
 let failures = 0;
 
-export const check = (cond: unknown, msg: string) => {
+export const check = (cond: unknown, msg: string, detail = '') => {
   if (cond) console.log('ok:', msg);
   else {
     failures++;
-    console.log('FAIL:', msg);
+    console.log('FAIL:', detail ? `${msg} | ${detail}` : msg);
   }
 };
 

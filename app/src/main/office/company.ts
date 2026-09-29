@@ -1,25 +1,34 @@
 import { randomUUID } from 'node:crypto';
 import { mkdirSync, readFileSync, realpathSync, renameSync, statSync, writeFileSync } from 'node:fs';
 import { basename, dirname, isAbsolute } from 'node:path';
+import { ALLOW_ANSWER, covers, isAllow, ruleFor, sameRule, type PermissionBody } from '../../shared/permissions.ts';
 import {
   DESKS_PER_BLOCK,
   MAX_LEVEL,
   PROVIDERS,
   XP_FOR_LEVEL,
   headcountCap,
+  seatCeiling,
+  type AllowRule,
   type BlockId,
   type ClientMessage,
   type Company,
+  type CompanySettings,
   type Employee,
   type EmployeeId,
   type EmployeeStatus,
   type HarnessStatus,
   type MeetingDoor,
+  type ModelCatalog,
+  type ModelId,
+  type PermissionMode,
+  type PermissionPolicy,
   type ProjectBlock,
   type Provider,
   type Question,
   type QuestionId,
   type Snapshot,
+  type Subagent,
 } from '../../shared/protocol.ts';
 import { HARNESSES } from './adapters/index.ts';
 import type { EmployeeSession, SessionHost } from './adapters/types.ts';
@@ -69,6 +78,17 @@ const describeQuestion = (q: Question): string =>
     ? `Asking permission: ${q.tool} ${short(q.detail, 120)}`
     : `Asking the boss: ${q.text}${q.options ? ` [${q.options.join(' / ')}]` : ''}`;
 
+const ruleLabel = (rule: AllowRule): string => {
+  switch (rule.kind) {
+    case 'command':
+      return rule.prefix;
+    case 'exact':
+      return rule.command;
+    case 'tool':
+      return rule.name;
+  }
+};
+
 export const levelForXp = (xp: number): number => {
   let level = 1;
   for (let l = 1; l <= MAX_LEVEL; l++) if (xp >= XP_FOR_LEVEL[l]!) level = l;
@@ -96,8 +116,33 @@ function seed(): Company {
     name: 'Gazapina Labs',
     level,
     xp: XP_FOR_LEVEL[level],
+    settings: { seats: seatCeiling(level), defaultModels: {}, defaultPermissions: 'inherit' },
     blocks: [],
     employees: [],
+  };
+}
+
+// What company.json can hold: a company from before models, permissions and settings existed, or from after.
+type StoredEmployee = Omit<Employee, 'model' | 'permissions' | 'subagents'> & Partial<Pick<Employee, 'model' | 'permissions'>>;
+type StoredCompany = Omit<Company, 'settings' | 'employees'> & { settings?: Partial<CompanySettings>; employees: StoredEmployee[] };
+
+// Every field added after the first release gets its default here and nowhere else, so an old file and a new one
+// load to the same company, and saving what this returns is the same file again.
+function migrate(c: StoredCompany): Company {
+  const settings: CompanySettings = {
+    seats: c.settings?.seats ?? seatCeiling(c.level),
+    defaultModels: c.settings?.defaultModels ?? {},
+    defaultPermissions: c.settings?.defaultPermissions ?? 'inherit',
+  };
+  return {
+    ...c,
+    settings,
+    employees: c.employees.map((e) => ({
+      ...e,
+      model: e.model ?? HARNESSES[e.provider].defaultModel(),
+      permissions: e.permissions ?? { mode: settings.defaultPermissions, alwaysAllow: [] },
+      subagents: [],
+    })),
   };
 }
 
@@ -109,16 +154,18 @@ function load(file: string): Company | undefined {
     return undefined;
   }
   // Only this process writes the file, so a shape check is enough; anything odd falls back to a fresh seed.
-  const c = raw as Partial<Company> | null;
+  const c = raw as Partial<StoredCompany> | null;
   if (!c || typeof c.name !== 'string' || typeof c.level !== 'number' || typeof c.xp !== 'number') return undefined;
   if (!Array.isArray(c.blocks) || !Array.isArray(c.employees)) return undefined;
-  return c as Company;
+  return migrate(c as StoredCompany);
 }
 
+// Subagents belong to a running session, so they are never written.
 function save(file: string, company: Company) {
   mkdirSync(dirname(file), { recursive: true });
   const tmp = `${file}.tmp`;
-  writeFileSync(tmp, JSON.stringify(company, null, 2));
+  const stored = { ...company, employees: company.employees.map(({ subagents: _, ...e }) => e) };
+  writeFileSync(tmp, JSON.stringify(stored, null, 2));
   renameSync(tmp, file);
 }
 
@@ -130,6 +177,8 @@ export class Office {
   // Every question an employee is waiting on. The employee's status shows the front of their line.
   private inbox = new Inbox({ headChanged: (id, head, left) => this.onHeadChanged(id, head, left) });
   private resumes = new Map<EmployeeId, Resume>();
+  // What each harness offered the last time the owner asked. It is about this machine, not the company, so a reset keeps it.
+  private catalogs: Record<Provider, ModelCatalog> = { 'claude-code': { kind: 'unknown' }, codex: { kind: 'unknown' }, hermes: { kind: 'unknown' } };
   private readonly dataFile: string;
   private readonly harnesses: Record<Provider, HarnessStatus>;
   private readonly events: OfficeEvents;
@@ -152,7 +201,7 @@ export class Office {
   }
 
   snapshot(): Snapshot {
-    return { type: 'snapshot', company: this.company, harnesses: this.harnesses, meetingDoor: this.meetingDoor };
+    return { type: 'snapshot', company: this.company, harnesses: this.harnesses, catalogs: this.catalogs, meetingDoor: this.meetingDoor };
   }
 
   shutdown() {
@@ -162,7 +211,7 @@ export class Office {
   handle(msg: ClientMessage): void {
     switch (msg.type) {
       case 'hire':
-        return this.hire(msg.provider, msg.blockId, msg.name);
+        return this.hire(msg.provider, msg.blockId, msg.name, msg.model);
       case 'fire':
         return this.fire(msg.employeeId);
       case 'create_block':
@@ -172,7 +221,7 @@ export class Office {
       case 'assign':
         return this.assign(msg.employeeId, msg.task);
       case 'answer':
-        return this.answer(msg.employeeId, msg.questionId, msg.text);
+        return this.answer(msg.employeeId, msg.questionId, msg.text, msg.always);
       case 'interject': {
         const e = this.employee(msg.employeeId);
         // A boss speaking to someone who is waiting on a decision is the decision.
@@ -181,6 +230,16 @@ export class Office {
       }
       case 'meeting_door':
         return this.setMeetingDoor(msg.state);
+      case 'load_models':
+        return this.loadModels(msg.provider);
+      case 'set_model':
+        return this.setModel(msg.employeeId, msg.model);
+      case 'set_permissions':
+        return this.setPermissions(msg.employeeId, msg.mode);
+      case 'remove_allow_rule':
+        return this.removeAllowRule(msg.employeeId, msg.rule);
+      case 'fresh_session':
+        return this.freshSession(msg.employeeId);
       case 'reset_company':
         return this.reset();
       default: {
@@ -221,6 +280,8 @@ export class Office {
 
   private startSession(employee: Employee) {
     const block = this.block(employee.blockId);
+    // Whatever the last session had running died with it.
+    employee.subagents = [];
     let session: EmployeeSession | undefined;
     // A stopped session (fired, reset, block moved) can still have a message in flight.
     // Dropping its callbacks here keeps it from touching a newer company.
@@ -241,6 +302,14 @@ export class Office {
       // Normal decisions get an immediate contextual answer while the owner is in a meeting. Permission
       // questions are still real inbox entries: they stay blocked and hidden until the door opens.
       if (this.meetingDoor === 'closed' && body.kind === 'ask') return Promise.resolve(MEETING_DND_RESPONSE);
+      // Always allow is the office's, so every harness gets it: a covered request never reaches the owner.
+      if (body.kind === 'permission') {
+        const rule = employee.permissions.alwaysAllow.find((r) => covers(r, body));
+        if (rule) {
+          this.events.log(employee.id, `Allowed by your rule "${ruleLabel(rule)}": ${body.tool} ${short(body.detail, 120)}`, Date.now());
+          return Promise.resolve(ALLOW_ANSWER);
+        }
+      }
       return this.inbox.ask(employee.id, body, signal);
     };
     // Whatever harness the employee runs on, these are the only tools it gets from the office, and the URL says whose they are.
@@ -256,6 +325,12 @@ export class Office {
       employee,
       block,
       companyName: this.company.name,
+      get model() {
+        return employee.model;
+      },
+      get permissions() {
+        return employee.permissions;
+      },
       setStatus: live((status) => this.report(employee, { status })),
       setActivity: live((text) => this.report(employee, { activity: text })),
       setSessionId: live((id) => {
@@ -267,10 +342,31 @@ export class Office {
       ask,
       mcp: { url, name: 'office' },
       memoryDigest: () => notebook.digest(block.name),
+      // F2 reads the rule files here.
+      rules: () => '',
       taskCompleted: live(() => this.addXp(XP_PER_TASK)),
+      subagentStarted: live((subagent) => this.startSubagent(employee, subagent)),
+      subagentFinished: live((id) => this.finishSubagent(employee, id)),
     };
     session = create(host);
     this.sessions.set(employee.id, session);
+  }
+
+  private startSubagent(e: Employee, subagent: Subagent) {
+    if (e.subagents.some((s) => s.id === subagent.id)) return;
+    // A doll sits on its parent, so one whose parent is not here sits on the desk.
+    const parentId = e.subagents.some((s) => s.id === subagent.parentId) ? subagent.parentId : null;
+    e.subagents.push({ ...subagent, parentId });
+    this.commit();
+  }
+
+  private finishSubagent(e: Employee, id: string) {
+    // A parent is always listed before its children, so one pass finds everything under it.
+    const ended = new Set([id]);
+    for (const s of e.subagents) if (s.parentId !== null && ended.has(s.parentId)) ended.add(s.id);
+    if (!e.subagents.some((s) => ended.has(s.id))) return;
+    e.subagents = e.subagents.filter((s) => !ended.has(s.id));
+    this.commit();
   }
 
   private stopSession(id: EmployeeId) {
@@ -322,7 +418,7 @@ export class Office {
     this.commit();
   }
 
-  private hire(provider: Provider, blockId: BlockId, requestedName?: string) {
+  private hire(provider: Provider, blockId: BlockId, requestedName?: string, requestedModel?: ModelId) {
     const { company } = this;
     const block = this.block(blockId);
     const harness = this.harnesses[provider];
@@ -349,6 +445,9 @@ export class Office {
       desk,
       status: { kind: 'idle' },
       activity: 'Just started, settling in at my desk',
+      model: requestedModel ?? company.settings.defaultModels[provider] ?? HARNESSES[provider].defaultModel(),
+      permissions: { mode: company.settings.defaultPermissions, alwaysAllow: [] },
+      subagents: [],
       hiredAt: Date.now(),
     };
     company.employees.push(employee);
@@ -422,21 +521,84 @@ export class Office {
     this.sessionOf(e).assign(task.trim());
   }
 
-  private answer(id: EmployeeId, questionId: QuestionId, text: string) {
+  private answer(id: EmployeeId, questionId: QuestionId, text: string, always = false) {
     const e = this.employee(id);
     if (e.status.kind !== 'blocked_on_owner' || e.status.question.id !== questionId) {
       throw new OfficeError(`${e.name} has no open question ${questionId}`);
     }
-    const { askedAt } = e.status.question;
+    const { question } = e.status;
     if (!this.inbox.answer(id, questionId, text)) throw new OfficeError(`${e.name} has no open question ${questionId}`);
-    debug(`owner answered ${e.name} after ${((Date.now() - askedAt) / 1000).toFixed(1)}s: ${JSON.stringify(short(text, 120))}`);
-    if (Date.now() - askedAt <= QUICK_ANSWER_MS) this.addXp(XP_PER_QUICK_ANSWER);
+    debug(`owner answered ${e.name} after ${((Date.now() - question.askedAt) / 1000).toFixed(1)}s: ${JSON.stringify(short(text, 120))}`);
+    if (always && question.kind === 'permission' && isAllow(text)) this.allowAlways(e, question);
+    if (Date.now() - question.askedAt <= QUICK_ANSWER_MS) this.addXp(XP_PER_QUICK_ANSWER);
+  }
+
+  // Always allow on a card. A command too tangled for a safe rule is allowed this once, and the log says so.
+  private allowAlways(e: Employee, question: PermissionBody) {
+    const rule = ruleFor(question);
+    if (!rule) return this.events.log(e.id, `No rule can stand for that command, so it was allowed only this once: ${short(question.detail, 120)}`, Date.now());
+    if (e.permissions.alwaysAllow.some((r) => sameRule(r, rule))) return;
+    this.changePermissions(e, { alwaysAllow: [...e.permissions.alwaysAllow, rule] }, `Always allow: ${ruleLabel(rule)}`);
+  }
+
+  private loadModels(provider: Provider) {
+    const harness = HARNESSES[provider];
+    if (!harness.listModels || this.catalogs[provider].kind === 'loading') return;
+    this.setCatalog(provider, { kind: 'loading' });
+    harness.listModels().then(
+      (catalog) => this.setCatalog(provider, catalog),
+      (err: unknown) => this.setCatalog(provider, { kind: 'error', message: err instanceof Error ? err.message : String(err) }),
+    );
+  }
+
+  private setCatalog(provider: Provider, catalog: ModelCatalog) {
+    this.catalogs[provider] = catalog;
+    this.events.changed();
+  }
+
+  private setModel(id: EmployeeId, model: ModelId) {
+    const e = this.employee(id);
+    e.model = model;
+    this.events.log(id, `Model: ${model}, from the next turn`, Date.now());
+    this.sessions.get(id)?.setModel(model);
+    this.commit();
+  }
+
+  private setPermissions(id: EmployeeId, mode: PermissionMode) {
+    this.changePermissions(this.employee(id), { mode }, `Permissions: ${mode}`);
+  }
+
+  private removeAllowRule(id: EmployeeId, rule: AllowRule) {
+    const e = this.employee(id);
+    const alwaysAllow = e.permissions.alwaysAllow.filter((r) => !sameRule(r, rule));
+    if (alwaysAllow.length !== e.permissions.alwaysAllow.length) this.changePermissions(e, { alwaysAllow }, `Rule removed: ${ruleLabel(rule)}`);
+  }
+
+  // The one way a policy changes. Each change is a new object, so nothing that was handed the old policy sees it move.
+  private changePermissions(e: Employee, change: Partial<PermissionPolicy>, logLine: string) {
+    e.permissions = { ...e.permissions, ...change };
+    this.events.log(e.id, logLine, Date.now());
+    this.sessions.get(e.id)?.permissionsChanged(e.permissions);
+    this.commit();
   }
 
   private setMeetingDoor(state: MeetingDoor) {
     if (this.meetingDoor === state) return;
     this.meetingDoor = state;
     this.events.changed();
+  }
+
+  // The old session stops with its questions. With no sessionId left, the new one has no conversation to resume.
+  // The employee keeps their notes, model and rules.
+  private freshSession(id: EmployeeId) {
+    const e = this.employee(id);
+    this.stopSession(id);
+    delete e.sessionId;
+    e.status = { kind: 'idle' };
+    e.activity = 'Started a fresh session';
+    this.events.log(id, 'Started a fresh session', Date.now());
+    this.startSession(e);
+    this.commit();
   }
 
   private reset() {

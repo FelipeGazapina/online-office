@@ -18,7 +18,7 @@ export function Person({
   read: () => Pose | null;
   typing?: boolean;
   hidden?: boolean;
-  onPick?: () => void;
+  onPick?: (at: { x: number; y: number }) => void;
   children?: ReactNode;
 }) {
   const root = useRef<Group>(null);
@@ -64,7 +64,7 @@ export function Person({
         onPick
           ? (e) => {
               e.stopPropagation();
-              if (e.delta < 6) onPick();
+              if (e.delta < 6) onPick({ x: e.nativeEvent.clientX, y: e.nativeEvent.clientY });
             }
           : undefined
       }

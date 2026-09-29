@@ -37,7 +37,7 @@ Each item is checked on the real Electron app, not on a mock.
 
 ## Running the beta
 
-The owner runs the beta from `~/projetos/online-office-beta/app`, a git worktree detached at the last verified commit on `main`. Agents never write there. The orchestrator moves it forward after each verified unit, so `pnpm dev` there always runs code that passed its checks. The owner's own employees also work there, because one of his blocks is this folder. Before moving it, the orchestrator saves any uncommitted work of theirs on a local branch.
+The owner runs the beta from `~/projetos/online-office-beta/app`, a git worktree detached at the last verified commit on `main`. Agents never write there. The orchestrator moves it forward after each verified unit, so `pnpm dev` there always runs code that passed its checks. The owner's own employees also work there, because one of his blocks is this folder. Before moving it, the orchestrator saves any uncommitted work of theirs on a local branch. The owner's own agent threads also commit in `~/projetos/online-office`, so the orchestrator merges only in its own worktree and never there.
 
 ## Known blockers
 
@@ -73,13 +73,13 @@ Research agents write only to `docs/research/`. From U2 on, every implementation
 | R4 | Research: whisper.cpp on this Mac, and speech inside Electron | none | done |
 | U0 | Electron shell: office in the main process, IPC, folder picker, fakes deleted | none | done |
 | U1 | Office MCP server over local HTTP, the owner's question inbox, the memory store, Claude moved onto them | U0, R1, R2, R3 | done |
-| C1 | Contract v2: the types the next wave needs (models, permission modes, Always allow, subagents, fresh session, the rules hook), the `company.json` migration, and the harness-agnostic plumbing | U1 | running |
+| C1 | Contract v2: the types the next wave needs (models, permission modes, Always allow, subagents, fresh session, the rules hook), the `company.json` migration, and the harness-agnostic plumbing | U1 | done |
 | U2 | Real ChatGPT (Codex) employee: app-server, isolation, the four permission modes, model list, subagent events | C1 | |
 | U3 | Real Hermes employee: ACP, office profile, the four permission modes, model list, subagent events | C1 | |
 | F1 | Claude employee v2 and its UI: permission modes and Always allow (card, drawer, office-side rule check), model picker and live switch, subagent dolls on the desk | C1 | |
 | F2 | Rules and boards: rule files with a watcher, delivery to live sessions, office and block boards, sticky notes on desks, notes on boards, fresh session | F1 | |
 | F3 | Owner's computer: the My Mac portal with its floating panel, the Company area with seats and level ceilings, desks per block from seats | F1 | |
-| N1 | Overview navigation: click to walk with A* around furniture, employee menu (Open chat, Go to), chat transcript in the drawer | U0 | running |
+| N1 | Overview navigation: click to walk with A* around furniture, employee menu (Open chat, Go to), chat transcript in the drawer. Employees route with the same planner, so the owner's meeting room no longer traps them | U0 | done |
 | U5 | Voice through whisper.cpp: push-to-talk and proximity, and a `pnpm beta` launch so macOS asks the app, not the terminal, for the mic. Dictating a rule to a board lands with F2 | R4 | running |
 | U6 | README, then the full end-to-end run for all three harnesses | all | |
 
@@ -132,7 +132,10 @@ export type NoteSummary = { id: NoteId; scope: NoteScope; title: string; author:
 // How much an employee may do without asking. `inherit` follows the owner's own settings for the harness.
 export type PermissionMode = 'inherit' | 'ask' | 'auto' | 'yolo';
 // Added by "Always allow" on a permission card. The office checks these before it shows a card, for every harness.
-export type AllowRule = { kind: 'command'; prefix: string } | { kind: 'tool'; name: string };
+export type AllowRule =
+  | { kind: 'command'; prefix: string } // `npm test` covers `npm test -- --watch`
+  | { kind: 'exact'; command: string } // shells, interpreters, wrappers and destructive commands only ever match exactly
+  | { kind: 'tool'; name: string };
 export type PermissionPolicy = { mode: PermissionMode; alwaysAllow: AllowRule[] };
 
 // A running subagent. `parentId` is null for one the employee spawned itself, or another subagent's id.
@@ -145,7 +148,9 @@ export type Subagent = { id: string; parentId: string | null; label: string; sta
 - `OfficeApi` gains `openRulesFile(scope)`, which opens the scope's rule file in the OS editor, and `portal.enter()` and `portal.leave()`.
 - `EmployeeSession` gains `setModel(model)`, applied from the next turn, and `rulesChanged(text)`, a notice delivered to a live session at its next step.
 - `SessionHost` gains the rules in scope as text, frozen at session start, and `subagentStarted` and `subagentFinished`.
-- Each harness entry gains `listModels(): Promise<ModelCatalog>`.
+- Each harness entry gains `listModels(): Promise<ModelCatalog>` and `defaultModel()`.
+- A subagent ends at the harness's completion signal, not at the tool result that launched it. Claude's Agent tool runs in the background by default, so its tool result only says "launched", and the end arrives as a `system/task_notification` with the same `tool_use_id`.
+- `src/shared/permissions.ts` owns how a permission card becomes a rule. Every harness names shell commands `Bash` and puts the bare command in `detail`, so Codex unwraps its `/bin/zsh -lc` first. A command that chains, substitutes or redirects never makes a rule and is never covered by one. `sudo` and `doas` never make a rule.
 
 Each harness maps the modes onto its own switches:
 

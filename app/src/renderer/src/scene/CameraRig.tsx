@@ -8,6 +8,8 @@ import { stepSim } from '../sim.ts';
 
 const ISO_PITCH = 0.78;
 const FOV = { follow: 55, iso: 26, first: 74 } as const;
+// The distance the scene uses to tell a click from a drag.
+const DRAG_PX = 6;
 const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
 const ease = (dt: number, rate: number) => 1 - Math.exp(-dt * rate);
 
@@ -33,15 +35,17 @@ export function CameraRig() {
 
   useEffect(() => {
     const el = gl.domElement;
-    let drag: { x: number; y: number } | null = null;
+    let drag: { x: number; y: number; ox: number; oy: number; far: boolean } | null = null;
     const down = (e: PointerEvent) => {
-      drag = { x: e.clientX, y: e.clientY };
+      drag = { x: e.clientX, y: e.clientY, ox: e.clientX, oy: e.clientY, far: false };
     };
     const move = (e: PointerEvent) => {
       if (!drag) return;
       const dx = e.clientX - drag.x;
       const dy = e.clientY - drag.y;
-      drag = { x: e.clientX, y: e.clientY };
+      drag.x = e.clientX;
+      drag.y = e.clientY;
+      drag.far ||= Math.hypot(e.clientX - drag.ox, e.clientY - drag.oy) >= DRAG_PX;
       const { view } = runtime;
       const m = get().camera;
       if (m === 'follow') {
@@ -50,6 +54,9 @@ export function CameraRig() {
       } else if (m === 'first') {
         view.yaw -= dx * 0.004;
         view.fpPitch = clamp(view.fpPitch - dy * 0.004, -1.25, 1.25);
+      } else if (drag.far) {
+        // A click that wobbles a few pixels must not nudge the overview off its axes, so only a real drag turns it.
+        view.isoYawTarget -= dx * 0.006;
       }
     };
     const up = () => {
@@ -81,6 +88,15 @@ export function CameraRig() {
 
     if (mode === 'iso') view.yaw += angleDiff(view.yaw, view.isoYawTarget) * ease(dt, 6);
     else view.yaw += turn * dt * 1.8;
+
+    // A click walk carries the first person view with it: toward the person once close, else where the owner is heading.
+    const { intent } = owner;
+    if (mode === 'first' && intent.kind === 'walk' && owner.speed > 0.4) {
+      const who = intent.goal.kind === 'employee' ? runtime.avatars.get(intent.goal.employeeId) : undefined;
+      const close = who && Math.hypot(who.pos.x - owner.pos.x, who.pos.z - owner.pos.z) < 2.5;
+      const aim = who && close ? Math.atan2(who.pos.x - owner.pos.x, who.pos.z - owner.pos.z) : Math.atan2(owner.vel.x, owner.vel.z);
+      view.yaw += angleDiff(view.yaw, aim) * ease(dt, 4);
+    }
 
     const fx = Math.sin(view.yaw);
     const fz = Math.cos(view.yaw);

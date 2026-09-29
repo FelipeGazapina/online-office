@@ -1,6 +1,7 @@
 // The whole per-frame world loop in one place: owner movement, employee walking, the queue,
 // proximity listening and the arrival moment. Avatar targets are derived from the office's
-// logical state every frame: blocked_on_owner walks to the owner, everything else goes to the desk.
+// logical state every frame: blocked_on_owner walks to the owner, everything else goes to the desk. Everyone follows
+// routes planned on the nav grid, so the walls of the meeting room are in the way of employees as much as of the owner.
 import { Vector3 } from 'three';
 import type { Company, Employee, EmployeeId } from '../../shared/protocol.ts';
 import { announceArrival, LISTEN_RADIUS } from './audio.ts';
@@ -10,14 +11,16 @@ import {
   DOOR,
   deskPose,
   getLayout,
-  meetingRoomObstacles,
+  OWNER_RADIUS,
   pushOut,
+  withMeetingRoom,
   type DeskPose,
   type Layout,
   type Vec2,
 } from './layout.ts';
-import { runtime, type AvatarRT } from './runtime.ts';
-import { get, set, waitingQueue } from './store.ts';
+import { findApproach, findPath, navFor, type NavGrid } from './nav.ts';
+import { KEYS_INTENT, runtime, STEER_KEYS, type AvatarRT, type OwnerIntent, type WalkGoal } from './runtime.ts';
+import { get, set, toast, waitingQueue } from './store.ts';
 import { ownerInsideMeetingRoom } from './meeting.ts';
 
 const OWNER_WALK = 3.0;
@@ -25,6 +28,16 @@ const OWNER_RUN = 5.4;
 const EMPLOYEE_WALK = 1.4;
 const QUEUE_SPACING = 1.2;
 const LISTEN_EXIT = LISTEN_RADIUS + 0.3;
+// Where the owner stands when walking to someone.
+const TALK_SPOT = 1.0;
+// A walk to someone is planned again once it would end this far from them. TALK_REPLAN + ARRIVE stays under
+// LISTEN_RADIUS, so a walk always ends within earshot.
+const TALK_REPLAN = 1.35;
+// The owner has arrived within this distance of the last waypoint, and moves on from the others within CORNER.
+const ARRIVE = 0.1;
+const CORNER = 0.2;
+// An avatar plans its route again once its target has moved this far since the plan.
+const REROUTE = 0.5;
 
 const dist2 = (a: Vec2, b: Vec2) => Math.hypot(a.x - b.x, a.z - b.z);
 const ease = (dt: number, rate: number) => 1 - Math.exp(-dt * rate);
@@ -69,17 +82,90 @@ function syncAvatars(company: Company) {
       speed: 0,
       seated,
       leaving: false,
+      route: null,
     });
   }
   runtime.seeded = true;
 }
 
-function stepOwner(dt: number, layout: Layout, talkingTo: EmployeeId | null) {
+type Walk = Extract<OwnerIntent, { kind: 'walk' }>;
+
+// The office a walk was planned in. A door that opens or closes makes the plan stale.
+const plannedIn = new WeakMap<Walk, NavGrid>();
+
+function plan(goal: WalkGoal, layout: Layout): Walk | null {
+  const grid = navFor(layout);
+  const from = runtime.owner.pos;
+  let path: Vec2[] | null;
+  switch (goal.kind) {
+    case 'point':
+      path = findPath(grid, from, goal.at);
+      break;
+    case 'employee': {
+      const target = runtime.avatars.get(goal.employeeId);
+      if (!target) return null;
+      const others = [...runtime.avatars.values()].filter((a) => a !== target).map((a) => a.pos);
+      path = findApproach(grid, from, target.pos, { dist: TALK_SPOT, others });
+      break;
+    }
+    default: {
+      const unreachable: never = goal;
+      return unreachable;
+    }
+  }
+  if (!path) return null;
+  const walk: Walk = { kind: 'walk', path, goal };
+  plannedIn.set(walk, grid);
+  return walk;
+}
+
+// A walk that cannot be planned leaves the owner doing what they were doing, and says why.
+export function walkTo(goal: WalkGoal) {
+  const door = get().meetingDoor;
+  const walk = plan(goal, withMeetingRoom(getLayout(get().company?.blocks ?? []), door));
+  if (walk) runtime.owner.intent = walk;
+  else toast(door === 'closed' ? 'The meeting room door is closed.' : 'There is no way there.', 'warn');
+}
+
+// A walk is planned again when the office has changed under it. A walk to someone also follows them: it is planned
+// again when they have moved too far from where it ends, and dropped when they are gone.
+function keepUp(walk: Walk, layout: Layout): OwnerIntent {
+  const { goal, path } = walk;
+  if (plannedIn.get(walk) !== navFor(layout)) return plan(goal, layout) ?? KEYS_INTENT;
+  if (goal.kind !== 'employee') return walk;
+  const target = runtime.avatars.get(goal.employeeId);
+  if (!target) return KEYS_INTENT;
+  if (dist2(path[path.length - 1], target.pos) <= TALK_REPLAN) return walk;
+  return plan(goal, layout) ?? KEYS_INTENT;
+}
+
+// The velocity the walk asks for this frame, or null when the owner is not walking or has just arrived.
+function walkVelocity(layout: Layout): Vec2 | null {
+  const { owner } = runtime;
+  if (owner.intent.kind === 'walk') owner.intent = keepUp(owner.intent, layout);
+  const { intent } = owner;
+  if (intent.kind !== 'walk') return null;
+  const { path } = intent;
+  while (path.length > 1 && dist2(owner.pos, path[0]) < CORNER) path.shift();
+  const next = path[0];
+  const left = dist2(owner.pos, next);
+  const last = path.length === 1;
+  if (last && left < ARRIVE) {
+    owner.intent = KEYS_INTENT;
+    return null;
+  }
+  // Into the last waypoint the speed falls with the distance left. At 3 m/s per meter the owner stops on it, where a
+  // steeper ramp overshoots because the velocity only eases toward what is asked.
+  const top = owner.running ? OWNER_RUN : OWNER_WALK;
+  const speed = last ? Math.min(top, 3 * left) : top;
+  return { x: ((next.x - owner.pos.x) / left) * speed, z: ((next.z - owner.pos.z) / left) * speed };
+}
+
+function keyVelocity(): Vec2 {
   const { owner, view, keys } = runtime;
   const down = (...codes: string[]) => codes.some((c) => keys.has(c));
   const fwd = (down('KeyW', 'ArrowUp') ? 1 : 0) - (down('KeyS', 'ArrowDown') ? 1 : 0);
   const str = (down('KeyD', 'ArrowRight') ? 1 : 0) - (down('KeyA', 'ArrowLeft') ? 1 : 0);
-  owner.running = down('ShiftLeft', 'ShiftRight');
 
   // Movement is relative to where the camera looks, in every camera mode.
   let dx = Math.sin(view.yaw) * fwd - Math.cos(view.yaw) * str;
@@ -90,12 +176,22 @@ function stepOwner(dt: number, layout: Layout, talkingTo: EmployeeId | null) {
     dx /= len;
     dz /= len;
   }
+  return { x: dx * top, z: dz * top };
+}
+
+function stepOwner(dt: number, layout: Layout, talkingTo: EmployeeId | null) {
+  const { owner, view, keys } = runtime;
+  owner.running = keys.has('ShiftLeft') || keys.has('ShiftRight');
+  // Keys always win. input.ts also drops the walk on the key down itself, because a tap can end between two frames.
+  if (STEER_KEYS.some((c) => keys.has(c))) owner.intent = KEYS_INTENT;
+
+  const want = walkVelocity(layout) ?? keyVelocity();
   const a = ease(dt, 12);
-  owner.vel.x += (dx * top - owner.vel.x) * a;
-  owner.vel.z += (dz * top - owner.vel.z) * a;
+  owner.vel.x += (want.x - owner.vel.x) * a;
+  owner.vel.z += (want.z - owner.vel.z) * a;
   owner.pos.x += owner.vel.x * dt;
   owner.pos.z += owner.vel.z * dt;
-  pushOut(owner.pos, 0.35, layout.obstacles);
+  pushOut(owner.pos, OWNER_RADIUS, layout.obstacles);
   clampToBounds(owner.pos, layout.bounds);
   owner.speed = Math.hypot(owner.vel.x, owner.vel.z);
 
@@ -113,6 +209,19 @@ function stepOwner(dt: number, layout: Layout, talkingTo: EmployeeId | null) {
       owner.yaw += angleDiff(owner.yaw, target) * ease(dt, 6);
     }
   }
+}
+
+// Where the avatar heads this frame to get to `target`, or null when there is no way there. Its route is planned
+// again when the target has moved or the office has changed since it was made. Once the last waypoint is behind it,
+// it walks straight to the target, which can lie a step off the grid beside a desk.
+function waypoint(av: AvatarRT, target: Vec2, grid: NavGrid): Vec2 | null {
+  if (!av.route || av.route.grid !== grid || dist2(av.route.to, target) > REROUTE) {
+    av.route = { path: findPath(grid, av.pos, target), to: { x: target.x, z: target.z }, grid };
+  }
+  const { path } = av.route;
+  if (!path) return null;
+  while (path.length > 0 && dist2(av.pos, path[0]) < CORNER) path.shift();
+  return path[0] ?? target;
 }
 
 function stepAvatar(
@@ -146,16 +255,18 @@ function stepAvatar(
     target = av.seated || dist2(av.pos, seat.chair) < 1.4 ? seat.chair : seat.exit;
   }
 
-  const dx = target.x - av.pos.x;
-  const dz = target.z - av.pos.z;
-  const dist = Math.hypot(dx, dz);
+  const dist = dist2(av.pos, target);
   let moved = 0;
-  if (!av.seated && dist > 0.03) {
+  const aim = !av.seated && dist > 0.03 ? waypoint(av, target, navFor(layout)) : null;
+  if (aim) {
+    const dx = aim.x - av.pos.x;
+    const dz = aim.z - av.pos.z;
+    const len = Math.hypot(dx, dz);
     // Chasing a moving owner from across the office is tedious, so far-away askers hurry a little.
     const boost = blocked ? 1 + Math.min(0.8, Math.max(0, dist - 6) * 0.08) : 1;
     const step = Math.min(EMPLOYEE_WALK * boost * dt, dist * 0.35 + 0.002);
-    av.pos.x += (dx / dist) * step;
-    av.pos.z += (dz / dist) * step;
+    av.pos.x += (dx / len) * step;
+    av.pos.z += (dz / len) * step;
     pushOut(av.pos, 0.3, layout.obstacles);
     clampToBounds(av.pos, layout.bounds, 0.4);
     moved = step / dt;
@@ -201,18 +312,16 @@ export function stepSim(rawDt: number) {
   const dt = Math.min(rawDt, 0.05);
   runtime.time += dt;
   const { company } = get();
-  const layout = getLayout(company?.blocks ?? []);
+  const meetingDoor = get().meetingDoor;
+  const collisionLayout = withMeetingRoom(getLayout(company?.blocks ?? []), meetingDoor);
 
   if (!company) {
-    stepOwner(dt, layout, null);
+    stepOwner(dt, collisionLayout, null);
     return;
   }
   syncAvatars(company);
 
   const state = get();
-  const meetingDoor = state.meetingDoor;
-  const collision = meetingDoor === 'closed' ? [...layout.obstacles, ...meetingRoomObstacles(true)] : [...layout.obstacles, ...meetingRoomObstacles(false)];
-  const collisionLayout = { ...layout, obstacles: collision };
   stepOwner(dt, collisionLayout, state.talkingTo);
 
   const queue = waitingQueue(company);

@@ -7,6 +7,7 @@ import {
   type EmployeeId,
   type HarnessStatus,
   type MeetingDoor,
+  type ModelId,
   type Provider,
   type QuestionId,
   type ServerMessage,
@@ -17,11 +18,18 @@ import { Office, OfficeError, type OfficeServices } from './office/company.ts';
 const employeeId = z.string().min(1).transform((s) => s as EmployeeId);
 const blockId = z.string().min(1).transform((s) => s as BlockId);
 const questionId = z.string().min(1).transform((s) => s as QuestionId);
+const modelId = z.string().min(1).transform((s) => s as ModelId);
 const provider = z.enum(['claude-code', 'codex', 'hermes']);
 const meetingDoor = z.enum(['open', 'closed']) satisfies z.ZodType<MeetingDoor>;
+const permissionMode = z.enum(['inherit', 'ask', 'auto', 'yolo']);
+const allowRule = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('command'), prefix: z.string().min(1) }),
+  z.object({ kind: z.literal('exact'), command: z.string().min(1) }),
+  z.object({ kind: z.literal('tool'), name: z.string().min(1) }),
+]);
 
 const clientMessage = z.discriminatedUnion('type', [
-  z.object({ type: z.literal('hire'), provider, blockId, name: z.string().optional() }),
+  z.object({ type: z.literal('hire'), provider, blockId, name: z.string().optional(), model: modelId.optional() }),
   z.object({ type: z.literal('fire'), employeeId }),
   z.object({ type: z.literal('create_block'), cwd: z.string().min(1), name: z.string().min(1).optional() }),
   z.object({
@@ -31,9 +39,14 @@ const clientMessage = z.discriminatedUnion('type', [
     cwd: z.string().min(1).optional(),
   }),
   z.object({ type: z.literal('assign'), employeeId, task: z.string().min(1) }),
-  z.object({ type: z.literal('answer'), employeeId, questionId, text: z.string() }),
+  z.object({ type: z.literal('answer'), employeeId, questionId, text: z.string(), always: z.boolean().optional() }),
   z.object({ type: z.literal('interject'), employeeId, text: z.string().min(1), style: z.enum(['next', 'now']) }),
   z.object({ type: z.literal('meeting_door'), state: meetingDoor }),
+  z.object({ type: z.literal('load_models'), provider }),
+  z.object({ type: z.literal('set_model'), employeeId, model: modelId }),
+  z.object({ type: z.literal('set_permissions'), employeeId, mode: permissionMode }),
+  z.object({ type: z.literal('remove_allow_rule'), employeeId, rule: allowRule }),
+  z.object({ type: z.literal('fresh_session'), employeeId }),
   z.object({ type: z.literal('reset_company') }),
 ]);
 // Compile-time proof the schema and the contract agree in both directions.
