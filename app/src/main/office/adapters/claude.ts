@@ -24,11 +24,22 @@ export async function listClaudeModels(): Promise<ModelCatalog> {
   const q = query({ prompt: '', options: { cwd: process.cwd() } });
   try {
     const models = await q.supportedModels();
-    const options: ModelOption[] = models
-      .filter((m) => m.value.trim())
-      .map((m) => ({ id: m.value as ModelId, label: m.displayName || m.value }));
+    // The SDK includes aliases (for example `sonnet`) alongside their canonical
+    // cloud model ids. Persist and send the canonical id so a newly introduced
+    // model such as Sonnet 5.5 is selectable instead of being hidden behind an
+    // alias, and avoid showing the same model twice.
+    const options: ModelOption[] = [];
+    const seen = new Set<string>();
+    for (const m of models) {
+      const id = (m.resolvedModel?.trim() || m.value.trim());
+      if (!id || seen.has(id)) continue;
+      seen.add(id);
+      options.push({ id: id as ModelId, label: m.displayName || id });
+    }
     const defaultModel = claudeDefaultModel();
-    return { kind: 'ready', models: options, defaultModel: options.some((m) => m.id === defaultModel) ? defaultModel : (options[0]?.id ?? defaultModel) };
+    const listedDefault = models.find((m) => m.value === defaultModel || m.resolvedModel === defaultModel)?.resolvedModel;
+    const selectedDefault = listedDefault ?? (options.some((m) => m.id === defaultModel) ? defaultModel : options[0]?.id ?? defaultModel);
+    return { kind: 'ready', models: options, defaultModel: selectedDefault as ModelId };
   } finally {
     q.close();
   }
