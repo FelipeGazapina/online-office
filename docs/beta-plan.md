@@ -74,8 +74,8 @@ Research agents write only to `docs/research/`. From U2 on, every implementation
 | U0 | Electron shell: office in the main process, IPC, folder picker, fakes deleted | none | done |
 | U1 | Office MCP server over local HTTP, the owner's question inbox, the memory store, Claude moved onto them | U0, R1, R2, R3 | done |
 | C1 | Contract v2: the types the next wave needs (models, permission modes, Always allow, subagents, fresh session, the rules hook), the `company.json` migration, and the harness-agnostic plumbing | U1 | done |
-| U2 | Real ChatGPT (Codex) employee: app-server, isolation, the four permission modes, model list, subagent events | C1 | |
-| U3 | Real Hermes employee: ACP, office profile, the four permission modes, model list, subagent events | C1 | |
+| U2 | Real ChatGPT (Codex) employee: app-server, isolation, the four permission modes, model list, subagent events | C1 | running |
+| U3 | Real Hermes employee: ACP, office profile, the four permission modes, model list, subagent events | C1 | running |
 | F1 | Claude employee v2 and its UI: permission modes and Always allow (card, drawer, office-side rule check), model picker and live switch, subagent dolls on the desk | C1 | |
 | F2 | Rules and boards: rule files with a watcher, delivery to live sessions, office and block boards, sticky notes on desks, notes on boards, fresh session | F1 | |
 | F3 | Owner's computer: the My Mac portal with its floating panel, the Company area with seats and level ceilings, desks per block from seats | F1 | |
