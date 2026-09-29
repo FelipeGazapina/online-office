@@ -4,7 +4,7 @@
 // routes planned on the nav grid, so the walls of the meeting room are in the way of employees as much as of the owner.
 import { Vector3 } from 'three';
 import type { Company, Employee, EmployeeId } from '../../shared/protocol.ts';
-import { announceArrival, LISTEN_RADIUS } from './audio.ts';
+import { announceArrival, cancelSpeech, LISTEN_RADIUS } from './audio.ts';
 import {
   angleDiff,
   clampToBounds,
@@ -376,6 +376,7 @@ export function stepSim(rawDt: number) {
 
   const nearbyChanged = nearbyIds.length !== state.nearbyIds.length || nearbyIds.some((id, i) => id !== state.nearbyIds[i]);
   if (talkingTo !== state.talkingTo || askerId !== state.askerId || nearbyChanged) {
+    if (talkingTo !== state.talkingTo) cancelSpeech();
     set({
       talkingTo,
       nearbyIds,

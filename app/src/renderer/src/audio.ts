@@ -99,7 +99,9 @@ export function isAudible(employee: Employee) {
 
 // Called by the office client for `said` events.
 export function heard(employee: Employee, text: string) {
-  if (!isAudible(employee)) return;
+  // Normal speech follows the same active proximity target as the chat and mic.
+  // The wider ear radius must not leave a previous employee talking after the owner moves on.
+  if (get().talkingTo !== employee.id || !isAudible(employee)) return;
   speak(employee.id, text);
   set((s) => ({ bubbles: { ...s.bubbles, [employee.id]: { text, until: Date.now() + 6000 } } }));
 }
