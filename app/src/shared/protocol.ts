@@ -203,17 +203,25 @@ export type OfficeApi = {
     openTerminal(): void;
   };
   update: {
+    // Acts only from `current`, `check-failed` and `update-failed`.
     check(): void;
-    download(): void;
+    // Downloads the update and relaunches into it. Acts only from `available`.
     install(): void;
+    // Calls back with the current state right away, then on every change. Never calls back in a build that cannot
+    // update itself (unpackaged, or not the Mac app).
     subscribe(cb: (state: UpdateState) => void): () => void;
   };
   voice: VoiceApi;
 };
 
 export type UpdateState =
-  | { status: 'idle' | 'checking' | 'not-available' | 'available' | 'downloading' | 'ready'; version?: string; progress?: number; message?: string }
-  | { status: 'error'; message: string };
+  | { status: 'checking' }
+  | { status: 'current'; version: string }
+  | { status: 'available'; version: string }
+  | { status: 'downloading'; version: string; percent: number }
+  | { status: 'installing'; version: string }
+  | { status: 'check-failed'; message: string }
+  | { status: 'update-failed'; version: string; message: string };
 
 export const IPC = {
   snapshot: 'office:snapshot',
@@ -226,7 +234,7 @@ export const IPC = {
   portalOpenHome: 'office:portal-open-home',
   portalOpenTerminal: 'office:portal-open-terminal',
   updateCheck: 'office:update-check',
-  updateDownload: 'office:update-download',
   updateInstall: 'office:update-install',
+  updateSubscribe: 'office:update-subscribe',
   updateEvent: 'office:update-event',
 } as const;

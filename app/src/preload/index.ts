@@ -20,11 +20,11 @@ const office: OfficeApi = {
   },
   update: {
     check: () => ipcRenderer.send(IPC.updateCheck),
-    download: () => ipcRenderer.send(IPC.updateDownload),
     install: () => ipcRenderer.send(IPC.updateInstall),
     subscribe(cb) {
       const listener = (_e: unknown, state: UpdateState) => cb(state);
       ipcRenderer.on(IPC.updateEvent, listener);
+      ipcRenderer.send(IPC.updateSubscribe);
       return () => void ipcRenderer.removeListener(IPC.updateEvent, listener);
     },
   },

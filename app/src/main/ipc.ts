@@ -1,5 +1,4 @@
 import { app, dialog, ipcMain, shell, type BrowserWindow, type IpcMainEvent, type IpcMainInvokeEvent } from 'electron';
-import electronUpdater from 'electron-updater';
 import { z } from 'zod';
 import {
   IPC,
@@ -14,8 +13,6 @@ import {
   type ServerMessage,
 } from '../shared/protocol.ts';
 import { Office, OfficeError, type OfficeServices } from './office/company.ts';
-
-const { autoUpdater } = electronUpdater;
 
 // The one place untrusted input becomes a ClientMessage. Ids are opaque strings to the renderer.
 const employeeId = z.string().min(1).transform((s) => s as EmployeeId);
@@ -73,19 +70,6 @@ export function startOffice({ dataFile, harnesses, window, services }: Options) 
     const win = window();
     if (win && !win.isDestroyed()) win.webContents.send(IPC.event, msg);
   };
-
-  const emitUpdate = (state: import('../shared/protocol.ts').UpdateState) => {
-    const win = window();
-    if (win && !win.isDestroyed()) win.webContents.send(IPC.updateEvent, state);
-  };
-  autoUpdater.autoDownload = false;
-  autoUpdater.autoInstallOnAppQuit = true;
-  autoUpdater.on('checking-for-update', () => emitUpdate({ status: 'checking' }));
-  autoUpdater.on('update-available', (info) => emitUpdate({ status: 'available', version: info.version }));
-  autoUpdater.on('update-not-available', () => emitUpdate({ status: 'not-available' }));
-  autoUpdater.on('download-progress', (progress) => emitUpdate({ status: 'downloading', progress: progress.percent }));
-  autoUpdater.on('update-downloaded', (info) => emitUpdate({ status: 'ready', version: info.version }));
-  autoUpdater.on('error', (error) => emitUpdate({ status: 'error', message: error.message }));
 
   let timer: NodeJS.Timeout | undefined;
   const office = new Office(
@@ -166,26 +150,6 @@ export function startOffice({ dataFile, harnesses, window, services }: Options) 
   });
   ipcMain.on(IPC.portalOpenTerminal, (e) => {
     if (trusted(e)) void shell.openPath('/System/Applications/Utilities/Terminal.app');
-  });
-  const trustedUpdate = (e: IpcMainEvent) => {
-    if (!trusted(e)) return false;
-    if (!app.isPackaged) {
-      emitUpdate({ status: 'not-available', message: 'Updates are available in the packaged app.' });
-      return false;
-    }
-    return true;
-  };
-  ipcMain.on(IPC.updateCheck, (e) => {
-    if (!trustedUpdate(e)) return;
-    void autoUpdater.checkForUpdates().catch((error: unknown) => emitUpdate({ status: 'error', message: error instanceof Error ? error.message : String(error) }));
-  });
-  ipcMain.on(IPC.updateDownload, (e) => {
-    if (!trustedUpdate(e)) return;
-    void autoUpdater.downloadUpdate().catch((error: unknown) => emitUpdate({ status: 'error', message: error instanceof Error ? error.message : String(error) }));
-  });
-  ipcMain.on(IPC.updateInstall, (e) => {
-    if (!trusted(e) || !app.isPackaged) return;
-    autoUpdater.quitAndInstall(false, true);
   });
 
   return { shutdown: () => office.shutdown() };

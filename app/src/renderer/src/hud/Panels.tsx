@@ -2,6 +2,7 @@ import { headcountCap, MAX_LEVEL, PROVIDERS, XP_FOR_LEVEL, type Employee } from 
 import type { VoiceQuality } from '../../../shared/voice.ts';
 import { set, setSetting, useStore, waitingQueue, type CameraMode, type Lang, type MicMode } from '../store.ts';
 import { fmtWait, tailPath, useNow } from './hooks.ts';
+import { UpdateSetting } from './UpdateControl.tsx';
 
 const URGENT_MS = 2 * 60 * 1000;
 
@@ -109,21 +110,6 @@ function Seg<T extends string>({ value, options, onChange }: { value: T; options
 
 export function SettingsPanel() {
   const s = useStore();
-  const updateLabel =
-    s.update.status === 'available'
-      ? `Download update${s.update.version ? ` v${s.update.version}` : ''}`
-      : s.update.status === 'downloading'
-        ? `Downloading ${Math.round(s.update.progress ?? 0)}%`
-        : s.update.status === 'ready'
-          ? 'Restart to update'
-          : s.update.status === 'checking'
-            ? 'Checking for updates…'
-            : 'Check for updates';
-  const updateAction = () => {
-    if (s.update.status === 'available') window.office.update.download();
-    else if (s.update.status === 'ready') window.office.update.install();
-    else if (s.update.status !== 'checking' && s.update.status !== 'downloading') window.office.update.check();
-  };
   return (
     <div className="panel settings">
       <label>Camera</label>
@@ -173,12 +159,7 @@ export function SettingsPanel() {
         ]}
         onChange={(v) => setSetting('voiceQuality', v)}
       />
-      <label>Updates</label>
-      <button className="btn ghost update-button" disabled={s.update.status === 'checking' || s.update.status === 'downloading'} onClick={updateAction}>
-        {updateLabel}
-      </button>
-      {s.update.status === 'not-available' && <span className="muted update-note">{s.update.message ?? 'You’re on the latest version.'}</span>}
-      {s.update.status === 'error' && <span className="muted update-note">Update check failed: {s.update.message}</span>}
+      <UpdateSetting />
     </div>
   );
 }
