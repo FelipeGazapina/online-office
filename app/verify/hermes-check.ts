@@ -2,12 +2,13 @@
 // writes, what an employee session tells the office over a scripted ACP agent, and what happens to a process when the app dies.
 // Nothing here starts `hermes`, and the owner's ~/.hermes is never opened: every path is under a scratch folder.
 // Run from app/: node verify/hermes-check.ts   Exits 1 on any failed check.
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, relative } from 'node:path';
 import { parse } from 'yaml';
+import { launchHermes } from '../src/main/office/adapters/hermes-process.ts';
 import {
   CATALOG_PROFILE,
   HOOK_FILE,
@@ -24,7 +25,7 @@ import {
   type Hermes,
 } from '../src/main/office/adapters/hermes-profile.ts';
 import type { EmployeeId, PermissionMode } from '../src/shared/protocol.ts';
-import { check, finish } from './check.ts';
+import { check, finish, sleep, until } from './check.ts';
 
 const scratch = realpathSync(mkdtempSync(join(tmpdir(), 'hermes-check-')));
 const yaml11 = (text: string) => parse(text, { version: '1.1' }) as Record<string, any>;
@@ -262,6 +263,86 @@ console.log('\n# the owner\'s files');
 check(fingerprint(root) === before, 'after all of it, every file of the owner\'s install has the same content, and nothing was added outside profiles/office-*');
 const listing = readdirSync(join(root, 'profiles')).filter((n) => !n.startsWith('.')).sort();
 check(JSON.stringify(listing) === JSON.stringify(['helena-pm']), 'and only the owner\'s profile is left');
+
+console.log('\n# a process the app cannot leave behind');
+// Stands in for Hermes in the middle of a tool: it ignores a polite stop, and the command it runs leads its own process group.
+const STAND_IN = `
+const { spawn } = require('node:child_process');
+const { writeFileSync } = require('node:fs');
+process.on('SIGTERM', () => {});
+const command = spawn('sleep', ['61.3'], { detached: true, stdio: 'ignore' });
+writeFileSync(process.env.STAND_IN_OUT, JSON.stringify({ pid: process.pid, command: command.pid, cwd: process.cwd(), env: Object.keys(process.env).filter((k) => k.startsWith('HERMES_')), home: process.env.HERMES_HOME }));
+setInterval(() => {}, 1000);
+`;
+const alive = (pid: number) => {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+};
+const goneAfter = async (pids: number[], ms: number) => {
+  const t0 = Date.now();
+  while (Date.now() - t0 < ms) {
+    if (pids.every((p) => !alive(p))) return Date.now() - t0;
+    await sleep(25);
+  }
+  return undefined;
+};
+const block = join(scratch, 'block');
+mkdirSync(block);
+const profile = join(scratch, 'profile');
+const standIn = async (out: string) => {
+  await until(() => existsSync(out), 10_000);
+  await sleep(50);
+  return JSON.parse(readFileSync(out, 'utf8')) as { pid: number; command: number; cwd: string; env: string[]; home: string };
+};
+
+process.env.STAND_IN_OUT = join(scratch, 'stand-in-1.json');
+process.env.HERMES_YOLO_MODE = '1';
+const first = launchHermes({ home: profile, cwd: block }, { bin: process.execPath, args: ['-e', STAND_IN] });
+const one = await standIn(process.env.STAND_IN_OUT);
+delete process.env.HERMES_YOLO_MODE;
+check(one.cwd === block, 'the process starts in the block folder');
+check(JSON.stringify(one.env) === JSON.stringify(['HERMES_HOME']) && one.home === profile, 'and sees the employee\'s profile as its home, with no other HERMES_ variable from the app\'s environment');
+check(alive(one.pid) && alive(one.command), 'it and the command it started are running');
+first.kill();
+const endedIn = await goneAfter([one.pid, one.command], 2000);
+check(endedIn !== undefined, `kill() ends a process that ignores a polite stop, and the command under it, in ${endedIn} ms`);
+check(/stopped \(SIGKILL\)/.test(await first.exited), 'and says how it ended');
+const twice = () => {
+  try {
+    first.kill();
+    return true;
+  } catch {
+    return false;
+  }
+};
+check(twice(), 'kill() twice is harmless');
+
+process.env.STAND_IN_OUT = join(scratch, 'stand-in-2.json');
+const parent = spawn(process.execPath, [join(import.meta.dirname, 'hermes-parent.ts'), profile, block, STAND_IN], { stdio: 'ignore' });
+const two = await standIn(process.env.STAND_IN_OUT);
+check(alive(two.pid) && alive(two.command), 'a process started by an app that is running is up');
+const killedAt = Date.now();
+parent.kill('SIGKILL');
+const survivors = await goneAfter([two.pid, two.command], 5000);
+check(survivors !== undefined && survivors <= 2000, `SIGKILL to the app ends the process and its command in ${survivors} ms, and it would not stop on SIGTERM`);
+check(Date.now() - killedAt < 6000 && !alive(two.pid) && !alive(two.command), 'and nothing is left');
+
+const missing = launchHermes({ home: profile, cwd: block }, { bin: join(scratch, 'no-such-hermes'), args: ['acp'] });
+check(/^Could not start Hermes: .*ENOENT/.test(await missing.exited), 'a Hermes that is not installed is reported as that');
+const endMissing = () => {
+  try {
+    missing.kill();
+    return true;
+  } catch {
+    return false;
+  }
+};
+check(endMissing(), 'and ending it does not throw');
+delete process.env.STAND_IN_OUT;
 
 rmSync(scratch, { recursive: true, force: true });
 finish();
