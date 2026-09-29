@@ -1234,6 +1234,35 @@ h3 {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+.progress-ring {
+  width: 16px;
+  height: 16px;
+  flex: none;
+  border: 3px solid rgba(127, 220, 176, 0.28);
+  border-top-color: #7fdcb0;
+  border-right-color: #7fdcb0;
+  border-radius: 50%;
+  animation: spin 0.9s linear infinite;
+}
+.bub.done {
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border-radius: 50%;
+  background: #43b978;
+  color: white;
+  display: grid;
+  place-items: center;
+  border: 3px solid white;
+}
+.done-circle {
+  font-size: 19px;
+  font-weight: 800;
+  line-height: 1;
+}
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
 .dots {
   display: inline-flex;
   gap: 3px;

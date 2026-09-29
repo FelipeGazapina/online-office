@@ -73,16 +73,14 @@ function Label({ employee: e, meetingDoor }: { employee: Employee; meetingDoor: 
   } else if (s.kind === 'working') {
     bubbleEl = (
       <div className="bub work">
-        <span className="dots">
-          <i />
-          <i />
-          <i />
-        </span>
+        <span className="progress-ring" aria-label="Working" />
         <span className="act">{e.activity}</span>
       </div>
     );
   } else if (s.kind === 'error') {
     bubbleEl = <div className="bub err">! {s.message}</div>;
+  } else if (e.completedAt) {
+    bubbleEl = <div className="bub done" title="Task complete"><span className="done-circle">✓</span></div>;
   } else {
     bubbleEl = <div className="bub idle">{hash(e.id) % 2 ? '☕' : 'zzz'}</div>;
   }

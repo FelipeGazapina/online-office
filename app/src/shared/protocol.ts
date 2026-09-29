@@ -75,6 +75,7 @@ export type Employee = {
   permissions: PermissionPolicy;
   // The subagents running now. They live and die with the session, so company.json never holds them.
   subagents: Subagent[];
+  completedAt?: number;
   sessionId?: string;
   hiredAt: number;
 };

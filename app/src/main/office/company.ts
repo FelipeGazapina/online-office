@@ -360,7 +360,10 @@ export class Office {
       memoryDigest: () => notebook.digest(block.name),
       // F2 reads the rule files here.
       rules: () => '',
-      taskCompleted: live(() => this.addXp(XP_PER_TASK)),
+      taskCompleted: live(() => {
+        employee.completedAt = Date.now();
+        this.addXp(XP_PER_TASK);
+      }),
       subagentStarted: live((subagent) => this.startSubagent(employee, subagent)),
       subagentFinished: live((id) => this.finishSubagent(employee, id)),
     };
@@ -536,6 +539,7 @@ export class Office {
     if (e.status.kind === 'working' || e.status.kind === 'blocked_on_owner') {
       throw new OfficeError(`${e.name} is busy. Interject to redirect them.`);
     }
+    delete e.completedAt;
     this.sessionOf(e).assign(task.trim());
   }
 
