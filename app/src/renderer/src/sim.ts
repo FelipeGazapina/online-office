@@ -1,6 +1,6 @@
 // The whole per-frame world loop in one place: owner movement, employee walking, the queue,
 // proximity listening and the arrival moment. Avatar targets are derived from the office's
-// logical state every frame: blocked_on_owner walks to the owner, everything else goes to the desk. Everyone walks
+// logical state every frame: blocked_on_owner walks to the owner, everything else goes to the desk. Everyone follows
 // routes planned on the nav grid, so the walls of the meeting room are in the way of employees as much as of the owner.
 import { Vector3 } from 'three';
 import type { Company, Employee, EmployeeId } from '../../shared/protocol.ts';
@@ -20,7 +20,7 @@ import {
 } from './layout.ts';
 import { findApproach, findPath, navFor, type NavGrid } from './nav.ts';
 import { KEYS_INTENT, runtime, STEER_KEYS, type AvatarRT, type OwnerIntent, type WalkGoal } from './runtime.ts';
-import { get, set, waitingQueue } from './store.ts';
+import { get, set, toast, waitingQueue } from './store.ts';
 import { ownerInsideMeetingRoom } from './meeting.ts';
 
 const OWNER_WALK = 3.0;
@@ -119,10 +119,12 @@ function plan(goal: WalkGoal, layout: Layout): Walk | null {
   return walk;
 }
 
-// A walk that cannot be planned leaves the owner doing what they were doing.
+// A walk that cannot be planned leaves the owner doing what they were doing, and says why.
 export function walkTo(goal: WalkGoal) {
-  const walk = plan(goal, withMeetingRoom(getLayout(get().company?.blocks ?? []), get().meetingDoor));
+  const door = get().meetingDoor;
+  const walk = plan(goal, withMeetingRoom(getLayout(get().company?.blocks ?? []), door));
   if (walk) runtime.owner.intent = walk;
+  else toast(door === 'closed' ? 'The meeting room door is closed.' : 'There is no way there.', 'warn');
 }
 
 // A walk is planned again when the office has changed under it. A walk to someone also follows them: it is planned

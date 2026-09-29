@@ -249,6 +249,7 @@ set({ meetingDoor: 'closed' });
 const room = { x: -14, z: 5 };
 walkTo({ kind: 'point', at: room });
 check(!walking(), 'a click inside a room whose door is closed changes nothing');
+check(get().toasts.some((t) => t.text === 'The meeting room door is closed.'), 'and it says why');
 set({ meetingDoor: 'open' });
 walkTo({ kind: 'point', at: room });
 check(walking(), 'with the door open the same click starts a walk');
