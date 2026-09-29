@@ -28,18 +28,23 @@ export async function listClaudeModels(): Promise<ModelCatalog> {
     // cloud model ids. Persist and send the canonical id so a newly introduced
     // model such as Sonnet 5.5 is selectable instead of being hidden behind an
     // alias, and avoid showing the same model twice.
-    const options: ModelOption[] = [];
-    const seen = new Set<string>();
+    const options = new Map<string, { option: ModelOption; rank: number }>();
     for (const m of models) {
-      const id = (m.resolvedModel?.trim() || m.value.trim());
-      if (!id || seen.has(id)) continue;
-      seen.add(id);
-      options.push({ id: id as ModelId, label: m.displayName || id });
+      const value = m.value.trim();
+      const id = m.resolvedModel?.trim() || value;
+      if (!id) continue;
+      // `default` and named aliases can resolve to the same model. Prefer a
+      // named alias (Opus 5.5) over the generic Default row, and an explicit
+      // canonical id over either alias.
+      const rank = value === id ? 3 : value === 'default' ? 1 : 2;
+      const current = options.get(id);
+      if (!current || rank > current.rank) options.set(id, { option: { id: id as ModelId, label: m.displayName || id }, rank });
     }
+    const listed = [...options.values()].map(({ option }) => option);
     const defaultModel = claudeDefaultModel();
     const listedDefault = models.find((m) => m.value === defaultModel || m.resolvedModel === defaultModel)?.resolvedModel;
-    const selectedDefault = listedDefault ?? (options.some((m) => m.id === defaultModel) ? defaultModel : options[0]?.id ?? defaultModel);
-    return { kind: 'ready', models: options, defaultModel: selectedDefault as ModelId };
+    const selectedDefault = listedDefault ?? (listed.some((m) => m.id === defaultModel) ? defaultModel : listed[0]?.id ?? defaultModel);
+    return { kind: 'ready', models: listed, defaultModel: selectedDefault as ModelId };
   } finally {
     q.close();
   }
