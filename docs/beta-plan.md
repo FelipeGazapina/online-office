@@ -73,7 +73,7 @@ Research agents write only to `docs/research/`. From U2 on, every implementation
 | R4 | Research: whisper.cpp on this Mac, and speech inside Electron | none | done |
 | U0 | Electron shell: office in the main process, IPC, folder picker, fakes deleted | none | done |
 | U1 | Office MCP server over local HTTP, the owner's question inbox, the memory store, Claude moved onto them | U0, R1, R2, R3 | done |
-| C1 | Contract v2: the types the next wave needs (models, permission modes, Always allow, subagents, fresh session, the rules hook), the `company.json` migration, and the harness-agnostic plumbing | U1 | running |
+| C1 | Contract v2: the types the next wave needs (models, permission modes, Always allow, subagents, fresh session, the rules hook), the `company.json` migration, and the harness-agnostic plumbing | U1 | done |
 | U2 | Real ChatGPT (Codex) employee: app-server, isolation, the four permission modes, model list, subagent events | C1 | |
 | U3 | Real Hermes employee: ACP, office profile, the four permission modes, model list, subagent events | C1 | |
 | F1 | Claude employee v2 and its UI: permission modes and Always allow (card, drawer, office-side rule check), model picker and live switch, subagent dolls on the desk | C1 | |
