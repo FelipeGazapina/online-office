@@ -37,7 +37,8 @@ function attach(employeeId: EmployeeId, blockId: BlockId) {
   notebooks.set(employeeId, memoryFor);
   return mcp.attach(employeeId, {
     ask: (body, signal) => inbox.ask(employeeId, body, signal),
-    drawDiagram: (title) => diagrams.push({ employeeId, title }),
+    openBoard: async () => {},
+  drawDiagram: (title) => diagrams.push({ employeeId, title }),
     memory: memoryFor,
   });
 }

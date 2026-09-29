@@ -1,3 +1,4 @@
+import { boardPage } from './board.ts';
 import { randomUUID } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, readFileSync, realpathSync, renameSync, statSync, writeFileSync } from 'node:fs';
@@ -333,6 +334,11 @@ export class Office {
       ask,
       drawDiagram: (title, mermaid) => {
         block.whiteboard = { title, mermaid, by: employee.id, at: Date.now() };
+        this.commit();
+      },
+      openBoard: async (title, target) => {
+        const page = await boardPage(block.cwd, target);
+        block.whiteboard = { title, mermaid: '', page, by: employee.id, at: Date.now() };
         this.commit();
       },
       memory: notebook,

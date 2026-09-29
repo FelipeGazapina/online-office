@@ -98,6 +98,7 @@ export type NoteSummary = { id: NoteId; scope: NoteScope; title: string; author:
 export type Whiteboard = {
   title: string;
   mermaid: string;
+  page?: { kind: 'html'; html: string; source: string } | { kind: 'url'; url: string };
   by: EmployeeId;
   at: number;
 };

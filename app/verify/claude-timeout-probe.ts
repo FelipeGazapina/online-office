@@ -52,6 +52,7 @@ const url = mcp.attach(employeeId, {
     log('office answers PINEAPPLE');
     return 'PINEAPPLE';
   },
+  openBoard: async () => {},
   drawDiagram: () => {},
   memory: MemoryStore.open(join(dir, 'memory')).notebook({ employeeId, blockId: 'probe-block' as BlockId, provider: 'claude-code' }),
 });

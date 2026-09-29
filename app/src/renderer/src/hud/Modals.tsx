@@ -319,6 +319,18 @@ function WhiteboardModal({ blockId }: { blockId: BlockId }) {
   const [source, setSource] = useState(false);
   const wb = block?.whiteboard;
 
+  if (wb?.page) {
+    const page = wb.page;
+    return (
+      <div className="scrim" onMouseDown={close}>
+        <div className="modal wide board-page" onMouseDown={(e) => e.stopPropagation()} onKeyDown={(e) => e.key === 'Escape' && close()}>
+          <div className="wb-head"><div><h2>{wb.title}</h2><p className="muted">{block?.name} · {page.kind === 'html' ? page.source : page.url}</p></div><button className="btn ink" onClick={close}>Close</button></div>
+          {page.kind === 'html' ? <iframe title={wb.title} sandbox="allow-scripts" srcDoc={page.html} /> : <iframe title={wb.title} sandbox="allow-scripts allow-forms allow-popups" src={page.url} />}
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="scrim" onMouseDown={close}>
       <div className="modal wide" onMouseDown={(e) => e.stopPropagation()} onKeyDown={(e) => e.key === 'Escape' && close()}>

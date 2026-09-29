@@ -12,6 +12,7 @@ const csp = [
   "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
   "font-src https://fonts.gstatic.com",
   "img-src 'self' data: blob:",
+  "frame-src 'self' https: http:",
   `connect-src 'self' ${VOICE_ORIGIN}`,
   "worker-src 'self' blob:",
 ].join('; ');

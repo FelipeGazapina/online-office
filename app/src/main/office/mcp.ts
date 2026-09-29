@@ -16,6 +16,7 @@ import type { Notebook } from './memory.ts';
 export type EmployeeTools = {
   ask(body: QuestionBody, signal?: AbortSignal): Promise<string>;
   drawDiagram(title: string, mermaid: string): void;
+  openBoard(title: string, target: string): Promise<void>;
   memory: Notebook;
 };
 
@@ -135,6 +136,21 @@ export async function startOfficeMcp(): Promise<OfficeMcp> {
           tools.drawDiagram(args.title, args.mermaid);
           return text('Drawn on the whiteboard.');
         }),
+    );
+
+    server.registerTool(
+      'open_board',
+      {
+        description: 'Show a website or a local HTML file on your project block board. Use an HTTP(S) URL (including localhost for running apps) or a path inside the project. Local HTML is a static snapshot; use a local web server URL for scripts and relative assets. The owner clicks the board to view it.',
+        inputSchema: {
+          title: z.string().min(1).max(200),
+          target: z.string().min(1).max(4096).describe('HTTP(S) URL or project-relative HTML path'),
+        },
+      },
+      (args, extra) => run('open_board', extra, async () => {
+        await tools.openBoard(args.title, args.target);
+        return text('Page placed on the block board. Click the board to view it.');
+      }),
     );
 
     server.registerTool(
