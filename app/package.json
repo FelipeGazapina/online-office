@@ -5,7 +5,7 @@
   "author": "Gazapina Labs",
   "private": true,
   "type": "module",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "main": "./out/main/index.js",
   "dependencies": {
     "@agentclientprotocol/sdk": "^1.5.1",
