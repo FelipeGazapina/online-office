@@ -25,8 +25,9 @@ Each item is checked on the real Electron app, not on a mock.
     - **My Mac** hides the office behind a small floating panel, so the owner works on the real computer. An employee who needs the owner shows up in that panel, speaks, and can be answered from it. One click or a global shortcut returns to the office.
     - **Company** sets the seat count for the company and per block, up to the ceiling the current level unlocks. Blocks lay out as many desks as their seats.
 12. **Subagents.** A subagent that an employee spawns appears as a matryoshka doll on that employee's desk. A nested subagent is a smaller doll. Dolls do not count as employees and disappear when the subagent finishes.
-13. **Permissions.** Each employee runs with the owner's permission settings for its harness (see Rigor). A command those settings allow runs without a card. A command they leave to "ask" walks to the owner.
-14. Every unit is committed and pushed to `main`.
+13. **Overview navigation.** In the Overview camera, a click on the floor walks the owner there around furniture. A click on an employee opens a menu at the cursor with "Open chat" and "Go to". The chat keeps what the owner said and what the employee answered, and a message sent from it reaches the employee as if the owner stood next to them. Real mouse input proves each of these, not programmatic clicks.
+14. **Permissions.** Each employee runs with the owner's permission settings for its harness (see Rigor). A command those settings allow runs without a card. A command they leave to "ask" walks to the owner.
+15. Every unit is committed and pushed to `main`.
 
 ## Running the beta
 
@@ -72,10 +73,11 @@ Research agents write only to `docs/research/`. From U2 on, every implementation
 | F1 | Claude employee v2 and its UI: inherited permissions, model picker and live switch, subagent dolls on the desk | C1 | |
 | F2 | Rules and boards: rule files with a watcher, delivery to live sessions, office and block boards, sticky notes on desks, notes on boards, fresh session | F1 | |
 | F3 | Owner's computer: the My Mac portal with its floating panel, the Company area with seats and level ceilings, desks per block from seats | F1 | |
-| U5 | Voice through whisper.cpp: push-to-talk, proximity, dictating a rule to a board | R4, F2 | |
+| N1 | Overview navigation: click to walk with A* around furniture, employee menu (Open chat, Go to), chat transcript in the drawer | U0 | running |
+| U5 | Voice through whisper.cpp: push-to-talk and proximity. Dictating a rule to a board lands with F2 | R4 | next |
 | U6 | README, then the full end-to-end run for all three harnesses | all | |
 
-C1 runs alone because every later unit builds on its types. Then U2, U3 and F1 run in parallel. Then F2, F3 and U5. At most three implementation agents run at once, which keeps the session under its rate limit. The decision trail lives in `docs/decisions.tsv`.
+The owner moved the microphone and Overview navigation to the front. N1 runs next to U1, and U5 starts as soon as R4's doc lands. C1 runs after U1, because every later unit builds on its types. Then U2, U3 and F1 run in parallel, then F2 and F3. At most three implementation agents run at once, which keeps the session under its rate limit. The decision trail lives in `docs/decisions.tsv`.
 
 ## Contract v2
 
