@@ -28,6 +28,7 @@ import {
   type Question,
   type QuestionId,
   type Snapshot,
+  type Subagent,
 } from '../../shared/protocol.ts';
 import { HARNESSES } from './adapters/index.ts';
 import type { EmployeeSession, SessionHost } from './adapters/types.ts';
@@ -333,9 +334,28 @@ export class Office {
       mcp: { url, name: 'office' },
       memoryDigest: () => notebook.digest(block.name),
       taskCompleted: live(() => this.addXp(XP_PER_TASK)),
+      subagentStarted: live((subagent) => this.startSubagent(employee, subagent)),
+      subagentFinished: live((id) => this.finishSubagent(employee, id)),
     };
     session = create(host);
     this.sessions.set(employee.id, session);
+  }
+
+  private startSubagent(e: Employee, subagent: Subagent) {
+    if (e.subagents.some((s) => s.id === subagent.id)) return;
+    // A doll sits on its parent, so one whose parent is not here sits on the desk.
+    const parentId = e.subagents.some((s) => s.id === subagent.parentId) ? subagent.parentId : null;
+    e.subagents.push({ ...subagent, parentId });
+    this.commit();
+  }
+
+  private finishSubagent(e: Employee, id: string) {
+    // A parent is always listed before its children, so one pass finds everything under it.
+    const ended = new Set([id]);
+    for (const s of e.subagents) if (s.parentId !== null && ended.has(s.parentId)) ended.add(s.id);
+    if (!e.subagents.some((s) => ended.has(s.id))) return;
+    e.subagents = e.subagents.filter((s) => !ended.has(s.id));
+    this.commit();
   }
 
   private stopSession(id: EmployeeId) {

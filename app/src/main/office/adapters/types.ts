@@ -7,6 +7,7 @@ import type {
   PermissionPolicy,
   ProjectBlock,
   QuestionBody,
+  Subagent,
 } from '../../../shared/protocol.ts';
 
 // What the company hands each session. `employee` and `block` are live views of company state;
@@ -50,6 +51,17 @@ export type SessionHost = {
   memoryDigest(): string;
   // Company awards the XP. Adapters call this once per finished task.
   taskCompleted(): void;
+  // Report each subagent the harness starts for this employee, the moment it starts: what the harness's own delegation
+  // tool spawns (Claude `Agent`, Hermes `delegate_task`). `id` is any string that is unique within this session.
+  // `parentId` is the id of the subagent that spawned this one, or null when the employee did. Report a parent before
+  // its children, or the office treats the child as the employee's own. The owner sees one doll per subagent on the
+  // employee's desk. A subagent is not an employee and takes no seat.
+  subagentStarted(subagent: Subagent): void;
+  // Report the same subagent when it ends, however it ends. Ending one ends everything under it. An id the office does
+  // not know is ignored, so ending twice is safe. A subagent that runs in the background ends when the harness says it
+  // is done, not when the call that launched it returns. There is no need to report ends when the session stops: the
+  // office clears every subagent then.
+  subagentFinished(id: string): void;
 };
 
 // One per employee. Construction must be cheap: the real adapter starts its process on first message.

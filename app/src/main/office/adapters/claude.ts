@@ -31,6 +31,10 @@ const permissionModeFor = (_policy: PermissionPolicy) => 'acceptEdits' as const;
 // Tools that can never hurt anything, so the boss is not bothered.
 const AUTO_ALLOW = new Set(['Read', 'Glob', 'Grep', 'LS', 'WebSearch', 'WebFetch', 'TodoWrite', 'Task', 'Agent']);
 
+// The tools that start a subagent. Claude runs them in the background unless told otherwise: the tool_result of the call
+// is then a "launched" placeholder, and only a task_notification says the subagent is done.
+const SUBAGENT_TOOLS = new Set(['Agent', 'Task']);
+
 // The office's own tools are how an employee reaches the boss, so they never ask.
 const OFFICE_TOOL_PREFIX = 'mcp__office__';
 
@@ -166,6 +170,8 @@ export class ClaudeSession implements EmployeeSession {
 
   // What the last `permissionsChanged` said. The next process starts on it.
   private policy: PermissionPolicy;
+  // The subagents this process has started and not seen end. The office keeps the list the owner sees.
+  private subagents = new Set<string>();
 
   private readonly host: SessionHost;
   private readonly run: ClaudeRun;
@@ -287,13 +293,15 @@ export class ClaudeSession implements EmployeeSession {
     }
   }
 
-  // The process is gone. The next assign starts a new one, resuming the stored session.
+  // The process is gone, and its subagents with it. The next assign starts a new one, resuming the stored session.
   private fail(message: string) {
     // A resume that dies before init means the stored session is gone. Start clean next time.
     if (!this.gotInit) this.host.setSessionId('');
     this.q?.close();
     this.q = undefined;
     this.life.abort();
+    for (const id of this.subagents) this.host.subagentFinished(id);
+    this.subagents.clear();
     this.reportError(message);
   }
 
@@ -316,9 +324,29 @@ export class ClaudeSession implements EmployeeSession {
       );
     } else if (m.type === 'assistant') {
       this.onAssistant(m);
+    } else if (m.type === 'system' && m.subtype === 'task_notification') {
+      this.subagentEnded(m.tool_use_id);
+    } else if (m.type === 'user') {
+      this.onUser(m);
     } else if (m.type === 'result') {
       this.onResult(m);
     }
+  }
+
+  private subagentStarted(id: string, parentId: string | null, input: Record<string, unknown>) {
+    this.subagents.add(id);
+    this.host.subagentStarted({ id, parentId, label: short(str(input.description), 60) || 'Helper', startedAt: Date.now() });
+  }
+
+  private subagentEnded(id: string | undefined) {
+    if (id && this.subagents.delete(id)) this.host.subagentFinished(id);
+  }
+
+  // A tool_result that is an error also ends the subagent: a launch that failed, or a run the owner interrupted.
+  private onUser(m: SDKUserMessage) {
+    const { content } = m.message;
+    if (typeof content === 'string') return;
+    for (const block of content) if (block.type === 'tool_result' && block.is_error) this.subagentEnded(block.tool_use_id);
   }
 
   private onAssistant(m: Extract<SDKMessage, { type: 'assistant' }>) {
@@ -329,7 +357,9 @@ export class ClaudeSession implements EmployeeSession {
     }
     for (const block of m.message.content) {
       if (block.type === 'tool_use') {
-        const line = describeTool(block.name, block.input as Record<string, unknown>, host.block.cwd);
+        const input = block.input as Record<string, unknown>;
+        if (SUBAGENT_TOOLS.has(block.name)) this.subagentStarted(block.id, m.parent_tool_use_id, input);
+        const line = describeTool(block.name, input, host.block.cwd);
         host.setActivity(line);
         if (block.name !== `${OFFICE_TOOL_PREFIX}ask_owner`) host.log(line); // the office logs the question itself
       } else if (block.type === 'text' && m.parent_tool_use_id === null) {

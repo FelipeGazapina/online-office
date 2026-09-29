@@ -4,8 +4,8 @@
 import type { CanUseTool, Options, SDKMessage, SDKUserMessage } from '@anthropic-ai/claude-agent-sdk';
 import { ClaudeSession, PushQueue, type ClaudeRun } from '../src/main/office/adapters/claude.ts';
 import type { SessionHost } from '../src/main/office/adapters/types.ts';
-import type { BlockId, Employee, EmployeeId, ModelId, PermissionPolicy, QuestionBody } from '../src/shared/protocol.ts';
-import { check, finish, until } from './check.ts';
+import type { BlockId, Employee, EmployeeId, ModelId, PermissionPolicy, QuestionBody, Subagent } from '../src/shared/protocol.ts';
+import { check, finish, sleep, until } from './check.ts';
 
 // One per SDK process the adapter starts. `out` is what the SDK streams back.
 type Process = { options: Options; sent: SDKUserMessage[]; calls: string[]; out: PushQueue<SDKMessage> };
@@ -45,6 +45,8 @@ function scripted(model = 'm1', policy: PermissionPolicy = { mode: 'inherit', al
   const asked: QuestionBody[] = [];
   const said: string[] = [];
   const logs: string[] = [];
+  const started: Subagent[] = [];
+  const finished: string[] = [];
   let answer = 'Allow';
   const host: SessionHost = {
     employee,
@@ -65,8 +67,10 @@ function scripted(model = 'm1', policy: PermissionPolicy = { mode: 'inherit', al
     mcp: { url: 'http://127.0.0.1:1/mcp/scripted', name: 'office' },
     memoryDigest: () => '',
     taskCompleted() {},
+    subagentStarted: (subagent) => void started.push(subagent),
+    subagentFinished: (id) => void finished.push(id),
   };
-  return { employee, host, asked, said, logs, answers: (text: string) => void (answer = text), session: new ClaudeSession(host, run) };
+  return { employee, host, asked, said, logs, started, finished, answers: (text: string) => void (answer = text), session: new ClaudeSession(host, run) };
 }
 const canUse = (p: Process) => async (name: string, input: Record<string, unknown>) => {
   const decision = await p.options.canUseTool!(name, input, { signal: new AbortController().signal, toolUseID: 'toolu_x' } as Parameters<CanUseTool>[2]);
@@ -118,6 +122,50 @@ const before = ana.asked.length;
 const quiet = [await ask('Read', { file_path: '/work/repo/a.ts' }), await ask('mcp__office__ask_owner', { question: 'x' })];
 check(quiet.every((r) => r.behavior === 'allow') && ana.asked.length === before, 'reading and the office tools never ask');
 
+console.log('\n# subagents, as the SDK 0.3.283 streams them');
+const assistant = (content: unknown[], parent: string | null = null) => sdk({ type: 'assistant', parent_tool_use_id: parent, message: { content } });
+const agentCall = (id: string, description: string, input: Record<string, unknown> = {}, name = 'Agent') => ({ type: 'tool_use', id, name, input: { description, prompt: 'p', ...input } });
+const taskStarted = (toolUseId: string, background: boolean) => sdk({ type: 'system', subtype: 'task_started', task_id: `task-${toolUseId}`, tool_use_id: toolUseId, is_backgrounded: background, task_type: 'local_agent' });
+const taskEnded = (toolUseId: string, status = 'completed') => sdk({ type: 'system', subtype: 'task_notification', task_id: `task-${toolUseId}`, tool_use_id: toolUseId, status });
+const toolResult = (toolUseId: string, isError = false, parent: string | null = null) =>
+  sdk({ type: 'user', parent_tool_use_id: parent, message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: toolUseId, content: [{ type: 'text', text: 'x' }], is_error: isError }] } });
+const turnEnd = () => sdk({ type: 'result', subtype: 'success', is_error: false, result: 'done', terminal_reason: 'completed' });
+const feed = async (p: Process, ...messages: SDKMessage[]) => {
+  for (const m of messages) p.out.push(m);
+  await sleep(30);
+};
+const sub = scripted();
+sub.session.assign('use a helper');
+const stream = processes.at(-1)!;
+const ids = (list: Subagent[]) => list.map((s) => `${s.id}<${s.parentId ?? ''}`).join(' ');
+
+await feed(stream, init('sess-sub'), assistant([agentCall('fg', 'Count total lines in three files', { run_in_background: false })]));
+check(ids(sub.started) === 'fg<' && sub.started[0]!.label === 'Count total lines in three files' && sub.finished.length === 0, 'an Agent tool call starts a subagent, labelled with its description');
+await feed(stream, taskStarted('fg', false), assistant([{ type: 'tool_use', id: 'read1', name: 'Read', input: { file_path: '/work/repo/a.txt' } }], 'fg'));
+check(sub.started.length === 1, 'the subagent own tool calls are not subagents');
+await feed(stream, taskEnded('fg'), toolResult('fg'));
+check(sub.finished.join() === 'fg', 'a foreground subagent ends at its task_notification, and the tool_result after it ends nothing twice');
+
+await feed(stream, assistant([agentCall('bg', 'Read three files')]), taskStarted('bg', true), toolResult('bg'));
+check(ids(sub.started) === 'fg< bg<' && sub.finished.join() === 'fg', 'a background subagent is still running when the tool_result says it launched');
+await feed(stream, assistant([{ type: 'text', text: 'I launched it.' }]), turnEnd());
+check(sub.employee.status.kind === 'idle' && sub.finished.join() === 'fg', 'and when the turn that launched it is over');
+await feed(stream, sdk({ type: 'system', subtype: 'background_tasks_changed', tasks: [] }), taskEnded('bg'));
+check(sub.finished.join() === 'fg,bg', 'it ends at its task_notification, later');
+
+await feed(stream, assistant([agentCall('outer', 'Plan the work')]), assistant([agentCall('inner', 'Check one file', {}, 'Task')], 'outer'));
+check(ids(sub.started) === 'fg< bg< outer< inner<outer', 'a subagent started inside another names it as its parent');
+await feed(stream, assistant([{ type: 'tool_use', id: 'sh1', name: 'Bash', input: { command: 'ls' } }], 'outer'), sdk({ type: 'system', subtype: 'task_notification', task_id: 'bash-task', tool_use_id: 'sh1', status: 'completed' }));
+check(sub.started.length === 4 && sub.finished.join() === 'fg,bg', 'a Bash call and the end of its background task are not subagents');
+await feed(stream, toolResult('inner', true, 'outer'), taskEnded('inner', 'failed'));
+check(sub.finished.join() === 'fg,bg,inner', 'a tool_result that is an error ends a subagent, once');
+await feed(stream, assistant([agentCall('halted', 'Slow job')]), taskEnded('halted', 'stopped'), toolResult('halted', true));
+check(sub.finished.join() === 'fg,bg,inner,halted', 'an interrupted subagent sends both signals and ends once');
+stream.out.close();
+await until(() => sub.employee.status.kind === 'error');
+check(sub.finished.join() === 'fg,bg,inner,halted,outer', 'a process that dies takes its open subagents with it');
+
 ana.session.stop();
 idle.session.stop();
+sub.session.stop();
 finish();
