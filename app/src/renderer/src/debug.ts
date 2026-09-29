@@ -1,4 +1,6 @@
 // Verification hooks: the render loop can be throttled in background tabs, so tests advance the sim by hand.
+import { _roots } from '@react-three/fiber';
+import { Vector3 } from 'three';
 import { applyServerMessage } from './office.ts';
 import { KEYS_INTENT, runtime } from './runtime.ts';
 import { stepSim } from './sim.ts';
@@ -31,7 +33,18 @@ export function installDebug() {
       talkingTo: get().talkingTo,
       askerId: get().askerId,
       intent: intentState(),
+      camera: get().camera,
+      view: { yaw: runtime.view.yaw, isoYawTarget: runtime.view.isoYawTarget },
     }),
+    // Where a point of the office lands on screen, in viewport pixels, through the camera as it is right now. That is
+    // the camera a real click is raycast through, so a mouse event sent there hits that point.
+    project(x: number, y: number, z: number) {
+      const root = _roots.values().next().value;
+      if (!root) return null;
+      const { camera, size } = root.store.getState();
+      const p = new Vector3(x, y, z).project(camera);
+      return { x: size.left + ((p.x + 1) / 2) * size.width, y: size.top + ((1 - p.y) / 2) * size.height };
+    },
     setCamera: (c: 'follow' | 'iso' | 'first') => setSetting('camera', c),
     apply: applyServerMessage,
     store: useStore,

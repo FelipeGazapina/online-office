@@ -89,17 +89,25 @@ Firing an employee moves their notes to `alumni/`. Notes of the block stay. Rese
 ```sh
 pnpm typecheck
 pnpm build
+node verify/nav-check.ts
+node --no-warnings verify/walk-check.mjs
+node --no-warnings verify/chat-check.mjs
 node verify/mcp-check.ts
 node verify/office-check.ts
 node verify/cdp.mjs verify/e2e-real.mjs
+node verify/cdp.mjs verify/e2e-nav.mjs
 node verify/cdp.mjs verify/e2e-memory.mjs
 node verify/cdp.mjs verify/e2e-queue.mjs
 node verify/cdp.mjs verify/e2e-long-wait.mjs
 ```
 
+- `verify/nav-check.ts` needs no model or Electron. It builds the walkable grid for one, two and three blocks and checks every path against an independent oracle that samples the segments: a route from the owner's seat to a talk spot at every desk, no segment inside an obstacle grown by the owner's radius, everything inside the walls, a goal in the middle of a desk snapping outside it, and a sealed pocket having no route.
+- `verify/walk-check.mjs` needs no model or Electron. It runs the real sim and store. It checks click walks that detour around desks, steering keys winning over a walk, going to an employee and re-planning when they move, and employees routing around the meeting room: a new hire sits, a blocked employee arrives with the owner outside or inside, and a closed door keeps everyone at their desk until it opens.
+- `verify/chat-check.mjs` needs no model or Electron. It checks that what the owner says and what an employee says land in that employee's transcript, in order, capped at 200 lines.
 - `verify/mcp-check.ts` needs no model. It starts the MCP server, the inbox, and the memory store in a scratch folder, and drives them with an MCP client. It checks the Origin, Host, and token rules, `ask_owner` waiting, cancelling, and queueing, and the memory limits, secret refusal, block visibility, firing, and the digest size. It exits 1 on any failed check.
 - `verify/office-check.ts` needs no model or Electron either. It runs the real `Office` with a scripted stand-in for a harness and checks what you would see: the cards, their order, where an employee goes back to after an answer or a cancel, and what firing and resetting do to sessions and notes.
 - `verify/e2e-real.mjs` launches the built app against a scratch data folder and a scratch git repo, then does everything through the UI. It creates a block through the stubbed picker, hires a Claude Code employee, and gives it a task by typing. The employee walks over to ask, the script answers on the card, and then checks the file the agent wrote. It also checks the main log for `ask_owner` arriving over HTTP. A second task covers a shell permission card and a whiteboard diagram. Screenshots land in `/tmp/office-shots`.
+- `verify/e2e-nav.mjs` uses real mouse and key events only. In the Overview it clicks the floor across a desk and checks the owner arrives, drags to turn the view without walking, and cancels a walk with a key. It clicks an employee's avatar and name tag for the menu, closes it with Esc and with a click elsewhere, walks to the employee with "Go to", and opens the chat, sends a message and waits for the real reply. Screenshots of the marker, the menu and the chat land in `/tmp/office-shots`.
 - `verify/e2e-memory.mjs` tells an employee a fact, quits the app, deletes the employee's `sessionId`, starts the app again on the same data folder, and asks a question only the notes can answer.
 - `verify/e2e-queue.mjs` makes two subagents ask permission at the same moment, and checks that the second card waits behind the first.
 - `verify/e2e-long-wait.mjs` leaves the owner silent for 150 seconds before answering. Run it with `OFFICE_LONG_WAIT_S=330` to go past Claude Code's 5 minute default.
