@@ -7,7 +7,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { createServer, type Server } from 'node:http';
 import { homedir, tmpdir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import vm from 'node:vm';
 import type { VoiceEngine } from '../src/shared/voice.ts';
@@ -18,7 +18,7 @@ import { cleanTranscript, killLeftover } from '../src/main/voice/server.ts';
 import { createWhisper, type Whisper } from '../src/main/voice/whisper.ts';
 import { PCM_WORKLET_SOURCE } from '../src/main/voice/worklet.ts';
 import { check, finish, sleep, until } from './check.ts';
-import { bytesOf, say } from './wav.ts';
+import { bytesOf, say, writeWav } from './wav.ts';
 
 const appDir = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const offline = process.argv.includes('--offline');
@@ -44,16 +44,25 @@ const norm = (s: string) =>
     .trim();
 const hears = (text: string, words: string[]) => words.every((w) => norm(text).includes(w));
 
-// Every whisper-server this check started has the scratch folder in its command line, whatever launched it.
-function serversUnderScratch(): number[] {
+// Every whisper-server this check started has the scratch folder in its command line, whatever launched it. The supervisor
+// shell and its watcher carry the same command line, so a process is a server only when it is not one of those.
+function scratchProcesses(): { pid: number; supervisor: boolean }[] {
   return execFileSync('ps', ['-axo', 'pid=,command='], { encoding: 'utf8' })
     .split('\n')
     .filter((line) => line.includes('whisper-server') && line.includes(dir))
-    .map((line) => Number(line.trim().split(/\s+/)[0]));
+    .map((line) => ({ pid: Number(line.trim().split(/\s+/)[0]), supervisor: /^\d+\s+\/bin\/(sh|dash)\s/.test(line.trim()) }));
 }
+const serversUnderScratch = () => scratchProcesses().filter((p) => !p.supervisor).map((p) => p.pid);
+const everythingUnderScratch = () => scratchProcesses().map((p) => p.pid);
 
 function cleanup() {
-  for (const pid of serversUnderScratch()) process.kill(pid, 'SIGKILL');
+  for (const pid of everythingUnderScratch()) {
+    try {
+      process.kill(pid, 'SIGKILL');
+    } catch {
+      // already gone
+    }
+  }
   for (const child of children) child.kill('SIGKILL');
 }
 
@@ -184,7 +193,7 @@ await section('the real service on the fast model', async () => {
   check(readFileSync(pidFile, 'utf8') === pidBefore, 'asking for the model it already runs does not restart the server');
 
   await service.stop();
-  check(serversUnderScratch().length === 0, 'after stop() no whisper-server is left');
+  check(everythingUnderScratch().length === 0, 'after stop() no whisper-server, and no supervisor around it, is left');
   check(!existsSync(pidFile), 'and the pid file is gone');
   check(await service.transcribe(bytesOf(en), 'en').then(() => false, () => true), 'a stopped service refuses new requests');
 });
@@ -205,7 +214,7 @@ await section('switching between fast and accurate', async () => {
   check(after.kind === 'ready' && after.model === 'ggml-small-q5_1.bin', `three switches in a row end on the last one (${JSON.stringify(after)})`);
   check(serversUnderScratch().length === 1, 'and leave exactly one server behind');
   await service.stop();
-  check(serversUnderScratch().length === 0, 'stop() leaves none');
+  check(everythingUnderScratch().length === 0, 'stop() leaves none');
 });
 
 await section('requests wait their turn', async () => {
@@ -243,8 +252,62 @@ process.exit(0);
   for (const mode of ['ready', 'loading']) {
     const env = { ...process.env, FAKE_WHISPER_START_MS: mode === 'loading' ? '4000' : '0' };
     execFileSync('node', [probe, cache, join(dir, `quit-${mode}.pid`), mode], { env });
-    check(await until(() => serversUnderScratch().length === 0, 2000), `an app that quits the moment it calls stop() leaves no whisper-server behind, with the server ${mode}`);
+    check(await until(() => everythingUnderScratch().length === 0, 2000), `an app that quits the moment it calls stop() leaves no whisper-server behind, with the server ${mode}`);
     check(!existsSync(join(dir, `quit-${mode}.pid`)), `and no pid file, with the server ${mode}`);
+  }
+});
+
+await section('an app that is killed', async () => {
+  const clip = join(dir, 'en.wav');
+  writeWav(clip, en);
+  const probe = join(dir, 'parent-probe.ts');
+  writeFileSync(
+    probe,
+    `import { createWhisper } from ${JSON.stringify(join(appDir, 'src/main/voice/whisper.ts'))};
+import { bytesOf, readWav } from ${JSON.stringify(join(appDir, 'verify/wav.ts'))};
+const [, , cacheDir, pidFile, shell, clip] = process.argv;
+const service = createWhisper({ cacheDir, pidFile, shell });
+await service.use('fast');
+console.log('up ' + (await service.transcribe(bytesOf(readWav(clip)), 'en')));
+setInterval(() => {}, 1000);
+`,
+  );
+  // dash is what /bin/sh is on Debian and Ubuntu, and macOS ships it, so it stands in for Linux here.
+  for (const shell of ['/bin/sh', '/bin/dash']) {
+    if (!existsSync(shell)) {
+      console.log(`SKIP: ${shell} is not on this machine`);
+      continue;
+    }
+    const pidFile = join(dir, `killed-${basename(shell)}.pid`);
+    const app = spawn(process.execPath, [probe, cache, pidFile, shell, clip], { stdio: ['ignore', 'pipe', 'inherit'] });
+    children.push(app);
+    const said = await new Promise<string>((done) => {
+      let out = '';
+      app.stdout.on('data', (chunk: Buffer) => {
+        out += chunk.toString();
+        const line = /up (.*)/.exec(out);
+        if (line) done(line[1]!);
+      });
+      app.once('exit', () => done(''));
+    });
+    check(hears(said, ['diagram', 'billing', 'queue']), `${shell}: the server answers while its app is alive ("${said}")`);
+    check(serversUnderScratch().length === 1 && everythingUnderScratch().length > 1, `${shell}: exactly one server runs, under a supervisor`);
+    const killedAt = Date.now();
+    app.kill('SIGKILL');
+    const gone = await until(() => everythingUnderScratch().length === 0, 2000);
+    check(gone, `${shell}: an app killed with SIGKILL takes its whisper-server with it, and none of its run is left after ${Date.now() - killedAt} ms`);
+    check(existsSync(pidFile), `${shell}: the killed app could not remove its pid file`);
+    await killLeftover(pidFile);
+    check(!existsSync(pidFile), `${shell}: the next launch clears that stale pid file and kills nothing`);
+  }
+
+  const { service } = newService('dash', { shell: '/bin/dash' });
+  if (existsSync('/bin/dash')) {
+    await service.use('fast');
+    check(service.engine().kind === 'ready', 'the service starts under dash');
+    check(hears(await service.transcribe(bytesOf(en), 'en'), ['diagram', 'billing']), 'and transcribes under dash');
+    await service.stop();
+    check(everythingUnderScratch().length === 0, 'and stop() under dash leaves nothing');
   }
 });
 
@@ -309,7 +372,7 @@ await section('downloading a model that is missing', async () => {
   check(partsOf(fresh).length === 0, 'and no .part file is left');
   const after = first.service.engine();
   check(after.kind === 'error' && after.message.includes('whisper-server'), `a model whisper cannot load is an error and not a crash (${JSON.stringify(after)})`);
-  check(serversUnderScratch().length === 0, 'and no server is left running');
+  check(everythingUnderScratch().length === 0, 'and no server is left running');
   await first.service.stop();
 
   const cut = join(dir, 'dl-cut');
@@ -320,7 +383,7 @@ await section('downloading a model that is missing', async () => {
   await running;
   const part = statSync(join(cut, 'fast.bin.part')).size;
   check(part > 0 && part < model.length && !existsSync(join(cut, 'fast.bin')), `stop() cancels it and keeps the partial file for later (${part} of ${model.length} bytes)`);
-  check(serversUnderScratch().length === 0, 'and starts no server');
+  check(everythingUnderScratch().length === 0, 'and starts no server');
 
   const third = newService('dl-resume', { cacheDir: cut, models });
   await third.service.use('fast');
@@ -410,6 +473,6 @@ if (!offline) {
 }
 
 cleanup();
-check(serversUnderScratch().length === 0, 'no whisper-server started by this check is still running');
+check(everythingUnderScratch().length === 0, 'no whisper-server started by this check is still running');
 rmSync(dir, { recursive: true, force: true });
 finish();

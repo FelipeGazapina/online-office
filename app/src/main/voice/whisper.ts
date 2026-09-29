@@ -9,9 +9,10 @@ export type WhisperOptions = {
   cacheDir: string;
   pidFile: string;
   onEngine?: (engine: VoiceEngine) => void;
-  // Tests replace these to run against a stand-in server or a local model host.
+  // Tests replace these to run against a stand-in server or a local model host, or under another shell.
   locate?: () => Promise<string | null>;
   models?: ModelSet;
+  shell?: string;
 };
 
 export type Whisper = {
@@ -85,7 +86,7 @@ export function createWhisper(o: WhisperOptions): Whisper {
         const vadModel = await fetchModel(models.vad);
         const model = await fetchModel(models.quality[next]);
         set({ kind: 'starting' });
-        const started = await startServer({ binary: path, model, vadModel, pidFile: o.pidFile, signal });
+        const started = await startServer({ binary: path, model, vadModel, pidFile: o.pidFile, signal, shell: o.shell });
         if (mine !== generation) {
           await started.stop();
           return;

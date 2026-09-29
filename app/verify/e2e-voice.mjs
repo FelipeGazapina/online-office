@@ -1,8 +1,9 @@
 // Beta predicate item 7 in the real app. Clips made with macOS `say` are played into the microphone through Chromium's fake
 // capture device, and a real Claude employee receives the right words, in English and in Portuguese, by hold-V push-to-talk
 // and by proximity with no key. It also proves that audio arriving while an employee speaks is dropped, that pressing V
-// stops an employee who is talking, that Accurate, Auto and a dead microphone behave, and what the chip says in every state.
+// stops an employee who is talking, that Accurate, Auto and a dead microphone behave, that an app killed with SIGKILL takes its whisper-server with it, and what the chip says in every state.
 // Run: pnpm build && OFFICE_CDP_PORT=9336 node verify/screen-watch.mjs node verify/cdp.mjs verify/e2e-voice.mjs
+import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
@@ -281,6 +282,18 @@ export default async (s, { launch }) => {
   await dead.key('keyUp', 'KeyV', 'v');
   await dead.sleep(2500);
   assert(routed(dead).length === beforeDead, 'holding V over silence sends nothing to the employee');
+
+  const supervisor = JSON.parse(readFileSync(join(dataDir, 'whisper-server.pid'), 'utf8')).pid;
+  const ofThisRun = () =>
+    execFileSync('ps', ['-axo', 'pid=,pgid=,command='], { encoding: 'utf8' })
+      .split('\n')
+      .filter((l) => l.trim().split(/\s+/)[1] === String(supervisor));
+  assert(ofThisRun().length > 1, `the app's whisper-server runs under a supervisor of its own (${ofThisRun().length} processes in its group)`);
+  const appPid = Number(execFileSync('lsof', ['-nP', `-iTCP:${process.env.OFFICE_CDP_PORT ?? 9333}`, '-sTCP:LISTEN', '-t'], { encoding: 'utf8' }).trim().split('\n')[0]);
+  const killedAt = Date.now();
+  process.kill(appPid, 'SIGKILL');
+  while (ofThisRun().length && Date.now() - killedAt < 2000) await dead.sleep(50);
+  assert(ofThisRun().length === 0, `the app was killed with SIGKILL and nothing of its whisper-server was left after ${Date.now() - killedAt} ms`);
   await dead.close();
 
   console.log('\nlatency summary');
