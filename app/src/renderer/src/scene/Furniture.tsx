@@ -1,5 +1,5 @@
 import { useFrame } from '@react-three/fiber';
-import { useMemo, useRef } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 import { Color, Shape, ShapeGeometry, type MeshStandardMaterial } from 'three';
 import type { Employee } from '../../../shared/protocol.ts';
 import { codeTexture } from './textures.ts';
@@ -17,6 +17,12 @@ function Screen({ kind, color }: { kind: ScreenKind; color: string }) {
   }, []);
   const mat = useRef<MeshStandardMaterial>(null);
   const seed = useMemo(() => Math.random() * 6, []);
+  useEffect(() => {
+    const m = mat.current;
+    if (!m || kind === 'working' || kind === 'blocked_on_owner') return;
+    m.emissive.set(kind === 'error' ? '#ff4d4d' : '#6a7898');
+    m.emissiveIntensity = kind === 'error' ? 1.4 : kind === 'idle' ? 0.14 : 0;
+  }, [kind, color]);
   useFrame((state, dt) => {
     const m = mat.current;
     if (!m) return;
@@ -28,14 +34,8 @@ function Screen({ kind, color }: { kind: ScreenKind; color: string }) {
     } else if (kind === 'blocked_on_owner') {
       m.emissive.set('#ffb340');
       m.emissiveIntensity = 1.1 + Math.sin(t * 6) * 0.9;
-    } else if (kind === 'error') {
-      m.emissive.set('#ff4d4d');
-      m.emissiveIntensity = 1.4;
-    } else {
-      m.emissive.set('#6a7898');
-      m.emissiveIntensity = kind === 'idle' ? 0.14 : 0;
     }
-  });
+  }, 1);
   return (
     <mesh position={[0, 0, 0.022]}>
       <planeGeometry args={[0.64, 0.36]} />
