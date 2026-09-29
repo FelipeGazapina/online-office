@@ -1549,3 +1549,13 @@ h3 {
   color: var(--tomato);
   border-color: rgba(229, 72, 77, 0.5);
 }
+
+/* The owner's computer hosts the company and settings apps. */
+.mac-desktop { min-height: 0; overflow: auto; }
+.mac-workspace { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr)); gap: 20px; align-items: start; max-width: 1400px; margin: auto; }
+.mac-workspace .mac-app-window { width: 100%; max-width: none; margin: 0; min-width: 0; }
+.mac-office-window { order: -1; }
+.mac-workspace .panel { position: static; width: auto; max-height: none; border: 0; border-radius: 0; box-shadow: none; background: transparent; }
+@media (max-width: 600px) { .mac-desktop { padding: 12px; } .mac-live { display: none; } .mac-bar { justify-content: space-between; } }
+
+.mac-portal { position: absolute; inset: 0; z-index: 30; }

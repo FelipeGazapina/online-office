@@ -17,11 +17,13 @@ export function installInput() {
     if (e.metaKey || e.ctrlKey || e.altKey) return;
     const s = get();
 
-    if (s.portalMode && e.code === 'Escape') {
+    if (s.portalMode && e.code === 'Escape' && !s.modal && !s.selectedId) {
       window.office.portal.leave();
       set({ portalMode: false });
       return;
     }
+
+    if (s.portalMode && e.code !== 'Escape') return;
 
     switch (e.code) {
       case 'Digit1':

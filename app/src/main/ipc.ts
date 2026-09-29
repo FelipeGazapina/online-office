@@ -149,7 +149,7 @@ export function startOffice({ dataFile, harnesses, window, services }: Options) 
     if (!win || win.isDestroyed()) return;
     normalBounds ??= win.getBounds();
     win.setAlwaysOnTop(true, 'floating');
-    win.setSize(560, 410, true);
+    // Keep the office window size: the desktop contains full management apps.
   });
   ipcMain.on(IPC.portalLeave, (e) => {
     if (!trusted(e)) return;

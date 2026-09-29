@@ -1,4 +1,5 @@
 import { set, useStore } from '../store.ts';
+import { CompanyPanel, SettingsPanel } from './Panels.tsx';
 
 export function ComputerMenu() {
   const open = useStore((s) => s.computerMenu);
@@ -36,10 +37,11 @@ export function MacPortal() {
     <main className="mac-portal">
       <header className="mac-bar">
         <div className="mac-brand"><span className="mac-logo">R</span><b>Rebolt OS</b></div>
-        <span className="mac-live">LIVE MAC PORTAL</span>
+        <span className="mac-live">OFFICE DESKTOP</span>
         <button className="btn ghost" onClick={leave}>Return to office</button>
       </header>
       <section className="mac-desktop">
+        <div className="mac-workspace">
         <div className="mac-app-window">
           <div className="mac-window-head">
             <span className="traffic red" /><span className="traffic amber" /><span className="traffic green" />
@@ -60,8 +62,17 @@ export function MacPortal() {
                 <span>⌘</span><b>Open Terminal</b><small>Terminal</small>
               </button>
             </div>
-            <p className="mac-footnote">Company configuration will appear as another app here.</p>
+
           </div>
+        </div>
+        <div className="mac-app-window mac-office-window">
+          <div className="mac-window-head"><span className="traffic red" /><span className="traffic amber" /><span className="traffic green" /><b>{company?.name ?? 'Company'}</b></div>
+          <CompanyPanel />
+        </div>
+        <div className="mac-app-window mac-settings-window">
+          <div className="mac-window-head"><span className="traffic red" /><span className="traffic amber" /><span className="traffic green" /><b>Office settings</b></div>
+          <SettingsPanel />
+        </div>
         </div>
       </section>
     </main>
