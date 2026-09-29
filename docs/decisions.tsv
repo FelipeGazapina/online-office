@@ -1,0 +1,5 @@
+ts	phase	decision	why	evidence	result
+2026-09-29T01:03:53Z	frame	committed prototype v0 as baseline before the rewrite	user wants GitHub history of each step	commit c70c80b	pushed to origin/main
+2026-09-29T01:03:53Z	frame	checked which harnesses exist and run headless	real employees need a programmatic interface per harness	hermes -z pong in 4.8s; codex login status = ChatGPT; hermes acp exists; codex app-server exists	3 harnesses reachable
+2026-09-29T01:03:53Z	frame	found claude-mem is not installed	user asked whether to use it; need facts before recommending	~/.claude/plugins/installed_plugins.json has no claude-mem	open, R3 researches
+2026-09-29T01:06:21Z	design	split into 4 research units plus Electron shell, all in parallel	adapter, memory and voice designs depend on facts about each harness; the shell does not	docs/beta-plan.md	5 Sonnet agents running
