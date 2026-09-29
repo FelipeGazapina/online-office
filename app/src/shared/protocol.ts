@@ -199,8 +199,18 @@ export type OfficeApi = {
     openHome(): void;
     openTerminal(): void;
   };
+  update: {
+    check(): void;
+    download(): void;
+    install(): void;
+    subscribe(cb: (state: UpdateState) => void): () => void;
+  };
   voice: VoiceApi;
 };
+
+export type UpdateState =
+  | { status: 'idle' | 'checking' | 'not-available' | 'available' | 'downloading' | 'ready'; version?: string; progress?: number; message?: string }
+  | { status: 'error'; message: string };
 
 export const IPC = {
   snapshot: 'office:snapshot',
@@ -212,4 +222,8 @@ export const IPC = {
   portalLeave: 'office:portal-leave',
   portalOpenHome: 'office:portal-open-home',
   portalOpenTerminal: 'office:portal-open-terminal',
+  updateCheck: 'office:update-check',
+  updateDownload: 'office:update-download',
+  updateInstall: 'office:update-install',
+  updateEvent: 'office:update-event',
 } as const;

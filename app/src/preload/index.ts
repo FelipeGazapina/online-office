@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron';
-import { IPC, type OfficeApi, type ServerMessage } from '../shared/protocol.ts';
+import { IPC, type OfficeApi, type ServerMessage, type UpdateState } from '../shared/protocol.ts';
 import { voiceApi } from './voice.ts';
 
 const office: OfficeApi = {
@@ -17,6 +17,16 @@ const office: OfficeApi = {
     leave: () => ipcRenderer.send(IPC.portalLeave),
     openHome: () => ipcRenderer.send(IPC.portalOpenHome),
     openTerminal: () => ipcRenderer.send(IPC.portalOpenTerminal),
+  },
+  update: {
+    check: () => ipcRenderer.send(IPC.updateCheck),
+    download: () => ipcRenderer.send(IPC.updateDownload),
+    install: () => ipcRenderer.send(IPC.updateInstall),
+    subscribe(cb) {
+      const listener = (_e: unknown, state: UpdateState) => cb(state);
+      ipcRenderer.on(IPC.updateEvent, listener);
+      return () => void ipcRenderer.removeListener(IPC.updateEvent, listener);
+    },
   },
   voice: voiceApi,
 };

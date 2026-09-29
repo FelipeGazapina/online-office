@@ -105,6 +105,14 @@ h3 {
 .muted {
   color: var(--muted);
 }
+.update-button {
+  width: 100%;
+}
+.update-note {
+  display: block;
+  margin-top: 5px;
+  font-size: 11px;
+}
 
 .computer-menu {
   position: fixed;

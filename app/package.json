@@ -1,9 +1,11 @@
 {
   "name": "online-office",
   "productName": "Online Office",
+  "description": "A local office for your AI employees",
+  "author": "Gazapina Labs",
   "private": true,
   "type": "module",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "main": "./out/main/index.js",
   "dependencies": {
     "@agentclientprotocol/sdk": "^1.5.1",
@@ -12,6 +14,7 @@
     "@react-three/drei": "^10.7.9",
     "@react-three/fiber": "^9.8.1",
     "@ricky0123/vad-web": "0.0.31",
+    "electron-updater": "^6.8.9",
     "mermaid": "^12.0.0",
     "onnxruntime-web": "1.30.0",
     "react": "^19.3.0",
@@ -28,6 +31,7 @@
     "@types/three": "^0.186.0",
     "@vitejs/plugin-react": "^6.1.1",
     "electron": "^44.4.5",
+    "electron-builder": "^26.15.3",
     "electron-vite": "6.0.0-beta.3",
     "typescript": "^7.0.2",
     "vite": "^8.3.1"
@@ -38,7 +42,29 @@
     "build": "electron-vite build",
     "build:verify": "electron-vite build --outDir out/verify",
     "start": "electron-vite preview",
+    "package": "pnpm build && electron-builder",
+    "release": "pnpm build && electron-builder --publish always",
     "beta": "node scripts/beta.mjs",
     "typecheck": "tsc -p tsconfig.node.json --noEmit --composite false && tsc -p tsconfig.web.json --noEmit --composite false"
+  },
+  "build": {
+    "appId": "com.gazapina.onlineoffice",
+    "productName": "Online Office",
+    "asar": true,
+    "files": ["out/**/*", "package.json"],
+    "mac": {
+      "category": "public.app-category.productivity",
+      "target": ["dmg", "zip"]
+    },
+    "win": { "target": ["nsis"] },
+    "linux": {
+      "category": "Office",
+      "target": ["AppImage"]
+    },
+    "publish": {
+      "provider": "github",
+      "owner": "FelipeGazapina",
+      "repo": "online-office"
+    }
   }
 }

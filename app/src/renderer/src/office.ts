@@ -31,5 +31,6 @@ export function applyServerMessage(msg: ServerMessage) {
 
 export async function startOffice() {
   window.office.subscribe(applyServerMessage);
+  window.office.update.subscribe((update) => set({ update }));
   applyServerMessage(await window.office.getSnapshot());
 }

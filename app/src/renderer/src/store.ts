@@ -10,6 +10,7 @@ import type {
   MeetingDoor,
   ModelCatalog,
   Provider,
+  UpdateState,
 } from '../../shared/protocol.ts';
 import type { Language, VoiceQuality } from '../../shared/voice.ts';
 import { initialVoice, type VoiceState } from './voice/chip.ts';
@@ -64,6 +65,7 @@ type State = Settings & {
   askerId: EmployeeId | null;
   voice: VoiceState;
   toasts: Toast[];
+  update: UpdateState;
 };
 
 export const useStore = create<State>()(() => ({
@@ -87,6 +89,7 @@ export const useStore = create<State>()(() => ({
   askerId: null,
   voice: initialVoice,
   toasts: [],
+  update: { status: 'idle' },
 }));
 
 export const set = useStore.setState;
