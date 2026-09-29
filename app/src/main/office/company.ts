@@ -442,6 +442,7 @@ export class Office {
   private reset() {
     for (const id of [...this.sessions.keys()]) this.stopSession(id);
     this.company = seed();
+    this.meetingDoor = 'open';
     this.commit();
     this.services.memory.wipe().catch((err) => console.error('Could not wipe memory:', err));
   }
