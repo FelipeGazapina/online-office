@@ -1,5 +1,12 @@
-import { useState, type ReactNode } from 'react';
-import { DESKS_PER_BLOCK, PROVIDERS, type BlockId, type HarnessStatus, type Provider } from '../../../shared/protocol.ts';
+import { useEffect, useState, type ReactNode } from 'react';
+import {
+  DESKS_PER_BLOCK,
+  PROVIDERS,
+  type BlockId,
+  type HarnessStatus,
+  type ModelId,
+  type Provider,
+} from '../../../shared/protocol.ts';
 import { useDiagram } from '../scene/whiteboard.ts';
 import { send, set, useStore } from '../store.ts';
 import { tailPath } from './hooks.ts';
@@ -42,6 +49,20 @@ function HireModal() {
   const [provider, setProvider] = useState<Provider>(() => PROVIDER_LIST.find((p) => harnesses?.[p].kind === 'ready') ?? 'claude-code');
   const [blockId, setBlockId] = useState<BlockId | ''>(company?.blocks[0]?.id ?? '');
   const [name, setName] = useState('');
+  const [model, setModel] = useState<ModelId | ''>('');
+  const catalogs = useStore((s) => s.catalogs);
+  const catalog = catalogs?.[provider];
+
+  // Model discovery can start the provider CLI, so do it only for the provider
+  // the owner is looking at and reuse a catalog that is already in the snapshot.
+  useEffect(() => {
+    if (!catalog || catalog.kind === 'unknown' || catalog.kind === 'error') send({ type: 'load_models', provider });
+    setModel('');
+  }, [provider]);
+
+  useEffect(() => {
+    if (catalog?.kind === 'ready' && !model) setModel(catalog.defaultModel);
+  }, [catalog, model]);
   if (!company || !harnesses) return null;
   const used = (id: BlockId) => company.employees.filter((e) => e.blockId === id).length;
   const ready = harnesses[provider].kind === 'ready';
@@ -86,6 +107,24 @@ function HireModal() {
         </label>
       )}
       <label className="field">
+        <span>Model</span>
+        {catalog?.kind === 'ready' ? (
+          <select value={model} onChange={(e) => setModel(e.target.value as ModelId)} disabled={catalog.models.length === 0}>
+            {catalog.models.map((option) => (
+              <option key={option.id} value={option.id}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+        ) : catalog?.kind === 'loading' ? (
+          <span className="muted">Loading models from {PROVIDERS[provider].label}…</span>
+        ) : catalog?.kind === 'error' ? (
+          <span className="muted">Could not load models: {catalog.message}</span>
+        ) : (
+          <span className="muted">Using the provider default model</span>
+        )}
+      </label>
+      <label className="field">
         <span>
           Name <span className="muted">optional</span>
         </span>
@@ -100,7 +139,7 @@ function HireModal() {
           disabled={!blockId || !ready}
           onClick={() => {
             if (!blockId) return;
-            send({ type: 'hire', provider, blockId, ...(name.trim() && { name: name.trim() }) });
+            send({ type: 'hire', provider, blockId, ...(name.trim() && { name: name.trim() }), ...(model && { model }) });
             close();
           }}
         >
