@@ -129,9 +129,9 @@ export function walkTo(goal: WalkGoal) {
 
 // A walk is planned again when the office has changed under it. A walk to someone also follows them: it is planned
 // again when they have moved too far from where it ends, and dropped when they are gone.
-function keepUp(walk: Walk, layout: Layout): OwnerIntent {
+function keepUp(walk: Walk, layout: Layout, grid: NavGrid): OwnerIntent {
   const { goal, path } = walk;
-  if (plannedIn.get(walk) !== navFor(layout)) return plan(goal, layout) ?? KEYS_INTENT;
+  if (plannedIn.get(walk) !== grid) return plan(goal, layout) ?? KEYS_INTENT;
   if (goal.kind !== 'employee') return walk;
   const target = runtime.avatars.get(goal.employeeId);
   if (!target) return KEYS_INTENT;
@@ -140,9 +140,9 @@ function keepUp(walk: Walk, layout: Layout): OwnerIntent {
 }
 
 // The velocity the walk asks for this frame, or null when the owner is not walking or has just arrived.
-function walkVelocity(layout: Layout): Vec2 | null {
+function walkVelocity(layout: Layout, grid: NavGrid): Vec2 | null {
   const { owner } = runtime;
-  if (owner.intent.kind === 'walk') owner.intent = keepUp(owner.intent, layout);
+  if (owner.intent.kind === 'walk') owner.intent = keepUp(owner.intent, layout, grid);
   const { intent } = owner;
   if (intent.kind !== 'walk') return null;
   const { path } = intent;
@@ -179,13 +179,13 @@ function keyVelocity(): Vec2 {
   return { x: dx * top, z: dz * top };
 }
 
-function stepOwner(dt: number, layout: Layout, talkingTo: EmployeeId | null) {
+function stepOwner(dt: number, layout: Layout, grid: NavGrid, talkingTo: EmployeeId | null) {
   const { owner, view, keys } = runtime;
   owner.running = keys.has('ShiftLeft') || keys.has('ShiftRight');
   // Keys always win. input.ts also drops the walk on the key down itself, because a tap can end between two frames.
   if (STEER_KEYS.some((c) => keys.has(c))) owner.intent = KEYS_INTENT;
 
-  const want = walkVelocity(layout) ?? keyVelocity();
+  const want = walkVelocity(layout, grid) ?? keyVelocity();
   const a = ease(dt, 12);
   owner.vel.x += (want.x - owner.vel.x) * a;
   owner.vel.z += (want.z - owner.vel.z) * a;
@@ -230,6 +230,7 @@ function stepAvatar(
   dt: number,
   company: Company,
   layout: Layout,
+  grid: NavGrid,
   queueIndex: number,
   talking: boolean,
   meetingDoor: 'open' | 'closed',
@@ -257,7 +258,7 @@ function stepAvatar(
 
   const dist = dist2(av.pos, target);
   let moved = 0;
-  const aim = !av.seated && dist > 0.03 ? waypoint(av, target, navFor(layout)) : null;
+  const aim = !av.seated && dist > 0.03 ? waypoint(av, target, grid) : null;
   if (aim) {
     const dx = aim.x - av.pos.x;
     const dz = aim.z - av.pos.z;
@@ -314,22 +315,24 @@ export function stepSim(rawDt: number) {
   const { company } = get();
   const meetingDoor = get().meetingDoor;
   const collisionLayout = withMeetingRoom(getLayout(company?.blocks ?? []), meetingDoor);
+  const grid = navFor(collisionLayout);
 
   if (!company) {
-    stepOwner(dt, collisionLayout, null);
+    stepOwner(dt, collisionLayout, grid, null);
     return;
   }
   syncAvatars(company);
 
   const state = get();
-  stepOwner(dt, collisionLayout, state.talkingTo);
+  stepOwner(dt, collisionLayout, grid, state.talkingTo);
 
   const queue = waitingQueue(company);
+  const queueIndex = new Map(queue.map((e, i) => [e.id, i]));
   for (const e of company.employees) {
     const av = runtime.avatars.get(e.id);
     if (!av) continue;
-    const qi = queue.findIndex((q) => q.id === e.id);
-    stepAvatar(av, e, dt, company, collisionLayout, qi, state.talkingTo === e.id, meetingDoor);
+    const qi = queueIndex.get(e.id) ?? -1;
+    stepAvatar(av, e, dt, company, collisionLayout, grid, qi, state.talkingTo === e.id, meetingDoor);
   }
 
   const talkingTo = nearestInRange(company, state.talkingTo);

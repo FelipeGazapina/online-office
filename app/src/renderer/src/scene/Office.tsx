@@ -291,7 +291,7 @@ function Lights({ b }: { b: Bounds }) {
         color="#fff0d6"
         intensity={2.1}
         position={[cx + 14, 26, cz + 12]}
-        shadow-mapSize={[2048, 2048]}
+        shadow-mapSize={[1024, 1024]}
         shadow-bias={-0.0005}
         shadow-normalBias={0.03}
         shadow-camera-left={-ext}
