@@ -21,11 +21,15 @@ export function WalkMarker() {
   return (
     <group ref={marker} visible={false}>
       <mesh rotation-x={-Math.PI / 2}>
-        <ringGeometry args={[0.28, 0.38, 32]} />
+        <ringGeometry args={[0.34, 0.47, 32]} />
+        <meshBasicMaterial color="#fbf7ef" transparent depthWrite={false} />
+      </mesh>
+      <mesh rotation-x={-Math.PI / 2}>
+        <ringGeometry args={[0.47, 0.56, 32]} />
         <meshBasicMaterial color="#2f3a5f" transparent depthWrite={false} />
       </mesh>
       <mesh rotation-x={-Math.PI / 2}>
-        <circleGeometry args={[0.1, 24]} />
+        <circleGeometry args={[0.13, 24]} />
         <meshBasicMaterial color="#f2b84b" transparent depthWrite={false} />
       </mesh>
     </group>
