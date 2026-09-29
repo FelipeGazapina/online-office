@@ -73,7 +73,64 @@ export function cleanTranscript(text: string): string {
     .replace(/\[[^\]]*\]|\([^)]*\)|[♪♫]+/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
-  return /[\p{L}\p{N}]/u.test(spoken) ? spoken : '';
+  return /[\p{L}\p{N}]/u.test(spoken) ? correctTechnicalTerms(spoken) : '';
+}
+
+// Whisper often gets the sound of an IT term right while splitting it into ordinary
+// words ("type script", "get hub") or losing its conventional casing. Keep this
+// correction local to speech output so typed messages and employee text are untouched.
+const TECHNICAL_TERMS: readonly [RegExp, string][] = [
+  [/\bgit\b/gi, 'Git'],
+  [/\b(?:git|get)[ -]?hub\b/gi, 'GitHub'],
+  [/\b(?:git|get)[ -]?lab\b/gi, 'GitLab'],
+  [/\bgithub[ -]?actions\b/gi, 'GitHub Actions'],
+  [/\bpull[ -]?request\b/gi, 'pull request'],
+  [/\bci[ /-]?cd\b/gi, 'CI/CD'],
+  [/\btype[ -]?script\b/gi, 'TypeScript'],
+  [/\bjava[ -]?script\b/gi, 'JavaScript'],
+  [/\btypescript\b/gi, 'TypeScript'],
+  [/\bjavascript\b/gi, 'JavaScript'],
+  [/\bnode[ -]?(?:js|j[ -]?s)\b/gi, 'Node.js'],
+  [/\breact[ -]?(?:js|j[ -]?s)\b/gi, 'React'],
+  [/\bthree[ -]?(?:js|j[ -]?s)\b/gi, 'Three.js'],
+  [/\bpost[ -]?gres(?:ql)?\b/gi, 'PostgreSQL'],
+  [/\bsql[ -]?lite\b/gi, 'SQLite'],
+  [/\bmongo[ -]?db\b/gi, 'MongoDB'],
+  [/\bmy[ -]?sql\b/gi, 'MySQL'],
+  [/\bredis\b/gi, 'Redis'],
+  [/\bsql\b/gi, 'SQL'],
+  [/\bgraph[ -]?ql\b/gi, 'GraphQL'],
+  [/\bweb[ -]?socket(?:s)?\b/gi, 'WebSocket'],
+  [/\bcloud[ -]?flare\b/gi, 'Cloudflare'],
+  [/\bsuper[ -]?base\b/gi, 'Supabase'],
+  [/\bfire[ -]?base\b/gi, 'Firebase'],
+  [/\bterra[ -]?form\b/gi, 'Terraform'],
+  [/\bkuber(?:net|n)etes\b/gi, 'Kubernetes'],
+  [/\bdocker\b/gi, 'Docker'],
+  [/\bco[ -]?pilot\b/gi, 'Copilot'],
+  [/\b(?:open[ -]?ai)\b/gi, 'OpenAI'],
+  [/\bclaude\b/gi, 'Claude'],
+  [/\bcodex\b/gi, 'Codex'],
+  [/\bwhisper\b/gi, 'Whisper'],
+  [/\bonnx\b/gi, 'ONNX'],
+  [/\bweb[ -]?rtc\b/gi, 'WebRTC'],
+  [/\bzod\b/gi, 'Zod'],
+  [/\btype[ -]?orm\b/gi, 'TypeORM'],
+  [/\b(?:e[ -]?lectron)\b/gi, 'Electron'],
+  [/\b(?:v[ -]?ite)\b/gi, 'Vite'],
+  [/\b(?:zoo[ -]?stand|zustand)\b/gi, 'Zustand'],
+  [/\b(?:m[ -]?c[ -]?p)\b/gi, 'MCP'],
+  [/\b(?:a[ -]?p[ -]?i)\b/gi, 'API'],
+  [/\b(?:s[ -]?d[ -]?k)\b/gi, 'SDK'],
+  [/\b(?:c[ -]?l[ -]?i)\b/gi, 'CLI'],
+  [/\b(?:j[ -]?s[ -]?o[ -]?n)\b/gi, 'JSON'],
+  [/\b(?:y[ -]?a[ -]?m[ -]?l)\b/gi, 'YAML'],
+  [/\b(?:h[ -]?t[ -]?m[ -]?l)\b/gi, 'HTML'],
+  [/\b(?:c[ -]?s[ -]?s)\b/gi, 'CSS'],
+];
+
+export function correctTechnicalTerms(text: string): string {
+  return TECHNICAL_TERMS.reduce((result, [pattern, replacement]) => result.replace(pattern, replacement), text);
 }
 
 function freePort(): Promise<number> {

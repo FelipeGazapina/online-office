@@ -2,10 +2,19 @@
 // and the one line the HUD chip shows for every state.
 // Run from app/: node verify/voice-logic-check.ts   Exits 1 on any failed check.
 import type { MicAccess, VoiceEngine } from '../src/shared/voice.ts';
+import { correctTechnicalTerms } from '../src/main/voice/server.ts';
 import { chipLine, chipOf, initialVoice, type VoiceState } from '../src/renderer/src/voice/chip.ts';
 import { createGate } from '../src/renderer/src/voice/gate.ts';
 import { Ring, SAMPLE_RATE } from '../src/renderer/src/voice/ring.ts';
 import { check, finish, sleep } from './check.ts';
+
+console.log('# technical transcript corrections');
+check(
+  correctTechnicalTerms('push this type script app to get hub and run it with node js') ===
+    'push this TypeScript app to GitHub and run it with Node.js',
+  'common split IT terms are restored with their conventional spelling',
+);
+check(correctTechnicalTerms('use postgres, graphql, and m c p') === 'use PostgreSQL, GraphQL, and MCP', 'database, API, and protocol terms are corrected');
 
 console.log('# the ring');
 const ring = new Ring(1);
