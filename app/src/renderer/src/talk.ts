@@ -53,6 +53,7 @@ let openings = 0;
 let pttFrom: number | null = null;
 let speaking = false;
 let pending = 0;
+let visibilityMuted = false;
 // Silero and onnxruntime are big, and a session that only holds V never needs them, so they load on the first listen.
 let detector: { kind: 'idle' } | { kind: 'loading' } | { kind: 'ready'; vad: Vad } | { kind: 'broken' } = { kind: 'idle' };
 
@@ -218,6 +219,11 @@ export function reconcile() {
 }
 
 function apply() {
+  if (visibilityMuted) {
+    if (micState.kind !== 'closed') closeMic();
+    syncVad(false);
+    return;
+  }
   // A card mic is for the question in front of the owner, and does not carry over to the next one.
   if (get().voice.cardMic && !get().askerId) patchVoice({ cardMic: false });
   const want = desired();
@@ -287,4 +293,12 @@ export function installTalk() {
     reconcile();
   });
   window.addEventListener('focus', retryBlockedMic);
+  // Electron marks the document hidden when its window is minimized. Close the
+  // capture immediately so a backgrounded office never keeps the user's mic live.
+  const onVisibility = () => {
+    visibilityMuted = document.visibilityState === 'hidden';
+    if (visibilityMuted) closeMic();
+    else reconcile();
+  };
+  document.addEventListener('visibilitychange', onVisibility);
 }
