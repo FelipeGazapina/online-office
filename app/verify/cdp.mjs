@@ -18,13 +18,13 @@ export const OUT = '/tmp/office-shots';
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const launched = [];
 
-export async function launch({ env = {}, width = 1280, height = 800 } = {}) {
+export async function launch({ env = {}, width = 1280, height = 800, exe } = {}) {
   mkdirSync(OUT, { recursive: true });
   const electron = createRequire(import.meta.url)('electron');
   // Set by Electron-based hosts (editors, agent shells). With it the binary runs as plain Node and never opens a window.
   const { ELECTRON_RUN_AS_NODE: _, ...inherited } = process.env;
   const entry = process.env.OFFICE_OUT_DIR ? join(resolve(APP_DIR, process.env.OFFICE_OUT_DIR), 'main', 'index.js') : '.';
-  const proc = spawn(electron, [entry, `--remote-debugging-port=${PORT}`], {
+  const proc = spawn(exe ?? electron, [...(exe ? [] : [entry]), `--remote-debugging-port=${PORT}`], {
     cwd: APP_DIR,
     // OFFICE_TEST_RUN keeps the window hidden and out of the Dock. A scenario can set it to '' to watch a run by eye.
     env: { ...inherited, OFFICE_TEST_RUN: '1', ...env },
@@ -76,8 +76,10 @@ export async function launch({ env = {}, width = 1280, height = 800 } = {}) {
     for (const { reject } of pending.values()) reject(new Error('the app closed the DevTools connection (window closed or app quit)'));
     pending.clear();
   };
+  // A send on a closed socket is dropped without an error, so a call made after the app quit would wait forever.
   const call = (method, params = {}) =>
     new Promise((resolve, reject) => {
+      if (ws.readyState !== WebSocket.OPEN) return reject(new Error('the DevTools connection is closed'));
       const i = ++id;
       pending.set(i, { resolve, reject });
       ws.send(JSON.stringify({ id: i, method, params }));
