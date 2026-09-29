@@ -1,4 +1,5 @@
 import { Drawer } from './hud/Drawer.tsx';
+import { EmployeeMenu } from './hud/EmployeeMenu.tsx';
 import { Modals } from './hud/Modals.tsx';
 import { CompanyPanel, HelpOverlay, SettingsPanel, Toasts, WaitingMeter } from './hud/Panels.tsx';
 import { Bottom } from './hud/Talk.tsx';
@@ -21,6 +22,7 @@ export function App() {
         <Drawer />
       </div>
       <Modals />
+      <EmployeeMenu />
       <HelpOverlay />
     </>
   );

@@ -772,6 +772,35 @@ h3 {
   gap: 8px;
 }
 
+/* Employee menu */
+.emp-menu {
+  position: fixed;
+  z-index: 150;
+  min-width: 176px;
+  padding: 4px;
+  background: rgba(251, 249, 245, 0.97);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.7) inset, 0 10px 30px rgba(24, 18, 44, 0.22);
+  animation: pop 0.12s ease-out;
+}
+.emp-menu button {
+  display: block;
+  width: 100%;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  font-weight: 600;
+  text-align: left;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.emp-menu button:hover,
+.emp-menu button:focus-visible {
+  background: var(--paper-2);
+}
+
 /* Modals */
 .scrim {
   position: fixed;
@@ -1095,6 +1124,12 @@ h3 {
   from {
     opacity: 0;
     transform: translateX(24px);
+  }
+}
+@keyframes pop {
+  from {
+    opacity: 0;
+    transform: scale(0.96);
   }
 }
 @keyframes nudge {

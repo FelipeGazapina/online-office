@@ -36,7 +36,7 @@ An Electron window opens with the office. On first run, click **Choose a folder*
 | V (hold) | Push-to-talk, when mic mode is "Hold V" |
 | H | Key help |
 
-Click a name tag to open that employee's log. Click a whiteboard to enlarge it. Click **Reveal** on a block to open its folder in Finder.
+Click an employee, on the avatar or the name tag, for a menu with **Open chat** and **Go to**. In the Overview camera, click the floor to walk there and drag to turn the view. Click a whiteboard to enlarge it. Click **Reveal** on a block to open its folder in Finder.
 
 ## How it works
 

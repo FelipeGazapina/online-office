@@ -38,7 +38,7 @@ export const EmployeeView = memo(function EmployeeView({ employee }: { employee:
       look={lookFor(employee)}
       read={() => runtime.avatars.get(employee.id) ?? null}
       typing={employee.status.kind === 'working'}
-      onPick={() => set({ selectedId: employee.id })}
+      onPick={({ x, y }) => set({ menu: { employeeId: employee.id, x, y } })}
     >
       {(talking || selected) && (
         <mesh ref={ring} rotation-x={-Math.PI / 2} position={[0, 0.03, 0]}>
@@ -90,7 +90,7 @@ function Label({ employee: e, meetingDoor }: { employee: Employee; meetingDoor: 
   return (
     <div className="emp-label">
       {bubbleEl}
-      <button className="tag" onClick={() => set({ selectedId: e.id })}>
+      <button className="tag" onClick={(ev) => set({ menu: { employeeId: e.id, x: ev.clientX, y: ev.clientY } })}>
         <i className="pdot" style={{ background: p.color }} />
         <b>{e.name}</b>
         <span className="prov">{p.label}</span>

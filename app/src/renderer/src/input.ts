@@ -40,6 +40,7 @@ export function installInput() {
         if (!e.repeat) setPtt(true);
         return;
       case 'Escape':
+        if (s.menu) return set({ menu: null });
         if (s.helpOpen) return set({ helpOpen: false });
         if (s.modal) return set({ modal: null });
         return set({ selectedId: null });
