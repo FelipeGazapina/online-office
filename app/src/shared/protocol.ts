@@ -156,12 +156,22 @@ export type ClientMessage =
   | { type: 'answer'; employeeId: EmployeeId; questionId: QuestionId; text: string; always?: boolean }
   | { type: 'interject'; employeeId: EmployeeId; text: string; style: InterruptStyle }
   | { type: 'meeting_door'; state: MeetingDoor }
+  // Asks a harness for its model list. The answer arrives as that provider's catalog in the next snapshots.
+  | { type: 'load_models'; provider: Provider }
   | { type: 'set_model'; employeeId: EmployeeId; model: ModelId }
   | { type: 'set_permissions'; employeeId: EmployeeId; mode: PermissionMode }
   | { type: 'remove_allow_rule'; employeeId: EmployeeId; rule: AllowRule }
+  // Stops the employee's session and starts another with no memory of the conversation. Notes, model and rules stay.
+  | { type: 'fresh_session'; employeeId: EmployeeId }
   | { type: 'reset_company' };
 
-export type Snapshot = { type: 'snapshot'; company: Company; harnesses: Record<Provider, HarnessStatus>; meetingDoor: MeetingDoor };
+export type Snapshot = {
+  type: 'snapshot';
+  company: Company;
+  harnesses: Record<Provider, HarnessStatus>;
+  catalogs: Record<Provider, ModelCatalog>;
+  meetingDoor: MeetingDoor;
+};
 
 export type ServerMessage =
   | Snapshot

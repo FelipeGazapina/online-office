@@ -7,7 +7,7 @@ import { join } from 'node:path';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { commandPrefix, covers, isAllow, ruleFor, sameRule, type PermissionBody } from '../src/shared/permissions.ts';
-import { SEAT_CEILING, type AllowRule, type Company, type Employee, type EmployeeId, type EmployeeStatus, type HarnessStatus, type ModelId, type PermissionPolicy, type Provider, type Question } from '../src/shared/protocol.ts';
+import { SEAT_CEILING, type AllowRule, type Company, type Employee, type EmployeeId, type EmployeeStatus, type HarnessStatus, type ModelCatalog, type ModelId, type PermissionPolicy, type Provider, type Question } from '../src/shared/protocol.ts';
 import { HARNESSES } from '../src/main/office/adapters/index.ts';
 import type { SessionHost } from '../src/main/office/adapters/types.ts';
 import { Office, OfficeError } from '../src/main/office/company.ts';
@@ -28,9 +28,15 @@ const mcp = await startOfficeMcp();
 // What a harness adapter does, reduced to its calls into the host.
 type Fake = { host: SessionHost; assigned: string[]; interjected: string[]; models: string[]; policies: PermissionPolicy[]; stopped: boolean };
 const fakes: Fake[] = [];
+let listing: { resolve(catalog: ModelCatalog): void; reject(err: Error): void } | undefined;
+let listCalls = 0;
 HARNESSES['claude-code'] = {
   ...HARNESSES['claude-code'],
   detect: async () => 'fake',
+  listModels: () => {
+    listCalls++;
+    return new Promise((resolve, reject) => void (listing = { resolve, reject }));
+  },
   session: (host) => {
     const fake: Fake = { host, assigned: [], interjected: [], models: [], policies: [], stopped: false };
     fakes.push(fake);
@@ -306,7 +312,8 @@ check(company().employees.every((e) => e.model === 'claude-sonnet-5-5' && e.perm
 console.log('\n# model, mode and Always allow');
 const labFile = join(dir, 'lab', 'company.json');
 const labLogs: string[] = [];
-const labEvents = { changed() {}, said() {}, log: (_id: EmployeeId, line: string) => void labLogs.push(line) };
+let labChanges = 0;
+const labEvents = { changed: () => void labChanges++, said() {}, log: (_id: EmployeeId, line: string) => void labLogs.push(line) };
 const lab = new Office(labFile, statuses, labEvents, { mcp, memory });
 lab.handle({ type: 'create_block', cwd: repo });
 const labBlock = lab.snapshot().company.blocks[0]!.id;
@@ -384,6 +391,43 @@ await asksAgain;
 lab.handle({ type: 'remove_allow_rule', employeeId: dia, rule: cmd('npm test') });
 check(fakeOf(dia).policies.length === told + 1, 'removing a rule that is not there changes nothing and tells nobody');
 
+console.log('\n# model lists');
+const catalogOf = (provider: Provider) => lab.snapshot().catalogs[provider];
+check((['claude-code', 'codex', 'hermes'] as const).every((p) => catalogOf(p).kind === 'unknown'), 'no catalog is known until someone asks');
+const changesBefore = labChanges;
+lab.handle({ type: 'load_models', provider: 'claude-code' });
+check(catalogOf('claude-code').kind === 'loading' && listCalls === 1 && labChanges > changesBefore, 'load_models marks the catalog loading, asks the harness and tells the window');
+lab.handle({ type: 'load_models', provider: 'claude-code' });
+check(listCalls === 1, 'asking again while it loads does not ask the harness again');
+const offered: ModelCatalog = { kind: 'ready', models: [{ id: 'm-a' as ModelId, label: 'Model A' }, { id: 'm-b' as ModelId, label: 'Model B' }], defaultModel: 'm-a' as ModelId };
+listing!.resolve(offered);
+check((await until(() => catalogOf('claude-code').kind === 'ready')) && JSON.stringify(catalogOf('claude-code')) === JSON.stringify(offered), 'what the harness lists becomes its catalog');
+lab.handle({ type: 'load_models', provider: 'claude-code' });
+listing!.reject(new Error('claude is not signed in'));
+check((await until(() => catalogOf('claude-code').kind === 'error')) && JSON.stringify(catalogOf('claude-code')) === JSON.stringify({ kind: 'error', message: 'claude is not signed in' }) && listCalls === 2, 'a rejection becomes an error the owner can read, and asking again lists again');
+lab.handle({ type: 'load_models', provider: 'codex' });
+check(catalogOf('codex').kind === 'unknown' && listCalls === 2, 'a harness that cannot list models stays unknown');
+
+console.log('\n# fresh session');
+const oldDia = fakeOf(dia);
+const eliFake = fakeOf(eli);
+oldDia.host.setSessionId('sess-old');
+const lastWords = oldDia.host.ask({ kind: 'ask', text: 'Any last words?' });
+check(inLab(dia).sessionId === 'sess-old' && inLab(dia).status.kind === 'blocked_on_owner' && labShown(dia)?.text === 'Any last words?', 'the employee is mid-task with a conversation to resume and a question open');
+const oldUrl = oldDia.host.mcp.url;
+lab.handle({ type: 'fresh_session', employeeId: dia });
+const newDia = fakeOf(dia);
+check(oldDia.stopped && newDia !== oldDia && !newDia.stopped, 'fresh_session stops the session and builds a new session object');
+check((await lastWords) === '' && labShown(dia) === undefined && inLab(dia).status.kind === 'idle', 'the questions are dropped and the employee is idle');
+check(inLab(dia).sessionId === undefined && newDia.host.employee.sessionId === undefined && !('sessionId' in stored(labFile).employees.find((e) => e.name === 'Dia')!), 'no sessionId is left, in memory or in the file, for the new session to resume');
+oldDia.host.setSessionId('sess-old');
+oldDia.host.setStatus({ kind: 'working', task: 'ghost', startedAt: 1 });
+check(inLab(dia).sessionId === undefined && inLab(dia).status.kind === 'idle' && (await oldDia.host.ask(perm('late'))) === '', 'a late report from the old session changes nothing');
+const gone = await fetch(oldUrl, { method: 'POST', headers: { 'content-type': 'application/json', accept: 'application/json, text/event-stream' }, body: '{}' });
+check(gone.status === 404 && newDia.host.mcp.url !== oldUrl, 'the old MCP URL is dead and the new session has its own');
+check(inLab(dia).model === 'next-model' && rulesOf(dia) === JSON.stringify([tool('Write')]) && fakeOf(eli) === eliFake && !eliFake.stopped, 'model and rules stay, and a teammate is not touched');
+
+console.log('\n# restart');
 lab.shutdown();
 const lab2 = new Office(labFile, statuses, labEvents, { mcp, memory });
 check((await promptly(fakeOf(dia).host.ask(use('Write', 'src/c.ts')))) === 'Allow' && lab2.snapshot().company.employees.find((e) => e.id === dia)?.model === 'next-model', 'after a restart the rule still allows and the model is still the one picked');

@@ -2,6 +2,7 @@ import type {
   Employee,
   EmployeeStatus,
   InterruptStyle,
+  ModelCatalog,
   ModelId,
   PermissionPolicy,
   ProjectBlock,
@@ -80,4 +81,10 @@ export type Harness = {
   defaultModel(): ModelId;
   // A harness without a `session` factory is installed but not wired: the hire modal shows it, and hiring it is refused.
   session?: SessionFactory;
+  // The models this harness offers, asked of the harness itself. The office calls it when the owner asks
+  // (`load_models`), never twice at once, so it may start the CLI and take seconds. Resolve `ready` with every model
+  // the owner can pick and the id the harness starts on when given none (Claude `Query.supportedModels()`, Codex
+  // `model/list` with its `isDefault` entry, Hermes the `models` of `session/new`), or `error` with a reason the owner
+  // can read. A rejection becomes `error` too. Leave it out until the harness can list its models.
+  listModels?(): Promise<ModelCatalog>;
 };

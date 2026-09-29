@@ -8,6 +8,7 @@ import type {
   HarnessStatus,
   InterruptStyle,
   MeetingDoor,
+  ModelCatalog,
   Provider,
 } from '../../shared/protocol.ts';
 
@@ -37,6 +38,7 @@ type State = Settings & {
   company: Company | null;
   harnesses: Record<Provider, HarnessStatus> | null;
   meetingDoor: MeetingDoor;
+  catalogs: Record<Provider, ModelCatalog> | null;
   logs: Record<string, LogLine[]>;
   chat: Record<EmployeeId, ChatLine[]>;
   bubbles: Record<string, { text: string; until: number }>;
@@ -57,6 +59,7 @@ export const useStore = create<State>()(() => ({
   company: null,
   harnesses: null,
   meetingDoor: 'open',
+  catalogs: null,
   logs: {},
   chat: {},
   bubbles: {},

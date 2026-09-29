@@ -142,7 +142,7 @@ export default async (s) => {
     const st = __office.store.getState();
     const c = structuredClone(st.company);
     c.blocks[0].whiteboard = { title: 'Flow', mermaid: 'flowchart LR\\n A[Owner] --> B[Employee]', by: c.employees[0].id, at: Date.now() };
-    __office.apply({ type: 'snapshot', company: c, harnesses: st.harnesses });
+    __office.apply({ type: 'snapshot', company: c, harnesses: st.harnesses, catalogs: st.catalogs });
     __office.set({ modal: { kind: 'whiteboard', blockId: c.blocks[0].id } });
   })()`);
   await s.waitFor(`!!document.querySelector('.wb-body .svg svg')`, 20000);

@@ -41,9 +41,11 @@ const clientMessage = z.discriminatedUnion('type', [
   z.object({ type: z.literal('answer'), employeeId, questionId, text: z.string(), always: z.boolean().optional() }),
   z.object({ type: z.literal('interject'), employeeId, text: z.string().min(1), style: z.enum(['next', 'now']) }),
   z.object({ type: z.literal('meeting_door'), state: meetingDoor }),
+  z.object({ type: z.literal('load_models'), provider }),
   z.object({ type: z.literal('set_model'), employeeId, model: modelId }),
   z.object({ type: z.literal('set_permissions'), employeeId, mode: permissionMode }),
   z.object({ type: z.literal('remove_allow_rule'), employeeId, rule: allowRule }),
+  z.object({ type: z.literal('fresh_session'), employeeId }),
   z.object({ type: z.literal('reset_company') }),
 ]);
 // Compile-time proof the schema and the contract agree in both directions.

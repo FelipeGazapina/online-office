@@ -19,6 +19,7 @@ import {
   type EmployeeStatus,
   type HarnessStatus,
   type MeetingDoor,
+  type ModelCatalog,
   type ModelId,
   type PermissionMode,
   type PermissionPolicy,
@@ -166,6 +167,8 @@ export class Office {
   // Every question an employee is waiting on. The employee's status shows the front of their line.
   private inbox = new Inbox({ headChanged: (id, head, left) => this.onHeadChanged(id, head, left) });
   private resumes = new Map<EmployeeId, Resume>();
+  // What each harness offered the last time the owner asked. It is about this machine, not the company, so a reset keeps it.
+  private catalogs: Record<Provider, ModelCatalog> = { 'claude-code': { kind: 'unknown' }, codex: { kind: 'unknown' }, hermes: { kind: 'unknown' } };
   private readonly dataFile: string;
   private readonly harnesses: Record<Provider, HarnessStatus>;
   private readonly events: OfficeEvents;
@@ -188,7 +191,7 @@ export class Office {
   }
 
   snapshot(): Snapshot {
-    return { type: 'snapshot', company: this.company, harnesses: this.harnesses, meetingDoor: this.meetingDoor };
+    return { type: 'snapshot', company: this.company, harnesses: this.harnesses, catalogs: this.catalogs, meetingDoor: this.meetingDoor };
   }
 
   shutdown() {
@@ -217,12 +220,16 @@ export class Office {
       }
       case 'meeting_door':
         return this.setMeetingDoor(msg.state);
+      case 'load_models':
+        return this.loadModels(msg.provider);
       case 'set_model':
         return this.setModel(msg.employeeId, msg.model);
       case 'set_permissions':
         return this.setPermissions(msg.employeeId, msg.mode);
       case 'remove_allow_rule':
         return this.removeAllowRule(msg.employeeId, msg.rule);
+      case 'fresh_session':
+        return this.freshSession(msg.employeeId);
       case 'reset_company':
         return this.reset();
       default: {
@@ -503,6 +510,21 @@ export class Office {
     this.changePermissions(e, { alwaysAllow: [...e.permissions.alwaysAllow, rule] }, `Always allow: ${ruleLabel(rule)}`);
   }
 
+  private loadModels(provider: Provider) {
+    const harness = HARNESSES[provider];
+    if (!harness.listModels || this.catalogs[provider].kind === 'loading') return;
+    this.setCatalog(provider, { kind: 'loading' });
+    harness.listModels().then(
+      (catalog) => this.setCatalog(provider, catalog),
+      (err: unknown) => this.setCatalog(provider, { kind: 'error', message: err instanceof Error ? err.message : String(err) }),
+    );
+  }
+
+  private setCatalog(provider: Provider, catalog: ModelCatalog) {
+    this.catalogs[provider] = catalog;
+    this.events.changed();
+  }
+
   private setModel(id: EmployeeId, model: ModelId) {
     const e = this.employee(id);
     e.model = model;
@@ -533,6 +555,19 @@ export class Office {
     if (this.meetingDoor === state) return;
     this.meetingDoor = state;
     this.events.changed();
+  }
+
+  // The old session is stopped with its questions, and the conversation it kept is never resumed: with no sessionId,
+  // the new one has nothing to resume. The employee keeps their notes, model and rules.
+  private freshSession(id: EmployeeId) {
+    const e = this.employee(id);
+    this.stopSession(id);
+    delete e.sessionId;
+    e.status = { kind: 'idle' };
+    e.activity = 'Started a fresh session';
+    this.events.log(id, 'Started a fresh session', Date.now());
+    this.startSession(e);
+    this.commit();
   }
 
   private reset() {
