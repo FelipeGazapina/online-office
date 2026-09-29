@@ -75,8 +75,9 @@ export interface EmployeeSession {
   interject(text: string, style: InterruptStyle): void;
   // The owner picked another model. `host.model` already returns it. Apply it from the next turn, and never interrupt
   // the turn that is running. Claude switches the live session with `Query.setModel`, Codex sends `model` on the next
-  // `turn/start`, and Hermes calls `session/set_model`. None of them validates the id up front, so a model the harness
-  // rejects fails the next turn. Report that like any failed turn, with `setStatus({ kind: 'error' })`.
+  // `turn/start`, and Hermes calls `session/set_model`. Claude refuses an id it does not know at once, and Codex and
+  // Hermes fail the next turn instead. Say so in `log`, and report a failed turn like any other, with
+  // `setStatus({ kind: 'error' })`. The office keeps the id on the employee, and the next session start tries it again.
   setModel(model: ModelId): void;
   // The policy changed: the owner picked another mode, or an Always-allow rule was added or removed. `host.permissions`
   // already returns it. Apply a new `mode` as soon as the harness allows, live if it can and from the next turn or the

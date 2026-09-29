@@ -215,11 +215,12 @@ export class ClaudeSession implements EmployeeSession {
     if (!this.stopped) this.send(text, 'now');
   }
 
-  // A live session switches models for its next turn. Without one, the next start reads `host.model`.
+  // A live session switches models for its next turn. Without one, the next start reads `host.model`. The SDK refuses an
+  // id its bundled Claude Code does not describe, even one that works as a start option, so the owner is told.
   setModel(model: ModelId) {
     this.q?.setModel(model).then(
       () => debug(`model switched to ${model}`),
-      (e: unknown) => debug('setModel failed:', e),
+      (e: unknown) => this.host.log(`Could not switch to ${model}, still on the previous model: ${e instanceof Error ? e.message : String(e)}`),
     );
   }
 

@@ -19,7 +19,10 @@ const run: ClaudeRun = ({ prompt, options }) => {
   return {
     [Symbol.asyncIterator]: () => p.out[Symbol.asyncIterator](),
     interrupt: async () => void p.calls.push('interrupt'),
-    setModel: async (model) => void p.calls.push(`setModel ${model}`),
+    setModel: async (model) => {
+      p.calls.push(`setModel ${model}`);
+      if (model === 'refused') throw new Error("Model 'refused' not found");
+    },
     close: () => void (p.calls.push('close'), p.out.close()),
   };
 };
@@ -94,6 +97,10 @@ await until(() => ana.employee.sessionId === 'sess-1');
 ana.employee.model = 'm2' as ModelId;
 ana.session.setModel('m2' as ModelId);
 check(first.calls.join() === 'setModel m2', 'a live session switches models through the SDK');
+ana.employee.model = 'refused' as ModelId;
+ana.session.setModel('refused' as ModelId);
+check((await until(() => ana.logs.length === 1)) && ana.logs[0] === "Could not switch to refused, still on the previous model: Model 'refused' not found", 'a switch the SDK refuses is told to the owner in the log');
+ana.employee.model = 'm2' as ModelId;
 const idle = scripted('m1');
 idle.employee.model = 'm3' as ModelId;
 idle.session.setModel('m3' as ModelId);
@@ -104,7 +111,7 @@ check(processes.length === 2 && processes[1]!.options.model === 'm3', 'the next 
 console.log('\n# permissions');
 ana.employee.permissions = { mode: 'yolo', alwaysAllow: [] };
 ana.session.permissionsChanged(ana.employee.permissions);
-check(first.calls.join() === 'setModel m2', 'a policy change touches no live process yet');
+check(first.calls.join() === 'setModel m2,setModel refused', 'a policy change touches no live process yet');
 first.out.close();
 await until(() => ana.employee.status.kind === 'error');
 ana.session.assign('again');
