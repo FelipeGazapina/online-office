@@ -31,6 +31,7 @@ function Modal({ title, children }: { title: string; children: ReactNode }) {
 }
 
 const PROVIDER_LIST = Object.keys(PROVIDERS) as Provider[];
+const EMPTY_BLOCKS: NonNullable<ReturnType<typeof useStore.getState>['company']>['blocks'] = [];
 
 function harnessNote(h: HarnessStatus): string {
   switch (h.kind) {
@@ -153,7 +154,7 @@ function HireModal() {
 const basename = (path: string) => path.split(/[\\/]/).filter(Boolean).pop() ?? path;
 
 function BlockModal() {
-  const blocks = useStore((s) => s.company?.blocks ?? []);
+  const blocks = useStore((s) => s.company?.blocks ?? EMPTY_BLOCKS);
   const [cwd, setCwd] = useState<string | null>(null);
   const [name, setName] = useState('');
   const [githubRepo, setGithubRepo] = useState('');

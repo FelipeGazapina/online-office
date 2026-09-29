@@ -13,6 +13,7 @@ export function Drawer() {
   const logs = useStore((s) => (id ? s.logs[id] : undefined));
   const lines = useStore((s) => (id ? s.chat[id] : undefined)) ?? [];
   const nearbyIds = useStore((s) => s.nearbyIds);
+  const company = useStore((s) => s.company);
   const now = useNow(1000);
   const [draft, setDraft] = useState('');
   const [confirm, setConfirm] = useState(false);
@@ -20,10 +21,12 @@ export function Drawer() {
   const input = useRef<HTMLInputElement>(null);
   const threadEnd = useRef<HTMLDivElement>(null);
   const logEnd = useRef<HTMLDivElement>(null);
-  const groupMembers = useStore((s) =>
-    nearbyIds
-      .map((nearbyId) => s.company?.employees.find((employee) => employee.id === nearbyId))
-      .filter((employee): employee is Employee => Boolean(employee)),
+  const groupMembers = useMemo(
+    () =>
+      nearbyIds
+        .map((nearbyId) => company?.employees.find((employee) => employee.id === nearbyId))
+        .filter((employee): employee is Employee => Boolean(employee)),
+    [company, nearbyIds],
   );
 
   useEffect(() => {
