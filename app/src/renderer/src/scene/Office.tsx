@@ -15,8 +15,9 @@ import {
   type Bounds,
   type Layout,
 } from '../layout.ts';
-import { set, useStore } from '../store.ts';
+import { get, set, useStore } from '../store.ts';
 import { toggleMeetingDoor } from '../meeting.ts';
+import { walkTo } from '../sim.ts';
 import { Chair, Desk, Plant, RoundedPlane } from './Furniture.tsx';
 import { fitText, FONT_BODY, FONT_DISPLAY, plankTexture, roundRect, useCanvasTexture } from './textures.ts';
 
@@ -137,7 +138,13 @@ function Floor({ b }: { b: Bounds }) {
         <boxGeometry args={[w + T * 2, 0.6, d + T * 2]} />
         <meshStandardMaterial color="#6d4c37" roughness={1} />
       </mesh>
-      <mesh rotation-x={-Math.PI / 2} receiveShadow>
+      <mesh
+        rotation-x={-Math.PI / 2}
+        receiveShadow
+        onClick={(e) => {
+          if (e.delta < 6 && get().camera === 'iso') walkTo({ kind: 'point', at: { x: e.point.x, z: e.point.z } });
+        }}
+      >
         <planeGeometry args={[w, d]} />
         <meshStandardMaterial map={tex} roughness={0.85} />
       </mesh>

@@ -1,5 +1,5 @@
 import { get, set, setSetting } from './store.ts';
-import { runtime } from './runtime.ts';
+import { KEYS_INTENT, runtime, STEER_KEYS } from './runtime.ts';
 import { setPtt } from './talk.ts';
 import { toggleMeetingDoor } from './meeting.ts';
 
@@ -52,6 +52,8 @@ export function installInput() {
       if (!e.repeat && s.camera === 'iso' && (e.code === 'KeyQ' || e.code === 'KeyE')) {
         runtime.view.isoYawTarget += e.code === 'KeyQ' ? Math.PI / 2 : -Math.PI / 2;
       }
+      // A key wins over a click walk. A tap can end before the next frame, so the sim alone would not see it.
+      if (STEER_KEYS.includes(e.code)) runtime.owner.intent = KEYS_INTENT;
       runtime.keys.add(e.code);
     }
   });
