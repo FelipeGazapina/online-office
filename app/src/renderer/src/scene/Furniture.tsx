@@ -35,7 +35,7 @@ function Screen({ kind, color }: { kind: ScreenKind; color: string }) {
       m.emissive.set('#ffb340');
       m.emissiveIntensity = 1.1 + Math.sin(t * 6) * 0.9;
     }
-  }, 1);
+  });
   return (
     <mesh position={[0, 0, 0.022]}>
       <planeGeometry args={[0.64, 0.36]} />
