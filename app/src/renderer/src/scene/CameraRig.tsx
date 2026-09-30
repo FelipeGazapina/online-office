@@ -1,7 +1,7 @@
 import { useFrame, useThree } from '@react-three/fiber';
 import { useEffect, useRef } from 'react';
 import { Vector3, type PerspectiveCamera } from 'three';
-import { angleDiff } from '../layout.ts';
+import { angleDiff, getLayout } from '../layout.ts';
 import { runtime } from '../runtime.ts';
 import { get, useStore } from '../store.ts';
 import { stepSim } from '../sim.ts';
@@ -22,6 +22,7 @@ export function SimDriver() {
 export function CameraRig() {
   const { gl } = useThree();
   const mode = useStore((s) => s.camera);
+  const company = useStore((s) => s.company);
   const uiOpen = useStore((s) => Boolean(s.modal || s.menu || s.helpOpen || s.cardMinimized || s.computerMenu || s.portalMode || s.selectedId));
   const focus = useRef(new Vector3());
   const snap = useRef(true);
@@ -172,7 +173,9 @@ export function CameraRig() {
       look.x += fx * 1.6;
       look.z += fz * 1.6;
     } else if (mode === 'iso') {
-      focus.current.lerp(desired.set(owner.pos.x, 0.6, owner.pos.z), ease(dt, snap.current ? 100 : 1.5));
+      // The overview is a map camera: keep the whole company legible while the owner moves through it.
+      const b = getLayout(company?.blocks ?? []).bounds;
+      focus.current.lerp(desired.set((b.x0 + b.x1) / 2, 0.6, (b.z0 + b.z1) / 2), ease(dt, snap.current ? 100 : 1.5));
       const c = Math.cos(ISO_PITCH);
       look.copy(focus.current);
       desired.set(look.x - fx * c * view.isoDist, look.y + Math.sin(ISO_PITCH) * view.isoDist, look.z - fz * c * view.isoDist);
