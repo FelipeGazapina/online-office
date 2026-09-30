@@ -2,7 +2,17 @@ import { mkdtempSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { linearToolArguments, normalizeTaskPayload, parseLinearSelector, TaskBoardService } from '../src/main/office/task-board.ts';
-import type { TaskBoardSource } from '../src/shared/protocol.ts';
+import { taskBoardColumns, type TaskBoardSource, type TaskCard } from '../src/shared/protocol.ts';
+
+const cards: TaskCard[] = [
+  { id: 'linear:1', provider: 'linear', identifier: 'BLOOM-1', title: 'Review', status: 'In Review', sourceLabel: 'Linear' },
+  { id: 'linear:2', provider: 'linear', identifier: 'BLOOM-2', title: 'New', status: 'Todo', sourceLabel: 'Linear' },
+  { id: 'linear:3', provider: 'linear', identifier: 'BLOOM-3', title: 'Unknown', status: 'Waiting on vendor', sourceLabel: 'Linear' },
+];
+const projected = taskBoardColumns(cards);
+if (projected.map((column) => column.label).join('|') !== 'Open|Ready to Review|Waiting on vendor') throw new Error(`task board columns lost the Linear order or unknown state: ${JSON.stringify(projected.map((column) => column.label))}`);
+if (projected.find((column) => column.label === 'Ready to Review')?.cards[0]?.id !== 'linear:1') throw new Error('review alias did not project to Ready to Review');
+console.log('ok: task cards project into stable Linear-style columns and retain unknown states');
 
 const source: TaskBoardSource = { provider: 'cronospark', projectId: 'project-1' };
 const result = normalizeTaskPayload('cronospark', {

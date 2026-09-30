@@ -7,6 +7,7 @@ import {
   type HarnessStatus,
   type ModelId,
   type Provider,
+  taskBoardColumns,
 } from '../../../shared/protocol.ts';
 import { useDiagram } from '../scene/whiteboard.ts';
 import { send, set, useStore } from '../store.ts';
@@ -389,6 +390,7 @@ function TaskBoardModal({ blockId }: { blockId: BlockId }) {
   const modal = useStore((s) => s.modal);
   const employees = company?.employees.filter((employee) => employee.blockId === blockId && employee.status.kind === 'idle') ?? [];
   const selected = board?.cards.find((card) => card.id === (modal?.kind === 'task_board' ? modal.taskId : undefined));
+  const columns = taskBoardColumns(board?.cards ?? []);
   const hasLinearSource = block?.taskBoard?.sources.some((source) => source.provider === 'linear') ?? false;
   const providerSummary = [...new Set((block?.taskBoard?.sources ?? []).map((source) => source.provider === 'linear' ? 'Linear' : 'CronoSpark'))].join(' and ') || 'configured sources';
   const refresh = () => send({ type: 'refresh_task_board', blockId });
@@ -399,7 +401,67 @@ function TaskBoardModal({ blockId }: { blockId: BlockId }) {
       : board
         ? <p className="muted">No tickets matched this board source.</p>
         : <p className="muted">This board has not loaded yet. Configure a source in the PO computer, then refresh.</p>;
-  return <div className="scrim" onMouseDown={close}><div className="modal wide task-board-modal" onMouseDown={(event) => event.stopPropagation()} onKeyDown={(event) => event.key === 'Escape' && close()}><div className="wb-head"><div><h2>{block?.name ?? 'Task board'}</h2><p className="muted">{board?.kind === 'error' ? board.message : board?.kind === 'loading' ? 'Refreshing tickets…' : `${board?.cards.length ?? 0} cards from ${providerSummary}`}</p></div><button className="btn ink" onClick={close}>Close</button></div><div className="task-board-modal-grid"><div className="task-card-list">{(board?.cards ?? []).map((card) => <button key={card.id} className={`task-card ${selected?.id === card.id ? 'selected' : ''}`} onClick={() => set({ modal: { kind: 'task_board', blockId, taskId: card.id } })}><span className={`task-provider ${card.provider}`}>{card.provider === 'linear' ? 'LIN' : 'CS'}</span><span><b>{card.identifier}</b><strong>{card.title}</strong><small>{card.status} · {card.sourceLabel}</small></span></button>)}{!(board?.cards.length ?? 0) && emptyState}</div><div className="task-card-detail">{selected ? <><span className={`task-provider ${selected.provider}`}>{selected.sourceLabel}</span><h3>{selected.identifier}</h3><h4>{selected.title}</h4><p className="muted">{selected.status}{selected.priority ? ` · ${selected.priority}` : ''}</p>{selected.url && <a href={selected.url} target="_blank" rel="noreferrer">Open in {selected.sourceLabel}</a>}<h4>Assign to an AI employee</h4>{employees.length ? employees.map((employee) => <button className="btn primary task-assign" key={employee.id} onClick={() => { send({ type: 'assign_task', blockId, taskId: selected.id, employeeId: employee.id }); close(); }}>{employee.name}</button>) : <p className="muted">Every AI employee in this block is busy. Wait for one to become idle.</p>}</> : <p className="muted">Select a ticket to see its details and assign it to an idle AI employee.</p>}</div></div></div></div>;
+  return (
+    <div className="scrim" onMouseDown={close}>
+      <div className="modal wide task-board-modal" onMouseDown={(event) => event.stopPropagation()} onKeyDown={(event) => event.key === 'Escape' && close()}>
+        <div className="task-board-header">
+          <div>
+            <p className="task-board-eyebrow">{providerSummary}</p>
+            <h2>{block?.name ?? 'Task board'}</h2>
+            <p className="muted">{board?.kind === 'error' ? board.message : board?.kind === 'loading' ? 'Refreshing tickets…' : `${board?.cards.length ?? 0} issues synced from your workspace`}</p>
+          </div>
+          <div className="task-board-header-actions">
+            <button className="task-board-filter active" type="button">All issues</button>
+            <button className="task-board-filter" type="button" onClick={refresh}>Refresh</button>
+            <button className="btn ink" onClick={close}>Close</button>
+          </div>
+        </div>
+        <div className="task-board-toolbar" aria-label="Task board filters">
+          <span className="task-board-filter-label">Board view</span>
+          <span className="task-board-filter-chip">{board?.cards.length ?? 0} issues</span>
+          <span className="task-board-filter-chip">{employees.length} idle employees</span>
+          {board?.kind === 'loading' && <span className="task-board-syncing">Syncing…</span>}
+        </div>
+        <div className="task-board-kanban-shell">
+          <div className="task-board-kanban" data-testid="task-board-kanban">
+            {columns.map((column) => (
+              <section className="task-board-column" key={column.id} data-column-id={column.id}>
+                <div className="task-board-column-head"><h3>{column.label}</h3><span>{column.cards.length}</span></div>
+                <div className="task-board-column-cards">
+                  {column.cards.map((card) => (
+                    <button
+                      key={card.id}
+                      type="button"
+                      className={`task-card ${selected?.id === card.id ? 'selected' : ''}`}
+                      data-task-id={card.id}
+                      aria-pressed={selected?.id === card.id}
+                      onClick={() => set({ modal: { kind: 'task_board', blockId, taskId: card.id } })}
+                    >
+                      <span className={`task-provider ${card.provider}`}>{card.provider === 'linear' ? 'LIN' : 'CS'}</span>
+                      <span className="task-card-copy"><b>{card.identifier}</b><strong>{card.title}</strong><small>{card.priority ? `${card.priority} · ` : ''}{card.sourceLabel}</small></span>
+                    </button>
+                  ))}
+                  {!column.cards.length && <p className="task-board-column-empty">No issues</p>}
+                </div>
+              </section>
+            ))}
+            {!(board?.cards.length ?? 0) && <div className="task-board-empty">{emptyState}</div>}
+          </div>
+          <aside className="task-card-detail" aria-live="polite" data-testid="task-card-details">
+            {selected ? <>
+              <div className="task-detail-topline"><span className={`task-provider ${selected.provider}`}>{selected.sourceLabel}</span><span className="task-detail-status">{selected.status}</span></div>
+              <h3>{selected.identifier}</h3>
+              <h4>{selected.title}</h4>
+              <p className="muted">{selected.priority ? `Priority ${selected.priority}` : 'No priority set'}</p>
+              {selected.url && <a href={selected.url} target="_blank" rel="noreferrer">Open in {selected.sourceLabel}</a>}
+              <h4>Assign to an AI employee</h4>
+              {employees.length ? employees.map((employee) => <button className="btn primary task-assign" key={employee.id} onClick={() => { send({ type: 'assign_task', blockId, taskId: selected.id, employeeId: employee.id }); close(); }}>{employee.name}</button>) : <p className="muted">Every AI employee in this block is busy. Wait for one to become idle.</p>}
+            </> : <p className="muted">Select an issue to see its details and assign it to an idle AI employee.</p>}
+          </aside>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 function LinearBoardModal({ blockId }: { blockId: BlockId }) {
