@@ -59,9 +59,9 @@ else {
 
   void app.whenReady().then(async () => {
     if (testRun) app.dock?.hide();
-    // Voice input needs the microphone and the arrival alert needs OS notifications. Nothing else.
+    // Voice input needs the microphone, the arrival alert needs OS notifications, and FPS camera mode needs pointer lock.
     const allowed = (wc: WebContents | null, permission: string) =>
-      wc === win?.webContents && (permission === 'media' || permission === 'notifications');
+      wc === win?.webContents && (permission === 'media' || permission === 'notifications' || permission === 'pointerLock');
     session.defaultSession.setPermissionCheckHandler((wc, permission) => allowed(wc, permission));
     session.defaultSession.setPermissionRequestHandler((wc, permission, callback) => callback(allowed(wc, permission)));
 
