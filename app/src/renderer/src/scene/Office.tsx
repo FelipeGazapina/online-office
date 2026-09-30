@@ -167,9 +167,9 @@ function GhostSlot({ slot }: { slot: number }) {
     g.textAlign = 'center';
     g.textBaseline = 'middle';
     g.font = `700 48px ${FONT_DISPLAY}`;
-    g.fillText('Free block slot', 256, 140);
+    g.fillText('EXPAND', 256, 140);
     g.font = `500 30px ${FONT_BODY}`;
-    g.fillText('Click to add a project block', 256, 196);
+    g.fillText('Click to add a project', 256, 196);
   }, []);
   return (
     <mesh
@@ -186,6 +186,73 @@ function GhostSlot({ slot }: { slot: number }) {
       <meshBasicMaterial map={tex} transparent depthWrite={false} />
     </mesh>
   );
+}
+
+function FacilitySign({ text, sub = '', color = '#344256', width = 4.4 }: { text: string; sub?: string; color?: string; width?: number }) {
+  const tex = useCanvasTexture(900, 220, (g) => {
+    g.fillStyle = color; roundRect(g, 0, 0, 900, 220, 28); g.fill();
+    g.fillStyle = '#fffdf7'; g.textAlign = 'center'; g.textBaseline = 'middle';
+    g.font = `800 ${text.length > 12 ? 54 : 66}px ${FONT_DISPLAY}`; g.fillText(text, 450, sub ? 82 : 110);
+    if (sub) { g.font = `500 28px ${FONT_BODY}`; g.fillStyle = 'rgba(255,255,255,0.68)'; g.fillText(sub, 450, 156); }
+  }, [text, sub, color]);
+  return <mesh position={[0, 1.85, 0]}><planeGeometry args={[width, 1.05]} /><meshBasicMaterial map={tex} transparent /></mesh>;
+}
+
+function SharedMeetingRoom({ x, z }: { x: number; z: number }) {
+  return <group position={[x, 0, z]}>
+    <RoundedPlane w={8.2} d={3.2} r={0.35} color="#cbd7e0" y={0.018} />
+    <RoundedPlane w={7.7} d={2.7} r={0.25} color="#edf0f1" y={0.025} />
+    <mesh position={[0, 0.55, 0]} castShadow><boxGeometry args={[4.6, 0.12, 1.35]} /><meshStandardMaterial color="#d8b47d" roughness={0.82} /></mesh>
+    {[-1.6, -0.55, 0.55, 1.6].flatMap((x0) => [<Chair key={`${x0}-n`} position={[x0, 0, -1.0]} color="#5c7892" />, <Chair key={`${x0}-s`} position={[x0, 0, 1.0]} color="#5c7892" rotationY={Math.PI} />])}
+    <mesh position={[0, 1.55, -1.36]}><boxGeometry args={[5.8, 1.55, 0.08]} /><meshStandardMaterial color="#aeb9c2" roughness={0.8} /></mesh>
+    <FacilitySign text="MEETING ROOM" sub="shared space" width={5.1} />
+  </group>;
+}
+
+function Reception({ x, z }: { x: number; z: number }) {
+  return <group position={[x, 0, z]}>
+    <RoundedPlane w={6.3} d={1.8} r={0.3} color="#e7ddd0" y={0.018} />
+    <mesh castShadow position={[0, 0.62, 0]}><boxGeometry args={[4.2, 1.05, 0.6]} /><meshStandardMaterial color="#b8865e" roughness={0.8} /></mesh>
+    <FacilitySign text="RECEPTION" sub="welcome" color="#52687a" width={4.2} />
+  </group>;
+}
+
+function Kitchen({ x, z }: { x: number; z: number }) {
+  return <group position={[x, 0, z]}>
+    <RoundedPlane w={6.2} d={2.1} r={0.3} color="#e5ded3" y={0.018} />
+    <mesh castShadow position={[0, 0.64, 0]}><boxGeometry args={[4.5, 1.05, 0.65]} /><meshStandardMaterial color="#b6a487" roughness={0.82} /></mesh>
+    {[-1.4, 0, 1.4].map((x0) => <Chair key={x0} position={[x0, 0, 0.75]} color="#78909d" />)}
+    <FacilitySign text="KITCHEN" sub="coffee + snacks" color="#7d8d78" width={3.8} />
+  </group>;
+}
+
+function Lounge({ x, z }: { x: number; z: number }) {
+  return <group position={[x, 0, z]}>
+    <RoundedPlane w={6.2} d={2.5} r={0.35} color="#dce2de" y={0.018} />
+    <mesh castShadow position={[-1.5, 0.52, 0]}><boxGeometry args={[2.5, 0.68, 0.85]} /><meshStandardMaterial color="#7c9c92" roughness={0.9} /></mesh>
+    <mesh castShadow position={[1.25, 0.32, 0]}><cylinderGeometry args={[0.6, 0.6, 0.08, 16]} /><meshStandardMaterial color="#c59e73" roughness={0.8} /></mesh>
+    <FacilitySign text="LOUNGE" sub="breakout" color="#6b8d86" width={3.5} />
+  </group>;
+}
+
+function BossBadge() {
+  const r = MEETING_ROOM;
+  return <group position={[(r.x0 + r.x1) / 2, 0, r.z1 + 0.12]}>
+    <RoundedPlane w={r.x1 - r.x0 - 0.5} d={r.z1 - r.z0 - 0.5} r={0.35} color="#d9d5cc" y={0.02} opacity={0.22} />
+    <FacilitySign text="BOSS" sub="leadership suite" color="#4f5e75" width={3.6} />
+  </group>;
+}
+
+function SharedFacilities({ b }: { b: Bounds }) {
+  const cx = (b.x0 + b.x1) / 2;
+  const right = b.x1 - 4;
+  return <>
+    <SharedMeetingRoom x={cx} z={-0.45} />
+    <Reception x={cx} z={b.z1 - 1.25} />
+    <Kitchen x={right} z={b.z1 - 4.15} />
+    <Lounge x={right} z={b.z1 - 1.75} />
+    <BossBadge />
+  </>;
 }
 
 function CompanySign({ name, b }: { name: string; b: Bounds }) {
@@ -313,6 +380,7 @@ export function Office({ company }: { company: Company | null }) {
       <Floor b={b} />
       <Walls b={b} />
       <CompanySign name={company?.name ?? 'Online Office'} b={b} />
+      <SharedFacilities b={b} />
       <MeetingRoom />
       <OwnerCorner />
       <group position={[DOOR.x, 0, DOOR.z - 1.1]}>
