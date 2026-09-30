@@ -1614,6 +1614,11 @@ h3 {
 .connection-dot { width: 8px; height: 8px; border-radius: 50%; background: #999; }
 .connection-dot.ready { background: #1f9d67; }
 .connection-dot.error { background: #cb4c4c; }
+.task-credentials { display: grid; grid-template-columns: minmax(210px, 1.2fr) minmax(180px, 1fr) minmax(180px, 1fr) auto; gap: 10px; align-items: end; margin: 0 0 16px; padding: 12px; border: 1px solid rgba(48,50,71,.14); border-radius: 10px; background: rgba(255,255,255,.7); }
+.task-credentials > div { align-self: center; }
+.task-credentials p { margin: 4px 0 0; font-size: 12px; }
+.task-credentials label { display: grid; gap: 4px; font-size: 11px; font-weight: 700; color: #6f7184; }
+.task-credentials input { min-width: 0; padding: 8px 10px; border: 1px solid rgba(48,50,71,.18); border-radius: 8px; background: #fff; color: inherit; font: inherit; font-weight: 400; }
 .task-source-list { display: grid; gap: 8px; }
 .task-source-row { display: grid; grid-template-columns: 125px 1fr 1fr auto; gap: 8px; align-items: center; }
 .task-source-row input, .task-source-row select, .task-config-head select { min-width: 0; padding: 8px 10px; border: 1px solid rgba(48,50,71,.18); border-radius: 8px; background: #fff; color: inherit; }
@@ -1634,7 +1639,8 @@ h3 {
 .task-card-detail h3 { margin: 16px 0 4px; }
 .task-card-detail h4 { margin: 14px 0 6px; }
 .task-assign { display: block; width: 100%; margin-top: 7px; }
-@media (max-width: 760px) { .task-board-modal-grid { grid-template-columns: 1fr; } .task-source-row { grid-template-columns: 1fr 1fr; } .task-source-row .link { grid-column: 2; } }
+@media (max-width: 900px) { .task-credentials { grid-template-columns: 1fr 1fr; } .task-credentials > div { grid-column: 1 / -1; } }
+@media (max-width: 760px) { .task-board-modal-grid { grid-template-columns: 1fr; } .task-source-row { grid-template-columns: 1fr 1fr; } .task-source-row .link { grid-column: 2; } .task-credentials { grid-template-columns: 1fr; } .task-credentials > div { grid-column: auto; } }
 
 /* A portal window is a click-through, always-on-top mirror of the real desktop. The main process
    removes this window from capture and sends the pointer and keyboard events to macOS underneath it. */

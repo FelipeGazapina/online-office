@@ -55,6 +55,8 @@ When you sit at the owner's desk and press **F**, Online Office becomes a live, 
 
 Click an employee, on the avatar or the name tag, for a menu with **Open chat** and **Go to**. In the Overview camera, click the floor to walk there and drag to turn the view. Click a whiteboard to enlarge it. Click **Reveal** on a block to open its folder in Finder.
 
+The project computer's **Task boards** app has a CronoSpark credentials section. Enter `CRONOSPARK_MCP_API_KEY` as the API key and `CRONOSPARK_MCP_USER_ID` as the MCP user ID, then click **Save CronoSpark**. The key is kept in the app's private credentials file (encrypted with the macOS keychain when available), never in `company.json` or renderer storage. A key already supplied in the app's environment can be kept by leaving the API key field blank.
+
 ## How it works
 
 - `src/shared/protocol.ts` is the contract. The main process owns logical state. The renderer derives every avatar from it: `blocked_on_owner` walks to the owner, anything else walks back to the desk.

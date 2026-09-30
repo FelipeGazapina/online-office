@@ -256,6 +256,10 @@ export class Office {
         this.services.taskBoards.connect(msg.provider);
         this.events.changed();
         return;
+      case 'configure_task_provider':
+        this.services.taskBoards.configureCronoSpark(msg.apiKey, msg.userId);
+        this.events.changed();
+        return;
       case 'assign_task':
         return this.assignTask(msg.blockId, msg.taskId, msg.employeeId);
       case 'assign':
