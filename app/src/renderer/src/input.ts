@@ -2,7 +2,7 @@ import { get, set, setSetting } from './store.ts';
 import { KEYS_INTENT, runtime, STEER_KEYS } from './runtime.ts';
 import { setPtt } from './talk.ts';
 import { toggleMeetingDoor } from './meeting.ts';
-import { enterComputer, leaveComputer } from './computer.ts';
+import { enterComputer, enterProjectComputer, leaveComputer } from './computer.ts';
 
 const isTyping = (t: EventTarget | null) =>
   t instanceof HTMLElement && (t.isContentEditable || t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT');
@@ -27,6 +27,7 @@ export function installInput() {
 
     if (!e.repeat && e.code === 'KeyF') {
       if (s.computerState === 'seated') leaveComputer();
+      else if (s.nearProjectComputer) enterProjectComputer(s.nearProjectComputer);
       else if (s.nearComputer) enterComputer();
       else if (s.camera === 'first') {
         e.preventDefault();

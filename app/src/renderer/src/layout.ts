@@ -84,6 +84,11 @@ export function headPose(slot: number): DeskPose {
   return poseOf(slot, HEAD);
 }
 
+// The PO workstation is the block's project computer. It is reserved for board configuration.
+export function projectComputerPose(slot: number): DeskPose {
+  return headPose(slot);
+}
+
 // A desk is wide across the person's line of sight, so one that faces east or west is turned on the floor plan.
 function deskBox(pose: DeskPose): Box {
   const sideways = Math.abs(Math.sin(pose.yaw)) > 0.5;

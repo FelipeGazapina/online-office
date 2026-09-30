@@ -11,6 +11,8 @@ import {
   type Provider,
   type QuestionId,
   type ServerMessage,
+  type TaskBoardConfig,
+  type TaskProvider,
 } from '../shared/protocol.ts';
 import { Office, OfficeError, type OfficeServices } from './office/company.ts';
 
@@ -27,6 +29,10 @@ const allowRule = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('exact'), command: z.string().min(1) }),
   z.object({ kind: z.literal('tool'), name: z.string().min(1) }),
 ]);
+const taskProvider = z.enum(['linear', 'cronospark']) satisfies z.ZodType<TaskProvider>;
+const taskBoardConfig = z.object({
+  sources: z.array(z.object({ provider: taskProvider, projectId: z.string().min(1).max(200), label: z.string().max(120).optional() })).max(8),
+}) satisfies z.ZodType<TaskBoardConfig>;
 
 const clientMessage = z.discriminatedUnion('type', [
   z.object({ type: z.literal('hire'), provider, blockId, name: z.string().optional(), model: modelId.optional(), role: z.enum(['employee', 'orchestrator']).optional(), bypassLimit: z.boolean().optional() }),
@@ -39,6 +45,10 @@ const clientMessage = z.discriminatedUnion('type', [
     cwd: z.string().min(1).optional(),
     githubRepo: z.string().url().optional(),
   }),
+  z.object({ type: z.literal('configure_task_board'), blockId, config: taskBoardConfig }),
+  z.object({ type: z.literal('refresh_task_board'), blockId }),
+  z.object({ type: z.literal('connect_task_provider'), provider: taskProvider }),
+  z.object({ type: z.literal('assign_task'), blockId, taskId: z.string().min(1).max(400), employeeId }),
   z.object({ type: z.literal('assign'), employeeId, task: z.string().min(1) }),
   z.object({ type: z.literal('answer'), employeeId, questionId, text: z.string(), always: z.boolean().optional() }),
   z.object({ type: z.literal('interject'), employeeId, text: z.string().min(1), style: z.enum(['next', 'now']) }),
