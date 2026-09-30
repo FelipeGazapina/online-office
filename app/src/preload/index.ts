@@ -17,6 +17,12 @@ const office: OfficeApi = {
     leave: () => ipcRenderer.send(IPC.portalLeave),
     openHome: () => ipcRenderer.send(IPC.portalOpenHome),
     openTerminal: () => ipcRenderer.send(IPC.portalOpenTerminal),
+    openSlack: () => ipcRenderer.send(IPC.portalOpenSlack),
+    onExit(cb) {
+      const listener = () => cb();
+      ipcRenderer.on(IPC.portalExit, listener);
+      return () => void ipcRenderer.removeListener(IPC.portalExit, listener);
+    },
   },
   update: {
     check: () => ipcRenderer.send(IPC.updateCheck),

@@ -1,4 +1,4 @@
-import { app, dialog, ipcMain, shell, type BrowserWindow, type IpcMainEvent, type IpcMainInvokeEvent } from 'electron';
+import { app, dialog, globalShortcut, ipcMain, shell, type BrowserWindow, type IpcMainEvent, type IpcMainInvokeEvent } from 'electron';
 import { z } from 'zod';
 import {
   IPC,
@@ -137,23 +137,72 @@ export function startOffice({ dataFile, harnesses, window, services }: Options) 
   });
 
   let normalBounds: Electron.Rectangle | null = null;
-  ipcMain.on(IPC.portalEnter, (e) => {
-    if (!trusted(e)) return;
+  let portalWasMaximized = false;
+  let portalWasFullScreen = false;
+  let portalFullScreenGuard: (() => void) | null = null;
+  let portalActive = false;
+  // A bare F remains available to the renderer while the portal is focused. Once a native app
+  // takes focus, this modifier shortcut returns to the office without stealing the letter F from text input.
+  const portalShortcuts = ['CommandOrControl+Shift+O'];
+  const unregisterPortalShortcuts = () => portalShortcuts.forEach((accelerator) => globalShortcut.unregister(accelerator));
+  const restorePortal = (notify: boolean) => {
+    unregisterPortalShortcuts();
+    portalActive = false;
     const win = window();
     if (!win || win.isDestroyed()) return;
-    normalBounds ??= win.getBounds();
-    win.setAlwaysOnTop(true, 'floating');
-    // Keep the office window size: the desktop contains full management apps.
-  });
-  ipcMain.on(IPC.portalLeave, (e) => {
-    if (!trusted(e)) return;
-    const win = window();
-    if (!win || win.isDestroyed()) return;
+    if (portalFullScreenGuard) {
+      win.removeListener('enter-full-screen', portalFullScreenGuard);
+      portalFullScreenGuard = null;
+    }
+    win.setIgnoreMouseEvents(false);
+    win.setFocusable(true);
+    win.setContentProtection(false);
     win.setAlwaysOnTop(false);
+    if (win.isMaximized() && !portalWasMaximized) win.unmaximize();
     if (normalBounds) {
       win.setBounds(normalBounds, true);
       normalBounds = null;
     }
+    if (portalWasMaximized && !win.isMaximized()) win.maximize();
+    if (portalWasFullScreen) win.setFullScreen(true);
+    portalWasMaximized = false;
+    portalWasFullScreen = false;
+    if (notify) win.webContents.send(IPC.portalExit);
+  };
+  ipcMain.on(IPC.portalEnter, (e) => {
+    if (!trusted(e)) return;
+    const win = window();
+    if (!win || win.isDestroyed()) return;
+    if (portalActive) return;
+    portalWasFullScreen = win.isFullScreen();
+    portalWasMaximized = !portalWasFullScreen && win.isMaximized();
+    if (portalWasFullScreen) win.setFullScreen(false);
+    if (!portalWasFullScreen && !portalWasMaximized) normalBounds ??= win.getBounds();
+    portalActive = true;
+    portalFullScreenGuard = () => {
+      if (portalActive && win.isFullScreen()) {
+        win.setFullScreen(false);
+        win.maximize();
+      }
+    };
+    win.on('enter-full-screen', portalFullScreenGuard);
+    win.setAlwaysOnTop(true, 'floating');
+    // A native fullscreen window lives in its own Space. Leave that Space while the portal is
+    // active, then fill the owner's current Space by maximizing in place.
+    if (!portalWasMaximized) win.maximize();
+    // Hide this layer from the screen capture to avoid a hall-of-mirrors effect. The real desktop
+    // underneath remains visible in the video and receives the user's mouse and keyboard events.
+    win.setContentProtection(true);
+    if (!process.env.OFFICE_TEST_RUN) {
+      win.setIgnoreMouseEvents(true, { forward: true });
+      // The mirror is click-through by design. The modifier shortcut remains available after a
+      // native app takes focus without consuming ordinary text input.
+      for (const accelerator of portalShortcuts) globalShortcut.register(accelerator, () => restorePortal(true));
+    }
+  });
+  ipcMain.on(IPC.portalLeave, (e) => {
+    if (!trusted(e)) return;
+    restorePortal(false);
   });
   ipcMain.on(IPC.portalOpenHome, (e) => {
     if (trusted(e)) void shell.openPath(app.getPath('home'));
@@ -161,6 +210,14 @@ export function startOffice({ dataFile, harnesses, window, services }: Options) 
   ipcMain.on(IPC.portalOpenTerminal, (e) => {
     if (trusted(e)) void shell.openPath('/System/Applications/Utilities/Terminal.app');
   });
+  ipcMain.on(IPC.portalOpenSlack, (e) => {
+    if (!trusted(e)) return;
+    if (process.platform === 'darwin') {
+      void shell.openPath('/Applications/Slack.app');
+    } else {
+      void shell.openExternal('slack://open');
+    }
+  });
 
-  return { shutdown: () => office.shutdown() };
+  return { shutdown: () => { unregisterPortalShortcuts(); office.shutdown(); } };
 }

@@ -51,6 +51,8 @@ To prove the whole path on this machine, run `pnpm build` and then `node verify/
 | V (hold) | Push-to-talk, in either mic mode. Releasing sends what you said, and pressing it stops an employee who is talking |
 | H | Key help |
 
+When you sit at the owner's desk and press **F**, Online Office becomes a live, click-through mirror of the Mac desktop. Safari, Slack, Finder, Terminal, and every other native app stay real: mouse clicks and keyboard input reach the Mac underneath the mirror. If the office is in native macOS fullscreen, the portal temporarily leaves that separate Space, fills the current desktop by maximizing in place, and restores fullscreen when you stand up. Press **F** again (or **⌘⇧O** after a native app takes focus) to return to the office. macOS may ask for Screen Recording access the first time.
+
 Click an employee, on the avatar or the name tag, for a menu with **Open chat** and **Go to**. In the Overview camera, click the floor to walk there and drag to turn the view. Click a whiteboard to enlarge it. Click **Reveal** on a block to open its folder in Finder.
 
 ## How it works

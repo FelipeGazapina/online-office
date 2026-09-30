@@ -1635,3 +1635,20 @@ h3 {
 .task-card-detail h4 { margin: 14px 0 6px; }
 .task-assign { display: block; width: 100%; margin-top: 7px; }
 @media (max-width: 760px) { .task-board-modal-grid { grid-template-columns: 1fr; } .task-source-row { grid-template-columns: 1fr 1fr; } .task-source-row .link { grid-column: 2; } }
+
+/* A portal window is a click-through, always-on-top mirror of the real desktop. The main process
+   removes this window from capture and sends the pointer and keyboard events to macOS underneath it. */
+.mac-mirror-portal { overflow: hidden; color: #fff; background: #111722; }
+.mac-mirror-video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; background: #111722; }
+.mac-mirror-shade { position: absolute; inset: 0; pointer-events: none; background: linear-gradient(180deg, rgba(15,23,42,.55), transparent 16%, transparent 80%, rgba(15,23,42,.5)); }
+.mac-mirror-bar { position: absolute; z-index: 2; top: 0; right: 0; left: 0; display: flex; align-items: center; gap: 13px; height: 48px; padding: 0 15px; color: #fff; background: rgba(17,24,40,.72); border-bottom: 1px solid rgba(255,255,255,.16); backdrop-filter: blur(12px); }
+.mac-mirror-app { color: rgba(255,255,255,.72); font-size: 12px; font-weight: 700; }
+.mac-mirror-state { display: flex; align-items: center; gap: 7px; margin-left: auto; color: #b5f5d0; font-size: 11px; }
+.mac-mirror-state i, .mirror-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: #68e29e; box-shadow: 0 0 0 4px rgba(104,226,158,.14); }
+.mac-mirror-state.starting { color: #ffe1a0; }.mac-mirror-state.starting i { background: #f3b448; box-shadow: 0 0 0 4px rgba(243,180,72,.14); }.mac-mirror-state.blocked { color: #ffc1c1; }.mac-mirror-state.blocked i { background: #ee7077; box-shadow: 0 0 0 4px rgba(238,112,119,.14); }
+.mac-mirror-shortcut { display: flex; align-items: center; gap: 5px; color: rgba(255,255,255,.65); font-size: 10px; }
+.mac-mirror-shortcut kbd { border-color: rgba(255,255,255,.28); color: #fff; background: rgba(255,255,255,.14); }
+.mac-mirror-blocked { position: absolute; z-index: 3; top: 50%; left: 50%; display: grid; gap: 9px; width: min(490px, calc(100% - 60px)); padding: 25px 28px; transform: translate(-50%, -50%); border: 1px solid rgba(255,255,255,.24); border-radius: 18px; color: #fff; background: rgba(20,27,45,.88); box-shadow: 0 16px 45px rgba(0,0,0,.32); backdrop-filter: blur(17px); text-align: center; }
+.mac-mirror-blocked b { font-size: 17px; }.mac-mirror-blocked span { color: rgba(255,255,255,.72); font-size: 12px; }
+.mac-mirror-footer { position: absolute; z-index: 2; right: 15px; bottom: 12px; left: 15px; display: flex; justify-content: space-between; gap: 15px; color: rgba(255,255,255,.62); font-size: 10px; text-shadow: 0 1px 4px rgba(0,0,0,.5); }.mac-mirror-footer span { display: flex; align-items: center; gap: 6px; }
+@media (max-width: 650px) { .mac-mirror-shortcut { display: none; }.mac-mirror-footer { display: none; }.mac-mirror-state { margin-left: auto; }.mac-mirror-app { display: none; } }

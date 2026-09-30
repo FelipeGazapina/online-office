@@ -1,5 +1,5 @@
 import { join } from 'node:path';
-import { app, BrowserWindow, session, shell, type WebContents } from 'electron';
+import { app, BrowserWindow, desktopCapturer, screen, session, shell, type WebContents } from 'electron';
 import { startOffice } from './ipc.ts';
 import { detectHarnesses, setCodexRoot } from './office/adapters/index.ts';
 import { startOfficeMcp } from './office/mcp.ts';
@@ -65,6 +65,15 @@ else {
       wc === win?.webContents && (permission === 'media' || permission === 'notifications' || permission === 'pointerLock');
     session.defaultSession.setPermissionCheckHandler((wc, permission) => allowed(wc, permission));
     session.defaultSession.setPermissionRequestHandler((wc, permission, callback) => callback(allowed(wc, permission)));
+    // The portal is a transparent remote-control layer over the real desktop. The user still sees and
+    // interacts with the actual macOS session; Electron only supplies the video surface and office HUD.
+    session.defaultSession.setDisplayMediaRequestHandler((_request, callback) => {
+      void desktopCapturer.getSources({ types: ['screen'], thumbnailSize: { width: 1, height: 1 } }).then((sources) => {
+        const current = win && !win.isDestroyed() ? screen.getDisplayMatching(win.getBounds()) : undefined;
+        const source = sources.find((candidate) => current && candidate.display_id === String(current.id)) ?? sources[0];
+        callback(source ? { video: source } : {});
+      }).catch(() => callback({}));
+    });
 
     // The MCP server has to be listening before the first session is built, and memory lives beside company.json.
     const userData = app.getPath('userData');
