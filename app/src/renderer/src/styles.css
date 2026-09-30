@@ -1669,16 +1669,26 @@ h3 {
 .attach-image input { display: none; }
 .chat-image { display: block; max-width: min(280px, 100%); max-height: 220px; object-fit: contain; border-radius: 8px; margin-bottom: 6px; }
 .msg span { white-space: pre-wrap; }
-.clock-bar { position: absolute; top: 16px; left: 50%; z-index: 4; display: flex; align-items: center; gap: 8px; transform: translateX(-50%); pointer-events: auto; }
-.clock-card, .clock-add, .clock-add-select select { border: 1px solid rgba(255,255,255,.2); border-radius: 12px; background: rgba(24,27,45,.78); color: #fff; box-shadow: 0 8px 24px rgba(17,12,36,.24); backdrop-filter: blur(12px); }
-.clock-card { position: relative; display: grid; gap: 1px; min-width: 116px; padding: 7px 12px; text-align: center; }
-.clock-zone { color: rgba(255,255,255,.67); font-size: 10px; letter-spacing: .05em; text-transform: uppercase; white-space: nowrap; }
-.clock-card strong { font: 700 17px/1.15 ui-monospace, 'SF Mono', Menlo, monospace; letter-spacing: .03em; }
-.clock-secondary { padding-right: 28px; }
-.clock-remove { position: absolute; top: 4px; right: 5px; border: 0; background: transparent; color: rgba(255,255,255,.6); cursor: pointer; font-size: 16px; line-height: 1; }
-.clock-add { padding: 8px 12px; color: rgba(255,255,255,.8); cursor: pointer; font-size: 11px; }
-.clock-add:hover, .clock-remove:hover { color: #fff; background: rgba(255,255,255,.12); }
-.clock-add-select select { padding: 8px 10px; color: #fff; font-size: 11px; }
+.clock-bar { position: absolute; top: 16px; left: 16px; z-index: 4; pointer-events: auto; }
+.clock-toggle, .clock-popover { border: 1px solid rgba(255,255,255,.2); border-radius: 12px; background: rgba(24,27,45,.82); color: #fff; box-shadow: 0 8px 24px rgba(17,12,36,.24); backdrop-filter: blur(12px); }
+.clock-toggle { position: relative; display: grid; min-width: 148px; padding: 7px 29px 7px 12px; border-color: rgba(255,255,255,.22); text-align: left; cursor: pointer; }
+.clock-toggle-zone, .clock-zone { color: rgba(255,255,255,.67); font-size: 10px; letter-spacing: .05em; text-transform: uppercase; white-space: nowrap; }
+.clock-toggle strong, .clock-card strong { font: 700 17px/1.15 ui-monospace, 'SF Mono', Menlo, monospace; letter-spacing: .03em; }
+.clock-count { position: absolute; top: 5px; right: 22px; color: #ffd98a; font-size: 10px; font-weight: 800; }
+.clock-chevron { position: absolute; right: 9px; top: 50%; color: rgba(255,255,255,.65); transform: translateY(-50%); }
+.clock-toggle:hover, .clock-toggle:focus-visible, .clock-close:hover, .clock-remove:hover { background: rgba(255,255,255,.12); }
+.clock-popover { display: grid; gap: 10px; width: min(300px, calc(100vw - 24px)); max-height: min(60vh, 380px); margin-top: 8px; padding: 10px; overflow: auto; }
+.clock-popover-head { display: flex; align-items: center; justify-content: space-between; color: rgba(255,255,255,.84); font-size: 12px; }
+.clock-close, .clock-remove { border: 0; background: transparent; color: rgba(255,255,255,.6); cursor: pointer; line-height: 1; }
+.clock-close { width: 24px; height: 24px; border-radius: 7px; font-size: 17px; }
+.clock-list { display: grid; gap: 6px; }
+.clock-card { position: relative; display: grid; gap: 1px; min-width: 0; padding: 7px 28px 7px 10px; border: 1px solid rgba(255,255,255,.14); border-radius: 9px; background: rgba(255,255,255,.07); }
+.clock-card strong { color: #fff; }
+.clock-local { background: rgba(255,255,255,.12); }
+.clock-remove { position: absolute; top: 5px; right: 6px; width: 20px; height: 20px; border-radius: 6px; font-size: 16px; }
+.clock-add-select { display: grid; gap: 4px; color: rgba(255,255,255,.7); font-size: 10px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; }
+.clock-add-select select { min-width: 0; padding: 7px 9px; border: 1px solid rgba(255,255,255,.2); border-radius: 8px; background: rgba(24,27,45,.9); color: #fff; font-size: 12px; }
 .clock-add-select option { color: var(--ink); background: var(--paper); }
+.clock-empty { margin: 0; color: rgba(255,255,255,.62); font-size: 11px; }
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; }
-@media (max-width: 600px) { .clock-bar { top: 10px; max-width: calc(100% - 20px); } .clock-card { min-width: 104px; padding: 6px 9px; } .clock-card strong { font-size: 14px; } .clock-add { padding: 7px 9px; } }
+@media (max-width: 600px) { .clock-bar { top: 10px; left: 10px; } .clock-toggle { min-width: 136px; padding: 6px 27px 6px 10px; } .clock-toggle strong, .clock-card strong { font-size: 14px; } .clock-popover { width: min(280px, calc(100vw - 20px)); } }
