@@ -40,9 +40,12 @@ export default async (s) => {
   await s.waitFor("__office.store.getState().modal?.kind === 'task_board'");
   await s.waitFor("document.querySelector('.task-card')?.innerText.includes('CS-27')");
   assert(await s.eval("document.body.innerText.includes('Fix the board')"), 'the board renders a normalized ticket card');
+  assert(await s.eval("document.querySelectorAll('[data-testid=task-board-kanban] .task-board-column').length === 6"), 'the board renders the Linear-style workflow columns');
   await s.eval(`window.office.send({ type: 'hire', provider: 'claude-code', blockId: __office.store.getState().company.blocks[0].id })`);
   await s.waitFor("__office.store.getState().company.employees.length === 1");
   await s.clickText('.task-card', 'CS-27');
+  assert(await s.eval("document.querySelector('[data-testid=task-card-details]')?.innerText.includes('Assign to an AI employee')"), 'selecting a card opens its assignment details');
+  await s.shot('task-board-kanban');
   await s.clickText('.task-assign', '');
   await s.waitFor("__office.store.getState().company.employees[0].status.kind === 'working'");
   assert(await s.eval("__office.store.getState().company.employees[0].status.task.includes('CS-27')"), 'assigning a card starts the ticket with an AI employee');

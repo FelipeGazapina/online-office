@@ -122,6 +122,69 @@ export type TaskCard = {
   url?: string;
   sourceLabel: string;
 };
+
+export type TaskBoardColumn = { id: string; label: string; cards: TaskCard[] };
+
+const TASK_BOARD_STATUS_ORDER = ['Open', 'In Design', 'In Dev', 'In Progress', 'Ready to Review', 'Done', 'Deferred'] as const;
+const TASK_BOARD_STATUS_ALIASES: Record<string, (typeof TASK_BOARD_STATUS_ORDER)[number]> = {
+  backlog: 'Open',
+  canceled: 'Done',
+  cancelled: 'Done',
+  closed: 'Done',
+  complete: 'Done',
+  completed: 'Done',
+  design: 'In Design',
+  development: 'In Dev',
+  dev: 'In Dev',
+  deferred: 'Deferred',
+  done: 'Done',
+  indevelopment: 'In Dev',
+  indev: 'In Dev',
+  indesign: 'In Design',
+  inprogress: 'In Progress',
+  inreview: 'Ready to Review',
+  open: 'Open',
+  pending: 'Open',
+  progress: 'In Progress',
+  qa: 'Ready to Review',
+  readyforreview: 'Ready to Review',
+  readytoreview: 'Ready to Review',
+  review: 'Ready to Review',
+  started: 'In Progress',
+  todo: 'Open',
+  working: 'In Progress',
+};
+
+const taskBoardStatusKey = (status: string) => status.trim().toLowerCase().replace(/[^a-z0-9]+/g, '');
+
+function taskBoardStatusLabel(status: string): string {
+  const trimmed = status.trim();
+  return TASK_BOARD_STATUS_ALIASES[taskBoardStatusKey(trimmed)] ?? (trimmed || 'Open');
+}
+
+function taskBoardStatusId(label: string): string {
+  const slug = label.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+  return `status:${slug || 'unknown'}`;
+}
+
+export function taskBoardColumns(cards: readonly TaskCard[]): TaskBoardColumn[] {
+  const grouped = new Map<string, TaskBoardColumn>();
+  for (const label of TASK_BOARD_STATUS_ORDER) grouped.set(label, { id: taskBoardStatusId(label), label, cards: [] });
+  for (const card of cards) {
+    const label = taskBoardStatusLabel(card.status);
+    const existing = grouped.get(label);
+    if (existing) {
+      existing.cards.push(card);
+      continue;
+    }
+    const id = taskBoardStatusId(label);
+    const column = grouped.get(id) ?? { id, label, cards: [] };
+    column.cards.push(card);
+    grouped.set(id, column);
+  }
+  return [...grouped.values()].filter((column) => column.cards.length > 0);
+}
+
 export type TaskBoardState =
   | { kind: 'idle'; cards: TaskCard[]; lastFetchedAt?: number }
   | { kind: 'loading'; cards: TaskCard[]; lastFetchedAt?: number }
