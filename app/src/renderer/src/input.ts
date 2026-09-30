@@ -28,29 +28,12 @@ export function installInput() {
     if (!e.repeat && e.code === 'KeyF') {
       if (s.computerState === 'seated') leaveComputer();
       else if (s.nearComputer) enterComputer();
-      else if (s.camera === 'first') {
-        e.preventDefault();
-        window.dispatchEvent(new Event('office:toggle-pointer-lock'));
-      }
-      return;
-    }
-
-    if (!e.repeat && e.code === 'KeyC' && s.camera === 'first') {
-      e.preventDefault();
-      window.dispatchEvent(new Event('office:toggle-pointer-lock'));
       return;
     }
 
     switch (e.code) {
-      case 'Digit1':
-        return setSetting('camera', 'follow');
       case 'Digit2':
         return setSetting('camera', 'iso');
-      case 'Digit3':
-        e.preventDefault();
-        setSetting('camera', 'first');
-        if (s.camera !== 'first' || !document.pointerLockElement) window.dispatchEvent(new Event('office:toggle-pointer-lock'));
-        return;
       case 'KeyH':
         return set({ helpOpen: !s.helpOpen });
       case 'Enter':

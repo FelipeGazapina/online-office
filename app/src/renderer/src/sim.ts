@@ -197,13 +197,10 @@ function stepOwner(dt: number, layout: Layout, grid: NavGrid, talkingTo: Employe
   clampToBounds(owner.pos, layout.bounds);
   owner.speed = Math.hypot(owner.vel.x, owner.vel.z);
 
-  const first = get().camera === 'first';
   if (owner.speed > 0.4) {
     const heading = Math.atan2(owner.vel.x, owner.vel.z);
-    owner.yaw += angleDiff(owner.yaw, first ? view.yaw : heading) * ease(dt, 12);
+    owner.yaw += angleDiff(owner.yaw, heading) * ease(dt, 12);
     runtime.queueYaw += angleDiff(runtime.queueYaw, heading) * ease(dt, 2.5);
-  } else if (first) {
-    owner.yaw = view.yaw;
   } else if (talkingTo) {
     const av = runtime.avatars.get(talkingTo);
     if (av) {

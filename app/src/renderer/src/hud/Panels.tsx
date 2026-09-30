@@ -117,11 +117,7 @@ export function SettingsPanel() {
       <label>Camera</label>
       <Seg<CameraMode>
         value={s.camera}
-        options={[
-          ['follow', '1 Follow'],
-          ['iso', '2 Overview'],
-          ['first', '3 First person'],
-        ]}
+        options={[['iso', '2 Top down']]}
         onChange={(v) => setSetting('camera', v)}
       />
       <label>Interrupt</label>
@@ -230,9 +226,8 @@ const KEYS: [string, string][] = [
   ['W A S D / arrows', 'Walk, relative to the camera. Cancels a click walk'],
   ['Shift', 'Run'],
   ['Q / E', 'Turn the camera (90 degree steps in overview)'],
-  ['Click / C', 'Capture or release the mouse for FPS look in first person'],
-  ['Drag / wheel', 'Orbit and zoom (follow), look (first person), turn and zoom (overview)'],
-  ['1 / 2 / 3', 'Follow, overview, first person'],
+  ['Drag / wheel', 'Turn and zoom the top-down camera'],
+  ['2', 'Top-down camera'],
   ['Enter', 'Type to the nearest employee, or whoever is asking'],
   ['Hold V', 'Push to talk (when the mic is set to Hold V)'],
   ['Click an employee', 'Open a menu: chat, or walk to them'],

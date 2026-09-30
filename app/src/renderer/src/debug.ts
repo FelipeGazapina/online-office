@@ -45,7 +45,7 @@ export function installDebug() {
       const p = new Vector3(x, y, z).project(camera);
       return { x: size.left + ((p.x + 1) / 2) * size.width, y: size.top + ((1 - p.y) / 2) * size.height };
     },
-    setCamera: (c: 'follow' | 'iso' | 'first') => setSetting('camera', c),
+    setCamera: () => setSetting('camera', 'iso'),
     apply: applyServerMessage,
     store: useStore,
     set,

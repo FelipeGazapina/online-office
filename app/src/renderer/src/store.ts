@@ -15,7 +15,7 @@ import type {
 import type { Language, VoiceQuality } from '../../shared/voice.ts';
 import { initialVoice, type VoiceState } from './voice/chip.ts';
 
-export type CameraMode = 'follow' | 'iso' | 'first';
+export type CameraMode = 'iso';
 export type MicMode = 'proximity' | 'push';
 export type Lang = 'en-US' | 'pt-BR' | 'auto';
 // What each language setting means for listening (`stt`, what whisper is told) and for the employees' voices (`tts`).
@@ -34,7 +34,7 @@ export type Toast = { id: number; text: string; tone: 'info' | 'warn' | 'ok' };
 // Settings the user is tuning while deciding how this should feel; kept across reloads.
 type Settings = { camera: CameraMode; interrupt: InterruptStyle; mic: MicMode; lang: Lang; voiceQuality: VoiceQuality };
 const SETTINGS_KEY = 'online-office.settings';
-const defaults: Settings = { camera: 'follow', interrupt: 'next', mic: 'proximity', lang: 'en-US', voiceQuality: 'fast' };
+const defaults: Settings = { camera: 'iso', interrupt: 'next', mic: 'proximity', lang: 'en-US', voiceQuality: 'fast' };
 
 function loadSettings(): Settings {
   try {
