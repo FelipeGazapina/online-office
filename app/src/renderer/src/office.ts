@@ -11,7 +11,7 @@ export function addLog(employeeId: string, line: string, at: number) {
 export function applyServerMessage(msg: ServerMessage) {
   switch (msg.type) {
     case 'snapshot':
-      set({ company: msg.company, harnesses: msg.harnesses, catalogs: msg.catalogs, meetingDoor: msg.meetingDoor });
+      set({ company: msg.company, harnesses: msg.harnesses, catalogs: msg.catalogs, meetingDoor: msg.meetingDoor, taskBoards: msg.taskBoards, taskConnections: msg.taskConnections });
       break;
     case 'said': {
       const e = employeeById(msg.employeeId);

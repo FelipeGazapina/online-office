@@ -1,9 +1,10 @@
 import { join } from 'node:path';
-import { app, BrowserWindow, desktopCapturer, screen, session, type WebContents } from 'electron';
+import { app, BrowserWindow, desktopCapturer, screen, session, shell, type WebContents } from 'electron';
 import { startOffice } from './ipc.ts';
 import { detectHarnesses, setCodexRoot } from './office/adapters/index.ts';
 import { startOfficeMcp } from './office/mcp.ts';
 import { MemoryStore } from './office/memory.ts';
+import { TaskBoardService } from './office/task-board.ts';
 import { startUpdater } from './updater.ts';
 import { prepareVoice, startVoice } from './voice.ts';
 
@@ -81,7 +82,7 @@ else {
       dataFile: join(userData, 'company.json'),
       harnesses: await harnesses,
       window: () => win,
-      services: { mcp, memory: MemoryStore.open(join(userData, 'memory')) },
+      services: { mcp, memory: MemoryStore.open(join(userData, 'memory')), taskBoards: new TaskBoardService({ openUrl: (url) => shell.openExternal(url) }) },
     });
     const voice = startVoice({ window: () => win, userData });
     startUpdater({ window: () => win });

@@ -1601,6 +1601,40 @@ h3 {
 @media (max-width: 600px) { .mac-desktop { padding: 12px; } .mac-live { display: none; } .mac-bar { justify-content: space-between; } }
 
 .mac-portal { position: absolute; inset: 0; z-index: 30; }
+/* Project task boards */
+.mac-task-window { grid-column: 1 / -1; }
+.task-config { padding: 18px; color: #303247; }
+.task-config-head, .task-config-actions, .task-connections { display: flex; align-items: center; gap: 10px; }
+.task-config-head { justify-content: space-between; margin-bottom: 14px; }
+.task-config-head h2 { margin: 0 0 4px; }
+.task-config-head p { max-width: 560px; margin: 0; }
+.task-connections { flex-wrap: wrap; margin-bottom: 14px; }
+.task-connection { display: grid; grid-template-columns: auto auto 1fr auto; gap: 6px; align-items: center; padding: 9px 11px; border: 1px solid rgba(48,50,71,.14); border-radius: 10px; min-width: 290px; background: rgba(255,255,255,.62); }
+.task-connection small { color: #6f7184; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.connection-dot { width: 8px; height: 8px; border-radius: 50%; background: #999; }
+.connection-dot.ready { background: #1f9d67; }
+.connection-dot.error { background: #cb4c4c; }
+.task-source-list { display: grid; gap: 8px; }
+.task-source-row { display: grid; grid-template-columns: 125px 1fr 1fr auto; gap: 8px; align-items: center; }
+.task-source-row input, .task-source-row select, .task-config-head select { min-width: 0; padding: 8px 10px; border: 1px solid rgba(48,50,71,.18); border-radius: 8px; background: #fff; color: inherit; }
+.task-config-actions { justify-content: flex-end; margin-top: 14px; flex-wrap: wrap; }
+.task-config-note { margin: 12px 0 0; font-size: 12px; }
+.task-board-modal { min-width: min(920px, 92vw); }
+.task-board-modal-grid { display: grid; grid-template-columns: minmax(290px, .9fr) minmax(260px, 1fr); gap: 18px; min-height: 420px; }
+.task-card-list { display: grid; align-content: start; gap: 7px; max-height: 55vh; overflow: auto; }
+.task-card { display: grid; grid-template-columns: auto 1fr; gap: 10px; padding: 11px; text-align: left; border: 1px solid rgba(48,50,71,.14); border-radius: 10px; background: #fff; color: inherit; cursor: pointer; }
+.task-card.selected { border-color: #5b8def; box-shadow: 0 0 0 2px rgba(91,141,239,.18); }
+.task-card span:last-child { display: grid; gap: 3px; }
+.task-card strong { font-weight: 650; }
+.task-card small { color: #7b7e93; }
+.task-provider { display: inline-flex; align-items: center; justify-content: center; height: 24px; min-width: 34px; padding: 0 5px; border-radius: 6px; background: #e8ebf3; color: #4c5270; font-size: 11px; font-weight: 800; }
+.task-provider.linear { background: #ece6ff; color: #6944b1; }
+.task-provider.cronospark { background: #dcf7ed; color: #12744b; }
+.task-card-detail { padding: 18px; border-radius: 12px; background: #f4f4f8; }
+.task-card-detail h3 { margin: 16px 0 4px; }
+.task-card-detail h4 { margin: 14px 0 6px; }
+.task-assign { display: block; width: 100%; margin-top: 7px; }
+@media (max-width: 760px) { .task-board-modal-grid { grid-template-columns: 1fr; } .task-source-row { grid-template-columns: 1fr 1fr; } .task-source-row .link { grid-column: 2; } }
 
 /* A portal window is a click-through, always-on-top mirror of the real desktop. The main process
    removes this window from capture and sends the pointer and keyboard events to macOS underneath it. */

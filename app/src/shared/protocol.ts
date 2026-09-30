@@ -105,6 +105,30 @@ export type Whiteboard = {
   at: number;
 };
 
+export type TaskProvider = 'linear' | 'cronospark';
+export type TaskBoardSource = {
+  provider: TaskProvider;
+  projectId: string;
+  label?: string;
+};
+export type TaskBoardConfig = { sources: TaskBoardSource[] };
+export type TaskCard = {
+  id: string;
+  provider: TaskProvider;
+  identifier: string;
+  title: string;
+  status: string;
+  priority?: string;
+  url?: string;
+  sourceLabel: string;
+};
+export type TaskBoardState =
+  | { kind: 'idle'; cards: TaskCard[]; lastFetchedAt?: number }
+  | { kind: 'loading'; cards: TaskCard[]; lastFetchedAt?: number }
+  | { kind: 'ready'; cards: TaskCard[]; lastFetchedAt: number }
+  | { kind: 'error'; cards: TaskCard[]; message: string; lastFetchedAt?: number };
+export type TaskConnectionState = { kind: 'ready' | 'connecting' | 'needs_auth' | 'missing' | 'error'; message?: string };
+
 export type ProjectBlock = {
   id: BlockId;
   name: string;
@@ -113,6 +137,7 @@ export type ProjectBlock = {
   slot: number;
   githubRepo?: string;
   whiteboard?: Whiteboard;
+  taskBoard?: TaskBoardConfig;
 };
 
 export type Company = {
@@ -161,6 +186,10 @@ export type ClientMessage =
   | { type: 'fire'; employeeId: EmployeeId }
   | { type: 'create_block'; cwd: string; name?: string; githubRepo?: string }
   | { type: 'update_block'; blockId: BlockId; name?: string; cwd?: string; githubRepo?: string }
+  | { type: 'configure_task_board'; blockId: BlockId; config: TaskBoardConfig }
+  | { type: 'refresh_task_board'; blockId: BlockId }
+  | { type: 'connect_task_provider'; provider: TaskProvider }
+  | { type: 'assign_task'; blockId: BlockId; taskId: string; employeeId: EmployeeId }
   | { type: 'assign'; employeeId: EmployeeId; task: string }
   // `always` counts only on a permission card, and only when `text` allows it. The office then adds a rule for that
   // employee that covers the same command or tool from now on.
@@ -182,6 +211,8 @@ export type Snapshot = {
   harnesses: Record<Provider, HarnessStatus>;
   catalogs: Record<Provider, ModelCatalog>;
   meetingDoor: MeetingDoor;
+  taskBoards: Record<string, TaskBoardState>;
+  taskConnections: Record<TaskProvider, TaskConnectionState>;
 };
 
 export type ServerMessage =

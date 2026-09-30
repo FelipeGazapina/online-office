@@ -10,6 +10,8 @@ import type {
   MeetingDoor,
   ModelCatalog,
   Provider,
+  TaskBoardState,
+  TaskConnectionState,
   UpdateState,
 } from '../../shared/protocol.ts';
 import type { Language, VoiceQuality } from '../../shared/voice.ts';
@@ -25,7 +27,7 @@ export const LANGS: Record<Lang, { stt: Language; tts: 'en-US' | 'pt-BR' }> = {
   // Whisper's json answer does not say which language it heard, so the employees keep an English voice.
   auto: { stt: 'auto', tts: 'en-US' },
 };
-export type Modal = null | { kind: 'hire'; bypassLimit?: boolean } | { kind: 'block' } | { kind: 'whiteboard'; blockId: BlockId } | { kind: 'github'; blockId: BlockId } | { kind: 'github_setup'; blockId: BlockId };
+export type Modal = null | { kind: 'hire'; bypassLimit?: boolean } | { kind: 'block' } | { kind: 'whiteboard'; blockId: BlockId } | { kind: 'github'; blockId: BlockId } | { kind: 'github_setup'; blockId: BlockId } | { kind: 'task_board'; blockId: BlockId; taskId?: string };
 
 export type LogLine = { line: string; at: number };
 export type ChatLine = { from: 'owner' | 'employee'; text: string; at: number };
@@ -49,6 +51,8 @@ type State = Settings & {
   harnesses: Record<Provider, HarnessStatus> | null;
   meetingDoor: MeetingDoor;
   catalogs: Record<Provider, ModelCatalog> | null;
+  taskBoards: Record<string, TaskBoardState>;
+  taskConnections: Record<'linear' | 'cronospark', TaskConnectionState>;
   logs: Record<string, LogLine[]>;
   chat: Record<EmployeeId, ChatLine[]>;
   bubbles: Record<string, { text: string; until: number }>;
@@ -61,6 +65,8 @@ type State = Settings & {
   portalMode: boolean;
   computerState: 'away' | 'seated';
   nearComputer: boolean;
+  nearProjectComputer: BlockId | null;
+  projectComputerId: BlockId | null;
   // Facts derived by the per-frame sim, published only when they change.
   talkingTo: EmployeeId | null;
   nearbyIds: EmployeeId[];
@@ -76,6 +82,8 @@ export const useStore = create<State>()(() => ({
   harnesses: null,
   meetingDoor: 'open',
   catalogs: null,
+  taskBoards: {},
+  taskConnections: { linear: { kind: 'needs_auth' }, cronospark: { kind: 'needs_auth' } },
   logs: {},
   chat: {},
   bubbles: {},
@@ -88,6 +96,8 @@ export const useStore = create<State>()(() => ({
   portalMode: false,
   computerState: 'away',
   nearComputer: false,
+  nearProjectComputer: null,
+  projectComputerId: null,
   talkingTo: null,
   nearbyIds: [],
   askerId: null,
