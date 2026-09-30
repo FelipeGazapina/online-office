@@ -208,46 +208,19 @@ function CompanySign({ name, b }: { name: string; b: Bounds }) {
 
 function OwnerCorner() {
   const seated = useStore((s) => s.computerState === 'seated');
-  const tex = useCanvasTexture(256, 96, (g) => {
-    g.fillStyle = '#2f3a5f';
-    roundRect(g, 0, 0, 256, 96, 16);
-    g.fill();
-    g.fillStyle = '#f2b84b';
-    g.font = `700 52px ${FONT_DISPLAY}`;
-    g.textAlign = 'center';
-    g.textBaseline = 'middle';
-    g.fillText('Owner', 128, 52);
-  }, []);
   return (
     <group>
-      <Desk position={[OWNER_DESK.x, 0, OWNER_DESK.z]} rotationY={Math.PI / 2} screen={seated ? 'working' : 'idle'} color="#5f9fdf" />
+      <Desk
+        position={[OWNER_DESK.x, 0, OWNER_DESK.z]}
+        rotationY={Math.PI / 2}
+        screen={seated ? 'working' : 'idle'}
+        color="#5f9fdf"
+        owner
+        plate="Owner"
+        flatPlate
+        onScreenClick={enterComputer}
+      />
       <Chair position={[OWNER_CHAIR.x, 0, OWNER_CHAIR.z]} rotationY={Math.PI / 2} color="#2f3a5f" />
-      <group
-        position={[OWNER_DESK.x + 0.15, 0.82, OWNER_DESK.z - 0.18]}
-        onClick={(e) => {
-          e.stopPropagation();
-          if (e.delta < 6) enterComputer();
-        }}
-        onPointerOver={() => void (document.body.style.cursor = 'pointer')}
-        onPointerOut={() => void (document.body.style.cursor = '')}
-      >
-        <mesh castShadow>
-          <boxGeometry args={[0.9, 0.52, 0.06]} />
-          <meshStandardMaterial color="#161b2a" roughness={0.45} />
-        </mesh>
-        <mesh position={[0, -0.01, 0.035]}>
-          <planeGeometry args={[0.78, 0.4]} />
-          <meshBasicMaterial color="#3c72a8" />
-        </mesh>
-        <mesh position={[0, -0.36, 0.1]}>
-          <boxGeometry args={[0.62, 0.03, 0.28]} />
-          <meshStandardMaterial color="#d8d1c3" roughness={0.8} />
-        </mesh>
-      </group>
-      <mesh position={[OWNER_DESK.x - 0.1, 0.83, OWNER_DESK.z + 0.55]} rotation={[-0.5, Math.PI / 2, 0]}>
-        <planeGeometry args={[0.36, 0.14]} />
-        <meshBasicMaterial map={tex} transparent />
-      </mesh>
     </group>
   );
 }

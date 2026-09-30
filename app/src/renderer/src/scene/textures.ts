@@ -97,3 +97,57 @@ export function codeTexture() {
   code = t;
   return t;
 }
+
+let ownerComputer: CanvasTexture | null = null;
+export function ownerComputerTexture() {
+  if (ownerComputer) return ownerComputer;
+  const c = document.createElement('canvas');
+  c.width = 512;
+  c.height = 288;
+  const g = c.getContext('2d')!;
+  const bg = g.createLinearGradient(0, 0, 0, 288);
+  bg.addColorStop(0, '#173c68');
+  bg.addColorStop(1, '#0b1a32');
+  g.fillStyle = bg;
+  g.fillRect(0, 0, 512, 288);
+  g.fillStyle = 'rgba(108, 205, 255, 0.16)';
+  g.fillRect(0, 0, 512, 42);
+  g.fillStyle = '#8de4ff';
+  g.font = `700 21px ${FONT_DISPLAY}`;
+  g.fillText('ONLINE OFFICE', 24, 28);
+  g.fillStyle = 'rgba(255,255,255,0.68)';
+  g.font = `500 13px ${FONT_BODY}`;
+  g.fillText('OWNER CONSOLE', 374, 27);
+  const cards = [
+    { x: 24, w: 142, value: '04', label: 'active teams', color: '#6fe0b0' },
+    { x: 181, w: 142, value: '12', label: 'agents online', color: '#8dc7ff' },
+    { x: 338, w: 150, value: '0', label: 'needs you', color: '#f7c766' },
+  ];
+  for (const card of cards) {
+    g.fillStyle = 'rgba(255,255,255,0.09)';
+    roundRect(g, card.x, 70, card.w, 88, 12);
+    g.fill();
+    g.fillStyle = card.color;
+    g.font = `800 30px ${FONT_DISPLAY}`;
+    g.fillText(card.value, card.x + 14, 108);
+    g.fillStyle = 'rgba(255,255,255,0.7)';
+    g.font = `500 13px ${FONT_BODY}`;
+    g.fillText(card.label, card.x + 14, 136);
+  }
+  g.fillStyle = 'rgba(255,255,255,0.18)';
+  g.fillRect(24, 194, 464, 1);
+  g.fillStyle = '#b8d7f4';
+  g.font = `600 14px ${FONT_BODY}`;
+  g.fillText('Everything is running smoothly', 24, 226);
+  g.fillStyle = '#6fe0b0';
+  g.beginPath();
+  g.arc(28, 252, 5, 0, Math.PI * 2);
+  g.fill();
+  g.fillStyle = 'rgba(255,255,255,0.55)';
+  g.font = `500 12px ${FONT_BODY}`;
+  g.fillText('Last synced just now', 42, 256);
+  ownerComputer = new CanvasTexture(c);
+  ownerComputer.colorSpace = SRGBColorSpace;
+  ownerComputer.anisotropy = 8;
+  return ownerComputer;
+}
