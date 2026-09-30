@@ -38,7 +38,8 @@ function attach(employeeId: EmployeeId, blockId: BlockId) {
   return mcp.attach(employeeId, {
     ask: (body, signal) => inbox.ask(employeeId, body, signal),
     openBoard: async () => {},
-  drawDiagram: (title) => diagrams.push({ employeeId, title }),
+    delegateToTeammate: async () => 'not available in this check',
+    drawDiagram: (title) => diagrams.push({ employeeId, title }),
     memory: memoryFor,
   });
 }
@@ -108,7 +109,7 @@ const b = await connect(urlB);
 const c = await connect(urlC);
 check(a.client.getServerVersion()?.name === 'office', `server name is "office" (${a.client.getServerVersion()?.name})`);
 const listed = (await a.client.listTools()).tools.map((t) => t.name).sort();
-check(JSON.stringify(listed) === JSON.stringify(['ask_owner', 'draw_diagram', 'forget', 'recall', 'remember']), `tools: ${listed.join(', ')}`);
+check(JSON.stringify(listed) === JSON.stringify(['ask_owner', 'delegate_to_teammate', 'draw_diagram', 'forget', 'open_board', 'recall', 'remember']), `tools: ${listed.join(', ')}`);
 
 const drawn = await call(a.client, 'draw_diagram', { title: 'Flow', mermaid: 'flowchart LR\n A-->B' });
 check(drawn.text === 'Drawn on the whiteboard.' && diagrams.at(-1)?.employeeId === A, 'draw_diagram reaches the office under the caller\'s identity');
@@ -288,6 +289,8 @@ const full = nb.digest('a very very long project folder name that keeps going an
 check(full.length <= LIMITS.digestChars && full.split('\n').filter((l) => l.startsWith('- ')).length === 65, `a full notebook digest is ${full.length} characters, cap ${LIMITS.digestChars}`);
 const p = persona({ name: 'Ana', company: 'Gazapina Labs', block: 'Gazapina Web', digest: digestA, rules: '' });
 check(p.includes('- Standup is at 09:40') && p.includes('remember, recall and forget') && p.includes('You are Ana'), 'the persona carries the memory rules and the digest');
+check(p.includes('pstack workflow') && p.includes('$HOME/.cursor/skills'), 'the persona tells every employee to use the Cursor pstack skills');
+check(persona({ name: 'PO', company: 'x', block: 'y', role: 'orchestrator', digest: '', rules: '' }).includes('delegate them with the team tool'), 'the orchestrator persona explains team coordination');
 check(!persona({ name: 'Ana', company: 'x', block: 'y', digest: '', rules: '' }).includes('What you remember'), 'the persona omits the digest when nothing is saved');
 const ruled = persona({ name: 'Ana', company: 'x', block: 'y', digest: digestA, rules: '- Never edit the billing folder' });
 check(ruled.includes('The rules your boss set for you') && ruled.includes('- Never edit the billing folder') && ruled.indexOf('billing') < ruled.indexOf('What you remember'), 'the persona carries the owner rules ahead of the digest');

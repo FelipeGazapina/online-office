@@ -231,7 +231,7 @@ export class CodexSession implements EmployeeSession, CodexUser {
       const digest = this.host.memoryDigest();
       const rules = this.host.rules();
       debug(`thread start for ${employee.name}, memory digest:\n${digest || '(no notes yet)'}`);
-      const developerInstructions = persona({ name: employee.name, company: companyName, block: block.name, digest, rules });
+      const developerInstructions = persona({ name: employee.name, company: companyName, block: block.name, role: employee.role, digest, rules });
       const started = await this.pool.loadThread(inherit, () => server.call('thread/start', { developerInstructions, ...common }, threadLoaded));
       id = started.thread.id;
       this.host.setSessionId(id);

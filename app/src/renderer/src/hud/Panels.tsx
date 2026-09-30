@@ -10,7 +10,7 @@ function statusClass(e: Employee) {
   return { idle: 'idle', working: 'working', blocked_on_owner: 'blocked', error: 'error' }[e.status.kind];
 }
 
-export function CompanyPanel() {
+export function CompanyPanel({ allowOverLimit = false }: { allowOverLimit?: boolean }) {
   const company = useStore((s) => s.company);
   if (!company) return <div className="panel company skeleton">Opening the office</div>;
 
@@ -20,6 +20,7 @@ export function CompanyPanel() {
   const pct = next === null ? 1 : Math.max(0, Math.min(1, (company.xp - base) / (next - base)));
   const cap = headcountCap(lvl);
   const full = company.employees.length >= cap;
+  const unlimited = !Number.isFinite(cap);
   const noBlocks = company.blocks.length === 0;
 
   return (
@@ -36,18 +37,19 @@ export function CompanyPanel() {
       </div>
       <div className="co-row">
         <span className="seats">
-          <b>{company.employees.length}</b>/{cap} seats
+          <b>{company.employees.length}</b>/{unlimited ? '∞' : cap} seats
         </span>
         <button
           className="btn primary"
-          disabled={full || noBlocks}
-          title={full ? 'Earn XP to level up and open another seat' : noBlocks ? 'Add a project block first' : ''}
-          onClick={() => set({ modal: { kind: 'hire' } })}
+          disabled={(full && !allowOverLimit) || noBlocks}
+          title={full && allowOverLimit ? 'Configuration can add an agent beyond the current level limit' : full ? 'Earn XP to level up and open another seat' : noBlocks ? 'Add a project block first' : unlimited ? 'Max level has no headcount limit' : ''}
+          onClick={() => set({ modal: { kind: 'hire', ...(allowOverLimit && { bypassLimit: true }) } })}
         >
           Hire
         </button>
       </div>
 
+      {allowOverLimit && full && <p className="muted config-note">Configuration mode can add agents beyond the level seat limit.</p>}
       <div className="blocks-head">
         <h2>Blocks</h2>
         <button className="btn ghost" onClick={() => set({ modal: { kind: 'block' } })}>
@@ -85,7 +87,7 @@ export function CompanyPanel() {
                 .map((e) => (
                   <button key={e.id} className={`person ${statusClass(e)}`} onClick={() => set({ selectedId: e.id })}>
                     <i className="sdot" />
-                    {e.name}
+                    {e.name}{(e.role ?? 'employee') === 'orchestrator' && <small>PO</small>}
                   </button>
                 ))}
             </div>
@@ -215,6 +217,13 @@ export function Toasts() {
       </button>
     </div>
   );
+}
+
+export function ComputerPrompt() {
+  const near = useStore((s) => s.nearComputer);
+  const seated = useStore((s) => s.computerState === 'seated');
+  if (!near || seated) return null;
+  return <div className="computer-prompt"><kbd>F</kbd><span>sit at your computer</span></div>;
 }
 
 const KEYS: [string, string][] = [

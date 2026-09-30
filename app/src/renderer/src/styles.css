@@ -161,6 +161,24 @@ h3 {
 }
 .computer-menu p { margin: 0 0 4px; }
 .computer-menu .link { justify-self: start; }
+.computer-prompt {
+  position: fixed;
+  left: 50%;
+  bottom: 28px;
+  z-index: 12;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  transform: translateX(-50%);
+  padding: 8px 13px;
+  border: 1px solid rgba(255,255,255,.18);
+  border-radius: 999px;
+  background: rgba(18, 24, 40, .82);
+  color: #fff;
+  box-shadow: 0 8px 22px rgba(20, 15, 40, .25);
+  font-size: 12px;
+}
+.computer-prompt kbd { min-width: 22px; padding: 2px 6px; border-radius: 6px; background: #f5b84c; color: #29243a; font-weight: 900; text-align: center; }
 
 .mac-portal {
   height: 100%;
@@ -885,6 +903,7 @@ h3 {
   padding: 14px 16px;
   box-shadow: 0 10px 30px rgba(24, 18, 44, 0.28);
   animation: drawer 0.28s cubic-bezier(0.2, 0.9, 0.3, 1);
+  z-index: 40;
 }
 .drawer header {
   display: flex;

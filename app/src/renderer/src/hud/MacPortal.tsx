@@ -1,5 +1,6 @@
 import { set, useStore } from '../store.ts';
 import { CompanyPanel, SettingsPanel } from './Panels.tsx';
+import { enterComputer, leaveComputer } from '../computer.ts';
 
 export function ComputerMenu() {
   const open = useStore((s) => s.computerMenu);
@@ -14,8 +15,7 @@ export function ComputerMenu() {
       <button
         className="btn primary"
         onClick={() => {
-          set({ computerMenu: false, portalMode: true });
-          window.office.portal.enter();
+          enterComputer();
         }}
       >
         Access computer
@@ -30,15 +30,15 @@ export function ComputerMenu() {
 export function MacPortal() {
   const company = useStore((s) => s.company);
   const leave = () => {
-    window.office.portal.leave();
-    set({ portalMode: false });
+    leaveComputer();
   };
+  const openConfiguration = () => document.getElementById('mac-configuration')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   return (
     <main className="mac-portal">
       <header className="mac-bar">
         <div className="mac-brand"><span className="mac-logo">R</span><b>Rebolt OS</b></div>
         <span className="mac-live">OFFICE DESKTOP</span>
-        <button className="btn ghost" onClick={leave}>Return to office</button>
+        <button className="btn ghost" onClick={leave}>Stand up (F)</button>
       </header>
       <section className="mac-desktop">
         <div className="mac-workspace">
@@ -61,13 +61,19 @@ export function MacPortal() {
               <button className="mac-action" onClick={() => window.office.portal.openTerminal()}>
                 <span>⌘</span><b>Open Terminal</b><small>Terminal</small>
               </button>
+              <button className="mac-action" onClick={openConfiguration}>
+                <span>👥</span><b>Agents</b><small>Hire and edit</small>
+              </button>
+              <button className="mac-action" onClick={openConfiguration}>
+                <span>⚙️</span><b>Configuration</b><small>Agents and office</small>
+              </button>
             </div>
 
           </div>
         </div>
-        <div className="mac-app-window mac-office-window">
-          <div className="mac-window-head"><span className="traffic red" /><span className="traffic amber" /><span className="traffic green" /><b>{company?.name ?? 'Company'}</b></div>
-          <CompanyPanel />
+        <div id="mac-configuration" className="mac-app-window mac-office-window">
+          <div className="mac-window-head"><span className="traffic red" /><span className="traffic amber" /><span className="traffic green" /><b>Configuration · {company?.name ?? 'Company'}</b></div>
+          <CompanyPanel allowOverLimit />
         </div>
         <div className="mac-app-window mac-settings-window">
           <div className="mac-window-head"><span className="traffic red" /><span className="traffic amber" /><span className="traffic green" /><b>Office settings</b></div>

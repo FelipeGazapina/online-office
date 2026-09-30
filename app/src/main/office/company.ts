@@ -17,6 +17,7 @@ import {
   type Company,
   type CompanySettings,
   type Employee,
+  type EmployeeRole,
   type EmployeeId,
   type EmployeeStatus,
   type HarnessStatus,
@@ -139,7 +140,7 @@ function seed(): Company {
 }
 
 // What company.json can hold: a company from before models, permissions and settings existed, or from after.
-type StoredEmployee = Omit<Employee, 'model' | 'permissions' | 'subagents'> & Partial<Pick<Employee, 'model' | 'permissions'>>;
+type StoredEmployee = Omit<Employee, 'model' | 'permissions' | 'subagents' | 'role'> & Partial<Pick<Employee, 'model' | 'permissions' | 'role'>>;
 type StoredCompany = Omit<Company, 'settings' | 'employees'> & { settings?: Partial<CompanySettings>; employees: StoredEmployee[] };
 
 // Every field added after the first release gets its default here and nowhere else, so an old file and a new one
@@ -156,6 +157,7 @@ function migrate(c: StoredCompany): Company {
     blocks: c.blocks.map((b) => ({ ...b, githubRepo: b.githubRepo ?? githubRemote(b.cwd) })),
     employees: c.employees.map((e) => ({
       ...e,
+      role: e.role ?? 'employee',
       model: e.model ?? HARNESSES[e.provider].defaultModel(),
       permissions: e.permissions ?? { mode: settings.defaultPermissions, alwaysAllow: [] },
       subagents: [],
@@ -228,7 +230,7 @@ export class Office {
   handle(msg: ClientMessage): void {
     switch (msg.type) {
       case 'hire':
-        return this.hire(msg.provider, msg.blockId, msg.name, msg.model);
+        return this.hire(msg.provider, msg.blockId, msg.name, msg.model, msg.role, msg.bypassLimit);
       case 'fire':
         return this.fire(msg.employeeId);
       case 'create_block':
@@ -341,6 +343,7 @@ export class Office {
         block.whiteboard = { title, mermaid: '', page, by: employee.id, at: Date.now() };
         this.commit();
       },
+      delegateToTeammate: async (target, task) => this.delegateToTeammate(employee, target, task),
       memory: notebook,
     });
     const host: SessionHost = {
@@ -443,7 +446,7 @@ export class Office {
     this.commit();
   }
 
-  private hire(provider: Provider, blockId: BlockId, requestedName?: string, requestedModel?: ModelId) {
+  private hire(provider: Provider, blockId: BlockId, requestedName?: string, requestedModel?: ModelId, role: EmployeeRole = 'employee', bypassLimit = false) {
     const { company } = this;
     const block = this.block(blockId);
     const harness = this.harnesses[provider];
@@ -454,18 +457,19 @@ export class Office {
       );
     }
     const cap = headcountCap(company.level);
-    if (company.employees.length >= cap) {
+    if (!bypassLimit && company.employees.length >= cap) {
       throw new OfficeError(`Headcount cap reached (${cap} at level ${company.level}). Earn XP to grow the company.`);
     }
     const taken = new Set(company.employees.filter((e) => e.blockId === blockId).map((e) => e.desk));
     let desk = 0;
     while (taken.has(desk)) desk++;
-    if (desk >= DESKS_PER_BLOCK) throw new OfficeError(`${block.name} has no free desk`);
+    if (!bypassLimit && desk >= DESKS_PER_BLOCK && Number.isFinite(cap)) throw new OfficeError(`${block.name} has no free desk at this level`);
 
     const employee: Employee = {
       id: newId<EmployeeId>(),
       name: requestedName?.trim() || this.pickName(),
       provider,
+      role,
       blockId,
       desk,
       status: { kind: 'idle' },
@@ -549,6 +553,19 @@ export class Office {
     this.sessionOf(e).assign(task.trim());
   }
 
+  private async delegateToTeammate(orchestrator: Employee, target: string | undefined, task: string): Promise<string> {
+    if ((orchestrator.role ?? 'employee') !== 'orchestrator') return 'Only the block orchestrator can delegate team tasks.';
+    const teammates = this.company.employees.filter((candidate) => candidate.blockId === orchestrator.blockId && candidate.id !== orchestrator.id);
+    const normalized = target?.trim().toLocaleLowerCase();
+    const teammate = normalized
+      ? teammates.find((candidate) => candidate.name.toLocaleLowerCase() === normalized)
+      : teammates.find((candidate) => candidate.status.kind === 'idle');
+    if (!teammate) return normalized ? `No teammate named ${target} works in this block.` : 'Every teammate is busy or this block has no other employees.';
+    if (teammate.status.kind === 'working' || teammate.status.kind === 'blocked_on_owner') return `${teammate.name} is busy. Ask them to finish or choose another teammate.`;
+    this.assign(teammate.id, task.trim());
+    return `Assigned ${teammate.name}: ${task.trim()}`;
+  }
+
   private answer(id: EmployeeId, questionId: QuestionId, text: string, always = false) {
     const e = this.employee(id);
     if (e.status.kind !== 'blocked_on_owner' || e.status.question.id !== questionId) {
@@ -571,7 +588,7 @@ export class Office {
 
   private loadModels(provider: Provider) {
     const harness = HARNESSES[provider];
-    if (!harness.listModels || this.catalogs[provider].kind === 'loading') return;
+    if (this.harnesses[provider].kind !== 'ready' || !harness.listModels || this.catalogs[provider].kind === 'loading') return;
     this.setCatalog(provider, { kind: 'loading' });
     harness.listModels().then(
       (catalog) => this.setCatalog(provider, catalog),

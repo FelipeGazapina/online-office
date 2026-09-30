@@ -77,6 +77,7 @@ export function CameraRig() {
     const move = (e: PointerEvent) => {
       const { view } = runtime;
       const m = get().camera;
+      // Relative deltas keep the FPS view turning after the physical cursor reaches a screen edge.
       if (pointer === 'locked' && document.hasFocus() && m === 'first') {
         const dx = e.movementX;
         const dy = e.movementY;

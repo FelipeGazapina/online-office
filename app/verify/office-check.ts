@@ -216,6 +216,20 @@ check(/^http:\/\/127\.0\.0\.1:\d+\/mcp\/[0-9a-f]{64}$/.test(fa.host.mcp.url) && 
 check(fa.host.memoryDigest() === '', 'the digest is empty before any note is saved');
 check(fa.host.rules() === '' && fb.host.rules() === '', 'no rules are in scope until F2 reads the rule files');
 
+const capOffice = new Office(join(dir, 'cap-company.json'), { 'claude-code': { kind: 'ready', version: 'fake' }, codex: { kind: 'missing' }, hermes: { kind: 'missing' } }, { changed() {}, said() {}, log() {} }, { mcp, memory });
+capOffice.handle({ type: 'create_block', cwd: repo });
+const capBlock = capOffice.snapshot().company.blocks[0]!.id;
+for (const name of ['Fay', 'Gus', 'Hana']) capOffice.handle({ type: 'hire', provider: 'claude-code', blockId: capBlock, name });
+let capRefused = false;
+try {
+  capOffice.handle({ type: 'hire', provider: 'claude-code', blockId: capBlock, name: 'Ivo' });
+} catch (error) {
+  capRefused = error instanceof OfficeError && /Headcount cap reached/.test(error.message);
+}
+capOffice.handle({ type: 'hire', provider: 'claude-code', blockId: capBlock, name: 'Ivo', role: 'orchestrator', bypassLimit: true });
+check(capRefused && capOffice.snapshot().company.employees.length === 4 && capOffice.snapshot().company.employees.at(-1)?.role === 'orchestrator', 'the normal level cap remains enforced while configuration can add an orchestrator beyond it');
+capOffice.shutdown();
+
 console.log('\n# owner questions');
 office.handle({ type: 'assign', employeeId: ana, task: 'Refactor billing' });
 fa.host.setActivity('Running npm test');

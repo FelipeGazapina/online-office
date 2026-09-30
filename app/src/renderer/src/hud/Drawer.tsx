@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { DESKS_PER_BLOCK, PROVIDERS, type Employee } from '../../../shared/protocol.ts';
+import { PROVIDERS, type Employee } from '../../../shared/protocol.ts';
 import { get, send, set, useStore } from '../store.ts';
 import { fmtWait, useNow } from './hooks.ts';
 
@@ -14,6 +14,7 @@ export function Drawer() {
   const lines = useStore((s) => (id ? s.chat[id] : undefined)) ?? [];
   const nearbyIds = useStore((s) => s.nearbyIds);
   const company = useStore((s) => s.company);
+  const catalogs = useStore((s) => s.catalogs);
   const now = useNow(1000);
   const [draft, setDraft] = useState('');
   const [confirm, setConfirm] = useState(false);
@@ -44,6 +45,7 @@ export function Drawer() {
   if (!e) return null;
   if (groupMembers.length > 1) return <GroupDrawer members={groupMembers} />;
   const p = PROVIDERS[e.provider];
+  const catalog = catalogs?.[e.provider];
   const s = e.status;
 
   return (
@@ -53,7 +55,7 @@ export function Drawer() {
           <h2>{e.name}</h2>
           <div className="sub">
             <i className="pdot" style={{ background: p.color }} />
-            {p.label}
+            {p.label} · {(e.role ?? 'employee') === 'orchestrator' ? 'Block orchestrator' : 'Employee'}
           </div>
         </div>
         <button className="x" title="Close (Esc)" onClick={() => set({ selectedId: null })}>
@@ -64,9 +66,20 @@ export function Drawer() {
       <div className="facts">
         <span className={`pill ${s.kind}`}>{STATUS_LABEL[s.kind]}</span>
         <span>
-          {block?.name ?? 'No block'} · desk {e.desk + 1}/{DESKS_PER_BLOCK}
+          {block?.name ?? 'No block'} · desk {e.desk + 1}
         </span>
       </div>
+
+      <section className="agent-settings">
+        <h3>Agent settings</h3>
+        <label className="field"><span>Permission mode</span><select value={e.permissions.mode} onChange={(event) => send({ type: 'set_permissions', employeeId: e.id, mode: event.target.value as 'inherit' | 'ask' | 'auto' | 'yolo' })}>
+          <option value="inherit">Inherit</option><option value="ask">Ask</option><option value="auto">Auto</option><option value="yolo">Yolo</option>
+        </select></label>
+        {catalog?.kind === 'ready' && <label className="field"><span>Model</span><select value={e.model} onChange={(event) => send({ type: 'set_model', employeeId: e.id, model: event.target.value as Employee['model'] })}>
+          {catalog.models.map((option) => <option key={option.id} value={option.id}>{option.label}</option>)}
+        </select></label>}
+        <button className="link" onClick={() => send({ type: 'fresh_session', employeeId: e.id })}>Start fresh session</button>
+      </section>
 
       <section>
         <h3>Current task</h3>

@@ -1,7 +1,7 @@
 import { Drawer } from './hud/Drawer.tsx';
 import { EmployeeMenu } from './hud/EmployeeMenu.tsx';
 import { Modals } from './hud/Modals.tsx';
-import { HelpOverlay, Toasts, WaitingMeter } from './hud/Panels.tsx';
+import { ComputerPrompt, HelpOverlay, Toasts, WaitingMeter } from './hud/Panels.tsx';
 import { Bottom } from './hud/Talk.tsx';
 import { UpdateChip } from './hud/UpdateControl.tsx';
 import { ComputerMenu, MacPortal } from './hud/MacPortal.tsx';
@@ -24,6 +24,7 @@ export function App() {
       </div>
       {portalMode && <MacPortal />}
       <Toasts />
+      <ComputerPrompt />
       <Drawer />
       <Modals />
       <EmployeeMenu />
