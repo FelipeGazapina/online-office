@@ -2,13 +2,13 @@ import { useFrame } from '@react-three/fiber';
 import { useEffect, useMemo, useRef } from 'react';
 import { Color, Shape, ShapeGeometry, type MeshStandardMaterial } from 'three';
 import type { Employee } from '../../../shared/protocol.ts';
-import { codeTexture, FONT_DISPLAY, fitText, roundRect, useCanvasTexture } from './textures.ts';
+import { codeTexture, FONT_DISPLAY, fitText, ownerComputerTexture, roundRect, useCanvasTexture } from './textures.ts';
 
 export type ScreenKind = Employee['status']['kind'] | 'none';
 
 const WHITE = new Color('#ffffff');
 
-function Screen({ kind, color }: { kind: ScreenKind; color: string }) {
+function Screen({ kind, color, owner = false }: { kind: ScreenKind; color: string; owner?: boolean }) {
   const tex = useMemo(() => {
     const t = codeTexture().clone();
     t.needsUpdate = true;
@@ -16,6 +16,7 @@ function Screen({ kind, color }: { kind: ScreenKind; color: string }) {
     return t;
   }, []);
   const mat = useRef<MeshStandardMaterial>(null);
+  const ownerTex = ownerComputerTexture();
   const seed = useMemo(() => Math.random() * 6, []);
   useEffect(() => {
     const m = mat.current;
@@ -38,14 +39,14 @@ function Screen({ kind, color }: { kind: ScreenKind; color: string }) {
   });
   return (
     <mesh position={[0, 0, 0.022]}>
-      <planeGeometry args={[0.64, 0.36]} />
-      <meshStandardMaterial ref={mat} color="#0d0f14" emissiveMap={tex} emissive="#ffffff" emissiveIntensity={0} roughness={0.3} />
+      <planeGeometry args={[owner ? 0.78 : 0.64, owner ? 0.44 : 0.36]} />
+      <meshStandardMaterial ref={mat} color={owner ? '#ffffff' : '#0d0f14'} map={owner ? ownerTex : undefined} emissiveMap={owner ? ownerTex : tex} emissive="#ffffff" emissiveIntensity={owner ? 0.42 : 0} roughness={0.3} />
     </mesh>
   );
 }
 
 // A nameplate on the desktop, turned away from the person at the desk so it reads to whoever looks at the desk.
-function Nameplate({ text }: { text: string }) {
+function Nameplate({ text, flat = false }: { text: string; flat?: boolean }) {
   const tex = useCanvasTexture(256, 96, (g) => {
     g.fillStyle = '#20263a';
     roundRect(g, 0, 0, 256, 96, 16);
@@ -56,6 +57,20 @@ function Nameplate({ text }: { text: string }) {
     fitText(g, text, 220, 72, 800, FONT_DISPLAY);
     g.fillText(text, 128, 52);
   }, [text]);
+  if (flat) {
+    return (
+      <group position={[0, 0.785, 0.2]}>
+        <mesh castShadow>
+          <boxGeometry args={[0.44, 0.025, 0.18]} />
+          <meshStandardMaterial color="#20263a" roughness={0.52} />
+        </mesh>
+        <mesh position={[0, 0.014, 0]} rotation-x={-Math.PI / 2}>
+          <planeGeometry args={[0.4, 0.14]} />
+          <meshStandardMaterial map={tex} transparent roughness={0.5} />
+        </mesh>
+      </group>
+    );
+  }
   return (
     <group position={[0, 0.755, -0.3]} rotation-y={Math.PI}>
       <mesh castShadow position={[0, 0.07, 0]}>
@@ -77,6 +92,9 @@ export function Desk({
   color = '#6f7cff',
   tall = false,
   plate,
+  flatPlate = false,
+  owner = false,
+  onScreenClick,
 }: {
   position: [number, number, number];
   rotationY?: number;
@@ -84,48 +102,70 @@ export function Desk({
   color?: string;
   tall?: boolean;
   plate?: string;
+  flatPlate?: boolean;
+  owner?: boolean;
+  onScreenClick?: () => void;
 }) {
+  const topW = owner ? 1.8 : 1.6;
+  const topD = owner ? 0.9 : 0.8;
   return (
     <group position={position} rotation-y={rotationY}>
       <mesh castShadow receiveShadow position={[0, 0.72, 0]}>
-        <boxGeometry args={[1.6, 0.06, 0.8]} />
-        <meshStandardMaterial color="#efe0c6" roughness={0.7} />
+        <boxGeometry args={[topW, owner ? 0.085 : 0.06, topD]} />
+        <meshStandardMaterial color={owner ? '#ead8ba' : '#efe0c6'} roughness={owner ? 0.58 : 0.7} />
       </mesh>
+      {owner && (
+        <mesh castShadow receiveShadow position={[0, 0.675, 0]}>
+          <boxGeometry args={[topW - 0.05, 0.035, topD - 0.05]} />
+          <meshStandardMaterial color="#b7834d" roughness={0.5} metalness={0.12} />
+        </mesh>
+      )}
       {[
-        [-0.74, -0.34],
-        [0.74, -0.34],
-        [-0.74, 0.34],
-        [0.74, 0.34],
+        [-(topW / 2 - 0.06), -(topD / 2 - 0.06)],
+        [topW / 2 - 0.06, -(topD / 2 - 0.06)],
+        [-(topW / 2 - 0.06), topD / 2 - 0.06],
+        [topW / 2 - 0.06, topD / 2 - 0.06],
       ].map(([x, z]) => (
         <mesh key={`${x}${z}`} castShadow position={[x, 0.35, z]}>
           <boxGeometry args={[0.06, 0.7, 0.06]} />
-          <meshStandardMaterial color="#3a3f4e" roughness={0.6} />
+          <meshStandardMaterial color={owner ? '#262a38' : '#3a3f4e'} roughness={0.6} />
         </mesh>
       ))}
       <mesh castShadow position={[0, 0.5, -0.36]}>
         <boxGeometry args={[1.4, 0.4, 0.03]} />
-        <meshStandardMaterial color="#e2d1b3" roughness={0.8} />
+        <meshStandardMaterial color={owner ? '#d4b98f' : '#e2d1b3'} roughness={0.8} />
       </mesh>
       <mesh position={[0, 0.755, 0.2]}>
-        <boxGeometry args={[0.5, 0.025, 0.16]} />
-        <meshStandardMaterial color="#2b2e38" roughness={0.5} />
+        <boxGeometry args={[owner ? 0.58 : 0.5, 0.025, owner ? 0.18 : 0.16]} />
+        <meshStandardMaterial color={owner ? '#22283a' : '#2b2e38'} roughness={0.5} />
       </mesh>
-      <mesh castShadow position={[0.62, 0.8, 0.12]}>
+      <mesh castShadow position={[owner ? 0.64 : 0.62, 0.8, 0.12]}>
         <cylinderGeometry args={[0.05, 0.045, 0.1, 12]} />
-        <meshStandardMaterial color="#fbf6ec" roughness={0.5} />
+        <meshStandardMaterial color={owner ? '#f7c766' : '#fbf6ec'} roughness={0.5} />
       </mesh>
-      <group position={[0, tall ? 1.14 : 1.1, -0.18]}>
+      <group
+        position={[0, tall ? 1.14 : owner ? 1.16 : 1.1, owner ? -0.2 : -0.18]}
+        onClick={onScreenClick ? (e) => { e.stopPropagation(); if (e.delta < 6) onScreenClick(); } : undefined}
+        onPointerOver={onScreenClick ? () => void (document.body.style.cursor = 'pointer') : undefined}
+        onPointerOut={onScreenClick ? () => void (document.body.style.cursor = '') : undefined}
+      >
         <mesh castShadow position={[0, -0.24, 0]}>
           <boxGeometry args={[0.06, 0.1, 0.06]} />
-          <meshStandardMaterial color="#2b2e38" />
+          <meshStandardMaterial color={owner ? '#252b3b' : '#2b2e38'} />
         </mesh>
         <mesh castShadow>
-          <boxGeometry args={[0.72, 0.44, 0.04]} />
-          <meshStandardMaterial color="#1c1f27" roughness={0.5} />
+          <boxGeometry args={[owner ? 0.88 : 0.72, owner ? 0.52 : 0.44, 0.04]} />
+          <meshStandardMaterial color={owner ? '#111a2a' : '#1c1f27'} roughness={0.5} />
         </mesh>
-        <Screen kind={screen} color={color} />
+        <Screen kind={screen} color={color} owner={owner} />
+        {owner && (
+          <mesh castShadow position={[0, -0.29, 0.02]}>
+            <boxGeometry args={[0.34, 0.035, 0.24]} />
+            <meshStandardMaterial color="#161c2b" roughness={0.45} />
+          </mesh>
+        )}
       </group>
-      {plate && <Nameplate text={plate} />}
+      {plate && <Nameplate text={plate} flat={flatPlate} />}
     </group>
   );
 }
