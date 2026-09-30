@@ -3,6 +3,7 @@ import { spawn } from 'node:child_process';
 import { Readable, Writable } from 'node:stream';
 import * as acp from '@agentclientprotocol/sdk';
 import { withoutHermesVars } from './hermes-profile.ts';
+import { providerLaunch } from './launch.ts';
 
 export type HermesProcess = {
   // The ACP wire, newline-delimited JSON over the process's stdin and stdout.
@@ -36,10 +37,14 @@ kill -KILL $all 2>/dev/null
 
 const TAIL_BYTES = 2000;
 
-export function launchHermes(spec: { home: string; cwd: string }, command = { bin: 'hermes', args: ['acp'] }): HermesProcess {
-  const child = spawn(command.bin, command.args, {
+export function launchHermes(spec: { home: string; cwd: string }, command?: { bin: string; args: string[] }): HermesProcess {
+  const configured = command ? undefined : providerLaunch('hermes', withoutHermesVars(process.env));
+  const bin = command?.bin ?? configured?.executable ?? 'hermes';
+  const args = command?.args ?? ['acp'];
+  const env = configured?.env ?? withoutHermesVars(process.env);
+  const child = spawn(bin, args, {
     cwd: spec.cwd,
-    env: { ...withoutHermesVars(process.env), HERMES_HOME: spec.home },
+    env: { ...env, HERMES_HOME: spec.home },
     stdio: ['pipe', 'pipe', 'pipe'],
     // Its own session, so a signal aimed at the app's process group does not reach it before the reaper acts.
     detached: true,

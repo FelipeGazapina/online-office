@@ -1,4 +1,6 @@
-import { isAbsolute, relative } from 'node:path';
+import { accessSync, constants } from 'node:fs';
+import { createRequire } from 'node:module';
+import { dirname, isAbsolute, join, relative, sep } from 'node:path';
 import {
   query,
   type CanUseTool,
@@ -18,10 +20,45 @@ const debug = logger('claude');
 
 const claudeDefaultModel = () => (process.env.OFFICE_CLAUDE_MODEL ?? 'claude-sonnet-5-5') as ModelId;
 
+const nodeRequire = createRequire(import.meta.url);
+
+// Electron's ASAR resolver returns a virtual path for the SDK's native binary. Native child processes need the unpacked file.
+export function claudeCodeExecutable(): string | undefined {
+  try {
+    const packageName = `claude-agent-sdk-${process.platform}-${process.arch}`;
+    // The platform package is an optional dependency nested under the SDK. It
+    // is not hoisted in the pnpm development install, so resolve it relative
+    // to the SDK package instead of asking Node to resolve it from this file.
+    const sdk = nodeRequire.resolve('@anthropic-ai/claude-agent-sdk') as string;
+    let root = dirname(sdk);
+    let resolved: string | undefined;
+    for (let i = 0; i < 8 && root; i += 1) {
+      const candidate = join(root, 'node_modules', '@anthropic-ai', packageName, 'claude');
+      try {
+        accessSync(candidate, constants.X_OK);
+        resolved = candidate;
+        break;
+      } catch {
+        const parent = dirname(root);
+        if (parent === root) break;
+        root = parent;
+      }
+    }
+    if (!resolved) return undefined;
+    const virtual = `${sep}app.asar${sep}`;
+    const unpacked = resolved.includes(virtual) ? resolved.replace(virtual, `${sep}app.asar.unpacked${sep}`) : resolved;
+    accessSync(unpacked, constants.X_OK);
+    return unpacked;
+  } catch {
+    return undefined;
+  }
+}
+
 // Claude's model list is part of the SDK initialization response. Use a short-lived
 // query so opening the hire dialog does not create an employee session.
 export async function listClaudeModels(): Promise<ModelCatalog> {
-  const q = query({ prompt: '', options: { cwd: process.cwd() } });
+  const executable = claudeCodeExecutable();
+  const q = query({ prompt: '', options: { cwd: process.cwd(), ...(executable && { pathToClaudeCodeExecutable: executable }) } });
   try {
     const models = await q.supportedModels();
     // The SDK includes aliases (for example `sonnet`) alongside their canonical
@@ -308,11 +345,13 @@ export class ClaudeSession implements EmployeeSession {
     // Read once per session: a note saved while the session runs shows up in the next one, and the prompt stays put.
     const digest = this.host.memoryDigest();
     const rules = this.host.rules();
+    const executable = claudeCodeExecutable();
     debug(`session start for ${employee.name}, memory digest:\n${digest || '(no notes yet)'}`);
     this.q = this.run({
       prompt: this.inbox,
       options: {
         cwd: block.cwd,
+        ...(executable && { pathToClaudeCodeExecutable: executable }),
         model: this.host.model,
         // 'project' only: the boss's global plugins and hooks must not leak into employees.
         settingSources: ['project'],

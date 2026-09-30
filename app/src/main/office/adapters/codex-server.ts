@@ -7,6 +7,7 @@ import { createInterface } from 'node:readline';
 import type { Readable, Writable } from 'node:stream';
 import type { z } from 'zod';
 import { logger } from '../debug.ts';
+import { providerLaunch } from './launch.ts';
 import {
   anything,
   parseEvent,
@@ -380,9 +381,10 @@ export const codexPaths = (root: string): CodexPaths => ({ home: join(root, 'hom
 //   Memories are Codex's own and would read and write his.
 // - HOME is an empty folder, which hides ~/.agents/skills. Commands still get the real one, or git and npm would not find
 //   their config.
-export function codexCommand(paths: CodexPaths, realHome: string, env: NodeJS.ProcessEnv = process.env) {
+export function codexCommand(paths: CodexPaths, realHome: string, env?: NodeJS.ProcessEnv) {
+  const launch = env === undefined ? providerLaunch('codex') : { executable: 'codex', env };
   return {
-    command: 'codex',
+    command: launch.executable ?? 'codex',
     args: [
       'app-server',
       '--disable', 'apps',
@@ -391,7 +393,7 @@ export function codexCommand(paths: CodexPaths, realHome: string, env: NodeJS.Pr
       '-c', 'features.memories=false',
       '-c', `shell_environment_policy.set={HOME=${JSON.stringify(realHome)}}`,
     ],
-    env: { ...env, CODEX_HOME: paths.home, HOME: paths.emptyHome },
+    env: { ...launch.env, CODEX_HOME: paths.home, HOME: paths.emptyHome },
   };
 }
 
