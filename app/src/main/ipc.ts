@@ -186,7 +186,7 @@ export function startOffice({ dataFile, harnesses, window, services }: Options) 
       }
     };
     win.on('enter-full-screen', portalFullScreenGuard);
-    win.setAlwaysOnTop(true, 'floating');
+    win.setAlwaysOnTop(true, 'screen-saver');
     // A native fullscreen window lives in its own Space. Leave that Space while the portal is
     // active, then fill the owner's current Space by maximizing in place.
     if (!portalWasMaximized) win.maximize();
