@@ -20,6 +20,7 @@ import { initialVoice, type VoiceState } from './voice/chip.ts';
 export type CameraMode = 'follow' | 'iso' | 'first';
 export type MicMode = 'proximity' | 'push';
 export type Lang = 'en-US' | 'pt-BR' | 'auto';
+export type ComputerView = 'office' | 'mirror';
 // What each language setting means for listening (`stt`, what whisper is told) and for the employees' voices (`tts`).
 export const LANGS: Record<Lang, { stt: Language; tts: 'en-US' | 'pt-BR' }> = {
   'en-US': { stt: 'en', tts: 'en-US' },
@@ -64,6 +65,7 @@ type State = Settings & {
   computerMenu: boolean;
   portalMode: boolean;
   computerState: 'away' | 'seated';
+  computerView: ComputerView;
   nearComputer: boolean;
   nearProjectComputer: BlockId | null;
   projectComputerId: BlockId | null;
@@ -95,6 +97,7 @@ export const useStore = create<State>()(() => ({
   computerMenu: false,
   portalMode: false,
   computerState: 'away',
+  computerView: 'office',
   nearComputer: false,
   nearProjectComputer: null,
   projectComputerId: null,

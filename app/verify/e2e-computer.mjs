@@ -11,7 +11,8 @@ export default async (s) => {
   assert(await s.eval("__office.store.getState().nearComputer"), 'the owner is near the computer');
   await s.press('KeyF', 'f');
   await s.waitFor("__office.store.getState().portalMode === true");
-  assert(await s.eval("!!document.querySelector('.mac-portal')"), 'F opens the simulated desktop');
+  assert(await s.eval("__office.store.getState().computerView === 'office'"), 'F opens the office desktop without mirroring');
+  assert(await s.eval("!!document.querySelector('.mac-portal') && !document.querySelector('.mac-mirror-portal')"), 'the office desktop is visible first');
   assert(await s.eval("document.querySelector('.mac-window-head b')?.innerText.includes('My Mac')"), 'the desktop shows the computer app');
   assert(await s.eval("[...document.querySelectorAll('.mac-action')].some((b) => b.innerText.includes('Configuration'))"), 'the desktop has a configuration icon');
   await s.clickText('.mac-action', 'Configuration');
@@ -21,6 +22,14 @@ export default async (s) => {
   await s.clickText('.mac-office-window .co-row .btn', 'Hire');
   assert(await s.eval("[...document.querySelectorAll('.modal option')].some((o) => o.innerText.includes('Block orchestrator'))"), 'hiring offers the block orchestrator role');
   await s.press('Escape', 'Escape');
+  await s.clickText('.mac-office-window .blocks-head .btn', 'New block');
+  await s.waitFor("__office.store.getState().modal?.kind === 'block'");
+  assert(await s.eval("document.body.innerText.includes('Choose folder')"), 'configuration opens the new block form');
+  await s.clickText('.modal .btn.ghost', 'Cancel');
+  await s.waitFor("__office.store.getState().modal === null");
+  await s.clickText('.mac-action', 'Live Mac mirror');
+  await s.waitFor("__office.store.getState().computerView === 'mirror'");
+  assert(await s.eval("!!document.querySelector('.mac-mirror-portal')"), 'the mirror app opens the live desktop view');
   await s.press('KeyF', 'f');
   await s.waitFor("__office.store.getState().portalMode === false");
   assert(await s.eval("__office.store.getState().computerState === 'away'"), 'F stands up from the desktop');

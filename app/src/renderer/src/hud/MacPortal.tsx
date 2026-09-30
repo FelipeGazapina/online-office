@@ -1,8 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { set, useStore } from '../store.ts';
 import { CompanyPanel, SettingsPanel, TaskBoardsPanel } from './Panels.tsx';
-import { enterComputer, leaveComputer } from '../computer.ts';
-import { testRun } from '../testRun.ts';
+import { enterComputer, leaveComputer, openMirror } from '../computer.ts';
 
 type DisplayCaptureVideoConstraints = MediaTrackConstraints & { cursor: 'never' };
 const DISPLAY_CAPTURE_VIDEO: DisplayCaptureVideoConstraints = { frameRate: { ideal: 30, max: 60 }, cursor: 'never' };
@@ -21,13 +20,13 @@ export function ComputerMenu() {
   );
 }
 
-function TestPortal() {
+function OfficeDesktop() {
   const company = useStore((s) => s.company);
   return (
     <main className="mac-portal">
-      <header className="mac-bar"><div className="mac-brand"><span className="mac-logo">⌘</span><b>My Mac</b></div><span className="mac-live">AUTOMATED TEST DESKTOP</span><button className="btn ghost" onClick={() => leaveComputer()}>Stand up (F)</button></header>
+      <header className="mac-bar"><div className="mac-brand"><span className="mac-logo">⌘</span><b>My Mac</b></div><span className="mac-live">OFFICE DESKTOP</span><button className="btn ghost" onClick={() => leaveComputer()}>Stand up (F)</button></header>
       <section className="mac-desktop"><div className="mac-workspace">
-        <div className="mac-app-window"><div className="mac-window-head"><span className="traffic red" /><span className="traffic amber" /><span className="traffic green" /><b>My Mac</b></div><div className="mac-window-body"><p className="mac-kicker">Your computer</p><h1>My Mac</h1><p className="muted">The real Mac desktop is mirrored here for the owner.</p><button className="mac-action"><span>⚙️</span><b>Configuration</b><small>Office settings</small></button></div></div>
+        <div className="mac-app-window"><div className="mac-window-head"><span className="traffic red" /><span className="traffic amber" /><span className="traffic green" /><b>My Mac</b></div><div className="mac-window-body"><p className="mac-kicker">Your computer</p><h1>My Mac</h1><p className="muted">Manage your office here, or open the live view of your native Mac when you need it.</p><div className="mac-actions"><button className="mac-action" onClick={() => document.getElementById('mac-configuration')?.scrollIntoView({ block: 'start' })}><span>⚙️</span><b>Configuration</b><small>Hiring and blocks</small></button><button className="mac-action" onClick={openMirror}><span>🖥️</span><b>Live Mac mirror</b><small>Open your native desktop</small></button></div></div></div>
         <div id="mac-configuration" className="mac-app-window mac-office-window"><div className="mac-window-head"><span className="traffic red" /><span className="traffic amber" /><span className="traffic green" /><b>Configuration · {company?.name ?? 'Company'}</b></div><CompanyPanel allowOverLimit /></div>
         <div className="mac-app-window mac-settings-window"><div className="mac-window-head"><span className="traffic red" /><span className="traffic amber" /><span className="traffic green" /><b>Office settings</b></div><SettingsPanel /></div>
       </div></section>
@@ -80,6 +79,7 @@ function MirrorDesktop() {
 
 export function MacPortal() {
   const projectComputerId = useStore((s) => s.projectComputerId);
+  const computerView = useStore((s) => s.computerView);
   if (projectComputerId) {
     return (
       <main className="mac-portal project-task-portal">
@@ -88,5 +88,5 @@ export function MacPortal() {
       </main>
     );
   }
-  return testRun ? <TestPortal /> : <MirrorDesktop />;
+  return computerView === 'office' ? <OfficeDesktop /> : <MirrorDesktop />;
 }
