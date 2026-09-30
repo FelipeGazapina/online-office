@@ -203,6 +203,8 @@ export type OfficeApi = {
     leave(): void;
     openHome(): void;
     openTerminal(): void;
+    openSlack(): void;
+    onExit(cb: () => void): () => void;
   };
   update: {
     // Acts only from `current`, `check-failed` and `update-failed`.
@@ -235,6 +237,8 @@ export const IPC = {
   portalLeave: 'office:portal-leave',
   portalOpenHome: 'office:portal-open-home',
   portalOpenTerminal: 'office:portal-open-terminal',
+  portalOpenSlack: 'office:portal-open-slack',
+  portalExit: 'office:portal-exit',
   updateCheck: 'office:update-check',
   updateInstall: 'office:update-install',
   updateSubscribe: 'office:update-subscribe',
