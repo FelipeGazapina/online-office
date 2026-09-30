@@ -1,7 +1,7 @@
 import { useFrame, useThree } from '@react-three/fiber';
 import { useEffect, useRef } from 'react';
 import { Vector3, type PerspectiveCamera } from 'three';
-import { angleDiff, getLayout } from '../layout.ts';
+import { angleDiff } from '../layout.ts';
 import { runtime } from '../runtime.ts';
 import { get, useStore } from '../store.ts';
 import { stepSim } from '../sim.ts';
@@ -22,15 +22,16 @@ export function SimDriver() {
 export function CameraRig() {
   const { gl } = useThree();
   const mode = useStore((s) => s.camera);
-  const company = useStore((s) => s.company);
   const uiOpen = useStore((s) => Boolean(s.modal || s.menu || s.helpOpen || s.cardMinimized || s.computerMenu || s.portalMode || s.selectedId));
   const focus = useRef(new Vector3());
+  const focusTarget = useRef(new Vector3());
   const snap = useRef(true);
   const pointerLocked = useRef(false);
   const scratch = useRef({ desired: new Vector3(), look: new Vector3() });
 
   useEffect(() => {
     const { view, owner } = runtime;
+    snap.current = true;
     if (mode !== 'first' && document.pointerLockElement === gl.domElement) document.exitPointerLock();
     if (mode === 'follow') view.yaw = owner.yaw;
     if (mode === 'iso') view.isoYawTarget = Math.round((view.yaw + (3 * Math.PI) / 4) / (Math.PI / 2)) * (Math.PI / 2) - (3 * Math.PI) / 4;
@@ -173,9 +174,9 @@ export function CameraRig() {
       look.x += fx * 1.6;
       look.z += fz * 1.6;
     } else if (mode === 'iso') {
-      // The overview is a map camera: keep the whole company legible while the owner moves through it.
-      const b = getLayout(company?.blocks ?? []).bounds;
-      focus.current.lerp(desired.set((b.x0 + b.x1) / 2, 0.6, (b.z0 + b.z1) / 2), ease(dt, snap.current ? 100 : 1.5));
+      focusTarget.current.set(owner.pos.x, 0.6, owner.pos.z);
+      if (snap.current) focus.current.copy(focusTarget.current);
+      else focus.current.lerp(focusTarget.current, ease(dt, 6));
       const c = Math.cos(ISO_PITCH);
       look.copy(focus.current);
       desired.set(look.x - fx * c * view.isoDist, look.y + Math.sin(ISO_PITCH) * view.isoDist, look.z - fz * c * view.isoDist);
