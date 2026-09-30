@@ -5,6 +5,9 @@ import { enterComputer, leaveComputer, openMirror } from '../computer.ts';
 
 type DisplayCaptureVideoConstraints = MediaTrackConstraints & { cursor: 'never' };
 const DISPLAY_CAPTURE_VIDEO: DisplayCaptureVideoConstraints = { frameRate: { ideal: 30, max: 60 }, cursor: 'never' };
+type MirrorBarVisibility = 'visible' | 'hidden';
+const MIRROR_BAR_HIDE_DELAY_MS = 3500;
+const MIRROR_BAR_REVEAL_ZONE = 24;
 
 /** The prompt shown before the owner sits down. */
 export function ComputerMenu() {
@@ -36,7 +39,9 @@ function OfficeDesktop() {
 
 function MirrorDesktop() {
   const video = useRef<HTMLVideoElement>(null);
+  const hideTimer = useRef<number | null>(null);
   const [state, setState] = useState<'starting' | 'live' | 'blocked'>('starting');
+  const [barVisibility, setBarVisibility] = useState<MirrorBarVisibility>('visible');
 
   useEffect(() => {
     let stream: MediaStream | undefined;
@@ -61,11 +66,51 @@ function MirrorDesktop() {
 
   useEffect(() => window.office.portal.onExit(() => leaveComputer()), []);
 
+  useEffect(() => {
+    const clearHideTimer = () => {
+      if (hideTimer.current !== null) {
+        window.clearTimeout(hideTimer.current);
+        hideTimer.current = null;
+      }
+    };
+    const scheduleHide = () => {
+      clearHideTimer();
+      hideTimer.current = window.setTimeout(() => {
+        hideTimer.current = null;
+        setBarVisibility('hidden');
+      }, MIRROR_BAR_HIDE_DELAY_MS);
+    };
+
+    if (state !== 'live') {
+      clearHideTimer();
+      setBarVisibility('visible');
+      return clearHideTimer;
+    }
+
+    scheduleHide();
+    return clearHideTimer;
+  }, [state]);
+
+  useEffect(() => {
+    const revealBar = (event: MouseEvent) => {
+      if (event.clientY > MIRROR_BAR_REVEAL_ZONE || barVisibility !== 'hidden') return;
+      setBarVisibility('visible');
+      if (state !== 'live') return;
+      if (hideTimer.current !== null) window.clearTimeout(hideTimer.current);
+      hideTimer.current = window.setTimeout(() => {
+        hideTimer.current = null;
+        setBarVisibility('hidden');
+      }, MIRROR_BAR_HIDE_DELAY_MS);
+    };
+    window.addEventListener('mousemove', revealBar);
+    return () => window.removeEventListener('mousemove', revealBar);
+  }, [barVisibility, state]);
+
   return (
     <main className="mac-portal mac-mirror-portal">
       <video ref={video} className="mac-mirror-video" autoPlay muted playsInline aria-label="Live view of this Mac" />
       <div className="mac-mirror-shade" aria-hidden="true" />
-      <header className="mac-mirror-bar">
+      <header className={`mac-mirror-bar ${barVisibility}`} data-visibility={barVisibility} aria-hidden={barVisibility === 'hidden'}>
         <div className="mac-brand"><span className="mac-logo">⌘</span><b>My Mac</b></div>
         <span className="mac-mirror-app">Desktop</span>
         <span className={`mac-mirror-state ${state}`}><i />{state === 'live' ? 'Live desktop' : state === 'starting' ? 'Connecting to this Mac…' : 'Screen Recording permission required'}</span>

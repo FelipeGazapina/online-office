@@ -139,6 +139,7 @@ export type ProjectBlock = {
   githubRepo?: string;
   whiteboard?: Whiteboard;
   taskBoard?: TaskBoardConfig;
+  linearBoardUrl?: string;
 };
 
 export type Company = {
@@ -188,6 +189,7 @@ export type ClientMessage =
   | { type: 'create_block'; cwd: string; name?: string; githubRepo?: string }
   | { type: 'update_block'; blockId: BlockId; name?: string; cwd?: string; githubRepo?: string }
   | { type: 'configure_task_board'; blockId: BlockId; config: TaskBoardConfig }
+  | { type: 'configure_linear_board'; blockId: BlockId; url: string }
   | { type: 'refresh_task_board'; blockId: BlockId }
   | { type: 'connect_task_provider'; provider: TaskProvider }
   | { type: 'configure_task_provider'; provider: 'cronospark'; apiKey: string; userId: string }

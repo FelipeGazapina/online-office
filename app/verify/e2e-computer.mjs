@@ -30,6 +30,17 @@ export default async (s) => {
   await s.clickText('.mac-action', 'Live Mac mirror');
   await s.waitFor("__office.store.getState().computerView === 'mirror'");
   assert(await s.eval("!!document.querySelector('.mac-mirror-portal')"), 'the mirror app opens the live desktop view');
+  const mirrorBar = await s.eval("(() => { const bar = document.querySelector('.mac-mirror-bar'); return bar && { state: document.querySelector('.mac-mirror-state')?.classList.contains('live'), visibility: bar.dataset.visibility, ariaHidden: bar.getAttribute('aria-hidden'), pointerEvents: getComputedStyle(bar).pointerEvents, background: getComputedStyle(bar).backgroundColor }; })()");
+  assert(mirrorBar?.visibility === 'visible' && mirrorBar.ariaHidden === 'false' && mirrorBar.pointerEvents === 'none', 'the mirror bar starts visible and click-through');
+  assert(mirrorBar?.background.includes('0.22'), `the mirror bar uses a translucent background (${mirrorBar?.background})`);
+  if (mirrorBar?.state) {
+    await s.sleep(4200);
+    assert(await s.eval("document.querySelector('.mac-mirror-bar')?.dataset.visibility === 'hidden' && document.querySelector('.mac-mirror-bar')?.getAttribute('aria-hidden') === 'true'"), 'the live mirror bar hides after its idle delay');
+    await s.eval("window.dispatchEvent(new MouseEvent('mousemove', { clientY: 4 }))");
+    assert(await s.eval("document.querySelector('.mac-mirror-bar')?.dataset.visibility === 'visible' && document.querySelector('.mac-mirror-bar')?.getAttribute('aria-hidden') === 'false'"), 'the top reveal zone shows the mirror bar again');
+    await s.sleep(4200);
+    assert(await s.eval("document.querySelector('.mac-mirror-bar')?.dataset.visibility === 'hidden'"), 'the revealed mirror bar hides again after the idle delay');
+  }
   await s.press('KeyF', 'f');
   await s.waitFor("__office.store.getState().portalMode === false");
   assert(await s.eval("__office.store.getState().computerState === 'away'"), 'F stands up from the desktop');

@@ -46,6 +46,7 @@ const clientMessage = z.discriminatedUnion('type', [
     githubRepo: z.string().url().optional(),
   }),
   z.object({ type: z.literal('configure_task_board'), blockId, config: taskBoardConfig }),
+  z.object({ type: z.literal('configure_linear_board'), blockId, url: z.string().url().max(1000) }),
   z.object({ type: z.literal('refresh_task_board'), blockId }),
   z.object({ type: z.literal('connect_task_provider'), provider: taskProvider }),
   z.object({ type: z.literal('configure_task_provider'), provider: z.literal('cronospark'), apiKey: z.string().max(2000), userId: z.string().max(200) }),

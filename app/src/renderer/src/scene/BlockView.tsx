@@ -229,7 +229,7 @@ function TaskBoardWhiteboard({ block }: { block: ProjectBlock }) {
     g.fillStyle = '#fbfbf8'; g.fillRect(0, 0, 1536, 840);
     g.fillStyle = '#2b2e44'; g.font = `700 60px ${FONT_DISPLAY}`; g.fillText('Task board', 70, 100);
     g.font = `400 32px ${FONT_BODY}`; g.fillStyle = '#7b7e93';
-    g.fillText(board?.kind === 'loading' ? 'Refreshing incoming tickets…' : board?.kind === 'error' ? board.message : `${cards.length} incoming tickets · click to assign work`, 72, 150);
+    g.fillText(board?.kind === 'loading' ? 'Refreshing incoming tickets…' : board?.kind === 'error' ? board.message : `${cards.length} incoming tickets · press F or click to assign work`, 72, 150);
     ['Open', 'In progress', 'Done'].forEach((column, i) => {
       const x = 48 + i * 490; g.fillStyle = '#eeeef2'; roundRect(g, x, 200, 450, 570, 24); g.fill();
       g.fillStyle = '#2b2e44'; g.font = `700 36px ${FONT_DISPLAY}`; g.fillText(column, x + 24, 250);
@@ -238,6 +238,18 @@ function TaskBoardWhiteboard({ block }: { block: ProjectBlock }) {
     });
   }, [block.id, board?.kind, board?.cards, board?.kind === 'error' ? board.message : undefined]);
   return <group onClick={(e) => { e.stopPropagation(); if (e.delta < 6) set({ modal: { kind: 'task_board', blockId: block.id } }); }} onPointerOver={() => void (document.body.style.cursor = 'pointer')} onPointerOut={() => void (document.body.style.cursor = '')}><mesh castShadow position={[0, 1.85, 0]}><boxGeometry args={[4.4, 2.4, 0.1]} /><meshStandardMaterial color="#c9cdd8" metalness={0.3} roughness={0.5} /></mesh><mesh position={[0, 1.85, 0.056]}><planeGeometry args={[4.24, 2.32]} /><meshStandardMaterial map={tex} roughness={0.35} emissive="#fff" emissiveMap={tex} emissiveIntensity={0.3} /></mesh></group>;
+}
+
+function LinearBoardWhiteboard({ block }: { block: ProjectBlock }) {
+  const tex = useCanvasTexture(1536, 840, (g) => {
+    g.fillStyle = '#fbfbf8'; g.fillRect(0, 0, 1536, 840);
+    g.fillStyle = '#5b45c7'; g.font = `700 64px ${FONT_DISPLAY}`; g.fillText('Linear board', 70, 110);
+    g.fillStyle = '#7b7e93'; g.font = `400 34px ${FONT_BODY}`; g.fillText('Open the live Linear board · click or press F', 72, 165);
+    g.fillStyle = '#ece6ff'; roundRect(g, 70, 240, 1395, 420, 28); g.fill();
+    g.fillStyle = '#4d3b9e'; g.font = `700 52px ${FONT_DISPLAY}`; g.fillText('Your Linear workspace', 120, 340);
+    g.fillStyle = '#625d7b'; g.font = `400 34px ${FONT_BODY}`; g.fillText('This is a separate board for the full Linear view.', 120, 405);
+  }, [block.linearBoardUrl]);
+  return <group onClick={(e) => { e.stopPropagation(); if (e.delta < 6) set({ modal: { kind: 'linear_board', blockId: block.id } }); }} onPointerOver={() => void (document.body.style.cursor = 'pointer')} onPointerOut={() => void (document.body.style.cursor = '')}><mesh castShadow position={[0, 1.85, 0]}><boxGeometry args={[4.4, 2.4, 0.1]} /><meshStandardMaterial color="#d8d0f0" /></mesh><mesh position={[0, 1.85, 0.056]}><planeGeometry args={[4.24, 2.32]} /><meshStandardMaterial map={tex} emissive="#fff" emissiveMap={tex} emissiveIntensity={0.3} /></mesh></group>;
 }
 
 // The Desk and Chair models have the chair on their +z side, so their rotationY is the seat's yaw turned half a turn.
@@ -284,7 +296,7 @@ export const BlockView = memo(function BlockView({ block, employees }: { block: 
         <Sign name={block.name} cwd={block.cwd} color={block.color} />
       </group>
       <group position={[w.x, 0, w.z]}>
-        {block.taskBoard?.sources.length ? <TaskBoardWhiteboard block={block} /> : block.githubRepo ? <GithubWhiteboard block={block} /> : <Whiteboard block={block} authorName={author} />}
+        {block.linearBoardUrl ? <LinearBoardWhiteboard block={block} /> : block.taskBoard?.sources.length ? <TaskBoardWhiteboard block={block} /> : block.githubRepo ? <GithubWhiteboard block={block} /> : <Whiteboard block={block} authorName={author} />}
       </group>
       <group position={[c.x + 2.65, 0, c.z - 2.15]}><DailyHuddle color={trim} /></group>
     </group>

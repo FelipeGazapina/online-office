@@ -29,6 +29,7 @@ export function installInput() {
       if (s.computerState === 'seated') leaveComputer();
       else if (s.nearProjectComputer) enterProjectComputer(s.nearProjectComputer);
       else if (s.nearComputer) enterComputer();
+      else if (!s.modal && s.nearTaskBoard) set({ modal: { kind: 'task_board', blockId: s.nearTaskBoard } });
       else if (s.camera === 'first') {
         e.preventDefault();
         window.dispatchEvent(new Event('office:toggle-pointer-lock'));

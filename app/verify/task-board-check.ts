@@ -1,7 +1,7 @@
-import { mkdtempSync, readFileSync, statSync } from 'node:fs';
+import { mkdtempSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { normalizeTaskPayload, TaskBoardService } from '../src/main/office/task-board.ts';
+import { linearToolArguments, normalizeTaskPayload, parseLinearSelector, TaskBoardService } from '../src/main/office/task-board.ts';
 import type { TaskBoardSource } from '../src/shared/protocol.ts';
 
 const source: TaskBoardSource = { provider: 'cronospark', projectId: 'project-1' };
@@ -13,6 +13,16 @@ const [card] = result;
 if (card.id !== 'cronospark:task-1' || card.identifier !== 'CS-27' || card.status !== 'pending' || card.priority !== 'P2') throw new Error(`unexpected normalized card ${JSON.stringify(card)}`);
 console.log('ok: CronoSpark MCP task payload becomes a normalized board card');
 
+const teamSelector = parseLinearSelector('https://linear.app/bloomnetwork/team/BLOOM/active');
+if (teamSelector.kind !== 'team' || teamSelector.team !== 'BLOOM' || teamSelector.workspace !== 'bloomnetwork') throw new Error(`Linear team URL was not parsed safely: ${JSON.stringify(teamSelector)}`);
+const teamArgs = linearToolArguments({ name: 'list_issues', inputSchema: { properties: { teamId: {}, workspace: {}, projectId: {} } } }, { provider: 'linear', projectId: 'https://linear.app/bloomnetwork/team/BLOOM/active' });
+if (teamArgs.args.teamId !== 'BLOOM' || teamArgs.args.workspace !== 'bloomnetwork' || 'projectId' in teamArgs.args) throw new Error(`Linear team arguments were mapped incorrectly: ${JSON.stringify(teamArgs)}`);
+const workspaceArgs = linearToolArguments({ name: 'list_issues', inputSchema: { properties: { projectId: {} } } }, { provider: 'linear', projectId: 'bloomnetwork' });
+if (Object.keys(workspaceArgs.args).length || !workspaceArgs.unfilteredWorkspace) throw new Error(`A workspace without a workspace filter must use the authenticated workspace: ${JSON.stringify(workspaceArgs)}`);
+const projectArgs = linearToolArguments({ name: 'list_issues', inputSchema: { properties: { project: {}, team: {}, workspace: {} } } }, { provider: 'linear', projectId: 'project:proj_123' });
+if (projectArgs.args.project !== 'proj_123' || Object.keys(projectArgs.args).length !== 1) throw new Error(`Linear project arguments were mapped incorrectly: ${JSON.stringify(projectArgs)}`);
+console.log('ok: Linear selectors map team URLs, workspaces, and explicit projects without project-field leakage');
+
 const credentialsFile = join(mkdtempSync(join(tmpdir(), 'office-task-board-')), 'credentials.json');
 const service = new TaskBoardService({ credentialsFile });
 service.configureCronoSpark('Bearer test-api-key', 'test-user');
@@ -22,3 +32,10 @@ const restored = new TaskBoardService({ credentialsFile });
 const connection = restored.connectionStates().cronospark;
 if (connection.kind !== 'ready' || connection.userId !== 'test-user' || JSON.stringify(connection).includes('test-api-key')) throw new Error(`credentials did not restore safely: ${JSON.stringify(connection)}`);
 console.log('ok: CronoSpark credentials persist privately without entering the snapshot');
+
+const linearCredentialsFile = join(mkdtempSync(join(tmpdir(), 'office-linear-')), 'credentials.json');
+writeFileSync(linearCredentialsFile, JSON.stringify({ linear: { tokens: { access_token: 'test-linear-token', token_type: 'bearer' } } }));
+const linearService = new TaskBoardService({ credentialsFile: linearCredentialsFile });
+const linearConnection = linearService.connectionStates().linear;
+if (linearConnection.kind !== 'ready' || JSON.stringify(linearConnection).includes('test-linear-token')) throw new Error(`Linear OAuth credentials did not restore safely: ${JSON.stringify(linearConnection)}`);
+console.log('ok: Linear OAuth credentials restore as a ready private connection');

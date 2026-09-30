@@ -53,7 +53,9 @@ To prove the whole path on this machine, run `pnpm build` and then `node verify/
 
 When you sit at the owner's desk and press **F**, Online Office becomes a live, click-through mirror of the Mac desktop. Safari, Slack, Finder, Terminal, and every other native app stay real: mouse clicks and keyboard input reach the Mac underneath the mirror. If the office is in native macOS fullscreen, the portal temporarily leaves that separate Space, fills the current desktop by maximizing in place, and restores fullscreen when you stand up. Press **F** again (or **⌘⇧O** after a native app takes focus) to return to the office. macOS may ask for Screen Recording access the first time.
 
-Click an employee, on the avatar or the name tag, for a menu with **Open chat** and **Go to**. In the Overview camera, click the floor to walk there and drag to turn the view. Click a whiteboard to enlarge it. Click **Reveal** on a block to open its folder in Finder.
+The project computer's **Task boards** app has a CronoSpark credentials section. Enter `CRONOSPARK_MCP_API_KEY` as the API key and `CRONOSPARK_MCP_USER_ID` as the MCP user ID, then click **Save CronoSpark**. The key is kept in the app's private credentials file (encrypted with the macOS keychain when available), never in `company.json` or renderer storage. A key already supplied in the app's environment can be kept by leaving the API key field blank.
+
+Click an employee, on the avatar or the name tag, for a menu with **Open chat** and **Go to**. In the Overview camera, click the floor to walk there and drag to turn the view. Press **F** near a task board or click its whiteboard to enlarge it. Click **Reveal** on a block to open its folder in Finder.
 
 The project computer's **Task boards** app has a CronoSpark credentials section. Enter `CRONOSPARK_MCP_API_KEY` as the API key and `CRONOSPARK_MCP_USER_ID` as the MCP user ID, then click **Save CronoSpark**. The key is kept in the app's private credentials file (encrypted with the macOS keychain when available), never in `company.json` or renderer storage. A key already supplied in the app's environment can be kept by leaving the API key field blank.
 
