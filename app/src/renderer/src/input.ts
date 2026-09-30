@@ -47,7 +47,10 @@ export function installInput() {
       case 'Digit2':
         return setSetting('camera', 'iso');
       case 'Digit3':
-        return setSetting('camera', 'first');
+        e.preventDefault();
+        setSetting('camera', 'first');
+        if (s.camera !== 'first' || !document.pointerLockElement) window.dispatchEvent(new Event('office:toggle-pointer-lock'));
+        return;
       case 'KeyH':
         return set({ helpOpen: !s.helpOpen });
       case 'Enter':

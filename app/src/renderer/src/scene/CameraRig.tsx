@@ -63,6 +63,14 @@ export function CameraRig() {
     };
     const down = (e: PointerEvent) => {
       if (pointer === 'locked') return;
+      const s = get();
+      if (s.camera === 'first' && !s.modal && !s.menu && !s.helpOpen && !s.cardMinimized && !s.computerMenu && !s.portalMode && !s.selectedId) {
+        drag = { x: e.clientX, y: e.clientY, ox: e.clientX, oy: e.clientY, far: false };
+        e.preventDefault();
+        e.stopPropagation();
+        void el.requestPointerLock({ unadjustedMovement: true }).catch(() => {});
+        return;
+      }
       drag = { x: e.clientX, y: e.clientY, ox: e.clientX, oy: e.clientY, far: false };
     };
     const blockSceneClick = (e: MouseEvent) => {
