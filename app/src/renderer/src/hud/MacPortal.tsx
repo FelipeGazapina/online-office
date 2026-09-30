@@ -1,5 +1,5 @@
 import { set, useStore } from '../store.ts';
-import { CompanyPanel, SettingsPanel } from './Panels.tsx';
+import { CompanyPanel, SettingsPanel, TaskBoardsPanel } from './Panels.tsx';
 import { enterComputer, leaveComputer } from '../computer.ts';
 
 export function ComputerMenu() {
@@ -28,6 +28,15 @@ export function ComputerMenu() {
 }
 
 export function MacPortal() {
+  const projectComputerId = useStore((s) => s.projectComputerId);
+  if (projectComputerId) {
+    return (
+      <main className="mac-portal project-task-portal">
+        <header className="mac-bar"><div className="mac-brand"><span className="mac-logo">⌘</span><b>Project computer</b></div><span className="mac-live">TASK BOARD CONFIGURATION</span><button className="btn ghost" onClick={() => leaveComputer()}>Stand up (F)</button></header>
+        <section className="mac-desktop"><div className="mac-workspace project-task-workspace"><div className="mac-app-window mac-task-window"><div className="mac-window-head"><span className="traffic red" /><span className="traffic amber" /><span className="traffic green" /><b>Project task boards</b></div><TaskBoardsPanel /></div></div></section>
+      </main>
+    );
+  }
   const company = useStore((s) => s.company);
   const leave = () => {
     leaveComputer();
@@ -79,6 +88,7 @@ export function MacPortal() {
           <div className="mac-window-head"><span className="traffic red" /><span className="traffic amber" /><span className="traffic green" /><b>Office settings</b></div>
           <SettingsPanel />
         </div>
+        <div className="mac-app-window mac-task-window"><div className="mac-window-head"><span className="traffic red" /><span className="traffic amber" /><span className="traffic green" /><b>Project task boards</b></div><TaskBoardsPanel /></div>
         </div>
       </section>
     </main>

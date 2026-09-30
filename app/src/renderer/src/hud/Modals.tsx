@@ -381,6 +381,16 @@ function WhiteboardModal({ blockId }: { blockId: BlockId }) {
   );
 }
 
+function TaskBoardModal({ blockId }: { blockId: BlockId }) {
+  const block = useStore((s) => s.company?.blocks.find((candidate) => candidate.id === blockId));
+  const company = useStore((s) => s.company);
+  const board = useStore((s) => s.taskBoards[blockId]);
+  const modal = useStore((s) => s.modal);
+  const employees = company?.employees.filter((employee) => employee.blockId === blockId && employee.status.kind === 'idle') ?? [];
+  const selected = board?.cards.find((card) => card.id === (modal?.kind === 'task_board' ? modal.taskId : undefined));
+  return <div className="scrim" onMouseDown={close}><div className="modal wide task-board-modal" onMouseDown={(event) => event.stopPropagation()} onKeyDown={(event) => event.key === 'Escape' && close()}><div className="wb-head"><div><h2>{block?.name ?? 'Task board'}</h2><p className="muted">{board?.kind === 'error' ? board.message : `${board?.cards.length ?? 0} cards from Linear and CronoSpark`}</p></div><button className="btn ink" onClick={close}>Close</button></div><div className="task-board-modal-grid"><div className="task-card-list">{(board?.cards ?? []).map((card) => <button key={card.id} className={`task-card ${selected?.id === card.id ? 'selected' : ''}`} onClick={() => set({ modal: { kind: 'task_board', blockId, taskId: card.id } })}><span className={`task-provider ${card.provider}`}>{card.provider === 'linear' ? 'LIN' : 'CS'}</span><span><b>{card.identifier}</b><strong>{card.title}</strong><small>{card.status} · {card.sourceLabel}</small></span></button>)}{!board?.cards.length && <p className="muted">No tickets are available. Configure a source in the PO computer, then refresh.</p>}</div><div className="task-card-detail">{selected ? <><span className={`task-provider ${selected.provider}`}>{selected.sourceLabel}</span><h3>{selected.identifier}</h3><h4>{selected.title}</h4><p className="muted">{selected.status}{selected.priority ? ` · ${selected.priority}` : ''}</p>{selected.url && <a href={selected.url} target="_blank" rel="noreferrer">Open in {selected.sourceLabel}</a>}<h4>Assign to an AI employee</h4>{employees.length ? employees.map((employee) => <button className="btn primary task-assign" key={employee.id} onClick={() => { send({ type: 'assign_task', blockId, taskId: selected.id, employeeId: employee.id }); close(); }}>{employee.name}</button>) : <p className="muted">Every AI employee in this block is busy. Wait for one to become idle.</p>}</> : <p className="muted">Select a ticket to see its details and assign it to an idle AI employee.</p>}</div></div></div></div>;
+}
+
 export function Modals() {
   const modal = useStore((s) => s.modal);
   if (!modal) return null;
@@ -388,5 +398,6 @@ export function Modals() {
   if (modal.kind === 'block') return <BlockModal />;
   if (modal.kind === 'github_setup') return <GithubSetupModal blockId={modal.blockId} />;
   if (modal.kind === 'github') return <GithubBoardModal blockId={modal.blockId} />;
+  if (modal.kind === 'task_board') return <TaskBoardModal blockId={modal.blockId} />;
   return <WhiteboardModal blockId={modal.blockId} />;
 }
