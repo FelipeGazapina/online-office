@@ -8,6 +8,7 @@ import { join } from 'node:path';
 import { parse, stringify } from 'yaml';
 import { z } from 'zod';
 import type { EmployeeId, ModelId, PermissionMode } from '../../../shared/protocol.ts';
+import { providerLaunch } from './launch.ts';
 
 // `root` is the owner's Hermes home. Every path the office writes is derived from it and a validated profile name, so no
 // caller can point a write at the owner's own files.
@@ -20,7 +21,9 @@ export const withoutHermesVars = (env: NodeJS.ProcessEnv): NodeJS.ProcessEnv =>
 
 const run = (args: string[]) =>
   new Promise<void>((resolve, reject) => {
-    execFile('hermes', args, { env: withoutHermesVars(process.env), timeout: 60_000 }, (err, _out, stderr) => {
+    const launch = providerLaunch('hermes', withoutHermesVars(process.env));
+    if (!launch.executable) return reject(new Error('Hermes is not installed on this machine'));
+    execFile(launch.executable, args, { env: launch.env, timeout: 60_000 }, (err, _out, stderr) => {
       if (err) reject(new Error(`hermes ${args.slice(0, 2).join(' ')} failed: ${stderr.trim().split('\n').at(-1) || err.message}`));
       else resolve();
     });
