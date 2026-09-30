@@ -4,6 +4,9 @@ import { CompanyPanel, SettingsPanel, TaskBoardsPanel } from './Panels.tsx';
 import { enterComputer, leaveComputer } from '../computer.ts';
 import { testRun } from '../testRun.ts';
 
+type DisplayCaptureVideoConstraints = MediaTrackConstraints & { cursor: 'never' };
+const DISPLAY_CAPTURE_VIDEO: DisplayCaptureVideoConstraints = { frameRate: { ideal: 30, max: 60 }, cursor: 'never' };
+
 /** The prompt shown before the owner sits down. */
 export function ComputerMenu() {
   const open = useStore((s) => s.computerMenu);
@@ -39,7 +42,7 @@ function MirrorDesktop() {
   useEffect(() => {
     let stream: MediaStream | undefined;
     let disposed = false;
-    void navigator.mediaDevices.getDisplayMedia({ video: { frameRate: { ideal: 30, max: 60 } }, audio: false }).then((next) => {
+    void navigator.mediaDevices.getDisplayMedia({ video: DISPLAY_CAPTURE_VIDEO, audio: false }).then((next) => {
       stream = next;
       if (disposed) {
         next.getTracks().forEach((track) => track.stop());
