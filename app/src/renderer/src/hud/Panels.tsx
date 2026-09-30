@@ -104,6 +104,8 @@ export function TaskBoardsPanel() {
   const connections = useStore((s) => s.taskConnections);
   const [blockId, setBlockId] = useState('');
   const [sources, setSources] = useState<TaskBoardSource[]>([]);
+  const [cronoApiKey, setCronoApiKey] = useState('');
+  const [cronoUserId, setCronoUserId] = useState(connections.cronospark.userId ?? '');
   useEffect(() => {
     if (!company || company.blocks.some((candidate) => candidate.id === blockId)) return;
     const block = company.blocks[0];
@@ -112,6 +114,7 @@ export function TaskBoardsPanel() {
       setSources(block.taskBoard?.sources ?? []);
     }
   }, [company, blockId]);
+  useEffect(() => setCronoUserId(connections.cronospark.userId ?? ''), [connections.cronospark.userId]);
   if (!company) return null;
   const block = company.blocks.find((candidate) => candidate.id === blockId) ?? company.blocks[0];
   if (!block) return <div className="task-config-empty">Add a project block before configuring a task board.</div>;
@@ -121,8 +124,14 @@ export function TaskBoardsPanel() {
     <div className="task-config">
       <div className="task-config-head"><div><h2>Task boards</h2><p className="muted">Incoming tickets for each project block. Assigning a card starts work with an AI employee.</p></div><select value={block.id} onChange={(event) => { const next = company.blocks.find((candidate) => candidate.id === event.target.value); setBlockId(event.target.value); setSources(next?.taskBoard?.sources ?? []); }}>{company.blocks.map((candidate) => <option key={candidate.id} value={candidate.id}>{candidate.name}</option>)}</select></div>
       <div className="task-connections">
-        {(['linear', 'cronospark'] as TaskProvider[]).map((provider) => <div key={provider} className="task-connection"><span className={`connection-dot ${connections[provider].kind}`} /><b>{provider === 'linear' ? 'Linear' : 'CronoSpark'}</b><small>{connections[provider].message ?? 'Connected'}</small><button className="btn small" onClick={() => window.office.send({ type: 'connect_task_provider', provider })}>{connections[provider].kind === 'ready' ? 'Connected' : 'Connect'}</button></div>)}
+        {(['linear', 'cronospark'] as TaskProvider[]).map((provider) => <div key={provider} className="task-connection"><span className={`connection-dot ${connections[provider].kind}`} /><b>{provider === 'linear' ? 'Linear' : 'CronoSpark'}</b><small>{connections[provider].message ?? 'Connected'}</small><button className="btn small" onClick={() => window.office.send({ type: 'connect_task_provider', provider })}>{connections[provider].kind === 'ready' ? 'Connected' : provider === 'cronospark' ? 'Configure' : 'Connect'}</button></div>)}
       </div>
+      <form className="task-credentials" onSubmit={(event) => { event.preventDefault(); window.office.send({ type: 'configure_task_provider', provider: 'cronospark', apiKey: cronoApiKey, userId: cronoUserId }); setCronoApiKey(''); }}>
+        <div><b>CronoSpark credentials</b><p className="muted">Saved only on this Mac. Leave the API key blank to keep the saved value or one supplied when the app starts.</p></div>
+        <label><span>API key</span><input type="password" value={cronoApiKey} onChange={(event) => setCronoApiKey(event.target.value)} placeholder={connections.cronospark.hasApiKey ? 'Saved API key' : 'CRONOSPARK_MCP_API_KEY'} autoComplete="new-password" /></label>
+        <label><span>MCP user ID</span><input value={cronoUserId} onChange={(event) => setCronoUserId(event.target.value)} placeholder="CRONOSPARK_MCP_USER_ID" autoComplete="off" /></label>
+        <button className="btn primary" type="submit" disabled={!cronoUserId.trim() || (!cronoApiKey.trim() && !connections.cronospark.hasApiKey)}>Save CronoSpark</button>
+      </form>
       <div className="task-source-list">
         {sources.map((source, index) => <div className="task-source-row" key={`${source.provider}-${index}`}><select value={source.provider} onChange={(event) => update(index, { provider: event.target.value as TaskProvider })}><option value="linear">Linear</option><option value="cronospark">CronoSpark</option></select><input value={source.projectId} placeholder="Project or team id" onChange={(event) => update(index, { projectId: event.target.value })} /><input value={source.label ?? ''} placeholder="Board label (optional)" onChange={(event) => update(index, { label: event.target.value })} /><button className="link" onClick={() => setSources((current) => current.filter((_, i) => i !== index))}>Remove</button></div>)}
       </div>

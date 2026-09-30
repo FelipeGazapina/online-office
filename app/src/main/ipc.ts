@@ -48,6 +48,7 @@ const clientMessage = z.discriminatedUnion('type', [
   z.object({ type: z.literal('configure_task_board'), blockId, config: taskBoardConfig }),
   z.object({ type: z.literal('refresh_task_board'), blockId }),
   z.object({ type: z.literal('connect_task_provider'), provider: taskProvider }),
+  z.object({ type: z.literal('configure_task_provider'), provider: z.literal('cronospark'), apiKey: z.string().max(2000), userId: z.string().max(200) }),
   z.object({ type: z.literal('assign_task'), blockId, taskId: z.string().min(1).max(400), employeeId }),
   z.object({ type: z.literal('assign'), employeeId, task: z.string().min(1) }),
   z.object({ type: z.literal('answer'), employeeId, questionId, text: z.string(), always: z.boolean().optional() }),
@@ -111,7 +112,10 @@ export function startOffice({ dataFile, harnesses, window, services }: Options) 
     if (!trusted(e)) return;
     const parsed = clientMessage.safeParse(raw);
     if (!parsed.success) return emit({ type: 'error', message: `Bad message: ${z.prettifyError(parsed.error)}` });
-    if (process.env.OFFICE_DEBUG) console.log('[ipc]', JSON.stringify(parsed.data).slice(0, 200));
+    if (process.env.OFFICE_DEBUG) {
+      const debugMessage = parsed.data.type === 'configure_task_provider' ? { ...parsed.data, apiKey: '<redacted>' } : parsed.data;
+      console.log('[ipc]', JSON.stringify(debugMessage).slice(0, 200));
+    }
     try {
       office.handle(parsed.data);
     } catch (err) {

@@ -15,6 +15,14 @@ export default async (s) => {
   await s.waitFor("document.body.innerText.includes('Task boards')");
   assert(await s.eval("document.body.innerText.includes('Task boards')"), 'PO configuration shows task boards');
   assert(await s.eval("document.body.innerText.includes('Add Linear') && document.body.innerText.includes('Add CronoSpark')"), 'PO configuration offers both providers');
+  assert(await s.eval("document.body.innerText.includes('CronoSpark credentials') && document.body.innerText.includes('MCP user ID')"), 'PO configuration exposes CronoSpark credentials');
+  await s.clickOn('.task-credentials input[type="password"]');
+  await s.type('board-test-key');
+  await s.clickOn('.task-credentials input:not([type="password"])');
+  await s.type('board-test-user');
+  await s.clickText('.task-credentials button', 'Save CronoSpark');
+  await s.waitFor("__office.store.getState().taskConnections.cronospark.kind === 'ready'");
+  assert(await s.eval("__office.store.getState().taskConnections.cronospark.userId === 'board-test-user'"), 'CronoSpark credentials are saved through the owner computer');
   await s.clickText('.task-config-actions button', 'Add CronoSpark');
   await s.waitFor("!!document.querySelector('.task-source-row input')");
   await s.clickOn('.task-source-row input');
