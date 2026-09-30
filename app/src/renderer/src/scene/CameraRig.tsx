@@ -22,62 +22,66 @@ export function SimDriver() {
 export function CameraRig() {
   const { gl } = useThree();
   const mode = useStore((s) => s.camera);
+  const uiOpen = useStore((s) => Boolean(s.modal || s.menu || s.helpOpen || s.cardMinimized || s.computerMenu || s.portalMode || s.selectedId));
   const focus = useRef(new Vector3());
   const snap = useRef(true);
+  const pointerLocked = useRef(false);
   const scratch = useRef({ desired: new Vector3(), look: new Vector3() });
 
   useEffect(() => {
     const { view, owner } = runtime;
-    if (mode === 'iso' && document.pointerLockElement === gl.domElement) document.exitPointerLock();
+    if (mode !== 'first' && document.pointerLockElement === gl.domElement) document.exitPointerLock();
     if (mode === 'follow') view.yaw = owner.yaw;
     if (mode === 'iso') view.isoYawTarget = Math.round((view.yaw + (3 * Math.PI) / 4) / (Math.PI / 2)) * (Math.PI / 2) - (3 * Math.PI) / 4;
     if (mode === 'first') view.fpPitch = 0;
   }, [gl, mode]);
 
   useEffect(() => {
+    if (uiOpen && document.pointerLockElement === gl.domElement) document.exitPointerLock();
+  }, [gl, uiOpen]);
+
+  useEffect(() => {
     const el = gl.domElement;
     let drag: { x: number; y: number; ox: number; oy: number; far: boolean } | null = null;
-    let overScene = false;
-    let locked = false;
-    const enter = () => { overScene = true; };
-    const leave = () => { overScene = false; };
-    const lock = () => {
-      if (!document.hasFocus() || get().camera === 'iso' || document.pointerLockElement === el) return;
-      void el.requestPointerLock({ unadjustedMovement: true }).catch(() => {
-        // Pointer lock can be refused until the Electron window has focus.
-      });
+    type PointerState = 'free' | 'locked';
+    let pointer: PointerState = document.pointerLockElement === el ? 'locked' : 'free';
+    pointerLocked.current = pointer === 'locked';
+    const toggleLock = () => {
+      if (document.pointerLockElement === el) {
+        document.exitPointerLock();
+        return;
+      }
+      const s = get();
+      if (!document.hasFocus() || s.camera !== 'first' || s.modal || s.menu || s.helpOpen || s.cardMinimized || s.computerMenu || s.portalMode || s.selectedId) return;
+      void el.requestPointerLock({ unadjustedMovement: true }).catch(() => {});
     };
     const lockChange = () => {
-      locked = document.pointerLockElement === el;
-      el.style.cursor = locked ? 'none' : '';
-      if (!locked) drag = null;
-    };
-    const refocus = () => { if (overScene) lock(); };
-    const toggleLock = () => {
-      if (document.pointerLockElement === el) document.exitPointerLock();
-      else lock();
+      pointer = document.pointerLockElement === el ? 'locked' : 'free';
+      pointerLocked.current = pointer === 'locked';
+      el.style.cursor = pointer === 'locked' ? 'none' : '';
+      if (pointer === 'free') drag = null;
     };
     const down = (e: PointerEvent) => {
-      if (locked) return;
+      if (pointer === 'locked') return;
       drag = { x: e.clientX, y: e.clientY, ox: e.clientX, oy: e.clientY, far: false };
+    };
+    const blockSceneClick = (e: MouseEvent) => {
+      if (pointer === 'locked') {
+        e.preventDefault();
+        e.stopPropagation();
+      }
+    };
+    const blur = () => {
+      if (document.pointerLockElement === el) document.exitPointerLock();
     };
     const move = (e: PointerEvent) => {
       const { view } = runtime;
       const m = get().camera;
-      // Follow and first-person look continuously while the office is focused;
-      // they do not require the owner to hold the mouse button. movementX/Y
-      // are relative deltas, so looking keeps working after the cursor reaches
-      // a screen edge. Drag state remains for click detection and overview.
-      if (!drag && overScene && document.hasFocus() && (m === 'follow' || m === 'first')) {
+      if (pointer === 'locked' && document.hasFocus() && m === 'first') {
         const dx = e.movementX;
         const dy = e.movementY;
-        if (m === 'follow') {
-          view.yaw -= dx * 0.006;
-          view.pitch = clamp(view.pitch + dy * 0.004, 0.08, 1.3);
-        } else {
-          view.yaw -= dx * 0.004;
-          view.fpPitch = clamp(view.fpPitch - dy * 0.004, -1.25, 1.25);
-        }
+        view.yaw -= dx * 0.004;
+        view.fpPitch = clamp(view.fpPitch - dy * 0.004, -1.25, 1.25);
         return;
       }
       if (!drag) return;
@@ -107,27 +111,24 @@ export function CameraRig() {
       if (m === 'iso') view.isoDist = clamp(view.isoDist + e.deltaY * 0.03, 18, 72);
     };
     el.addEventListener('pointerdown', down);
-    el.addEventListener('pointerenter', enter);
-    el.addEventListener('pointerenter', lock);
-    el.addEventListener('pointerleave', leave);
+    el.addEventListener('click', blockSceneClick, true);
     document.addEventListener('pointerlockchange', lockChange);
-    window.addEventListener('focus', refocus);
     window.addEventListener('office:toggle-pointer-lock', toggleLock);
+    window.addEventListener('blur', blur);
     window.addEventListener('pointermove', move);
     window.addEventListener('pointerup', up);
     el.addEventListener('wheel', wheel, { passive: true });
     return () => {
       el.removeEventListener('pointerdown', down);
-      el.removeEventListener('pointerenter', enter);
-      el.removeEventListener('pointerenter', lock);
-      el.removeEventListener('pointerleave', leave);
+      el.removeEventListener('click', blockSceneClick, true);
       document.removeEventListener('pointerlockchange', lockChange);
-      window.removeEventListener('focus', refocus);
       window.removeEventListener('office:toggle-pointer-lock', toggleLock);
+      window.removeEventListener('blur', blur);
       window.removeEventListener('pointermove', move);
       window.removeEventListener('pointerup', up);
       el.removeEventListener('wheel', wheel);
       if (document.pointerLockElement === el) document.exitPointerLock();
+      pointerLocked.current = false;
       el.style.cursor = '';
     };
   }, [gl]);
@@ -143,7 +144,7 @@ export function CameraRig() {
 
     // A click walk carries the first person view with it: toward the person once close, else where the owner is heading.
     const { intent } = owner;
-    if (mode === 'first' && intent.kind === 'walk' && owner.speed > 0.4) {
+    if (mode === 'first' && !pointerLocked.current && intent.kind === 'walk' && owner.speed > 0.4) {
       const who = intent.goal.kind === 'employee' ? runtime.avatars.get(intent.goal.employeeId) : undefined;
       const close = who && Math.hypot(who.pos.x - owner.pos.x, who.pos.z - owner.pos.z) < 2.5;
       const aim = who && close ? Math.atan2(who.pos.x - owner.pos.x, who.pos.z - owner.pos.z) : Math.atan2(owner.vel.x, owner.vel.z);
