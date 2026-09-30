@@ -35,13 +35,19 @@ export default async (s, { launch }) => {
   assert((await clockCards(s)).length === 2, 'an existing single timezone migrates into the saved timezone list');
   assert((await s.eval('localStorage.getItem("online-office.timezones")')) === '["America/New_York"]', 'the migrated timezone uses the new persisted collection');
 
+  await s.eval('localStorage.setItem("online-office.timezones", "{"); localStorage.setItem("online-office.secondary-clock", "Europe/London"); location.reload()');
+  await s.waitFor('__office.store.getState().company !== null');
+  await s.waitFor('localStorage.getItem("online-office.timezones") === "[\\"Europe/London\\"]"');
+  await openClock(s);
+  assert((await clockCards(s)).length === 2, 'a corrupt collection falls back to the legacy timezone');
+
   const add = async (zone) => {
     await s.waitFor('document.querySelector(".clock-add-select select") !== null');
     await s.eval(`(() => { const select = document.querySelector('.clock-add-select select'); const setValue = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set; setValue.call(select, ${JSON.stringify(zone)}); select.dispatchEvent(new InputEvent('input', { bubbles: true })); select.dispatchEvent(new Event('change', { bubbles: true })); })()`);
     await s.waitFor(`[...document.querySelectorAll('.clock-zone')].some((item) => item.innerText.toLowerCase().includes(${JSON.stringify(zone.split('/').at(-1).replaceAll('_', ' ').toLowerCase())}))`);
   };
 
-  await add('Europe/London');
+  await add('America/New_York');
   await add('America/Los_Angeles');
   assert((await clockCards(s)).length === 4, 'the HUD shows the local clock plus three saved timezones');
   assert((await s.eval('[...document.querySelectorAll(".clock-card .clock-remove")].length')) === 3, 'each saved timezone has its own remove action');

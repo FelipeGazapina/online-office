@@ -46,7 +46,7 @@ function loadZones(localZone: string) {
     try {
       return normalizeZones(JSON.parse(saved), localZone);
     } catch {
-      return [];
+      return normalizeZones(localStorage.getItem(LEGACY_CLOCK_KEY), localZone);
     }
   }
   return normalizeZones(localStorage.getItem(LEGACY_CLOCK_KEY), localZone);
