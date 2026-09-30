@@ -1,6 +1,6 @@
 import { memo, useEffect, useMemo, useState } from 'react';
 import { Color } from 'three';
-import { PROVIDERS, type Employee, type ProjectBlock } from '../../../shared/protocol.ts';
+import { PROVIDERS, taskBoardColumns, type Employee, type ProjectBlock } from '../../../shared/protocol.ts';
 import { BENCH, blockCenter, deskPose, projectComputerPose, RUG_D, RUG_W, signPose, whiteboardPose, type DeskPose } from '../layout.ts';
 import { enterProjectComputer } from '../computer.ts';
 import { set, useStore } from '../store.ts';
@@ -225,18 +225,19 @@ function GithubWhiteboard({ block }: { block: ProjectBlock }) {
 function TaskBoardWhiteboard({ block }: { block: ProjectBlock }) {
   const board = useStore((s) => s.taskBoards[block.id]);
   const cards = board?.cards ?? [];
+  const columns = taskBoardColumns(cards);
   const tex = useCanvasTexture(1536, 840, (g) => {
     g.fillStyle = '#fbfbf8'; g.fillRect(0, 0, 1536, 840);
     g.fillStyle = '#2b2e44'; g.font = `700 60px ${FONT_DISPLAY}`; g.fillText('Task board', 70, 100);
     g.font = `400 32px ${FONT_BODY}`; g.fillStyle = '#7b7e93';
     g.fillText(board?.kind === 'loading' ? 'Refreshing incoming tickets…' : board?.kind === 'error' ? board.message : `${cards.length} incoming tickets · press F or click to assign work`, 72, 150);
-    ['Open', 'In progress', 'Done'].forEach((column, i) => {
-      const x = 48 + i * 490; g.fillStyle = '#eeeef2'; roundRect(g, x, 200, 450, 570, 24); g.fill();
-      g.fillStyle = '#2b2e44'; g.font = `700 36px ${FONT_DISPLAY}`; g.fillText(column, x + 24, 250);
-      const matches = cards.filter((card) => column === 'Done' ? /done|complete|closed|canceled/i.test(card.status) : column === 'In progress' ? /progress|approval|started/i.test(card.status) : !/done|complete|closed|canceled|progress|approval|started/i.test(card.status));
-      matches.slice(0, 4).forEach((card, j) => { const y = 285 + j * 115; g.fillStyle = '#fff'; roundRect(g, x + 18, y, 414, 92, 14); g.fill(); g.fillStyle = '#2b2e44'; g.font = `700 25px ${FONT_BODY}`; g.fillText(card.identifier, x + 35, y + 32); g.font = `500 24px ${FONT_BODY}`; g.fillText(card.title.slice(0, 25), x + 35, y + 65); });
+    columns.forEach((column, i) => {
+      const x = 28 + i * 214;
+      g.fillStyle = '#eeeef2'; roundRect(g, x, 200, 194, 570, 18); g.fill();
+      g.fillStyle = '#2b2e44'; g.font = `700 23px ${FONT_DISPLAY}`; g.fillText(`${column.label} · ${column.cards.length}`, x + 14, 240);
+      column.cards.slice(0, 4).forEach((card, j) => { const y = 270 + j * 116; g.fillStyle = '#fff'; roundRect(g, x + 10, y, 174, 94, 11); g.fill(); g.fillStyle = '#2b2e44'; g.font = `700 18px ${FONT_BODY}`; g.fillText(card.identifier, x + 20, y + 29); g.font = `500 17px ${FONT_BODY}`; g.fillText(card.title.slice(0, 17), x + 20, y + 59); g.fillStyle = '#7b7e93'; g.font = `500 14px ${FONT_BODY}`; g.fillText(card.sourceLabel.slice(0, 18), x + 20, y + 81); });
     });
-  }, [block.id, board?.kind, board?.cards, board?.kind === 'error' ? board.message : undefined]);
+  }, [board?.kind, board?.cards, board?.kind === 'error' ? board.message : undefined]);
   return <group onClick={(e) => { e.stopPropagation(); if (e.delta < 6) set({ modal: { kind: 'task_board', blockId: block.id } }); }} onPointerOver={() => void (document.body.style.cursor = 'pointer')} onPointerOut={() => void (document.body.style.cursor = '')}><mesh castShadow position={[0, 1.85, 0]}><boxGeometry args={[4.4, 2.4, 0.1]} /><meshStandardMaterial color="#c9cdd8" metalness={0.3} roughness={0.5} /></mesh><mesh position={[0, 1.85, 0.056]}><planeGeometry args={[4.24, 2.32]} /><meshStandardMaterial map={tex} roughness={0.35} emissive="#fff" emissiveMap={tex} emissiveIntensity={0.3} /></mesh></group>;
 }
 
