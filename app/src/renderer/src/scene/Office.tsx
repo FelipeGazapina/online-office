@@ -9,6 +9,7 @@ import {
   blockCenter,
   DOOR,
   getLayout,
+  OWNER_CHAIR,
   OWNER_DESK,
   MEETING_ROOM,
   WALL_H,
@@ -16,6 +17,7 @@ import {
   type Layout,
 } from '../layout.ts';
 import { get, set, useStore } from '../store.ts';
+import { enterComputer } from '../computer.ts';
 import { toggleMeetingDoor } from '../meeting.ts';
 import { walkTo } from '../sim.ts';
 import { Chair, Desk, Plant, RoundedPlane } from './Furniture.tsx';
@@ -205,6 +207,7 @@ function CompanySign({ name, b }: { name: string; b: Bounds }) {
 }
 
 function OwnerCorner() {
+  const seated = useStore((s) => s.computerState === 'seated');
   const tex = useCanvasTexture(256, 96, (g) => {
     g.fillStyle = '#2f3a5f';
     roundRect(g, 0, 0, 256, 96, 16);
@@ -217,13 +220,13 @@ function OwnerCorner() {
   }, []);
   return (
     <group>
-      <Desk position={[OWNER_DESK.x, 0, OWNER_DESK.z]} rotationY={Math.PI / 2} screen="idle" />
-      <Chair position={[OWNER_DESK.x + 0.9, 0, OWNER_DESK.z]} rotationY={Math.PI / 2} color="#2f3a5f" />
+      <Desk position={[OWNER_DESK.x, 0, OWNER_DESK.z]} rotationY={Math.PI / 2} screen={seated ? 'working' : 'idle'} color="#5f9fdf" />
+      <Chair position={[OWNER_CHAIR.x, 0, OWNER_CHAIR.z]} rotationY={Math.PI / 2} color="#2f3a5f" />
       <group
         position={[OWNER_DESK.x + 0.15, 0.82, OWNER_DESK.z - 0.18]}
         onClick={(e) => {
           e.stopPropagation();
-          if (e.delta < 6) set({ computerMenu: true });
+          if (e.delta < 6) enterComputer();
         }}
         onPointerOver={() => void (document.body.style.cursor = 'pointer')}
         onPointerOut={() => void (document.body.style.cursor = '')}

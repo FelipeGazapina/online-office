@@ -11,6 +11,7 @@ import {
   DOOR,
   deskPose,
   getLayout,
+  OWNER_CHAIR,
   OWNER_RADIUS,
   pushOut,
   withMeetingRoom,
@@ -352,6 +353,7 @@ export function stepSim(rawDt: number) {
   }
 
   const nearbyIds = nearbyInRange(company);
+  const nearComputer = Math.hypot(runtime.owner.pos.x - OWNER_CHAIR.x, runtime.owner.pos.z - OWNER_CHAIR.z) < 1.75;
   const talkingTo = nearestInRange(company, state.talkingTo, nearbyIds);
 
   // The arrival: the first blocked employee in line has reached the owner.
@@ -376,12 +378,13 @@ export function stepSim(rawDt: number) {
   const askerId = meetingDoor === 'open' && front && front.status.kind === 'blocked_on_owner' && runtime.arrived.get(front.id) === front.status.question.id ? front.id : null;
 
   const nearbyChanged = nearbyIds.length !== state.nearbyIds.length || nearbyIds.some((id, i) => id !== state.nearbyIds[i]);
-  if (talkingTo !== state.talkingTo || askerId !== state.askerId || nearbyChanged) {
+  if (talkingTo !== state.talkingTo || askerId !== state.askerId || nearbyChanged || nearComputer !== state.nearComputer) {
     if (talkingTo !== state.talkingTo) cancelSpeech();
     set({
       talkingTo,
       nearbyIds,
       askerId,
+      nearComputer,
       // Proximity opens the side chat and follows the closest person as the owner moves.
       ...(talkingTo && talkingTo !== state.talkingTo ? { selectedId: talkingTo } : {}),
       // Close the drawer when the owner leaves the employee who opened it through proximity chat.

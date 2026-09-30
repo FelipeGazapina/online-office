@@ -9,6 +9,7 @@ export type BlockId = string & { readonly __brand: 'BlockId' };
 export type QuestionId = string & { readonly __brand: 'QuestionId' };
 
 export type Provider = 'claude-code' | 'codex' | 'hermes';
+export type EmployeeRole = 'employee' | 'orchestrator';
 
 // The owner meeting room is session-scoped. Main owns this value and sends it in every snapshot.
 export type MeetingDoor = 'open' | 'closed';
@@ -66,6 +67,7 @@ export type Employee = {
   id: EmployeeId;
   name: string;
   provider: Provider;
+  role?: EmployeeRole;
   blockId: BlockId;
   desk: number;
   status: EmployeeStatus;
@@ -126,7 +128,7 @@ export const MAX_LEVEL = 5;
 export const XP_FOR_LEVEL = [0, 0, 30, 80, 150, 250] as const;
 // The bench seats in renderer/layout.ts. The head desk is not one of them.
 export const DESKS_PER_BLOCK = 6;
-export const headcountCap = (level: number) => Math.min(level, MAX_LEVEL);
+export const headcountCap = (level: number) => (level >= MAX_LEVEL ? Infinity : Math.min(level, MAX_LEVEL));
 
 // The level unlocks a ceiling, and the owner picks a number up to it in the Company area. Indexed by level.
 // No level's perBlock exceeds DESKS_PER_BLOCK, because a block has no more bench seats than that.
@@ -155,7 +157,7 @@ export type CompanySettings = {
 export type InterruptStyle = 'next' | 'now';
 
 export type ClientMessage =
-  | { type: 'hire'; provider: Provider; blockId: BlockId; name?: string; model?: ModelId }
+  | { type: 'hire'; provider: Provider; blockId: BlockId; name?: string; model?: ModelId; role?: EmployeeRole; bypassLimit?: boolean }
   | { type: 'fire'; employeeId: EmployeeId }
   | { type: 'create_block'; cwd: string; name?: string; githubRepo?: string }
   | { type: 'update_block'; blockId: BlockId; name?: string; cwd?: string; githubRepo?: string }

@@ -25,7 +25,7 @@ export const LANGS: Record<Lang, { stt: Language; tts: 'en-US' | 'pt-BR' }> = {
   // Whisper's json answer does not say which language it heard, so the employees keep an English voice.
   auto: { stt: 'auto', tts: 'en-US' },
 };
-export type Modal = null | { kind: 'hire' } | { kind: 'block' } | { kind: 'whiteboard'; blockId: BlockId } | { kind: 'github'; blockId: BlockId } | { kind: 'github_setup'; blockId: BlockId };
+export type Modal = null | { kind: 'hire'; bypassLimit?: boolean } | { kind: 'block' } | { kind: 'whiteboard'; blockId: BlockId } | { kind: 'github'; blockId: BlockId } | { kind: 'github_setup'; blockId: BlockId };
 
 export type LogLine = { line: string; at: number };
 export type ChatLine = { from: 'owner' | 'employee'; text: string; at: number };
@@ -59,6 +59,8 @@ type State = Settings & {
   cardMinimized: boolean;
   computerMenu: boolean;
   portalMode: boolean;
+  computerState: 'away' | 'seated';
+  nearComputer: boolean;
   // Facts derived by the per-frame sim, published only when they change.
   talkingTo: EmployeeId | null;
   nearbyIds: EmployeeId[];
@@ -84,6 +86,8 @@ export const useStore = create<State>()(() => ({
   cardMinimized: false,
   computerMenu: false,
   portalMode: false,
+  computerState: 'away',
+  nearComputer: false,
   talkingTo: null,
   nearbyIds: [],
   askerId: null,

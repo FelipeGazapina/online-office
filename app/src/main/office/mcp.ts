@@ -17,6 +17,7 @@ export type EmployeeTools = {
   ask(body: QuestionBody, signal?: AbortSignal): Promise<string>;
   drawDiagram(title: string, mermaid: string): void;
   openBoard(title: string, target: string): Promise<void>;
+  delegateToTeammate(target: string | undefined, task: string): Promise<string>;
   memory: Notebook;
 };
 
@@ -151,6 +152,18 @@ export async function startOfficeMcp(): Promise<OfficeMcp> {
         await tools.openBoard(args.title, args.target);
         return text('Page placed on the block board. Click the board to view it.');
       }),
+    );
+
+    server.registerTool(
+      'delegate_to_teammate',
+      {
+        description: 'For a block orchestrator only. Give a clear task to another employee on the same project block. Leave target empty to choose an idle teammate.',
+        inputSchema: {
+          target: z.string().max(120).optional().describe('Teammate name, or empty to choose an idle teammate'),
+          task: z.string().min(1).max(4000).describe('The task to assign'),
+        },
+      },
+      (args, extra) => run('delegate_to_teammate', extra, async () => text(await tools.delegateToTeammate(args.target, args.task))),
     );
 
     server.registerTool(

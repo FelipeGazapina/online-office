@@ -220,6 +220,9 @@ export const BlockView = memo(function BlockView({ block, employees }: { block: 
         <Workstation key={i} pose={deskPose(block.slot, i)} employee={employees.find((e) => e.desk === i)} chairColor={chairColor} />
       ))}
       <Workstation pose={headPose(block.slot)} chairColor={chairColor} plate="PO" />
+      {employees.filter((employee) => employee.desk >= BENCH.length).map((employee) => (
+        <Workstation key={employee.id} pose={deskPose(block.slot, employee.desk)} employee={employee} chairColor={chairColor} />
+      ))}
       <group position={[s.x, 0, s.z]}>
         <Sign name={block.name} cwd={block.cwd} color={block.color} />
       </group>

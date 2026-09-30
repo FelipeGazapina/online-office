@@ -68,7 +68,16 @@ function poseOf(slot: number, seat: Seat): DeskPose {
 }
 
 export function deskPose(slot: number, desk: number): DeskPose {
-  return poseOf(slot, BENCH[Math.max(0, Math.min(BENCH.length - 1, desk))]);
+  const seat = BENCH[desk];
+  if (seat) return poseOf(slot, seat);
+  const overflow = Math.max(0, desk - BENCH.length);
+  const row = Math.floor(overflow / 3);
+  const column = overflow % 3;
+  return poseOf(slot, {
+    x: BENCH_X + (column - 1) * DESK_W,
+    z: -1.8 - row * 1.25,
+    yaw: FACE_NORTH,
+  });
 }
 
 export function headPose(slot: number): DeskPose {
@@ -94,6 +103,7 @@ export function signPose(slot: number): Vec2 {
 export const DOOR: Vec2 = { x: X0 + 8, z: Z1 };
 export const OWNER_START: Vec2 = { x: X0 + 8, z: Z1 - 4.8 };
 export const OWNER_DESK: Vec2 = { x: X0 + 1.5, z: 5.2 };
+export const OWNER_CHAIR: Vec2 = { x: OWNER_DESK.x + 0.9, z: OWNER_DESK.z };
 
 // A small room around the owner's desk. The east wall has one opening so the owner can walk in and close it.
 // The same dimensions are used by the renderer and the simulation collision boxes.

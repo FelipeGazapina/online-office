@@ -1,6 +1,7 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import {
   DESKS_PER_BLOCK,
+  headcountCap,
   PROVIDERS,
   type BlockId,
   type HarnessStatus,
@@ -46,10 +47,12 @@ function harnessNote(h: HarnessStatus): string {
 
 function HireModal() {
   const company = useStore((s) => s.company);
+  const bypassLimit = useStore((s) => s.modal?.kind === 'hire' && s.modal.bypassLimit === true);
   const harnesses = useStore((s) => s.harnesses);
   const [provider, setProvider] = useState<Provider>(() => PROVIDER_LIST.find((p) => harnesses?.[p].kind === 'ready') ?? 'claude-code');
   const [blockId, setBlockId] = useState<BlockId | ''>(company?.blocks[0]?.id ?? '');
   const [name, setName] = useState('');
+  const [role, setRole] = useState<'employee' | 'orchestrator'>('employee');
   const [model, setModel] = useState<ModelId | ''>('');
   const catalogs = useStore((s) => s.catalogs);
   const catalog = catalogs?.[provider];
@@ -67,6 +70,7 @@ function HireModal() {
   if (!company || !harnesses) return null;
   const used = (id: BlockId) => company.employees.filter((e) => e.blockId === id).length;
   const ready = harnesses[provider].kind === 'ready';
+  const unlimited = bypassLimit || !Number.isFinite(headcountCap(company.level));
 
   return (
     <Modal title="Hire someone">
@@ -100,8 +104,8 @@ function HireModal() {
           <span>Block</span>
           <select value={blockId} onChange={(e) => setBlockId(e.target.value as BlockId)}>
             {company.blocks.map((b) => (
-              <option key={b.id} value={b.id} disabled={used(b.id) >= DESKS_PER_BLOCK}>
-                {b.name} ({used(b.id)}/{DESKS_PER_BLOCK} desks)
+              <option key={b.id} value={b.id} disabled={!unlimited && used(b.id) >= DESKS_PER_BLOCK}>
+                {b.name} ({used(b.id)}/{unlimited ? '∞' : DESKS_PER_BLOCK} desks)
               </option>
             ))}
           </select>
@@ -126,6 +130,13 @@ function HireModal() {
         )}
       </label>
       <label className="field">
+        <span>Role</span>
+        <select value={role} onChange={(e) => setRole(e.target.value as 'employee' | 'orchestrator')}>
+          <option value="employee">Employee</option>
+          <option value="orchestrator">Block orchestrator / PO</option>
+        </select>
+      </label>
+      <label className="field">
         <span>
           Name <span className="muted">optional</span>
         </span>
@@ -140,7 +151,7 @@ function HireModal() {
           disabled={!blockId || !ready}
           onClick={() => {
             if (!blockId) return;
-            send({ type: 'hire', provider, blockId, ...(name.trim() && { name: name.trim() }), ...(model && { model }) });
+            send({ type: 'hire', provider, blockId, role, ...(bypassLimit && { bypassLimit: true }), ...(name.trim() && { name: name.trim() }), ...(model && { model }) });
             close();
           }}
         >

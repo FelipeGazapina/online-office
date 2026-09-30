@@ -53,6 +53,7 @@ const url = mcp.attach(employeeId, {
     return 'PINEAPPLE';
   },
   openBoard: async () => {},
+  delegateToTeammate: async () => 'not available in this check',
   drawDiagram: () => {},
   memory: MemoryStore.open(join(dir, 'memory')).notebook({ employeeId, blockId: 'probe-block' as BlockId, provider: 'claude-code' }),
 });

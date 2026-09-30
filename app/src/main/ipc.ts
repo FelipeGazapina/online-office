@@ -29,7 +29,7 @@ const allowRule = z.discriminatedUnion('kind', [
 ]);
 
 const clientMessage = z.discriminatedUnion('type', [
-  z.object({ type: z.literal('hire'), provider, blockId, name: z.string().optional(), model: modelId.optional() }),
+  z.object({ type: z.literal('hire'), provider, blockId, name: z.string().optional(), model: modelId.optional(), role: z.enum(['employee', 'orchestrator']).optional(), bypassLimit: z.boolean().optional() }),
   z.object({ type: z.literal('fire'), employeeId }),
   z.object({ type: z.literal('create_block'), cwd: z.string().min(1), name: z.string().min(1).optional(), githubRepo: z.string().url().optional() }),
   z.object({
