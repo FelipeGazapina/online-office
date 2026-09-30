@@ -6,8 +6,8 @@ import { runtime } from '../runtime.ts';
 import { get, useStore } from '../store.ts';
 import { stepSim } from '../sim.ts';
 
-const TOP_DOWN_PITCH = 1.48;
-const FOV = 45;
+const ISO_PITCH = 0.58;
+const FOV = 26;
 const DRAG_PX = 6;
 const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
 const ease = (dt: number, rate: number) => 1 - Math.exp(-dt * rate);
@@ -45,9 +45,9 @@ export function CameraRig() {
     view.isoYawTarget += turn * dt * 1.8;
     view.yaw += angleDiff(view.yaw, view.isoYawTarget) * ease(dt, 8);
     focus.current.lerp(desired.set(owner.pos.x, 0.6, owner.pos.z), ease(dt, snap.current ? 100 : 5));
-    const fx = Math.sin(view.yaw), fz = Math.cos(view.yaw), c = Math.cos(TOP_DOWN_PITCH);
+    const fx = Math.sin(view.yaw), fz = Math.cos(view.yaw), c = Math.cos(ISO_PITCH);
     look.copy(focus.current);
-    desired.set(look.x - fx * c * view.isoDist, look.y + Math.sin(TOP_DOWN_PITCH) * view.isoDist, look.z - fz * c * view.isoDist);
+    desired.set(look.x - fx * c * view.isoDist, look.y + Math.sin(ISO_PITCH) * view.isoDist, look.z - fz * c * view.isoDist);
     if (snap.current) cam.position.copy(desired); else cam.position.lerp(desired, ease(dt, 5));
     snap.current = false; cam.lookAt(look);
     if (Math.abs(cam.fov - FOV) > 0.01) { cam.fov += (FOV - cam.fov) * ease(dt, 6); cam.updateProjectionMatrix(); }
