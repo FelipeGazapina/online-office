@@ -441,7 +441,6 @@ function TaskBoardModal({ blockId }: { blockId: BlockId }) {
                       <span className="task-card-copy"><b>{card.identifier}</b><strong>{card.title}</strong><small>{card.priority ? `${card.priority} · ` : ''}{card.sourceLabel}</small></span>
                     </button>
                   ))}
-                  {!column.cards.length && <p className="task-board-column-empty">No issues</p>}
                 </div>
               </section>
             ))}
