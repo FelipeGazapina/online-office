@@ -1,10 +1,16 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { PROVIDERS, type Employee } from '../../../shared/protocol.ts';
-import { get, send, set, useStore } from '../store.ts';
+import { attachChatImage, get, send, set, useStore } from '../store.ts';
 import { fmtWait, useNow } from './hooks.ts';
 
 const STATUS_LABEL = { idle: 'Idle', working: 'Working', blocked_on_owner: 'Waiting on you', error: 'Error' } as const;
 const time = (at: number) => new Date(at).toLocaleTimeString([], { hour12: false });
+
+async function readImage(file: File) {
+  if (!file.type.startsWith('image/')) throw new Error('Choose an image file.');
+  if (file.size > 8 * 1024 * 1024) throw new Error('Images must be smaller than 8 MB.');
+  return await new Promise<string>((resolve, reject) => { const reader = new FileReader(); reader.onload = () => resolve(String(reader.result)); reader.onerror = () => reject(new Error('Could not read image.')); reader.readAsDataURL(file); });
+}
 
 export function Drawer() {
   const id = useStore((s) => s.selectedId);
@@ -17,6 +23,7 @@ export function Drawer() {
   const catalogs = useStore((s) => s.catalogs);
   const now = useNow(1000);
   const [draft, setDraft] = useState('');
+  const [image, setImage] = useState<{ data: string; name: string }>();
   const [confirm, setConfirm] = useState(false);
   const [showLog, setShowLog] = useState(false);
   const input = useRef<HTMLInputElement>(null);
@@ -96,7 +103,8 @@ export function Drawer() {
         {lines.length === 0 && <p className="muted">Nothing said yet. Type below and it reaches {e.name} as if you stood at their desk.</p>}
         {lines.map((l, i) => (
           <div key={i} className={`msg ${l.from}`}>
-            {l.text}
+            {l.image && <img className="chat-image" src={l.image} alt={l.imageName ?? 'Shared image'} />}
+            {l.text && <span>{l.text}</span>}
           </div>
         ))}
         <div ref={threadEnd} />
@@ -106,15 +114,17 @@ export function Drawer() {
         className="compose"
         onSubmit={(ev) => {
           ev.preventDefault();
-          const text = draft.trim();
+          const text = draft.trim() || (image ? `Shared image: ${image.name}` : '');
           if (!text) return;
           send({ type: 'interject', employeeId: e.id, text, style: get().interrupt });
+          if (image) attachChatImage(e.id, text, image.data, image.name);
           setDraft('');
+          setImage(undefined);
           input.current?.focus();
         }}
       >
-        <input id="drawer-input" ref={input} value={draft} onChange={(ev) => setDraft(ev.target.value)} placeholder={`Message ${e.name}`} />
-        <button type="submit" className="btn ink" disabled={!draft.trim()}>
+        <label className="attach-image" title="Share an image"><input type="file" accept="image/*" onChange={async (ev) => { const file = ev.target.files?.[0]; if (!file) return; try { setImage({ data: await readImage(file), name: file.name }); } catch (error) { window.alert(error instanceof Error ? error.message : String(error)); } ev.currentTarget.value = ''; }} /><span>＋</span></label><input id="drawer-input" ref={input} value={draft} onChange={(ev) => setDraft(ev.target.value)} placeholder={image ? image.name : `Message ${e.name}`} />
+        <button type="submit" className="btn ink" disabled={!draft.trim() && !image}>
           Send
         </button>
       </form>

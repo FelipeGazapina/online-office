@@ -127,7 +127,8 @@ export type TaskBoardState =
   | { kind: 'loading'; cards: TaskCard[]; lastFetchedAt?: number }
   | { kind: 'ready'; cards: TaskCard[]; lastFetchedAt: number }
   | { kind: 'error'; cards: TaskCard[]; message: string; lastFetchedAt?: number };
-export type TaskConnectionState = { kind: 'ready' | 'connecting' | 'needs_auth' | 'missing' | 'error'; message?: string };
+// The user id is safe to show back in the settings UI. The API key never crosses the main-process boundary in a snapshot.
+export type TaskConnectionState = { kind: 'ready' | 'connecting' | 'needs_auth' | 'missing' | 'error'; message?: string; userId?: string; hasApiKey?: boolean };
 
 export type ProjectBlock = {
   id: BlockId;
@@ -138,6 +139,7 @@ export type ProjectBlock = {
   githubRepo?: string;
   whiteboard?: Whiteboard;
   taskBoard?: TaskBoardConfig;
+  linearBoardUrl?: string;
 };
 
 export type Company = {
@@ -187,8 +189,10 @@ export type ClientMessage =
   | { type: 'create_block'; cwd: string; name?: string; githubRepo?: string }
   | { type: 'update_block'; blockId: BlockId; name?: string; cwd?: string; githubRepo?: string }
   | { type: 'configure_task_board'; blockId: BlockId; config: TaskBoardConfig }
+  | { type: 'configure_linear_board'; blockId: BlockId; url: string }
   | { type: 'refresh_task_board'; blockId: BlockId }
   | { type: 'connect_task_provider'; provider: TaskProvider }
+  | { type: 'configure_task_provider'; provider: 'cronospark'; apiKey: string; userId: string }
   | { type: 'assign_task'; blockId: BlockId; taskId: string; employeeId: EmployeeId }
   | { type: 'assign'; employeeId: EmployeeId; task: string }
   // `always` counts only on a permission card, and only when `text` allows it. The office then adds a rule for that

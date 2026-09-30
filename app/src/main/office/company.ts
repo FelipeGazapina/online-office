@@ -213,7 +213,12 @@ export class Office {
     this.harnesses = harnesses;
     this.events = events;
     this.services = { ...services, taskBoards: services.taskBoards ?? new TaskBoardService() };
-    this.services.taskBoards.setOnChange(() => this.events.changed());
+    this.services.taskBoards.setOnChange(() => {
+      this.events.changed();
+      for (const block of this.company.blocks) {
+        if (block.taskBoard?.sources.some((source) => source.provider === 'linear')) void this.refreshTaskBoard(block.id);
+      }
+    });
     this.company = load(dataFile) ?? seed();
     for (const e of this.company.employees) {
       if (e.status.kind === 'working' || e.status.kind === 'blocked_on_owner') {
@@ -250,10 +255,16 @@ export class Office {
         return this.updateBlock(msg.blockId, msg.name, msg.cwd, msg.githubRepo);
       case 'configure_task_board':
         return this.configureTaskBoard(msg.blockId, msg.config);
+      case 'configure_linear_board':
+        return this.configureLinearBoard(msg.blockId, msg.url);
       case 'refresh_task_board':
         return void this.refreshTaskBoard(msg.blockId);
       case 'connect_task_provider':
         this.services.taskBoards.connect(msg.provider);
+        this.events.changed();
+        return;
+      case 'configure_task_provider':
+        this.services.taskBoards.configureCronoSpark(msg.apiKey, msg.userId);
         this.events.changed();
         return;
       case 'assign_task':
@@ -315,6 +326,14 @@ export class Office {
     block.taskBoard = { sources };
     this.commit();
     void this.refreshTaskBoard(blockId);
+  }
+
+  private configureLinearBoard(blockId: BlockId, url: string) {
+    const block = this.block(blockId);
+    const parsed = new URL(url.trim());
+    if (!/^(www\.)?linear\.app$/i.test(parsed.hostname)) throw new OfficeError('Linear board URL must be on linear.app');
+    block.linearBoardUrl = parsed.toString();
+    this.commit();
   }
 
   private async refreshTaskBoard(blockId: BlockId) {

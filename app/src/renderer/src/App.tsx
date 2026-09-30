@@ -5,6 +5,7 @@ import { ComputerPrompt, HelpOverlay, Toasts, WaitingMeter } from './hud/Panels.
 import { Bottom } from './hud/Talk.tsx';
 import { UpdateChip } from './hud/UpdateControl.tsx';
 import { ComputerMenu, MacPortal } from './hud/MacPortal.tsx';
+import { Clock } from './hud/Clock.tsx';
 import { Scene } from './scene/Scene.tsx';
 import { useStore } from './store.ts';
 import { testRun } from './testRun.ts';
@@ -18,6 +19,7 @@ export function App() {
         <Scene />
       </div>
       <div className="hud" style={{ display: portalMode ? 'none' : undefined }}>
+        <Clock />
         <WaitingMeter />
         <UpdateChip />
         <Bottom />

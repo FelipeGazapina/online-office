@@ -20,6 +20,7 @@ import { initialVoice, type VoiceState } from './voice/chip.ts';
 export type CameraMode = 'follow' | 'iso' | 'first';
 export type MicMode = 'proximity' | 'push';
 export type Lang = 'en-US' | 'pt-BR' | 'auto';
+export type ComputerView = 'office' | 'mirror';
 // What each language setting means for listening (`stt`, what whisper is told) and for the employees' voices (`tts`).
 export const LANGS: Record<Lang, { stt: Language; tts: 'en-US' | 'pt-BR' }> = {
   'en-US': { stt: 'en', tts: 'en-US' },
@@ -27,10 +28,10 @@ export const LANGS: Record<Lang, { stt: Language; tts: 'en-US' | 'pt-BR' }> = {
   // Whisper's json answer does not say which language it heard, so the employees keep an English voice.
   auto: { stt: 'auto', tts: 'en-US' },
 };
-export type Modal = null | { kind: 'hire'; bypassLimit?: boolean } | { kind: 'block' } | { kind: 'whiteboard'; blockId: BlockId } | { kind: 'github'; blockId: BlockId } | { kind: 'github_setup'; blockId: BlockId } | { kind: 'task_board'; blockId: BlockId; taskId?: string };
+export type Modal = null | { kind: 'hire'; bypassLimit?: boolean } | { kind: 'block' } | { kind: 'whiteboard'; blockId: BlockId } | { kind: 'github'; blockId: BlockId } | { kind: 'github_setup'; blockId: BlockId } | { kind: 'task_board'; blockId: BlockId; taskId?: string } | { kind: 'linear_board'; blockId: BlockId };
 
 export type LogLine = { line: string; at: number };
-export type ChatLine = { from: 'owner' | 'employee'; text: string; at: number };
+export type ChatLine = { from: 'owner' | 'employee'; text: string; at: number; image?: string; imageName?: string };
 export type Toast = { id: number; text: string; tone: 'info' | 'warn' | 'ok' };
 
 // Settings the user is tuning while deciding how this should feel; kept across reloads.
@@ -64,8 +65,10 @@ type State = Settings & {
   computerMenu: boolean;
   portalMode: boolean;
   computerState: 'away' | 'seated';
+  computerView: ComputerView;
   nearComputer: boolean;
   nearProjectComputer: BlockId | null;
+  nearTaskBoard: BlockId | null;
   projectComputerId: BlockId | null;
   // Facts derived by the per-frame sim, published only when they change.
   talkingTo: EmployeeId | null;
@@ -95,8 +98,10 @@ export const useStore = create<State>()(() => ({
   computerMenu: false,
   portalMode: false,
   computerState: 'away',
+  computerView: 'office',
   nearComputer: false,
   nearProjectComputer: null,
+  nearTaskBoard: null,
   projectComputerId: null,
   talkingTo: null,
   nearbyIds: [],
@@ -144,8 +149,12 @@ export function askedAt(e: Employee) {
 
 const CHAT_CAP = 200;
 
-export function addChat(employeeId: EmployeeId, from: ChatLine['from'], text: string) {
-  set((s) => ({ chat: { ...s.chat, [employeeId]: [...(s.chat[employeeId] ?? []).slice(-(CHAT_CAP - 1)), { from, text, at: Date.now() }] } }));
+export function addChat(employeeId: EmployeeId, from: ChatLine['from'], text: string, image?: string, imageName?: string) {
+  set((s) => ({ chat: { ...s.chat, [employeeId]: [...(s.chat[employeeId] ?? []).slice(-(CHAT_CAP - 1)), { from, text, at: Date.now(), ...(image ? { image, imageName } : {}) }] } }));
+}
+
+export function attachChatImage(employeeId: EmployeeId, text: string, image: string, imageName: string) {
+  set((s) => { const lines = [...(s.chat[employeeId] ?? [])]; const index = lines.findLastIndex((line) => line.from === 'owner' && line.text === text); if (index < 0) return s; lines[index] = { ...lines[index], image, imageName }; return { chat: { ...s.chat, [employeeId]: lines } }; });
 }
 
 export function send(m: ClientMessage) {
