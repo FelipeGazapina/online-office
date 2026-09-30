@@ -1,4 +1,5 @@
-import { headcountCap, MAX_LEVEL, PROVIDERS, XP_FOR_LEVEL, type Employee } from '../../../shared/protocol.ts';
+import { useEffect, useState } from 'react';
+import { headcountCap, MAX_LEVEL, PROVIDERS, XP_FOR_LEVEL, type Employee, type TaskBoardSource, type TaskProvider } from '../../../shared/protocol.ts';
 import type { VoiceQuality } from '../../../shared/voice.ts';
 import { set, setSetting, useStore, waitingQueue, type CameraMode, type Lang, type MicMode } from '../store.ts';
 import { fmtWait, tailPath, useNow } from './hooks.ts';
@@ -94,6 +95,51 @@ export function CompanyPanel({ allowOverLimit = false }: { allowOverLimit?: bool
           </li>
         ))}
       </ul>
+    </div>
+  );
+}
+
+export function TaskBoardsPanel() {
+  const company = useStore((s) => s.company);
+  const connections = useStore((s) => s.taskConnections);
+  const [blockId, setBlockId] = useState('');
+  const [sources, setSources] = useState<TaskBoardSource[]>([]);
+  const [linearUrl, setLinearUrl] = useState('');
+  const [cronoApiKey, setCronoApiKey] = useState('');
+  const [cronoUserId, setCronoUserId] = useState(connections.cronospark.userId ?? '');
+  useEffect(() => {
+    if (!company || company.blocks.some((candidate) => candidate.id === blockId)) return;
+    const block = company.blocks[0];
+    if (block) {
+      setBlockId(block.id);
+      setSources(block.taskBoard?.sources ?? []);
+      setLinearUrl(block.linearBoardUrl ?? '');
+    }
+  }, [company, blockId]);
+  useEffect(() => setCronoUserId(connections.cronospark.userId ?? ''), [connections.cronospark.userId]);
+  if (!company) return null;
+  const block = company.blocks.find((candidate) => candidate.id === blockId) ?? company.blocks[0];
+  if (!block) return <div className="task-config-empty">Add a project block before configuring a task board.</div>;
+  const update = (index: number, patch: Partial<TaskBoardSource>) => setSources((current) => current.map((source, i) => i === index ? { ...source, ...patch } : source));
+  const save = () => window.office.send({ type: 'configure_task_board', blockId: block.id, config: { sources } });
+  return (
+    <div className="task-config">
+      <div className="task-config-head"><div><span className="task-config-kicker">3D project boards</span><h2>Linear and task boards</h2><p className="muted">Linear gets its own live board in the office. The internal task board remains available for synced work assignments.</p></div><label className="task-block-picker"><span>Project block</span><select value={block.id} onChange={(event) => { const next = company.blocks.find((candidate) => candidate.id === event.target.value); setBlockId(event.target.value); setSources(next?.taskBoard?.sources ?? []); setLinearUrl(next?.linearBoardUrl ?? ''); }}>{company.blocks.map((candidate) => <option key={candidate.id} value={candidate.id}>{candidate.name}</option>)}</select></label></div>
+      <form className="task-credentials linear-board-config" onSubmit={(event) => { event.preventDefault(); if (linearUrl.trim()) window.office.send({ type: 'configure_linear_board', blockId: block.id, url: linearUrl.trim() }); }}><div><b>Separate Linear board</b><p className="muted">Shows the full signed-in Linear board in its own 3D board. It does not create or copy tickets into the app task board.</p></div><label><span>Linear board URL</span><input type="url" value={linearUrl} onChange={(event) => setLinearUrl(event.target.value)} placeholder="https://linear.app/acme/team/ENG/active" /></label><button className="btn primary" type="submit" disabled={!/^https?:\/\/(www\.)?linear\.app\//i.test(linearUrl.trim())}>Save Linear board</button></form>
+      <div className="task-connections">
+        {(['linear', 'cronospark'] as TaskProvider[]).map((provider) => <div key={provider} className={`task-connection ${provider === 'linear' ? 'task-connection-linear' : ''}`}><span className={`connection-dot ${connections[provider].kind}`} /><b>{provider === 'linear' ? 'Linear' : 'CronoSpark'}</b><small>{connections[provider].message ?? (connections[provider].kind === 'ready' ? 'Ready to sync' : 'Not connected')}</small><button className="btn small" onClick={() => connections[provider].kind === 'ready' ? window.office.send({ type: 'refresh_task_board', blockId: block.id }) : window.office.send({ type: 'connect_task_provider', provider })}>{connections[provider].kind === 'ready' ? 'Sync now' : provider === 'cronospark' ? 'Configure' : 'Connect Linear'}</button></div>)}
+      </div>
+      <form className="task-credentials" onSubmit={(event) => { event.preventDefault(); window.office.send({ type: 'configure_task_provider', provider: 'cronospark', apiKey: cronoApiKey, userId: cronoUserId }); setCronoApiKey(''); }}>
+        <div><b>CronoSpark credentials</b><p className="muted">Saved only on this Mac. Leave the API key blank to keep the saved value or one supplied when the app starts.</p></div>
+        <label><span>API key</span><input type="password" value={cronoApiKey} onChange={(event) => setCronoApiKey(event.target.value)} placeholder={connections.cronospark.hasApiKey ? 'Saved API key' : 'CRONOSPARK_MCP_API_KEY'} autoComplete="new-password" /></label>
+        <label><span>MCP user ID</span><input value={cronoUserId} onChange={(event) => setCronoUserId(event.target.value)} placeholder="CRONOSPARK_MCP_USER_ID" autoComplete="off" /></label>
+        <button className="btn primary" type="submit" disabled={!cronoUserId.trim() || (!cronoApiKey.trim() && !connections.cronospark.hasApiKey)}>Save CronoSpark</button>
+      </form>
+      <div className="task-source-list">
+        {sources.map((source, index) => <div className="task-source-row" key={`${source.provider}-${index}`}><select value={source.provider} onChange={(event) => update(index, { provider: event.target.value as TaskProvider })}><option value="linear">Linear</option><option value="cronospark">CronoSpark</option></select><input value={source.projectId} placeholder={source.provider === 'linear' ? 'Linear team, project, workspace, or URL' : 'Project or team id'} onChange={(event) => update(index, { projectId: event.target.value })} /><input value={source.label ?? ''} placeholder="Board label (optional)" onChange={(event) => update(index, { label: event.target.value })} /><button className="link" onClick={() => setSources((current) => current.filter((_, i) => i !== index))}>Remove</button></div>)}
+      </div>
+      <div className="task-config-actions"><button className="btn ghost" onClick={() => setSources((current) => [...current, { provider: 'linear', projectId: '' }])}>Add Linear</button><button className="btn ghost" onClick={() => setSources((current) => [...current, { provider: 'cronospark', projectId: '' }])}>Add CronoSpark</button><button className="btn primary" disabled={sources.some((source) => !source.projectId.trim())} onClick={save}>Save and refresh</button><button className="btn ghost" onClick={() => window.office.send({ type: 'refresh_task_board', blockId: block.id })}>Refresh</button></div>
+      <p className="muted task-config-note">Linear accepts a team, project, workspace id, or Linear URL. Prefix an ambiguous value with <code>team:</code>, <code>project:</code>, or <code>workspace:</code>. CronoSpark accepts ids such as <code>j577z1hp6k8a19vadt7eff1d197qwwqr</code>. Linear OAuth is the same remote MCP connection used by other MCP clients.</p>
     </div>
   );
 }
@@ -217,7 +263,9 @@ export function Toasts() {
 
 export function ComputerPrompt() {
   const near = useStore((s) => s.nearComputer);
+  const nearTaskBoard = useStore((s) => s.nearTaskBoard);
   const seated = useStore((s) => s.computerState === 'seated');
+  if (nearTaskBoard && !seated) return <div className="computer-prompt"><kbd>F</kbd><span>open the task board</span></div>;
   if (!near || seated) return null;
   return <div className="computer-prompt"><kbd>F</kbd><span>sit at your computer</span></div>;
 }
@@ -232,6 +280,7 @@ const KEYS: [string, string][] = [
   ['Hold V', 'Push to talk (when the mic is set to Hold V)'],
   ['Click an employee', 'Open a menu: chat, or walk to them'],
   ['Click the floor', 'Walk there (overview camera)'],
+  ['F near a board', 'Open the task board or project computer'],
   ['Click the whiteboard', 'Open the diagram large'],
   ['Esc', 'Close whatever is open'],
   ['H', 'This help'],

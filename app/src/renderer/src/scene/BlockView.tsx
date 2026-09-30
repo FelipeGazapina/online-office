@@ -1,13 +1,14 @@
 import { memo, useEffect, useMemo, useState } from 'react';
 import { Color } from 'three';
 import { PROVIDERS, type Employee, type ProjectBlock } from '../../../shared/protocol.ts';
-import { BENCH, blockCenter, deskPose, headPose, RUG_D, RUG_W, signPose, whiteboardPose, type DeskPose } from '../layout.ts';
-import { set } from '../store.ts';
+import { BENCH, blockCenter, deskPose, projectComputerPose, RUG_D, RUG_W, signPose, whiteboardPose, type DeskPose } from '../layout.ts';
+import { enterProjectComputer } from '../computer.ts';
+import { set, useStore } from '../store.ts';
 import { Chair, Desk, RoundedPlane } from './Furniture.tsx';
 import { fitText, FONT_BODY, FONT_DISPLAY, roundRect, useCanvasTexture } from './textures.ts';
 import { useDiagram } from './whiteboard.ts';
 
-const FLOOR = new Color('#d9b48a');
+// The block presentation is intentionally a light prototype: neutral pods, a visible PO desk, and a small DAILY huddle spot.
 
 function shade(hex: string, amount: number) {
   return `#${new Color(hex).multiplyScalar(amount).getHexString()}`;
@@ -15,16 +16,25 @@ function shade(hex: string, amount: number) {
 
 function Sign({ name, cwd, color }: { name: string; cwd: string; color: string }) {
   const tex = useCanvasTexture(1024, 320, (g) => {
-    g.fillStyle = color;
+    g.fillStyle = '#344256';
     roundRect(g, 0, 0, 1024, 320, 44);
     g.fill();
-    g.fillStyle = 'rgba(255,255,255,0.92)';
-    const s = fitText(g, name, 900, 168, 800);
+    g.fillStyle = color;
+    roundRect(g, 30, 28, 150, 92, 24);
+    g.fill();
+    g.fillStyle = '#172235';
+    g.font = `800 68px ${FONT_DISPLAY}`;
+    g.textAlign = 'center';
     g.textBaseline = 'middle';
-    g.fillText(name, 62, 128);
+    g.fillText('PO', 105, 74);
+    g.textAlign = 'left';
+    g.fillStyle = 'rgba(255,255,255,0.95)';
+    const s = fitText(g, name, 760, 132, 800);
+    g.textBaseline = 'middle';
+    g.fillText(name, 210, 82);
     g.font = `500 ${Math.min(52, s * 0.42)}px ${FONT_BODY}`;
-    g.fillStyle = 'rgba(255,255,255,0.72)';
-    g.fillText(cwd.length > 42 ? `…${cwd.slice(-41)}` : cwd, 66, 258);
+    g.fillStyle = 'rgba(255,255,255,0.62)';
+    g.fillText('Project lead · ' + (cwd.length > 32 ? `…${cwd.slice(-31)}` : cwd), 214, 236);
   }, [name, cwd, color]);
   return (
     <group>
@@ -40,6 +50,34 @@ function Sign({ name, cwd, color }: { name: string; cwd: string; color: string }
         <planeGeometry args={[3.4, 1.06]} />
         <meshStandardMaterial map={tex} transparent roughness={0.6} emissive="#ffffff" emissiveMap={tex} emissiveIntensity={0.25} />
       </mesh>
+    </group>
+  );
+}
+
+function DailyHuddle({ color }: { color: string }) {
+  const tex = useCanvasTexture(420, 180, (g) => {
+    g.fillStyle = '#fffdf7'; roundRect(g, 0, 0, 420, 180, 22); g.fill();
+    g.fillStyle = '#344256'; g.font = `800 58px ${FONT_DISPLAY}`; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText('DAILY', 210, 76);
+    g.font = `500 25px ${FONT_BODY}`; g.fillStyle = '#7c8794'; g.fillText('team sync', 210, 132);
+  }, []);
+  return (
+    <group>
+      <mesh receiveShadow position={[0, 0.035, 0]}><cylinderGeometry args={[1.25, 1.25, 0.06, 20]} /><meshStandardMaterial color={color} roughness={0.9} /></mesh>
+      <mesh castShadow position={[0, 0.62, 0]}><cylinderGeometry args={[0.75, 0.82, 0.1, 16]} /><meshStandardMaterial color="#eadfc9" roughness={0.75} /></mesh>
+      {[-1, 1].map((x) => <Chair key={x} position={[x * 0.95, 0, 0]} color={color} rotationY={x < 0 ? -Math.PI / 2 : Math.PI / 2} />)}
+      <mesh position={[0, 1.4, -0.82]}><planeGeometry args={[2.3, 0.98]} /><meshBasicMaterial map={tex} transparent /></mesh>
+    </group>
+  );
+}
+
+function PodBoundary({ color }: { color: string }) {
+  const edge = '#d2d8dd';
+  return (
+    <group>
+      {[[0, -3.72, 9.6, 0.08], [-4.72, 0, 0.08, 7.4], [4.72, 0, 0.08, 7.4]].map(([x, z, w, d], i) => (
+        <mesh key={i} receiveShadow position={[x, 0.28, z]}><boxGeometry args={[w, 0.56, d]} /><meshStandardMaterial color={i === 0 ? color : edge} roughness={0.85} transparent opacity={0.82} /></mesh>
+      ))}
+      <mesh receiveShadow position={[0, 0.22, 3.72]}><boxGeometry args={[3.1, 0.44, 0.18]} /><meshStandardMaterial color={edge} roughness={0.9} /></mesh>
     </group>
   );
 }
@@ -184,11 +222,41 @@ function GithubWhiteboard({ block }: { block: ProjectBlock }) {
   );
 }
 
+function TaskBoardWhiteboard({ block }: { block: ProjectBlock }) {
+  const board = useStore((s) => s.taskBoards[block.id]);
+  const cards = board?.cards ?? [];
+  const tex = useCanvasTexture(1536, 840, (g) => {
+    g.fillStyle = '#fbfbf8'; g.fillRect(0, 0, 1536, 840);
+    g.fillStyle = '#2b2e44'; g.font = `700 60px ${FONT_DISPLAY}`; g.fillText('Task board', 70, 100);
+    g.font = `400 32px ${FONT_BODY}`; g.fillStyle = '#7b7e93';
+    g.fillText(board?.kind === 'loading' ? 'Refreshing incoming tickets…' : board?.kind === 'error' ? board.message : `${cards.length} incoming tickets · press F or click to assign work`, 72, 150);
+    ['Open', 'In progress', 'Done'].forEach((column, i) => {
+      const x = 48 + i * 490; g.fillStyle = '#eeeef2'; roundRect(g, x, 200, 450, 570, 24); g.fill();
+      g.fillStyle = '#2b2e44'; g.font = `700 36px ${FONT_DISPLAY}`; g.fillText(column, x + 24, 250);
+      const matches = cards.filter((card) => column === 'Done' ? /done|complete|closed|canceled/i.test(card.status) : column === 'In progress' ? /progress|approval|started/i.test(card.status) : !/done|complete|closed|canceled|progress|approval|started/i.test(card.status));
+      matches.slice(0, 4).forEach((card, j) => { const y = 285 + j * 115; g.fillStyle = '#fff'; roundRect(g, x + 18, y, 414, 92, 14); g.fill(); g.fillStyle = '#2b2e44'; g.font = `700 25px ${FONT_BODY}`; g.fillText(card.identifier, x + 35, y + 32); g.font = `500 24px ${FONT_BODY}`; g.fillText(card.title.slice(0, 25), x + 35, y + 65); });
+    });
+  }, [block.id, board?.kind, board?.cards, board?.kind === 'error' ? board.message : undefined]);
+  return <group onClick={(e) => { e.stopPropagation(); if (e.delta < 6) set({ modal: { kind: 'task_board', blockId: block.id } }); }} onPointerOver={() => void (document.body.style.cursor = 'pointer')} onPointerOut={() => void (document.body.style.cursor = '')}><mesh castShadow position={[0, 1.85, 0]}><boxGeometry args={[4.4, 2.4, 0.1]} /><meshStandardMaterial color="#c9cdd8" metalness={0.3} roughness={0.5} /></mesh><mesh position={[0, 1.85, 0.056]}><planeGeometry args={[4.24, 2.32]} /><meshStandardMaterial map={tex} roughness={0.35} emissive="#fff" emissiveMap={tex} emissiveIntensity={0.3} /></mesh></group>;
+}
+
+function LinearBoardWhiteboard({ block }: { block: ProjectBlock }) {
+  const tex = useCanvasTexture(1536, 840, (g) => {
+    g.fillStyle = '#fbfbf8'; g.fillRect(0, 0, 1536, 840);
+    g.fillStyle = '#5b45c7'; g.font = `700 64px ${FONT_DISPLAY}`; g.fillText('Linear board', 70, 110);
+    g.fillStyle = '#7b7e93'; g.font = `400 34px ${FONT_BODY}`; g.fillText('Open the live Linear board · click or press F', 72, 165);
+    g.fillStyle = '#ece6ff'; roundRect(g, 70, 240, 1395, 420, 28); g.fill();
+    g.fillStyle = '#4d3b9e'; g.font = `700 52px ${FONT_DISPLAY}`; g.fillText('Your Linear workspace', 120, 340);
+    g.fillStyle = '#625d7b'; g.font = `400 34px ${FONT_BODY}`; g.fillText('This is a separate board for the full Linear view.', 120, 405);
+  }, [block.linearBoardUrl]);
+  return <group onClick={(e) => { e.stopPropagation(); if (e.delta < 6) set({ modal: { kind: 'linear_board', blockId: block.id } }); }} onPointerOver={() => void (document.body.style.cursor = 'pointer')} onPointerOut={() => void (document.body.style.cursor = '')}><mesh castShadow position={[0, 1.85, 0]}><boxGeometry args={[4.4, 2.4, 0.1]} /><meshStandardMaterial color="#d8d0f0" /></mesh><mesh position={[0, 1.85, 0.056]}><planeGeometry args={[4.24, 2.32]} /><meshStandardMaterial map={tex} emissive="#fff" emissiveMap={tex} emissiveIntensity={0.3} /></mesh></group>;
+}
+
 // The Desk and Chair models have the chair on their +z side, so their rotationY is the seat's yaw turned half a turn.
-function Workstation({ pose, employee, chairColor, plate }: { pose: DeskPose; employee?: Employee; chairColor: string; plate?: string }) {
+function Workstation({ pose, employee, chairColor, plate, blockId }: { pose: DeskPose; employee?: Employee; chairColor: string; plate?: string; blockId?: ProjectBlock['id'] }) {
   const rotationY = pose.yaw - Math.PI;
   return (
-    <group>
+    <group onClick={plate === 'PO' && blockId ? (e) => { e.stopPropagation(); if (e.delta < 6) enterProjectComputer(blockId); } : undefined} onPointerOver={plate === 'PO' ? () => void (document.body.style.cursor = 'pointer') : undefined} onPointerOut={plate === 'PO' ? () => void (document.body.style.cursor = '') : undefined}>
       <Desk
         position={[pose.desk.x, 0, pose.desk.z]}
         rotationY={rotationY}
@@ -205,21 +273,22 @@ export const BlockView = memo(function BlockView({ block, employees }: { block: 
   const c = blockCenter(block.slot);
   const s = signPose(block.slot);
   const w = whiteboardPose(block.slot);
-  const rug = useMemo(() => new Color(block.color).lerp(FLOOR, 0.12).getStyle(), [block.color]);
+  const rug = useMemo(() => new Color(block.color).lerp(new Color('#d7dde2'), 0.62).getStyle(), [block.color]);
   const chairColor = useMemo(() => shade(block.color, 0.75), [block.color]);
-  const trim = useMemo(() => new Color(block.color).multiplyScalar(0.8).getStyle(), [block.color]);
+  const trim = useMemo(() => new Color(block.color).lerp(new Color('#738195'), 0.5).getStyle(), [block.color]);
   const author = block.whiteboard ? employees.find((e) => e.id === block.whiteboard!.by)?.name : undefined;
 
   return (
     <group>
       <group position={[c.x, 0, c.z]}>
-        <RoundedPlane w={RUG_W + 0.5} d={RUG_D + 0.5} r={0.5} color={trim} y={0.008} />
+        <RoundedPlane w={RUG_W + 0.5} d={RUG_D + 0.5} r={0.5} color="#d6dbe0" y={0.008} />
         <RoundedPlane w={RUG_W} d={RUG_D} r={0.35} color={rug} y={0.014} />
+        <PodBoundary color={trim} />
       </group>
       {BENCH.map((_, i) => (
         <Workstation key={i} pose={deskPose(block.slot, i)} employee={employees.find((e) => e.desk === i)} chairColor={chairColor} />
       ))}
-      <Workstation pose={headPose(block.slot)} chairColor={chairColor} plate="PO" />
+      <Workstation pose={projectComputerPose(block.slot)} chairColor={chairColor} plate="PO" blockId={block.id} />
       {employees.filter((employee) => employee.desk >= BENCH.length).map((employee) => (
         <Workstation key={employee.id} pose={deskPose(block.slot, employee.desk)} employee={employee} chairColor={chairColor} />
       ))}
@@ -227,8 +296,9 @@ export const BlockView = memo(function BlockView({ block, employees }: { block: 
         <Sign name={block.name} cwd={block.cwd} color={block.color} />
       </group>
       <group position={[w.x, 0, w.z]}>
-        {block.githubRepo ? <GithubWhiteboard block={block} /> : <Whiteboard block={block} authorName={author} />}
+        {block.linearBoardUrl ? <LinearBoardWhiteboard block={block} /> : block.taskBoard?.sources.length ? <TaskBoardWhiteboard block={block} /> : block.githubRepo ? <GithubWhiteboard block={block} /> : <Whiteboard block={block} authorName={author} />}
       </group>
+      <group position={[c.x + 2.65, 0, c.z - 2.15]}><DailyHuddle color={trim} /></group>
     </group>
   );
 });

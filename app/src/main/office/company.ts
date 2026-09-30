@@ -32,6 +32,9 @@ import {
   type QuestionId,
   type Snapshot,
   type Subagent,
+  type TaskBoardConfig,
+  type TaskBoardState,
+  type TaskProvider,
 } from '../../shared/protocol.ts';
 import { HARNESSES } from './adapters/index.ts';
 import type { EmployeeSession, SessionHost } from './adapters/types.ts';
@@ -39,6 +42,7 @@ import { logger } from './debug.ts';
 import { Inbox, type Left } from './inbox.ts';
 import type { OfficeMcp } from './mcp.ts';
 import type { MemoryStore } from './memory.ts';
+import { TaskBoardService } from './task-board.ts';
 
 const XP_PER_TASK = 10;
 const XP_PER_QUICK_ANSWER = 3;
@@ -63,7 +67,7 @@ export type OfficeEvents = {
 };
 
 // The things every session leans on, started before the first employee so a session can connect the moment it is built.
-export type OfficeServices = { mcp: OfficeMcp; memory: MemoryStore };
+export type OfficeServices = { mcp: OfficeMcp; memory: MemoryStore; taskBoards?: TaskBoardService };
 
 // Where a blocked employee goes when the last question is answered. The adapter keeps reporting while the card is up
 // (a subagent finishes, the turn ends), and those reports land here so the card stays put.
@@ -201,13 +205,20 @@ export class Office {
   private readonly dataFile: string;
   private readonly harnesses: Record<Provider, HarnessStatus>;
   private readonly events: OfficeEvents;
-  private readonly services: OfficeServices;
+  private readonly services: OfficeServices & { taskBoards: TaskBoardService };
+  private readonly taskBoards = new Map<BlockId, TaskBoardState>();
 
   constructor(dataFile: string, harnesses: Record<Provider, HarnessStatus>, events: OfficeEvents, services: OfficeServices) {
     this.dataFile = dataFile;
     this.harnesses = harnesses;
     this.events = events;
-    this.services = services;
+    this.services = { ...services, taskBoards: services.taskBoards ?? new TaskBoardService() };
+    this.services.taskBoards.setOnChange(() => {
+      this.events.changed();
+      for (const block of this.company.blocks) {
+        if (block.taskBoard?.sources.some((source) => source.provider === 'linear')) void this.refreshTaskBoard(block.id);
+      }
+    });
     this.company = load(dataFile) ?? seed();
     for (const e of this.company.employees) {
       if (e.status.kind === 'working' || e.status.kind === 'blocked_on_owner') {
@@ -217,14 +228,19 @@ export class Office {
       this.startSession(e);
     }
     save(dataFile, this.company);
+    for (const block of this.company.blocks) if (block.taskBoard?.sources.length) void this.refreshTaskBoard(block.id);
   }
 
   snapshot(): Snapshot {
-    return { type: 'snapshot', company: this.company, harnesses: this.harnesses, catalogs: this.catalogs, meetingDoor: this.meetingDoor };
+    return {
+      type: 'snapshot', company: this.company, harnesses: this.harnesses, catalogs: this.catalogs, meetingDoor: this.meetingDoor,
+      taskBoards: Object.fromEntries(this.taskBoards), taskConnections: this.services.taskBoards.connectionStates(),
+    };
   }
 
   shutdown() {
     for (const id of [...this.sessions.keys()]) this.stopSession(id);
+    void this.services.taskBoards.close();
   }
 
   handle(msg: ClientMessage): void {
@@ -237,6 +253,22 @@ export class Office {
         return this.createBlock(msg.cwd, msg.name, msg.githubRepo);
       case 'update_block':
         return this.updateBlock(msg.blockId, msg.name, msg.cwd, msg.githubRepo);
+      case 'configure_task_board':
+        return this.configureTaskBoard(msg.blockId, msg.config);
+      case 'configure_linear_board':
+        return this.configureLinearBoard(msg.blockId, msg.url);
+      case 'refresh_task_board':
+        return void this.refreshTaskBoard(msg.blockId);
+      case 'connect_task_provider':
+        this.services.taskBoards.connect(msg.provider);
+        this.events.changed();
+        return;
+      case 'configure_task_provider':
+        this.services.taskBoards.configureCronoSpark(msg.apiKey, msg.userId);
+        this.events.changed();
+        return;
+      case 'assign_task':
+        return this.assignTask(msg.blockId, msg.taskId, msg.employeeId);
       case 'assign':
         return this.assign(msg.employeeId, msg.task);
       case 'answer':
@@ -283,6 +315,48 @@ export class Office {
     const b = this.company.blocks.find((x) => x.id === id);
     if (!b) throw new OfficeError(`No such block ${id}`);
     return b;
+  }
+
+  private configureTaskBoard(blockId: BlockId, config: TaskBoardConfig) {
+    const block = this.block(blockId);
+    const sources = config.sources.map((source) => ({ provider: source.provider, projectId: source.projectId.trim(), ...(source.label?.trim() ? { label: source.label.trim() } : {}) }));
+    if (sources.some((source) => !source.projectId)) throw new OfficeError('Each task board source needs a project id');
+    const seen = new Set<string>();
+    if (sources.some((source) => { const key = `${source.provider}:${source.projectId}`; if (seen.has(key)) return true; seen.add(key); return false; })) throw new OfficeError('A task board source is duplicated');
+    block.taskBoard = { sources };
+    this.commit();
+    void this.refreshTaskBoard(blockId);
+  }
+
+  private configureLinearBoard(blockId: BlockId, url: string) {
+    const block = this.block(blockId);
+    const parsed = new URL(url.trim());
+    if (!/^(www\.)?linear\.app$/i.test(parsed.hostname)) throw new OfficeError('Linear board URL must be on linear.app');
+    block.linearBoardUrl = parsed.toString();
+    this.commit();
+  }
+
+  private async refreshTaskBoard(blockId: BlockId) {
+    const block = this.block(blockId);
+    const previous = this.taskBoards.get(blockId);
+    this.taskBoards.set(blockId, { kind: 'loading', cards: previous?.cards ?? [], ...(previous && 'lastFetchedAt' in previous && previous.lastFetchedAt ? { lastFetchedAt: previous.lastFetchedAt } : {}) });
+    this.events.changed();
+    const result = await this.services.taskBoards.fetchSources(block.taskBoard?.sources ?? []);
+    const now = Date.now();
+    this.taskBoards.set(blockId, result.errors.length && !result.cards.length
+      ? { kind: 'error', cards: result.cards, message: result.errors.join(' ') }
+      : { kind: 'ready', cards: result.cards, lastFetchedAt: now });
+    this.events.changed();
+  }
+
+  private assignTask(blockId: BlockId, taskId: string, employeeId: EmployeeId) {
+    const block = this.block(blockId);
+    const employee = this.employee(employeeId);
+    if (employee.blockId !== block.id) throw new OfficeError(`${employee.name} does not work in ${block.name}`);
+    const card = this.taskBoards.get(blockId)?.cards.find((candidate) => candidate.id === taskId);
+    if (!card) throw new OfficeError('That ticket is no longer on the board. Refresh and try again.');
+    const link = card.url ? ` ${card.url}` : '';
+    this.assign(employeeId, `Work on ${card.identifier}: ${card.title} [${card.sourceLabel}]${link}`);
   }
 
   private sessionOf(e: Employee): EmployeeSession {

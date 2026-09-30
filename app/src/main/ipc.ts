@@ -1,4 +1,4 @@
-import { app, dialog, ipcMain, shell, type BrowserWindow, type IpcMainEvent, type IpcMainInvokeEvent } from 'electron';
+import { app, dialog, globalShortcut, ipcMain, shell, type BrowserWindow, type IpcMainEvent, type IpcMainInvokeEvent } from 'electron';
 import { z } from 'zod';
 import {
   IPC,
@@ -11,6 +11,8 @@ import {
   type Provider,
   type QuestionId,
   type ServerMessage,
+  type TaskBoardConfig,
+  type TaskProvider,
 } from '../shared/protocol.ts';
 import { Office, OfficeError, type OfficeServices } from './office/company.ts';
 
@@ -27,6 +29,10 @@ const allowRule = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('exact'), command: z.string().min(1) }),
   z.object({ kind: z.literal('tool'), name: z.string().min(1) }),
 ]);
+const taskProvider = z.enum(['linear', 'cronospark']) satisfies z.ZodType<TaskProvider>;
+const taskBoardConfig = z.object({
+  sources: z.array(z.object({ provider: taskProvider, projectId: z.string().min(1).max(200), label: z.string().max(120).optional() })).max(8),
+}) satisfies z.ZodType<TaskBoardConfig>;
 
 const clientMessage = z.discriminatedUnion('type', [
   z.object({ type: z.literal('hire'), provider, blockId, name: z.string().optional(), model: modelId.optional(), role: z.enum(['employee', 'orchestrator']).optional(), bypassLimit: z.boolean().optional() }),
@@ -39,6 +45,12 @@ const clientMessage = z.discriminatedUnion('type', [
     cwd: z.string().min(1).optional(),
     githubRepo: z.string().url().optional(),
   }),
+  z.object({ type: z.literal('configure_task_board'), blockId, config: taskBoardConfig }),
+  z.object({ type: z.literal('configure_linear_board'), blockId, url: z.string().url().max(1000) }),
+  z.object({ type: z.literal('refresh_task_board'), blockId }),
+  z.object({ type: z.literal('connect_task_provider'), provider: taskProvider }),
+  z.object({ type: z.literal('configure_task_provider'), provider: z.literal('cronospark'), apiKey: z.string().max(2000), userId: z.string().max(200) }),
+  z.object({ type: z.literal('assign_task'), blockId, taskId: z.string().min(1).max(400), employeeId }),
   z.object({ type: z.literal('assign'), employeeId, task: z.string().min(1) }),
   z.object({ type: z.literal('answer'), employeeId, questionId, text: z.string(), always: z.boolean().optional() }),
   z.object({ type: z.literal('interject'), employeeId, text: z.string().min(1), style: z.enum(['next', 'now']) }),
@@ -101,7 +113,10 @@ export function startOffice({ dataFile, harnesses, window, services }: Options) 
     if (!trusted(e)) return;
     const parsed = clientMessage.safeParse(raw);
     if (!parsed.success) return emit({ type: 'error', message: `Bad message: ${z.prettifyError(parsed.error)}` });
-    if (process.env.OFFICE_DEBUG) console.log('[ipc]', JSON.stringify(parsed.data).slice(0, 200));
+    if (process.env.OFFICE_DEBUG) {
+      const debugMessage = parsed.data.type === 'configure_task_provider' ? { ...parsed.data, apiKey: '<redacted>' } : parsed.data;
+      console.log('[ipc]', JSON.stringify(debugMessage).slice(0, 200));
+    }
     try {
       office.handle(parsed.data);
     } catch (err) {
@@ -127,23 +142,72 @@ export function startOffice({ dataFile, harnesses, window, services }: Options) 
   });
 
   let normalBounds: Electron.Rectangle | null = null;
-  ipcMain.on(IPC.portalEnter, (e) => {
-    if (!trusted(e)) return;
+  let portalWasMaximized = false;
+  let portalWasFullScreen = false;
+  let portalFullScreenGuard: (() => void) | null = null;
+  let portalActive = false;
+  // A bare F remains available to the renderer while the portal is focused. Once a native app
+  // takes focus, this modifier shortcut returns to the office without stealing the letter F from text input.
+  const portalShortcuts = ['CommandOrControl+Shift+O'];
+  const unregisterPortalShortcuts = () => portalShortcuts.forEach((accelerator) => globalShortcut.unregister(accelerator));
+  const restorePortal = (notify: boolean) => {
+    unregisterPortalShortcuts();
+    portalActive = false;
     const win = window();
     if (!win || win.isDestroyed()) return;
-    normalBounds ??= win.getBounds();
-    win.setAlwaysOnTop(true, 'floating');
-    // Keep the office window size: the desktop contains full management apps.
-  });
-  ipcMain.on(IPC.portalLeave, (e) => {
-    if (!trusted(e)) return;
-    const win = window();
-    if (!win || win.isDestroyed()) return;
+    if (portalFullScreenGuard) {
+      win.removeListener('enter-full-screen', portalFullScreenGuard);
+      portalFullScreenGuard = null;
+    }
+    win.setIgnoreMouseEvents(false);
+    win.setFocusable(true);
+    win.setContentProtection(false);
     win.setAlwaysOnTop(false);
+    if (win.isMaximized() && !portalWasMaximized) win.unmaximize();
     if (normalBounds) {
       win.setBounds(normalBounds, true);
       normalBounds = null;
     }
+    if (portalWasMaximized && !win.isMaximized()) win.maximize();
+    if (portalWasFullScreen) win.setFullScreen(true);
+    portalWasMaximized = false;
+    portalWasFullScreen = false;
+    if (notify) win.webContents.send(IPC.portalExit);
+  };
+  ipcMain.on(IPC.portalEnter, (e) => {
+    if (!trusted(e)) return;
+    const win = window();
+    if (!win || win.isDestroyed()) return;
+    if (portalActive) return;
+    portalWasFullScreen = win.isFullScreen();
+    portalWasMaximized = !portalWasFullScreen && win.isMaximized();
+    if (portalWasFullScreen) win.setFullScreen(false);
+    if (!portalWasFullScreen && !portalWasMaximized) normalBounds ??= win.getBounds();
+    portalActive = true;
+    portalFullScreenGuard = () => {
+      if (portalActive && win.isFullScreen()) {
+        win.setFullScreen(false);
+        win.maximize();
+      }
+    };
+    win.on('enter-full-screen', portalFullScreenGuard);
+    win.setAlwaysOnTop(true, 'screen-saver');
+    // A native fullscreen window lives in its own Space. Leave that Space while the portal is
+    // active, then fill the owner's current Space by maximizing in place.
+    if (!portalWasMaximized) win.maximize();
+    // Hide this layer from the screen capture to avoid a hall-of-mirrors effect. The real desktop
+    // underneath remains visible in the video and receives the user's mouse and keyboard events.
+    win.setContentProtection(true);
+    if (!process.env.OFFICE_TEST_RUN) {
+      win.setIgnoreMouseEvents(true, { forward: true });
+      // The mirror is click-through by design. The modifier shortcut remains available after a
+      // native app takes focus without consuming ordinary text input.
+      for (const accelerator of portalShortcuts) globalShortcut.register(accelerator, () => restorePortal(true));
+    }
+  });
+  ipcMain.on(IPC.portalLeave, (e) => {
+    if (!trusted(e)) return;
+    restorePortal(false);
   });
   ipcMain.on(IPC.portalOpenHome, (e) => {
     if (trusted(e)) void shell.openPath(app.getPath('home'));
@@ -151,6 +215,14 @@ export function startOffice({ dataFile, harnesses, window, services }: Options) 
   ipcMain.on(IPC.portalOpenTerminal, (e) => {
     if (trusted(e)) void shell.openPath('/System/Applications/Utilities/Terminal.app');
   });
+  ipcMain.on(IPC.portalOpenSlack, (e) => {
+    if (!trusted(e)) return;
+    if (process.platform === 'darwin') {
+      void shell.openPath('/Applications/Slack.app');
+    } else {
+      void shell.openExternal('slack://open');
+    }
+  });
 
-  return { shutdown: () => office.shutdown() };
+  return { shutdown: () => { unregisterPortalShortcuts(); office.shutdown(); } };
 }

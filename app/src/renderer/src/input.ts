@@ -28,6 +28,7 @@ export function installInput() {
     if (!e.repeat && e.code === 'KeyF') {
       if (s.computerState === 'seated') leaveComputer();
       else if (s.nearComputer) enterComputer();
+      else if (!s.modal && s.nearTaskBoard) set({ modal: { kind: 'task_board', blockId: s.nearTaskBoard } });
       return;
     }
 

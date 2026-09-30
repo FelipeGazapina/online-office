@@ -105,6 +105,31 @@ export type Whiteboard = {
   at: number;
 };
 
+export type TaskProvider = 'linear' | 'cronospark';
+export type TaskBoardSource = {
+  provider: TaskProvider;
+  projectId: string;
+  label?: string;
+};
+export type TaskBoardConfig = { sources: TaskBoardSource[] };
+export type TaskCard = {
+  id: string;
+  provider: TaskProvider;
+  identifier: string;
+  title: string;
+  status: string;
+  priority?: string;
+  url?: string;
+  sourceLabel: string;
+};
+export type TaskBoardState =
+  | { kind: 'idle'; cards: TaskCard[]; lastFetchedAt?: number }
+  | { kind: 'loading'; cards: TaskCard[]; lastFetchedAt?: number }
+  | { kind: 'ready'; cards: TaskCard[]; lastFetchedAt: number }
+  | { kind: 'error'; cards: TaskCard[]; message: string; lastFetchedAt?: number };
+// The user id is safe to show back in the settings UI. The API key never crosses the main-process boundary in a snapshot.
+export type TaskConnectionState = { kind: 'ready' | 'connecting' | 'needs_auth' | 'missing' | 'error'; message?: string; userId?: string; hasApiKey?: boolean };
+
 export type ProjectBlock = {
   id: BlockId;
   name: string;
@@ -113,6 +138,8 @@ export type ProjectBlock = {
   slot: number;
   githubRepo?: string;
   whiteboard?: Whiteboard;
+  taskBoard?: TaskBoardConfig;
+  linearBoardUrl?: string;
 };
 
 export type Company = {
@@ -161,6 +188,12 @@ export type ClientMessage =
   | { type: 'fire'; employeeId: EmployeeId }
   | { type: 'create_block'; cwd: string; name?: string; githubRepo?: string }
   | { type: 'update_block'; blockId: BlockId; name?: string; cwd?: string; githubRepo?: string }
+  | { type: 'configure_task_board'; blockId: BlockId; config: TaskBoardConfig }
+  | { type: 'configure_linear_board'; blockId: BlockId; url: string }
+  | { type: 'refresh_task_board'; blockId: BlockId }
+  | { type: 'connect_task_provider'; provider: TaskProvider }
+  | { type: 'configure_task_provider'; provider: 'cronospark'; apiKey: string; userId: string }
+  | { type: 'assign_task'; blockId: BlockId; taskId: string; employeeId: EmployeeId }
   | { type: 'assign'; employeeId: EmployeeId; task: string }
   // `always` counts only on a permission card, and only when `text` allows it. The office then adds a rule for that
   // employee that covers the same command or tool from now on.
@@ -182,6 +215,8 @@ export type Snapshot = {
   harnesses: Record<Provider, HarnessStatus>;
   catalogs: Record<Provider, ModelCatalog>;
   meetingDoor: MeetingDoor;
+  taskBoards: Record<string, TaskBoardState>;
+  taskConnections: Record<TaskProvider, TaskConnectionState>;
 };
 
 export type ServerMessage =
@@ -203,6 +238,8 @@ export type OfficeApi = {
     leave(): void;
     openHome(): void;
     openTerminal(): void;
+    openSlack(): void;
+    onExit(cb: () => void): () => void;
   };
   update: {
     // Acts only from `current`, `check-failed` and `update-failed`.
@@ -235,6 +272,8 @@ export const IPC = {
   portalLeave: 'office:portal-leave',
   portalOpenHome: 'office:portal-open-home',
   portalOpenTerminal: 'office:portal-open-terminal',
+  portalOpenSlack: 'office:portal-open-slack',
+  portalExit: 'office:portal-exit',
   updateCheck: 'office:update-check',
   updateInstall: 'office:update-install',
   updateSubscribe: 'office:update-subscribe',

@@ -1,6 +1,7 @@
 import { useFrame, useThree } from '@react-three/fiber';
 import { useEffect, useRef } from 'react';
 import { Vector3, type PerspectiveCamera } from 'three';
+import { angleDiff } from '../layout.ts';
 import { runtime } from '../runtime.ts';
 import { get, useStore } from '../store.ts';
 import { stepSim } from '../sim.ts';
@@ -42,7 +43,7 @@ export function CameraRig() {
     const { desired, look } = scratch.current;
     const turn = (keys.has('KeyQ') ? 1 : 0) - (keys.has('KeyE') ? 1 : 0);
     view.isoYawTarget += turn * dt * 1.8;
-    view.yaw += (view.isoYawTarget - view.yaw + Math.PI) % (2 * Math.PI) - Math.PI;
+    view.yaw += angleDiff(view.yaw, view.isoYawTarget) * ease(dt, 8);
     focus.current.lerp(desired.set(owner.pos.x, 0.6, owner.pos.z), ease(dt, snap.current ? 100 : 5));
     const fx = Math.sin(view.yaw), fz = Math.cos(view.yaw), c = Math.cos(TOP_DOWN_PITCH);
     look.copy(focus.current);

@@ -1,9 +1,10 @@
 import { join } from 'node:path';
-import { app, BrowserWindow, session, type WebContents } from 'electron';
+import { app, BrowserWindow, desktopCapturer, safeStorage, screen, session, shell, type WebContents } from 'electron';
 import { startOffice } from './ipc.ts';
 import { detectHarnesses, setCodexRoot } from './office/adapters/index.ts';
 import { startOfficeMcp } from './office/mcp.ts';
 import { MemoryStore } from './office/memory.ts';
+import { TaskBoardService } from './office/task-board.ts';
 import { startUpdater } from './updater.ts';
 import { prepareVoice, startVoice } from './voice.ts';
 
@@ -64,15 +65,27 @@ else {
       wc === win?.webContents && (permission === 'media' || permission === 'notifications' || permission === 'pointerLock');
     session.defaultSession.setPermissionCheckHandler((wc, permission) => allowed(wc, permission));
     session.defaultSession.setPermissionRequestHandler((wc, permission, callback) => callback(allowed(wc, permission)));
+    // The portal is a transparent remote-control layer over the real desktop. The user still sees and
+    // interacts with the actual macOS session; Electron only supplies the video surface and office HUD.
+    session.defaultSession.setDisplayMediaRequestHandler((_request, callback) => {
+      void desktopCapturer.getSources({ types: ['screen'], thumbnailSize: { width: 1, height: 1 } }).then((sources) => {
+        const current = win && !win.isDestroyed() ? screen.getDisplayMatching(win.getBounds()) : undefined;
+        const source = sources.find((candidate) => current && candidate.display_id === String(current.id)) ?? sources[0];
+        callback(source ? { video: source } : {});
+      }).catch(() => callback({}));
+    });
 
     // The MCP server has to be listening before the first session is built, and memory lives beside company.json.
     const userData = app.getPath('userData');
     const mcp = await startOfficeMcp();
+    const credentialsCodec = safeStorage.isEncryptionAvailable()
+      ? { encode: (value: string) => safeStorage.encryptString(value).toString('base64'), decode: (value: string) => safeStorage.decryptString(Buffer.from(value, 'base64')) }
+      : undefined;
     const office = startOffice({
       dataFile: join(userData, 'company.json'),
       harnesses: await harnesses,
       window: () => win,
-      services: { mcp, memory: MemoryStore.open(join(userData, 'memory')) },
+      services: { mcp, memory: MemoryStore.open(join(userData, 'memory')), taskBoards: new TaskBoardService({ openUrl: (url) => shell.openExternal(url), credentialsFile: join(userData, 'task-board-credentials.json'), credentialsCodec }) },
     });
     const voice = startVoice({ window: () => win, userData });
     startUpdater({ window: () => win });

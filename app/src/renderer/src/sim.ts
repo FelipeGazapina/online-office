@@ -3,7 +3,7 @@
 // logical state every frame: blocked_on_owner walks to the owner, everything else goes to the desk. Everyone follows
 // routes planned on the nav grid, so the walls of the meeting room are in the way of employees as much as of the owner.
 import { Vector3 } from 'three';
-import type { Company, Employee, EmployeeId } from '../../shared/protocol.ts';
+import type { BlockId, Company, Employee, EmployeeId } from '../../shared/protocol.ts';
 import { announceArrival, cancelSpeech, LISTEN_RADIUS } from './audio.ts';
 import {
   angleDiff,
@@ -12,8 +12,10 @@ import {
   deskPose,
   getLayout,
   OWNER_CHAIR,
+  projectComputerPose,
   OWNER_RADIUS,
   pushOut,
+  whiteboardPose,
   withMeetingRoom,
   type DeskPose,
   type Layout,
@@ -39,6 +41,7 @@ const ARRIVE = 0.1;
 const CORNER = 0.2;
 // An avatar plans its route again once its target has moved this far since the plan.
 const REROUTE = 0.5;
+const TASK_BOARD_RADIUS = 1.75;
 
 const dist2 = (a: Vec2, b: Vec2) => Math.hypot(a.x - b.x, a.z - b.z);
 const ease = (dt: number, rate: number) => 1 - Math.exp(-dt * rate);
@@ -55,6 +58,18 @@ export function queueSlot(k: number): Vec2 {
 export function seatFor(e: Employee, company: Company): DeskPose | null {
   const block = company.blocks.find((b) => b.id === e.blockId);
   return block ? deskPose(block.slot, e.desk) : null;
+}
+
+export function taskBoardTarget(company: Company, pos: Vec2): BlockId | null {
+  let nearest: { id: BlockId; distance: number } | undefined;
+  for (const block of company.blocks) {
+    if (!block.taskBoard?.sources.length && !block.linearBoardUrl) continue;
+    const board = whiteboardPose(block.slot);
+    const distance = dist2(pos, board);
+    if (distance >= TASK_BOARD_RADIUS || (nearest && distance >= nearest.distance)) continue;
+    nearest = { id: block.id, distance };
+  }
+  return nearest?.id ?? null;
 }
 
 const fallbackSeat: DeskPose = {
@@ -351,6 +366,11 @@ export function stepSim(rawDt: number) {
 
   const nearbyIds = nearbyInRange(company);
   const nearComputer = Math.hypot(runtime.owner.pos.x - OWNER_CHAIR.x, runtime.owner.pos.z - OWNER_CHAIR.z) < 1.75;
+  const nearProjectComputer = company.blocks.find((block) => {
+    const chair = projectComputerPose(block.slot).chair;
+    return Math.hypot(runtime.owner.pos.x - chair.x, runtime.owner.pos.z - chair.z) < 1.75;
+  })?.id ?? null;
+  const nearTaskBoard = taskBoardTarget(company, runtime.owner.pos);
   const talkingTo = nearestInRange(company, state.talkingTo, nearbyIds);
 
   // The arrival: the first blocked employee in line has reached the owner.
@@ -375,13 +395,15 @@ export function stepSim(rawDt: number) {
   const askerId = meetingDoor === 'open' && front && front.status.kind === 'blocked_on_owner' && runtime.arrived.get(front.id) === front.status.question.id ? front.id : null;
 
   const nearbyChanged = nearbyIds.length !== state.nearbyIds.length || nearbyIds.some((id, i) => id !== state.nearbyIds[i]);
-  if (talkingTo !== state.talkingTo || askerId !== state.askerId || nearbyChanged || nearComputer !== state.nearComputer) {
+  if (talkingTo !== state.talkingTo || askerId !== state.askerId || nearbyChanged || nearComputer !== state.nearComputer || nearProjectComputer !== state.nearProjectComputer || nearTaskBoard !== state.nearTaskBoard) {
     if (talkingTo !== state.talkingTo) cancelSpeech();
     set({
       talkingTo,
       nearbyIds,
       askerId,
       nearComputer,
+      nearProjectComputer,
+      nearTaskBoard,
       // Proximity opens the side chat and follows the closest person as the owner moves.
       ...(talkingTo && talkingTo !== state.talkingTo ? { selectedId: talkingTo } : {}),
       // Close the drawer when the owner leaves the employee who opened it through proximity chat.
