@@ -84,7 +84,7 @@ export function Clock() {
   const available = TIMEZONES.filter((zone) => zone !== localZone && !zones.includes(zone));
 
   return (
-    <div className="clock-bar" aria-label="World clocks">
+    <div className="clock-bar" data-hud-resize-target="clock" aria-label="World clocks">
       <button className="clock-toggle" type="button" aria-expanded={open} aria-controls="clock-popover" onClick={() => setOpen((value) => !value)}>
         <span className="clock-toggle-zone">{labelFor(localZone)} · local</span>
         <strong>{formatTime(now, localZone)}</strong>

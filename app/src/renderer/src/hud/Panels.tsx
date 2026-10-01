@@ -221,7 +221,7 @@ export function WaitingMeter() {
   return (
     <>
       <div className={`vignette ${urgent ? 'urgent' : ''}`} />
-      <div className={`waiting ${queue.length ? 'some' : 'none'} ${urgent ? 'urgent' : ''} ${meetingDoor === 'closed' ? 'door-closed' : ''}`}>
+      <div data-hud-resize-target="waiting-meter" className={`waiting ${queue.length ? 'some' : 'none'} ${urgent ? 'urgent' : ''} ${meetingDoor === 'closed' ? 'door-closed' : ''}`}>
         <div className="ticket">
           <span className="num">{queue.length}</span>
           <span className="lab">
@@ -248,7 +248,7 @@ export function WaitingMeter() {
 export function Toasts() {
   const toasts = useStore((s) => s.toasts);
   return (
-    <div className="toasts">
+    <div className="toasts" data-hud-resize-target="toasts">
       {toasts.map((t) => (
         <div key={t.id} className={`toast ${t.tone}`}>
           {t.text}
@@ -265,9 +265,9 @@ export function ComputerPrompt() {
   const near = useStore((s) => s.nearComputer);
   const nearTaskBoard = useStore((s) => s.nearTaskBoard);
   const seated = useStore((s) => s.computerState === 'seated');
-  if (nearTaskBoard && !seated) return <div className="computer-prompt"><kbd>F</kbd><span>open the task board</span></div>;
+  if (nearTaskBoard && !seated) return <div className="computer-prompt" data-hud-resize-target="computer-prompt"><kbd>F</kbd><span>open the task board</span></div>;
   if (!near || seated) return null;
-  return <div className="computer-prompt"><kbd>F</kbd><span>sit at your computer</span></div>;
+  return <div className="computer-prompt" data-hud-resize-target="computer-prompt"><kbd>F</kbd><span>sit at your computer</span></div>;
 }
 
 const KEYS: [string, string][] = [
@@ -291,7 +291,7 @@ export function HelpOverlay() {
   if (!open) return null;
   return (
     <div className="scrim" onClick={() => set({ helpOpen: false })}>
-      <div className="modal help" onClick={(e) => e.stopPropagation()}>
+      <div className="modal help" data-hud-resize-target="help-overlay" onClick={(e) => e.stopPropagation()}>
         <h2>Keys</h2>
         <dl>
           {KEYS.map(([k, d]) => (

@@ -20,6 +20,7 @@ function Modal({ title, children }: { title: string; children: ReactNode }) {
     <div className="scrim" onMouseDown={close}>
       <div
         className="modal"
+        data-hud-resize-target="modals"
         onMouseDown={(e) => e.stopPropagation()}
         onKeyDown={(e) => {
           if (e.key === 'Escape') close();
