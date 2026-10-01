@@ -28,7 +28,7 @@ export function UpdateChip() {
   const v = update && view(update);
   if (!v?.chip) return null;
   return (
-    <button className={`btn update-chip ${v.chip}`} disabled={!v.run} title={v.note} onClick={() => v.run?.()}>
+    <button className={`btn update-chip ${v.chip}`} data-hud-resize-target="update-chip" disabled={!v.run} title={v.note} onClick={() => v.run?.()}>
       {v.label}
     </button>
   );

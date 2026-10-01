@@ -7,6 +7,7 @@ import { fmtWait, useNow } from '../hud/hooks.ts';
 import { hash } from '../layout.ts';
 import { runtime } from '../runtime.ts';
 import { set, useStore } from '../store.ts';
+import { ResizableHud } from '../hud/ResizableHud.tsx';
 import { labelLayer } from './labelLayer.ts';
 import { Person, type Look } from './Person.tsx';
 
@@ -46,8 +47,8 @@ export const EmployeeView = memo(function EmployeeView({ employee }: { employee:
           <meshBasicMaterial color={talking ? '#8ff0b8' : '#ffffff'} transparent opacity={talking ? 0.95 : 0.6} />
         </mesh>
       )}
-      <Html position={[0, 2.0, 0]} portal={labelLayer} pointerEvents="none" zIndexRange={[20, 0]}>
-        <Label employee={employee} meetingDoor={meetingDoor} />
+      <Html position={[0, 2.0, 0]} portal={labelLayer} pointerEvents="auto" zIndexRange={[20, 0]}>
+        <ResizableHud itemKey={`employee-label-${employee.id}`}><Label employee={employee} meetingDoor={meetingDoor} /></ResizableHud>
       </Html>
     </Person>
   );
@@ -86,7 +87,7 @@ function Label({ employee: e, meetingDoor }: { employee: Employee; meetingDoor: 
   }
 
   return (
-    <div className="emp-label">
+    <div className="emp-label" data-hud-resize-target={`employee-label-${e.id}`}>
       {bubbleEl}
       <button className="tag" onClick={(ev) => set({ menu: { employeeId: e.id, x: ev.clientX, y: ev.clientY } })}>
         <i className="pdot" style={{ background: p.color }} />

@@ -184,7 +184,7 @@ export function Bottom() {
   const target = talking ?? (s.meetingDoor === 'open' ? asker : undefined) ?? visibleSelected;
 
   return (
-    <div className="bottom">
+    <div className="bottom" data-hud-resize-target="bottom-talk">
       {talking && <VoiceChip name={talking.name} />}
       {s.meetingDoor === 'open' && asker && s.cardMinimized && asker.status.kind === 'blocked_on_owner' && (
         <button className="qmini" onClick={() => set({ cardMinimized: false })}>

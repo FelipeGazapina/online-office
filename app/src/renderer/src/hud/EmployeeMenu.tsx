@@ -44,7 +44,7 @@ function Menu({ employee, x, y }: { employee: Employee; x: number; y: number }) 
   }, []);
 
   return (
-    <div ref={ref} className="emp-menu" style={pos}>
+    <div ref={ref} className="emp-menu" data-hud-resize-target="employee-menu" style={pos}>
       <button
         onClick={() => {
           if (get().selectedId === employee.id) document.getElementById('drawer-input')?.focus();
