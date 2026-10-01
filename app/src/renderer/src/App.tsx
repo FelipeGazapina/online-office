@@ -6,6 +6,7 @@ import { Bottom } from './hud/Talk.tsx';
 import { UpdateChip } from './hud/UpdateControl.tsx';
 import { ComputerMenu, MacPortal } from './hud/MacPortal.tsx';
 import { Clock } from './hud/Clock.tsx';
+import { ResizableHud } from './hud/ResizableHud.tsx';
 import { Scene } from './scene/Scene.tsx';
 import { useStore } from './store.ts';
 import { testRun } from './testRun.ts';
@@ -19,19 +20,19 @@ export function App() {
         <Scene />
       </div>
       <div className="hud" style={{ display: portalMode ? 'none' : undefined }}>
-        <Clock />
-        <WaitingMeter />
-        <UpdateChip />
-        <Bottom />
+        <ResizableHud itemKey="clock"><Clock /></ResizableHud>
+        <ResizableHud itemKey="waiting-meter"><WaitingMeter /></ResizableHud>
+        <ResizableHud itemKey="update-chip"><UpdateChip /></ResizableHud>
+        <ResizableHud itemKey="bottom-talk"><Bottom /></ResizableHud>
       </div>
       {portalMode && <MacPortal />}
-      <Toasts />
-      <ComputerPrompt />
-      <Drawer />
-      <Modals />
-      <EmployeeMenu />
-      <HelpOverlay />
-      <ComputerMenu />
+      <ResizableHud itemKey="toasts"><Toasts /></ResizableHud>
+      <ResizableHud itemKey="computer-prompt"><ComputerPrompt /></ResizableHud>
+      <ResizableHud itemKey="drawer"><Drawer /></ResizableHud>
+      <ResizableHud itemKey="modals"><Modals /></ResizableHud>
+      <ResizableHud itemKey="employee-menu"><EmployeeMenu /></ResizableHud>
+      <ResizableHud itemKey="help-overlay"><HelpOverlay /></ResizableHud>
+      <ResizableHud itemKey="computer-menu"><ComputerMenu /></ResizableHud>
     </>
   );
 }

@@ -56,7 +56,7 @@ export function Drawer() {
   const s = e.status;
 
   return (
-    <aside className="drawer" key={e.id}>
+    <aside className="drawer" data-hud-resize-target="drawer" key={e.id}>
       <header>
         <div>
           <h2>{e.name}</h2>
@@ -176,7 +176,7 @@ function GroupDrawer({ members }: { members: Employee[] }) {
   }, [lines.length]);
 
   return (
-    <aside className="drawer" key="group">
+    <aside className="drawer" data-hud-resize-target="drawer" key="group">
       <header>
         <div>
           <h2>Nearby team</h2>

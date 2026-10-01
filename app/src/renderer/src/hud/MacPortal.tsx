@@ -14,7 +14,7 @@ export function ComputerMenu() {
   const open = useStore((s) => s.computerMenu);
   if (!open) return null;
   return (
-    <div className="computer-menu panel">
+    <div className="computer-menu panel" data-hud-resize-target="computer-menu">
       <div className="computer-title"><span className="computer-dot" /><b>My Mac</b></div>
       <p className="muted">Sit down to use the same Mac, apps, and files you use every day.</p>
       <button className="btn primary" onClick={() => enterComputer()}>Open MacBook</button>
