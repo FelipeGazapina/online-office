@@ -119,6 +119,7 @@ export type TaskCard = {
   title: string;
   status: string;
   priority?: string;
+  description?: string;
   url?: string;
   sourceLabel: string;
 };

@@ -435,6 +435,7 @@ function TaskBoardModal({ blockId }: { blockId: BlockId }) {
                       className={`task-card ${selected?.id === card.id ? 'selected' : ''}`}
                       data-task-id={card.id}
                       aria-pressed={selected?.id === card.id}
+                      aria-label={`Open details for ${card.identifier}`}
                       onClick={() => set({ modal: { kind: 'task_board', blockId, taskId: card.id } })}
                     >
                       <span className={`task-provider ${card.provider}`}>{card.provider === 'linear' ? 'LIN' : 'CS'}</span>
@@ -452,6 +453,7 @@ function TaskBoardModal({ blockId }: { blockId: BlockId }) {
               <div className="task-detail-topline"><span className={`task-provider ${selected.provider}`}>{selected.sourceLabel}</span><span className="task-detail-status">{selected.status}</span></div>
               <h3>{selected.identifier}</h3>
               <h4>{selected.title}</h4>
+              <p className="task-detail-description">{selected.description || 'No additional description provided.'}</p>
               <p className="muted">{selected.priority ? `Priority ${selected.priority}` : 'No priority set'}</p>
               {selected.url && <a href={selected.url} target="_blank" rel="noreferrer">Open in {selected.sourceLabel}</a>}
               <h4>Assign to an AI employee</h4>

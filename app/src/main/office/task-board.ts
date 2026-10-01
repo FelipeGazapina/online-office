@@ -51,6 +51,7 @@ export function normalizeTaskPayload(provider: TaskProvider, payload: unknown, s
     const identifier = text(item.identifier) || text(item.code) || rawId;
     const state = nestedName(item.state) || text(item.status) || 'Open';
     const priority = nestedName(item.priority) || (typeof item.priority === 'number' ? `P${item.priority}` : undefined);
+    const description = text(item.description) || text(item.body) || text(item.details) || undefined;
     const url = text(item.url) || text(item.webUrl) || text(item.link) || undefined;
     return [{
       id: `${provider}:${rawId}`,
@@ -59,6 +60,7 @@ export function normalizeTaskPayload(provider: TaskProvider, payload: unknown, s
       title,
       status: state,
       ...(priority ? { priority } : {}),
+      ...(description ? { description } : {}),
       ...(url ? { url } : {}),
       sourceLabel: source.label?.trim() || (provider === 'cronospark' ? 'CronoSpark' : 'Linear'),
     }];

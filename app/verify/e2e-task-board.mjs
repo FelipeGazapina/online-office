@@ -43,8 +43,11 @@ export default async (s) => {
   assert(await s.eval("document.querySelectorAll('[data-testid=task-board-kanban] .task-board-column').length === 6"), 'the board renders the Linear-style workflow columns');
   await s.eval(`window.office.send({ type: 'hire', provider: 'claude-code', blockId: __office.store.getState().company.blocks[0].id })`);
   await s.waitFor("__office.store.getState().company.employees.length === 1");
-  await s.clickText('.task-card', 'CS-27');
+  const cardBounds = await s.eval("(() => { const card = [...document.querySelectorAll('.task-card')].find((candidate) => candidate.innerText.includes('CS-27')); const bounds = card?.getBoundingClientRect(); return bounds ? { x: bounds.right - 12, y: bounds.top + bounds.height / 2 } : null; })()");
+  if (!cardBounds) throw new Error('could not locate the CS-27 card bounds');
+  await s.click(cardBounds.x, cardBounds.y);
   assert(await s.eval("document.querySelector('[data-testid=task-card-details]')?.innerText.includes('Assign to an AI employee')"), 'selecting a card opens its assignment details');
+  assert(await s.eval("document.querySelector('[data-testid=task-card-details]')?.innerText.includes('Keep cards readable.') && document.querySelector('[data-testid=task-card-details]')?.innerText.includes('Inspect the complete task before assigning it.')"), 'selecting a card opens its full description');
   await s.shot('task-board-kanban');
   await s.clickText('.task-assign', '');
   await s.waitFor("__office.store.getState().company.employees[0].status.kind === 'working'");

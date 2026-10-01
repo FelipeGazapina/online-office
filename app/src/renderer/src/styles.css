@@ -1628,7 +1628,8 @@ h3 {
 .task-source-row input, .task-source-row select, .task-config-head select { min-width: 0; padding: 8px 10px; border: 1px solid rgba(48,50,71,.18); border-radius: 8px; background: #fff; color: inherit; }
 .task-config-actions { justify-content: flex-end; margin-top: 14px; flex-wrap: wrap; }
 .task-config-note { margin: 12px 0 0; font-size: 12px; }
-.task-board-modal { width: min(1400px, 94vw); min-width: min(920px, 92vw); max-height: 92vh; overflow: hidden; }
+.modal.wide.task-board-modal { width: min(1400px, 94vw); }
+.task-board-modal { min-width: min(920px, 92vw); max-height: 92vh; overflow: hidden; }
 .task-board-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 22px; padding-bottom: 14px; border-bottom: 1px solid rgba(48,50,71,.12); }
 .task-board-header h2 { margin: 2px 0 3px; }
 .task-board-eyebrow { margin: 0; color: #676b85; font-size: 11px; font-weight: 800; letter-spacing: .09em; text-transform: uppercase; }
@@ -1640,8 +1641,8 @@ h3 {
 .task-board-filter-chip { padding: 5px 9px; border: 1px solid rgba(48,50,71,.12); border-radius: 999px; background: rgba(255,255,255,.55); }
 .task-board-syncing { margin-left: auto; color: #5b45c7; font-weight: 700; }
 .task-board-kanban-shell { display: grid; grid-template-columns: minmax(0, 1fr) minmax(245px, .32fr); gap: 14px; min-height: 470px; overflow: hidden; }
-.task-board-kanban { display: grid; grid-template-columns: repeat(7, minmax(142px, 1fr)); gap: 9px; min-width: 0; overflow-x: auto; padding: 1px 1px 10px; }
-.task-board-column { min-width: 142px; padding: 10px; border: 1px solid rgba(48,50,71,.1); border-radius: 10px; background: #f3f3f6; }
+.task-board-kanban { display: grid; grid-template-columns: repeat(7, 220px); grid-auto-columns: 220px; gap: 9px; min-width: 0; overflow-x: auto; padding: 1px 1px 10px; }
+.task-board-column { width: 220px; min-width: 220px; padding: 10px; border: 1px solid rgba(48,50,71,.1); border-radius: 10px; background: #f3f3f6; }
 .task-board-column-head { display: flex; align-items: center; justify-content: space-between; gap: 6px; margin-bottom: 10px; }
 .task-board-column-head h3 { margin: 0; color: #393d55; font-size: 13px; }
 .task-board-column-head span { display: inline-flex; min-width: 22px; justify-content: center; padding: 2px 5px; border-radius: 999px; color: #70748b; background: #e7e8ed; font-size: 11px; font-weight: 800; }
@@ -1659,6 +1660,7 @@ h3 {
 .task-card-detail { min-width: 0; padding: 18px; border: 1px solid rgba(48,50,71,.1); border-radius: 12px; background: #f4f4f8; }
 .task-detail-topline { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .task-detail-status { color: #6f7184; font-size: 11px; font-weight: 700; }
+.task-detail-description { margin: 12px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; }
 .task-board-empty { display: grid; justify-items: start; gap: 10px; padding: 18px; border: 1px solid rgba(48,50,71,.14); border-radius: 12px; background: #f4f4f8; }
 .task-board-empty .err-text { margin: 0; }
 .task-card-detail h3 { margin: 16px 0 4px; }
@@ -1666,7 +1668,7 @@ h3 {
 .task-assign { display: block; width: 100%; margin-top: 7px; }
 @media (max-width: 900px) { .task-credentials { grid-template-columns: 1fr 1fr; } .task-credentials > div { grid-column: 1 / -1; } }
 @media (max-width: 1000px) { .task-board-kanban-shell { grid-template-columns: 1fr; overflow-y: auto; } .task-card-detail { min-height: 170px; } }
-@media (max-width: 760px) { .task-config-head { align-items: stretch; flex-direction: column; } .task-block-picker { min-width: 0; } .task-board-modal { min-width: 0; } .task-board-header { flex-direction: column; } .task-board-header-actions { flex-wrap: wrap; } .task-board-kanban { grid-template-columns: repeat(7, minmax(160px, 1fr)); } .task-source-row { grid-template-columns: 1fr 1fr; } .task-source-row .link { grid-column: 2; } .task-credentials { grid-template-columns: 1fr; } .task-credentials > div { grid-column: auto; } }
+@media (max-width: 760px) { .task-config-head { align-items: stretch; flex-direction: column; } .task-block-picker { min-width: 0; } .task-board-modal { min-width: 0; } .task-board-header { flex-direction: column; } .task-board-header-actions { flex-wrap: wrap; } .task-board-kanban { grid-template-columns: repeat(7, 180px); grid-auto-columns: 180px; } .task-board-column { width: 180px; min-width: 180px; } .task-source-row { grid-template-columns: 1fr 1fr; } .task-source-row .link { grid-column: 2; } .task-credentials { grid-template-columns: 1fr; } .task-credentials > div { grid-column: auto; } }
 
 /* A portal window is a click-through, always-on-top mirror of the real desktop. The main process
    removes this window from capture and sends the pointer and keyboard events to macOS underneath it. */
