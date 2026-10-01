@@ -1,3 +1,5 @@
+@layer legacy {
+
 :root {
   --ink: #232640;
   --ink-soft: #3b3f63;
@@ -1723,3 +1725,5 @@ h3 {
 .hud-resize-badge { position: absolute; right: calc(100% + 5px); bottom: calc(100% + 5px); display: block; min-width: 34px; padding: 2px 5px; border: 1px solid rgba(255,189,86,.55); border-radius: 999px; color: #fff4dd; background: rgba(51,37,18,.9); box-shadow: 0 3px 10px rgba(20,12,2,.25); font: 700 10px/1.2 ui-monospace, 'SF Mono', Menlo, monospace; pointer-events: none; white-space: nowrap; }
 body.hud-resizing, body.hud-resizing * { cursor: nwse-resize !important; }
 @media (max-width: 600px) { .clock-bar { top: 10px; left: 10px; } .clock-toggle { min-width: 130px; padding: 5px 25px 5px 9px; } .clock-toggle strong, .clock-card strong { font-size: 14px; } .clock-popover { width: min(260px, calc(100vw - 20px)); } }
+
+}

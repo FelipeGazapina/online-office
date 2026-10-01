@@ -222,20 +222,20 @@ export function WaitingMeter() {
     <>
       <div className={`vignette ${urgent ? 'urgent' : ''}`} />
       <div data-hud-resize-target="waiting-meter" className={`waiting ${queue.length ? 'some' : 'none'} ${urgent ? 'urgent' : ''} ${meetingDoor === 'closed' ? 'door-closed' : ''} oo:flex oo:flex-col oo:items-center oo:gap-1`}>
-        <div className="ticket">
-          <span className="num">{queue.length}</span>
-          <span className="lab">
+        <div className="ticket oo:flex oo:items-center oo:gap-2 oo:rounded-xl oo:border oo:border-hud-border oo:bg-hud-surface/95 oo:px-2 oo:py-1.5 oo:text-hud-text oo:shadow-2xl">
+          <span className="num oo:min-w-10 oo:rounded-lg oo:bg-hud-card oo:px-2 oo:py-1 oo:font-hud-display oo:text-3xl oo:text-hud-warm">{queue.length}</span>
+          <span className="lab oo:font-hud-display oo:text-sm">
             {meetingDoor === 'closed' ? 'Meeting room door closed' : queue.length === 0 ? 'Nobody waiting on you' : queue.length === 1 ? 'person waiting on you' : 'people waiting on you'}
-            {queue.length > 0 && <em>longest {fmtWait(longest)}</em>}
+            {queue.length > 0 && <em className="oo:text-hud-muted">longest {fmtWait(longest)}</em>}
           </span>
         </div>
         {queue.length > 0 && (
           <div className="chips oo:flex oo:flex-wrap oo:items-center oo:justify-center oo:gap-1">
             {queue.map((e, i) => (
-              <button key={e.id} className={`${waits[i] > URGENT_MS ? 'late' : ''} oo:transition-colors oo:duration-150`} onClick={() => set({ selectedId: e.id })}>
+              <button key={e.id} className={`${waits[i] > URGENT_MS ? 'late' : ''} oo:inline-flex oo:items-center oo:gap-1 oo:rounded-full oo:border oo:border-hud-border oo:bg-hud-card/90 oo:px-2 oo:py-0.5 oo:text-xs oo:font-semibold oo:text-hud-text oo:shadow-lg oo:transition-colors oo:duration-150 oo:hover:border-hud-accent oo:hover:bg-hud-surface`} onClick={() => set({ selectedId: e.id })}>
                 <i style={{ background: PROVIDERS[e.provider].color }} />
                 {e.name}
-                <span>{fmtWait(waits[i])}</span>
+                <span className="oo:text-hud-muted">{fmtWait(waits[i])}</span>
               </button>
             ))}
           </div>
