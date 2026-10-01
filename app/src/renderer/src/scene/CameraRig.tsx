@@ -6,7 +6,7 @@ import { runtime } from '../runtime.ts';
 import { get, useStore } from '../store.ts';
 import { stepSim } from '../sim.ts';
 
-const ISO_PITCH = 0.78;
+const ISO_PITCH = 0.58;
 const FOV = { follow: 55, iso: 26, first: 74 } as const;
 // The distance the scene uses to tell a click from a drag.
 const DRAG_PX = 6;

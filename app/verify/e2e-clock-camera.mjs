@@ -59,7 +59,7 @@ export default async (s, { launch }) => {
   await reopened.eval('__office.setCamera("iso")');
   await reopened.eval('__office.teleport(-10, 4)');
   await reopened.sleep(1200);
-  const center = await reopened.eval('(() => { const p = __office.project(__office.state().owner.x, 1, __office.state().owner.z); return { p, width: innerWidth, height: innerHeight }; })()');
+  const center = await reopened.eval('(() => { const owner = __office.state().owner; const p = __office.project(owner.x, 0.6, owner.z); return { p, width: innerWidth, height: innerHeight }; })()');
   assert(Math.abs(center.p.x - center.width / 2) < center.width * 0.12, `the owner stays horizontally centered in Overview (${center.p.x.toFixed(0)} vs ${(center.width / 2).toFixed(0)})`);
   assert(Math.abs(center.p.y - center.height / 2) < center.height * 0.18, `the owner stays vertically centered in Overview (${center.p.y.toFixed(0)} vs ${(center.height / 2).toFixed(0)})`);
   await reopened.shot('clock-camera');
