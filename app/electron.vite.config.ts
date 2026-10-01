@@ -1,4 +1,5 @@
 import { readFileSync } from 'node:fs';
+import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
 import { defineConfig } from 'electron-vite';
 import { VOICE_ORIGIN } from './src/shared/voice.ts';
@@ -39,6 +40,7 @@ export default defineConfig({
   renderer: {
     plugins: [
       react(),
+      tailwindcss(),
       {
         name: 'office-csp',
         apply: 'build',
