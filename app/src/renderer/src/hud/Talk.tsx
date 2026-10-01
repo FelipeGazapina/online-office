@@ -31,7 +31,7 @@ function Meter() {
   }, []);
   return (
     <span className="meter" ref={ref}>
-      <span />
+      <span className="oo:block" />
     </span>
   );
 }
@@ -42,7 +42,7 @@ function VoiceChip({ name }: { name: string }) {
   const chip = chipOf(voice, mode);
   const action = chip.action && CHIP_ACTIONS[chip.action];
   return (
-    <div className={`talk-badge ${chip.tone}`}>
+    <div className={`talk-badge ${chip.tone} oo:rounded-full oo:border oo:border-hud-border oo:bg-hud-card oo:px-3 oo:py-1 oo:text-xs oo:text-hud-text oo:shadow-lg oo:transition-colors oo:duration-150`}>
       <i className={chip.tone === 'live' ? 'live' : ''} />
       Talking to <b>{name}</b>
       <span>
@@ -50,7 +50,7 @@ function VoiceChip({ name }: { name: string }) {
       </span>
       {chip.meter && <Meter />}
       {action && (
-        <button type="button" className="chip-btn" onClick={action.run}>
+        <button type="button" className="chip-btn oo:rounded-full oo:bg-hud-warm oo:px-2 oo:py-1 oo:font-semibold oo:text-hud-surface oo:transition-colors oo:duration-150 oo:hover:bg-hud-accent oo:focus-visible:outline-2 oo:focus-visible:outline-brand oo:focus-visible:outline-offset-2" onClick={action.run}>
           {action.label}
         </button>
       )}
@@ -73,7 +73,7 @@ function QuestionCard({ e }: { e: Employee }) {
 
   return (
     <form
-      className={`qcard ${q.kind}`}
+      className={`qcard ${q.kind} oo:rounded-2xl oo:bg-hud-card oo:text-hud-text oo:shadow-2xl`}
       style={{ ['--pc' as string]: p.color }}
       onSubmit={(ev) => {
         ev.preventDefault();
@@ -83,14 +83,14 @@ function QuestionCard({ e }: { e: Employee }) {
         (document.activeElement as HTMLElement | null)?.blur();
       }}
     >
-      <header>
+      <header className="oo:flex oo:items-center oo:gap-2">
         <i className="pdot" />
         <b>{e.name}</b>
         <span className="in">in {block?.name ?? 'the office'}</span>
         <span className="prov">{p.label}</span>
         {q.kind === 'permission' && <span className="perm-tag">Permission</span>}
         <span className="wait">{fmtWait(now - q.askedAt)}</span>
-        <button type="button" className="x" title="Minimize" onClick={() => set({ cardMinimized: true })}>
+        <button type="button" className="x oo:rounded-lg oo:bg-hud-surface oo:text-hud-muted oo:hover:text-hud-accent" title="Minimize" onClick={() => set({ cardMinimized: true })}>
           –
         </button>
       </header>
@@ -101,28 +101,29 @@ function QuestionCard({ e }: { e: Employee }) {
             <span>{q.tool}</span>
             {q.detail}
           </pre>
-          <div className="opts">
-            <button type="button" className="btn allow" onClick={() => routeText(e.id, 'Allow')}>
+          <div className="opts oo:flex oo:flex-wrap oo:gap-2">
+            <button type="button" className="btn allow oo:rounded-lg oo:transition-colors oo:duration-150 oo:hover:bg-hud-accent oo:focus-visible:outline-2 oo:focus-visible:outline-brand oo:focus-visible:outline-offset-2" onClick={() => routeText(e.id, 'Allow')}>
               Allow
             </button>
-            <button type="button" className="btn deny" onClick={() => routeText(e.id, 'Deny')}>
+            <button type="button" className="btn deny oo:rounded-lg oo:transition-colors oo:duration-150 oo:hover:bg-hud-accent oo:focus-visible:outline-2 oo:focus-visible:outline-brand oo:focus-visible:outline-offset-2" onClick={() => routeText(e.id, 'Deny')}>
               Deny
             </button>
           </div>
         </>
       ) : (
         q.options && (
-          <div className="opts">
+          <div className="opts oo:flex oo:flex-wrap oo:gap-2">
             {q.options.map((o) => (
-              <button type="button" key={o} className="btn primary" onClick={() => routeText(e.id, o)}>
+              <button type="button" key={o} className="btn primary oo:rounded-lg oo:transition-colors oo:duration-150 oo:hover:bg-hud-accent oo:focus-visible:outline-2 oo:focus-visible:outline-brand oo:focus-visible:outline-offset-2" onClick={() => routeText(e.id, o)}>
                 {o}
               </button>
             ))}
           </div>
         )
       )}
-      <div className="reply">
+      <div className="reply oo:flex oo:items-center oo:gap-2">
         <input
+          className="oo:rounded-lg oo:border-hud-border oo:bg-hud-surface oo:px-2 oo:py-1 oo:text-hud-text oo:transition-colors oo:duration-150 oo:focus-visible:outline-2 oo:focus-visible:outline-brand oo:focus-visible:outline-offset-2"
           id="card-input"
           value={text}
           onChange={(ev) => setText(ev.target.value)}
@@ -130,14 +131,14 @@ function QuestionCard({ e }: { e: Employee }) {
         />
         <button
           type="button"
-          className={`btn mic ${voice.cardMic ? 'on' : ''}`}
+          className={`btn mic ${voice.cardMic ? 'on' : ''} oo:rounded-lg oo:transition-colors oo:duration-150 oo:hover:bg-hud-accent oo:focus-visible:outline-2 oo:focus-visible:outline-brand oo:focus-visible:outline-offset-2`}
           disabled={chip.tone === 'warn'}
           title={chip.tone === 'warn' ? chipLine(chip) : 'Answer by voice'}
           onClick={toggleCardMic}
         >
           {voice.cardMic ? 'Listening' : 'Mic'}
         </button>
-        <button type="submit" className="btn ink" disabled={!text.trim()}>
+        <button type="submit" className="btn ink oo:rounded-lg oo:transition-colors oo:duration-150 oo:hover:bg-hud-accent oo:focus-visible:outline-2 oo:focus-visible:outline-brand oo:focus-visible:outline-offset-2" disabled={!text.trim()}>
           Answer
         </button>
       </div>
@@ -152,7 +153,7 @@ function ChatBar({ target }: { target: Employee | undefined }) {
   const [text, setText] = useState('');
   return (
     <form
-      className={`chat ${target ? '' : 'idle'}`}
+      className={`chat ${target ? '' : 'idle'} oo:flex oo:items-center oo:gap-2 oo:rounded-xl oo:border-hud-border oo:bg-hud-surface/90 oo:px-2 oo:py-1 oo:text-hud-text oo:shadow-xl`}
       onSubmit={(ev) => {
         ev.preventDefault();
         if (target && text.trim()) routeText(target.id, text);
@@ -162,6 +163,7 @@ function ChatBar({ target }: { target: Employee | undefined }) {
     >
       <span className="to">{target ? <>To <b>{target.name}</b></> : 'Nobody in earshot'}</span>
       <input
+        className="oo:rounded-lg oo:border-hud-border oo:bg-hud-card oo:px-2 oo:py-1 oo:text-hud-text oo:transition-colors oo:duration-150 oo:focus-visible:outline-2 oo:focus-visible:outline-brand oo:focus-visible:outline-offset-2"
         id="chat-input"
         ref={ref}
         value={text}

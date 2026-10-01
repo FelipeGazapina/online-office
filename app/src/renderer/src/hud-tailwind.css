@@ -1,0 +1,29 @@
+@layer legacy, theme, utilities;
+
+@import "tailwindcss/theme.css" layer(theme) prefix(oo);
+@import "tailwindcss/utilities.css" layer(utilities) prefix(oo) source("./hud");
+
+@theme inline {
+  --color-ink: var(--ink);
+  --color-paper: var(--paper);
+  --color-paper-2: var(--paper-2);
+  --color-brand: var(--brand);
+  --color-amber: var(--amber);
+  --color-tomato: var(--tomato);
+  --color-moss: var(--moss);
+  --font-display: var(--display);
+  --font-body: var(--body);
+
+  --color-hud-surface: #0b1220;
+  --color-hud-card: #16243a;
+  --color-hud-text: #f3f7ff;
+  --color-hud-muted: #9aacc2;
+  --color-hud-accent: #55dfff;
+  --color-hud-warm: #ffc857;
+  --color-hud-border: rgba(158, 196, 231, 0.24);
+  --font-hud-display: var(--display);
+  --font-hud-body: var(--body);
+  --spacing-hud-1: 0.25rem;
+  --spacing-hud-2: 0.5rem;
+  --spacing-hud-3: 0.75rem;
+}

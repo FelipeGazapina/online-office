@@ -238,7 +238,7 @@ export function ResizableHud({ itemKey, children }: { itemKey: HudItemKey; child
         <button
           type="button"
           ref={handleRef}
-          className="hud-resize-handle"
+          className="hud-resize-handle oo:transition-[opacity,box-shadow,color] oo:duration-0 oo:ease-out oo:focus-visible:outline-2 oo:focus-visible:outline-brand oo:focus-visible:outline-offset-2"
           data-resize-state={state.kind}
           style={handle}
           aria-label={`Resize ${label}`}
