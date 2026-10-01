@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
+import { useEffect, useLayoutEffect, useReducer, useRef, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
 
 const STORAGE_KEY = 'online-office.hud-scales';
 const MIN_SCALE = 0.75;
@@ -23,8 +23,22 @@ const HUD_ITEMS = {
 export type HudItemId = keyof typeof HUD_ITEMS;
 export type HudItemKey = HudItemId | `employee-label-${string}`;
 type HudScaleState = Partial<Record<string, number>>;
-type DragState = { pointerId: number; startX: number; startY: number; startScale: number; currentScale: number };
 type HandleRect = { left: number; top: number };
+type ResizeState =
+  | { kind: 'idle'; scale: number }
+  | { kind: 'hover'; scale: number }
+  | { kind: 'focus'; scale: number }
+  | { kind: 'active-drag'; pointerId: number; startX: number; startY: number; startScale: number; currentScale: number };
+type ResizeEvent =
+  | { type: 'pointer-enter' }
+  | { type: 'pointer-leave' }
+  | { type: 'focus' }
+  | { type: 'blur' }
+  | { type: 'drag-start'; pointerId: number; startX: number; startY: number }
+  | { type: 'drag-move'; clientX: number; clientY: number }
+  | { type: 'drag-end' }
+  | { type: 'cancel' }
+  | { type: 'keyboard-adjust'; delta: number };
 
 function readScales(): HudScaleState {
   try {
@@ -56,14 +70,55 @@ function applyScale(target: HTMLElement | null, scale: number) {
   target?.style.setProperty('--hud-scale', String(scale));
 }
 
+function stateScale(state: ResizeState) {
+  return state.kind === 'active-drag' ? state.currentScale : state.scale;
+}
+
+function idle(scale: number): ResizeState {
+  return { kind: 'idle', scale };
+}
+
+function setAffordance(state: ResizeState, kind: 'hover' | 'focus') {
+  return state.kind === 'active-drag' ? state : { kind, scale: stateScale(state) };
+}
+
+function reduceResize(state: ResizeState, event: ResizeEvent): ResizeState {
+  switch (event.type) {
+    case 'pointer-enter':
+      return setAffordance(state, 'hover');
+    case 'pointer-leave':
+      return state.kind === 'hover' ? idle(state.scale) : state;
+    case 'focus':
+      return setAffordance(state, 'focus');
+    case 'blur':
+      return state.kind === 'focus' ? idle(state.scale) : state;
+    case 'drag-start':
+      return state.kind === 'active-drag'
+        ? state
+        : { kind: 'active-drag', pointerId: event.pointerId, startX: event.startX, startY: event.startY, startScale: stateScale(state), currentScale: stateScale(state) };
+    case 'drag-move':
+      return state.kind === 'active-drag'
+        ? { ...state, currentScale: clampScale(state.startScale + ((event.clientX - state.startX) + (event.clientY - state.startY)) / 360) }
+        : state;
+    case 'drag-end':
+      return state.kind === 'active-drag' ? idle(state.currentScale) : state;
+    case 'cancel':
+      return state.kind === 'active-drag' ? idle(state.startScale) : state;
+    case 'keyboard-adjust':
+      return state.kind === 'active-drag' ? state : { kind: state.kind, scale: clampScale(stateScale(state) + event.delta) };
+  }
+}
+
 export function ResizableHud({ itemKey, children }: { itemKey: HudItemKey; children: ReactNode }) {
-  const [scale, setScale] = useState(() => readScales()[itemKey] ?? DEFAULT_SCALE);
-  const [handle, setHandle] = useState<HandleRect | null>(null);
-  const drag = useRef<DragState | null>(null);
+  const [state, dispatch] = useReducer(reduceResize, itemKey, (key) => idle(readScales()[key] ?? DEFAULT_SCALE));
+  const [handle, setHandle] = useReducer((previous: HandleRect | null, next: HandleRect | null) => previous && next && Math.abs(previous.left - next.left) < 0.5 && Math.abs(previous.top - next.top) < 0.5 ? previous : next, null);
+  const stateRef = useRef(state);
   const target = useRef<HTMLElement | null>(null);
   const handleRef = useRef<HTMLButtonElement>(null);
   const label = labelFor(itemKey);
   const projected = itemKey === 'owner-label' || itemKey.startsWith('employee-label-');
+  const scale = stateScale(state);
+  stateRef.current = state;
 
   useEffect(() => {
     let resizeObserver: ResizeObserver | undefined;
@@ -77,7 +132,7 @@ export function ResizableHud({ itemKey, children }: { itemKey: HudItemKey; child
       applyScale(target.current, scale);
       const rect = target.current?.getBoundingClientRect();
       const nextHandle = rect && rect.width > 1 && rect.height > 1 ? { left: rect.right - 24, top: rect.bottom - 24 } : null;
-      setHandle((previous) => previous && nextHandle && Math.abs(previous.left - nextHandle.left) < 0.5 && Math.abs(previous.top - nextHandle.top) < 0.5 ? previous : nextHandle);
+      setHandle(nextHandle);
       resizeObserver?.disconnect();
       if (target.current) {
         resizeObserver = new ResizeObserver(sync);
@@ -117,34 +172,28 @@ export function ResizableHud({ itemKey, children }: { itemKey: HudItemKey; child
 
   useEffect(() => {
     const move = (event: PointerEvent) => {
-      const active = drag.current;
-      if (!active || active.pointerId !== event.pointerId) return;
+      const active = stateRef.current;
+      if (active.kind !== 'active-drag' || active.pointerId !== event.pointerId) return;
       event.preventDefault();
       event.stopPropagation();
-      const next = clampScale(active.startScale + ((event.clientX - active.startX) + (event.clientY - active.startY)) / 360);
-      active.currentScale = next;
-      setScale(next);
-      applyScale(target.current, next);
+      dispatch({ type: 'drag-move', clientX: event.clientX, clientY: event.clientY });
     };
     const cancel = () => {
-      const active = drag.current;
-      if (!active) return;
-      setScale(active.startScale);
-      applyScale(target.current, active.startScale);
-      drag.current = null;
-      document.body.classList.remove('hud-resizing');
+      const active = stateRef.current;
+      if (active.kind !== 'active-drag') return;
+      if (handleRef.current?.hasPointerCapture(active.pointerId)) handleRef.current.releasePointerCapture(active.pointerId);
+      dispatch({ type: 'cancel' });
     };
     const finish = (event: PointerEvent) => {
-      const active = drag.current;
-      if (!active || active.pointerId !== event.pointerId) return;
+      const active = stateRef.current;
+      if (active.kind !== 'active-drag' || active.pointerId !== event.pointerId) return;
       event.preventDefault();
       event.stopPropagation();
       writeScale(itemKey, active.currentScale);
-      drag.current = null;
-      document.body.classList.remove('hud-resizing');
+      dispatch({ type: 'drag-end' });
     };
     const keydown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape' && drag.current) {
+      if (event.key === 'Escape' && stateRef.current.kind === 'active-drag') {
         event.preventDefault();
         cancel();
       }
@@ -161,18 +210,23 @@ export function ResizableHud({ itemKey, children }: { itemKey: HudItemKey; child
     };
   }, [itemKey]);
 
+  useEffect(() => {
+    if (state.kind !== 'active-drag') return;
+    document.body.classList.add('hud-resizing');
+    return () => document.body.classList.remove('hud-resizing');
+  }, [state.kind]);
+
   const start = (event: ReactPointerEvent<HTMLButtonElement>) => {
     event.preventDefault();
     event.stopPropagation();
-    drag.current = { pointerId: event.pointerId, startX: event.clientX, startY: event.clientY, startScale: scale, currentScale: scale };
-    document.body.classList.add('hud-resizing');
+    dispatch({ type: 'drag-start', pointerId: event.pointerId, startX: event.clientX, startY: event.clientY });
     event.currentTarget.setPointerCapture?.(event.pointerId);
   };
 
-  const adjust = (delta: number, event: React.KeyboardEvent<HTMLButtonElement>) => {
+  const adjust = (delta: number, event: ReactKeyboardEvent<HTMLButtonElement>) => {
     event.preventDefault();
     const next = clampScale(scale + delta);
-    setScale(next);
+    dispatch({ type: 'keyboard-adjust', delta });
     applyScale(target.current, next);
     writeScale(itemKey, next);
   };
@@ -185,12 +239,17 @@ export function ResizableHud({ itemKey, children }: { itemKey: HudItemKey; child
           type="button"
           ref={handleRef}
           className="hud-resize-handle"
+          data-resize-state={state.kind}
           style={handle}
           aria-label={`Resize ${label}`}
           title={`Drag to resize ${label}`}
           aria-valuemin={MIN_SCALE}
           aria-valuemax={MAX_SCALE}
           aria-valuenow={scale}
+          onPointerEnter={() => dispatch({ type: 'pointer-enter' })}
+          onPointerLeave={() => dispatch({ type: 'pointer-leave' })}
+          onFocus={() => dispatch({ type: 'focus' })}
+          onBlur={() => dispatch({ type: 'blur' })}
           onPointerDown={start}
           onKeyDown={(event) => {
             if (event.key === 'ArrowRight' || event.key === 'ArrowDown') adjust(event.shiftKey ? 0.1 : 0.02, event);
@@ -198,7 +257,9 @@ export function ResizableHud({ itemKey, children }: { itemKey: HudItemKey; child
             if (event.key === 'Home') adjust(1 - scale, event);
           }}
           onClick={(event) => event.stopPropagation()}
-        />
+        >
+          {state.kind === 'active-drag' && <span className="hud-resize-badge" aria-live="polite">{Math.round(scale * 100)}%</span>}
+        </button>
       )}
     </div>
   );

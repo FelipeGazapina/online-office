@@ -1714,7 +1714,12 @@ h3 {
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; }
 .hud-resizable { display: contents; }
 .hud-resize-target { scale: var(--hud-scale, 1); transform-origin: center; }
-.hud-resize-handle { position: fixed; width: 24px; height: 24px; padding: 0; border: 0; border-radius: 3px; background: linear-gradient(135deg, transparent 42%, var(--brand) 43%, var(--brand) 58%, transparent 59%); cursor: nwse-resize; opacity: .65; pointer-events: auto; z-index: 250; touch-action: none; }
-.hud-resize-handle:hover, .hud-resize-handle:focus-visible { opacity: 1; }
+.hud-resize-handle { position: fixed; width: 24px; height: 24px; padding: 0; border: 0; border-radius: 5px; background: transparent; color: transparent; cursor: default; opacity: 0; pointer-events: auto; z-index: 180; touch-action: none; transition: opacity 120ms ease, box-shadow 120ms ease, color 120ms ease; }
+.hud-resize-handle::before { content: ''; position: absolute; right: 3px; bottom: 3px; width: 3px; height: 10px; border-radius: 999px; background: currentColor; transform: rotate(45deg); transform-origin: center; box-shadow: -5px 5px 0 currentColor, -10px 10px 0 currentColor; }
+.hud-resize-handle::after { content: ''; position: absolute; right: 1px; bottom: 1px; width: 12px; height: 12px; border-right: 2px solid currentColor; border-bottom: 2px solid currentColor; border-radius: 0 0 4px 0; opacity: .55; }
+.hud-resize-handle[data-resize-state='hover'], .hud-resize-handle[data-resize-state='focus'] { color: #55dfff; box-shadow: 0 0 0 5px rgba(85,223,255,.16); cursor: nwse-resize; opacity: 1; }
+.hud-resize-handle[data-resize-state='active-drag'] { color: #ffbd56; box-shadow: 0 0 0 5px rgba(255,189,86,.2); cursor: nwse-resize; opacity: 1; }
+.hud-resize-handle:focus-visible { outline: 2px solid #55dfff; outline-offset: 2px; }
+.hud-resize-badge { position: absolute; right: calc(100% + 5px); bottom: calc(100% + 5px); display: block; min-width: 34px; padding: 2px 5px; border: 1px solid rgba(255,189,86,.55); border-radius: 999px; color: #fff4dd; background: rgba(51,37,18,.9); box-shadow: 0 3px 10px rgba(20,12,2,.25); font: 700 10px/1.2 ui-monospace, 'SF Mono', Menlo, monospace; pointer-events: none; white-space: nowrap; }
 body.hud-resizing, body.hud-resizing * { cursor: nwse-resize !important; }
 @media (max-width: 600px) { .clock-bar { top: 10px; left: 10px; } .clock-toggle { min-width: 130px; padding: 5px 25px 5px 9px; } .clock-toggle strong, .clock-card strong { font-size: 14px; } .clock-popover { width: min(260px, calc(100vw - 20px)); } }
