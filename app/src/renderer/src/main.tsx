@@ -7,6 +7,7 @@ import { startOffice } from './office.ts';
 import { installTalk } from './talk.ts';
 import { installTestRun } from './testRun.ts';
 import './styles.css';
+import './hud-tailwind.css';
 
 installTestRun();
 installGestureUnlock();

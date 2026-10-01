@@ -85,27 +85,27 @@ export function Clock() {
 
   return (
     <div className="clock-bar" data-hud-resize-target="clock" aria-label="World clocks">
-      <button className="clock-toggle" type="button" aria-expanded={open} aria-controls="clock-popover" onClick={() => setOpen((value) => !value)}>
+      <button className="clock-toggle oo:transition-colors oo:duration-150 oo:focus-visible:outline-2 oo:focus-visible:outline-brand oo:focus-visible:outline-offset-2" type="button" aria-expanded={open} aria-controls="clock-popover" onClick={() => setOpen((value) => !value)}>
         <span className="clock-toggle-zone">{labelFor(localZone)} · local</span>
         <strong>{formatTime(now, localZone)}</strong>
         {zones.length > 0 && <span className="clock-count">+{zones.length}</span>}
         <span className="clock-chevron" aria-hidden="true">{open ? '⌃' : '⌄'}</span>
       </button>
       {open && (
-        <div className="clock-popover" id="clock-popover">
-          <div className="clock-popover-head"><b>World clocks</b><button className="clock-close" type="button" aria-label="Close world clocks" onClick={() => setOpen(false)}>×</button></div>
-          <div className="clock-list">
-            <div className="clock-card clock-local"><span className="clock-zone">{labelFor(localZone)} · local</span><strong>{formatTime(now, localZone)}</strong></div>
+        <div className="clock-popover oo:gap-2" id="clock-popover">
+          <div className="clock-popover-head oo:flex oo:items-center oo:justify-between oo:gap-2"><b>World clocks</b><button className="clock-close oo:transition-colors oo:duration-150 oo:focus-visible:outline-2 oo:focus-visible:outline-brand oo:focus-visible:outline-offset-2" type="button" aria-label="Close world clocks" onClick={() => setOpen(false)}>×</button></div>
+          <div className="clock-list oo:gap-1">
+            <div className="clock-card clock-local oo:transition-colors oo:duration-150"><span className="clock-zone">{labelFor(localZone)} · local</span><strong>{formatTime(now, localZone)}</strong></div>
             {zones.map((zone) => (
-              <div className="clock-card" key={zone}>
+              <div className="clock-card oo:transition-colors oo:duration-150" key={zone}>
                 <span className="clock-zone">{labelFor(zone)}</span>
                 <strong>{formatTime(now, zone)}</strong>
-                <button className="clock-remove" type="button" aria-label={`Remove ${labelFor(zone)} timezone`} onClick={() => removeZone(zone)}>×</button>
+                <button className="clock-remove oo:transition-colors oo:duration-150 oo:focus-visible:outline-2 oo:focus-visible:outline-brand oo:focus-visible:outline-offset-2" type="button" aria-label={`Remove ${labelFor(zone)} timezone`} onClick={() => removeZone(zone)}>×</button>
               </div>
             ))}
           </div>
           {available.length > 0 ? (
-            <label className="clock-add-select"><span>Add timezone</span><select value="" onChange={(event) => addZone(event.target.value)}><option value="" disabled>Add timezone…</option>{available.map((zone) => <option key={zone} value={zone}>{labelFor(zone)}</option>)}</select></label>
+            <label className="clock-add-select oo:gap-1"><span>Add timezone</span><select className="oo:transition-colors oo:duration-150 oo:focus-visible:outline-2 oo:focus-visible:outline-brand oo:focus-visible:outline-offset-2" value="" onChange={(event) => addZone(event.target.value)}><option value="" disabled>Add timezone…</option>{available.map((zone) => <option key={zone} value={zone}>{labelFor(zone)}</option>)}</select></label>
           ) : <p className="clock-empty">All available timezones are added.</p>}
         </div>
       )}

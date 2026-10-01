@@ -1,0 +1,14 @@
+@import "tailwindcss/theme.css" layer(theme) prefix(oo);
+@import "tailwindcss/utilities.css" layer(utilities) prefix(oo) source("./hud");
+
+@theme inline {
+  --color-ink: var(--ink);
+  --color-paper: var(--paper);
+  --color-paper-2: var(--paper-2);
+  --color-brand: var(--brand);
+  --color-amber: var(--amber);
+  --color-tomato: var(--tomato);
+  --color-moss: var(--moss);
+  --font-display: var(--display);
+  --font-body: var(--body);
+}

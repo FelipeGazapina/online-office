@@ -221,7 +221,7 @@ export function WaitingMeter() {
   return (
     <>
       <div className={`vignette ${urgent ? 'urgent' : ''}`} />
-      <div data-hud-resize-target="waiting-meter" className={`waiting ${queue.length ? 'some' : 'none'} ${urgent ? 'urgent' : ''} ${meetingDoor === 'closed' ? 'door-closed' : ''}`}>
+      <div data-hud-resize-target="waiting-meter" className={`waiting ${queue.length ? 'some' : 'none'} ${urgent ? 'urgent' : ''} ${meetingDoor === 'closed' ? 'door-closed' : ''} oo:flex oo:flex-col oo:items-center oo:gap-1`}>
         <div className="ticket">
           <span className="num">{queue.length}</span>
           <span className="lab">
@@ -230,9 +230,9 @@ export function WaitingMeter() {
           </span>
         </div>
         {queue.length > 0 && (
-          <div className="chips">
+          <div className="chips oo:flex oo:flex-wrap oo:items-center oo:justify-center oo:gap-1">
             {queue.map((e, i) => (
-              <button key={e.id} className={waits[i] > URGENT_MS ? 'late' : ''} onClick={() => set({ selectedId: e.id })}>
+              <button key={e.id} className={`${waits[i] > URGENT_MS ? 'late' : ''} oo:transition-colors oo:duration-150`} onClick={() => set({ selectedId: e.id })}>
                 <i style={{ background: PROVIDERS[e.provider].color }} />
                 {e.name}
                 <span>{fmtWait(waits[i])}</span>
