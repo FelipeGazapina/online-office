@@ -4,6 +4,7 @@ import type { VoiceQuality } from '../../../shared/voice.ts';
 import { set, setSetting, useStore, waitingQueue, type CameraMode, type Lang, type MicMode } from '../store.ts';
 import { fmtWait, tailPath, useNow } from './hooks.ts';
 import { UpdateSetting } from './UpdateControl.tsx';
+import { resetHudLayout } from './ResizableHud.tsx';
 
 const URGENT_MS = 2 * 60 * 1000;
 
@@ -292,7 +293,10 @@ export function HelpOverlay() {
   return (
     <div className="scrim" onClick={() => set({ helpOpen: false })}>
       <div className="modal help" data-hud-resize-target="help-overlay" onClick={(e) => e.stopPropagation()}>
-        <h2>Keys</h2>
+        <h2 className="hud-help-title">
+          Keys
+          <button type="button" className="hud-reset-layout" title="Move every panel back and reset its size" onClick={resetHudLayout}>Reset HUD layout</button>
+        </h2>
         <dl>
           {KEYS.map(([k, d]) => (
             <div key={k}>
