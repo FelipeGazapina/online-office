@@ -15,12 +15,12 @@ import { tailPath } from './hooks.ts';
 
 const close = () => set({ modal: null });
 
-function Modal({ title, children }: { title: string; children: ReactNode }) {
+function Modal({ kind, title, children }: { kind: string; title: string; children: ReactNode }) {
   return (
     <div className="scrim" onMouseDown={close}>
       <div
         className="modal"
-        data-hud-resize-target="modals"
+        data-hud-resize-target={`modal-${kind}`}
         onMouseDown={(e) => e.stopPropagation()}
         onKeyDown={(e) => {
           if (e.key === 'Escape') close();
@@ -75,7 +75,7 @@ function HireModal() {
   const unlimited = bypassLimit || !Number.isFinite(headcountCap(company.level));
 
   return (
-    <Modal title="Hire someone">
+    <Modal kind="hire" title="Hire someone">
       <div className="providers">
         {PROVIDER_LIST.map((p) => {
           const h = harnesses[p];
@@ -183,7 +183,7 @@ function BlockModal() {
   };
 
   return (
-    <Modal title="New block">
+    <Modal kind="block" title="New block">
       <form
         onSubmit={(e) => {
           e.preventDefault();
@@ -242,7 +242,7 @@ function GithubSetupModal({ blockId }: { blockId: BlockId }) {
   const [repo, setRepo] = useState(block?.githubRepo ?? '');
   if (!block) return null;
   return (
-    <Modal title={`Connect GitHub to ${block.name}`}>
+    <Modal kind="github_setup" title={`Connect GitHub to ${block.name}`}>
       <form onSubmit={(event) => {
         event.preventDefault();
         const value = repo.trim();
@@ -312,7 +312,7 @@ function GithubBoardModal({ blockId }: { blockId: BlockId }) {
 
   return (
     <div className="scrim" onMouseDown={close}>
-      <div className="modal wide github-board" onMouseDown={(e) => e.stopPropagation()} onKeyDown={(e) => e.key === 'Escape' && close()}>
+      <div className="modal wide github-board" data-hud-resize-target="modal-github" onMouseDown={(e) => e.stopPropagation()} onKeyDown={(e) => e.key === 'Escape' && close()}>
         <div className="wb-head"><div><h2>GitHub board</h2><p className="muted">{block.name} · {block.githubRepo}</p></div><button className="btn ink" onClick={close}>Close</button></div>
         {state === 'loading' && <p className="muted">Loading pull requests and issues…</p>}
         {state === 'error' && <p className="err-text">Could not load GitHub data: {message}</p>}
@@ -336,7 +336,7 @@ function WhiteboardModal({ blockId }: { blockId: BlockId }) {
     const page = wb.page;
     return (
       <div className="scrim" onMouseDown={close}>
-        <div className="modal wide board-page" onMouseDown={(e) => e.stopPropagation()} onKeyDown={(e) => e.key === 'Escape' && close()}>
+        <div className="modal wide board-page" data-hud-resize-target="modal-whiteboard" onMouseDown={(e) => e.stopPropagation()} onKeyDown={(e) => e.key === 'Escape' && close()}>
           <div className="wb-head"><div><h2>{wb.title}</h2><p className="muted">{block?.name} · {page.kind === 'html' ? page.source : page.url}</p></div><button className="btn ink" onClick={close}>Close</button></div>
           {page.kind === 'html' ? <iframe title={wb.title} sandbox="allow-scripts" srcDoc={page.html} /> : <iframe title={wb.title} sandbox="allow-scripts allow-forms allow-popups" src={page.url} />}
         </div>
@@ -346,7 +346,7 @@ function WhiteboardModal({ blockId }: { blockId: BlockId }) {
 
   return (
     <div className="scrim" onMouseDown={close}>
-      <div className="modal wide" onMouseDown={(e) => e.stopPropagation()} onKeyDown={(e) => e.key === 'Escape' && close()}>
+      <div className="modal wide" data-hud-resize-target="modal-whiteboard" onMouseDown={(e) => e.stopPropagation()} onKeyDown={(e) => e.key === 'Escape' && close()}>
         <div className="wb-head">
           <div>
             <h2>{wb?.title ?? 'Whiteboard'}</h2>
@@ -404,7 +404,7 @@ function TaskBoardModal({ blockId }: { blockId: BlockId }) {
         : <p className="muted">This board has not loaded yet. Configure a source in the PO computer, then refresh.</p>;
   return (
     <div className="scrim" onMouseDown={close}>
-      <div className="modal wide task-board-modal" onMouseDown={(event) => event.stopPropagation()} onKeyDown={(event) => event.key === 'Escape' && close()}>
+      <div className="modal wide task-board-modal" data-hud-resize-target="modal-task_board" onMouseDown={(event) => event.stopPropagation()} onKeyDown={(event) => event.key === 'Escape' && close()}>
         <div className="task-board-header">
           <div>
             <p className="task-board-eyebrow">{providerSummary}</p>
@@ -467,7 +467,7 @@ function TaskBoardModal({ blockId }: { blockId: BlockId }) {
 function LinearBoardModal({ blockId }: { blockId: BlockId }) {
   const block = useStore((s) => s.company?.blocks.find((candidate) => candidate.id === blockId));
   if (!block?.linearBoardUrl) return null;
-  return <div className="scrim" onMouseDown={close}><div className="modal wide board-page" onMouseDown={(event) => event.stopPropagation()}><div className="wb-head"><div><h2>Linear board</h2><p className="muted">{block.name} · live view from Linear</p></div><button className="btn ink" onClick={close}>Close</button></div><iframe title="Linear board" src={block.linearBoardUrl} allow="clipboard-read; clipboard-write" /></div></div>;
+  return <div className="scrim" onMouseDown={close}><div className="modal wide board-page" data-hud-resize-target="modal-linear_board" onMouseDown={(event) => event.stopPropagation()}><div className="wb-head"><div><h2>Linear board</h2><p className="muted">{block.name} · live view from Linear</p></div><button className="btn ink" onClick={close}>Close</button></div><iframe title="Linear board" src={block.linearBoardUrl} allow="clipboard-read; clipboard-write" /></div></div>;
 }
 
 export function Modals() {

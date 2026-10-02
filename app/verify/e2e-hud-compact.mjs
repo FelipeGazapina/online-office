@@ -29,6 +29,7 @@ const rects = (s) => s.eval(`(() => {
 
 export default async (s) => {
   await s.waitFor('document.querySelector(".clock-bar") !== null');
+  await s.waitFor('document.querySelector(".tag.you") !== null');
 
   const closed = await rects(s);
   assert(closed.clock.width <= 148, `the collapsed clock stays compact (${closed.clock.width.toFixed(0)}px wide)`);

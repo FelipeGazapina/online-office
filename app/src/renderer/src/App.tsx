@@ -11,6 +11,12 @@ import { Scene } from './scene/Scene.tsx';
 import { useStore } from './store.ts';
 import { testRun } from './testRun.ts';
 
+// Each kind of dialog remembers its own place and size; `key` gives the wrapper a fresh pose when the kind changes.
+function ModalsHud() {
+  const kind = useStore((s) => s.modal?.kind ?? 'none');
+  return <ResizableHud key={kind} itemKey={`modal-${kind}`}><Modals /></ResizableHud>;
+}
+
 export function App() {
   const portalMode = useStore((s) => s.portalMode);
   return (
@@ -29,7 +35,7 @@ export function App() {
       <ResizableHud itemKey="toasts"><Toasts /></ResizableHud>
       <ResizableHud itemKey="computer-prompt"><ComputerPrompt /></ResizableHud>
       <ResizableHud itemKey="drawer"><Drawer /></ResizableHud>
-      <ResizableHud itemKey="modals"><Modals /></ResizableHud>
+      <ModalsHud />
       <ResizableHud itemKey="employee-menu"><EmployeeMenu /></ResizableHud>
       <ResizableHud itemKey="help-overlay"><HelpOverlay /></ResizableHud>
       <ResizableHud itemKey="computer-menu"><ComputerMenu /></ResizableHud>

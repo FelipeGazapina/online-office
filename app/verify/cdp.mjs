@@ -97,6 +97,10 @@ export async function launch({ env = {}, width = 1280, height = 800, exe } = {})
       if (r.exceptionDetails) throw new Error(r.exceptionDetails.exception?.description ?? 'eval failed');
       return r.result.value;
     },
+    // Shrinks or grows the page the way a window resize would, so a scenario can test layout at a new size.
+    async resize(width, height) {
+      await call('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false });
+    },
     async shot(name) {
       const r = await call('Page.captureScreenshot', { format: 'png' });
       const path = `${OUT}/${name}.png`;

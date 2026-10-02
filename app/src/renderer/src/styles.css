@@ -851,13 +851,16 @@ h3 {
   position: absolute;
   left: 16px;
   bottom: 16px;
-  width: 300px;
+  /* Hugs what is visible (the "H keys" chip, or the widest toast), so the move grip sits next to it. */
+  width: max-content;
+  max-width: 300px;
   display: flex;
   flex-direction: column;
   gap: 6px;
   pointer-events: none;
 }
 .toast {
+  pointer-events: auto;
   background: rgba(35, 38, 64, 0.92);
   color: var(--paper);
   border-radius: 12px;
@@ -1085,8 +1088,8 @@ h3 {
 }
 .modal {
   width: 480px;
-  max-width: calc(100vw - 32px);
-  max-height: calc(100vh - 48px);
+  max-width: calc(100vw - 72px);
+  max-height: calc(100vh - 72px);
   overflow: auto;
   background: var(--paper);
   border-radius: 20px;
@@ -1100,7 +1103,7 @@ h3 {
   margin-bottom: 14px;
 }
 .modal.wide {
-  width: min(1100px, calc(100vw - 48px));
+  width: min(1100px, calc(100vw - 72px));
 }
 .field {
   display: grid;
@@ -1715,7 +1718,7 @@ h3 {
 .clock-empty { margin: 0; color: rgba(255,255,255,.62); font-size: 11px; }
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; }
 .hud-resizable { display: contents; }
-.hud-resize-target { scale: var(--hud-scale, 1); transform-origin: center; }
+.hud-resize-target { translate: var(--hud-x, 0px) var(--hud-y, 0px); scale: var(--hud-scale, 1); transform-origin: center; }
 .hud-resize-handle { position: fixed; width: 24px; height: 24px; padding: 0; border: 0; border-radius: 5px; background: transparent; color: transparent; cursor: default; opacity: 0; pointer-events: auto; z-index: 180; touch-action: none; transition: opacity 120ms ease, box-shadow 120ms ease, color 120ms ease; }
 .hud-resize-handle::before { content: ''; position: absolute; right: 3px; bottom: 3px; width: 3px; height: 10px; border-radius: 999px; background: currentColor; transform: rotate(45deg); transform-origin: center; box-shadow: -5px 5px 0 currentColor, -10px 10px 0 currentColor; }
 .hud-resize-handle::after { content: ''; position: absolute; right: 1px; bottom: 1px; width: 12px; height: 12px; border-right: 2px solid currentColor; border-bottom: 2px solid currentColor; border-radius: 0 0 4px 0; opacity: .55; }
@@ -1727,3 +1730,46 @@ body.hud-resizing, body.hud-resizing * { cursor: nwse-resize !important; }
 @media (max-width: 600px) { .clock-bar { top: 10px; left: 10px; } .clock-toggle { min-width: 130px; padding: 5px 25px 5px 9px; } .clock-toggle strong, .clock-card strong { font-size: 14px; } .clock-popover { width: min(260px, calc(100vw - 20px)); } }
 
 }
+.hud-move-handle { position: fixed; display: grid; place-items: center; width: 24px; height: 28px; padding: 0; border: 1px solid rgba(255,255,255,.28); border-radius: 7px; background: rgba(24,27,45,.94); color: rgba(255,255,255,.8); box-shadow: 0 4px 12px rgba(10,8,24,.38); cursor: grab; opacity: 0; pointer-events: auto; z-index: 181; touch-action: none; transform: scale(.9); transition: opacity 120ms ease, transform 120ms ease, color 120ms ease, background 120ms ease, box-shadow 120ms ease; }
+.hud-move-handle svg { display: block; fill: currentColor; pointer-events: none; }
+/* Transparent bridge across the gap to the panel, so the pointer never falls through on its way to the grip. */
+.hud-move-handle::before { content: ''; position: absolute; pointer-events: inherit; }
+.hud-move-handle[data-side='left']::before { left: 100%; width: 8px; top: -2px; bottom: -2px; }
+.hud-move-handle[data-side='right']::before { right: 100%; width: 8px; top: -2px; bottom: -2px; }
+.hud-move-handle[data-side='top']::before { top: 100%; height: 8px; left: -2px; right: -2px; }
+.hud-move-handle[data-side='bottom']::before { bottom: 100%; height: 8px; left: -2px; right: -2px; }
+/* Instant tooltip, no OS delay. */
+.hud-move-handle::after { content: attr(data-tip); position: absolute; padding: 4px 8px; border-radius: 6px; background: rgba(12,13,24,.96); color: #fff; font: 600 11px/1.2 system-ui, sans-serif; white-space: nowrap; pointer-events: none; opacity: 0; transition: opacity 80ms ease; box-shadow: 0 4px 10px rgba(10,8,24,.35); }
+.hud-move-handle[data-move-state='peek']:hover::after, .hud-move-handle:focus-visible::after { opacity: 1; }
+.hud-move-handle[data-side='left']::after { right: 0; top: calc(100% + 6px); }
+.hud-move-handle[data-side='right']::after, .hud-move-handle[data-side='inside']::after { left: 0; top: calc(100% + 6px); }
+.hud-move-handle[data-side='top']::after, .hud-move-handle[data-side='bottom']::after { left: calc(100% + 6px); top: 50%; translate: 0 -50%; }
+.hud-move-handle[data-tip-up]:not([data-side='top']):not([data-side='bottom'])::after { top: auto; bottom: calc(100% + 6px); }
+.hud-move-handle[data-tip-start]::after { right: auto; left: 0; }
+.hud-move-handle[data-tip-up][data-side='top']::after, .hud-move-handle[data-tip-up][data-side='bottom']::after { top: auto; bottom: 0; translate: none; }
+.hud-move-handle[data-move-state='peek'], .hud-move-handle[data-move-state='moving'], .hud-move-handle:focus-visible { opacity: 1; pointer-events: auto; transform: none; }
+.hud-move-handle[data-move-state='peek']:hover { color: #55dfff; background: rgb(24,27,45); box-shadow: 0 0 0 4px rgba(85,223,255,.18), 0 4px 12px rgba(10,8,24,.38); transform: scale(1.06); }
+.hud-move-handle[data-move-state='moving'] { color: #ffbd56; border-color: rgba(255,189,86,.7); background: rgb(51,37,18); box-shadow: 0 0 0 4px rgba(255,189,86,.2), 0 6px 16px rgba(10,8,24,.4); cursor: grabbing; transform: scale(1.06); }
+.hud-move-handle[data-move-state='moving']::after { opacity: 0; }
+.hud-move-handle[data-grabbed] { color: #ffbd56; border-color: rgba(255,189,86,.7); background: rgb(51,37,18); box-shadow: 0 0 0 4px rgba(255,189,86,.2), 0 6px 16px rgba(10,8,24,.4); }
+.hud-move-handle[data-grabbed]::after { opacity: 1; }
+.hud-move-handle:focus-visible { outline: 2px solid #55dfff; outline-offset: 2px; }
+/* First launch: grips show faintly for a few seconds. */
+body.hud-hint .hud-move-handle[data-move-state='idle'] { opacity: .45; transform: none; }
+.hud-help-title { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.hud-reset-layout { font: 600 12px/1 system-ui, sans-serif; color: #fff; background: rgba(85,223,255,.16); border: 1px solid rgba(85,223,255,.55); border-radius: 8px; padding: 8px 12px; cursor: pointer; }
+.hud-reset-layout:hover { background: rgba(85,223,255,.3); }
+/* Lift: shadow and a little scale (composed with the resize scale). The live drag
+   translate is never in the transition list, so the panel tracks the pointer one to one. */
+.hud-moving-target { z-index: 175; scale: calc(var(--hud-scale, 1) * var(--hud-lift, 1.05)); box-shadow: 0 0 0 4px rgba(255,255,255,.3), 0 26px 52px rgba(0,0,0,.55), 0 8px 18px rgba(0,0,0,.4); outline: 2px solid rgba(255,189,86,.9); outline-offset: 2px; will-change: translate, scale; transition: scale 120ms ease-out, opacity 120ms ease-out, box-shadow 120ms ease-out, outline-color 120ms ease-out; }
+/* Picked up with the keyboard: the same amber ring, without the lift. */
+.hud-grabbed-target { outline: 2px solid rgba(255,189,86,.9); outline-offset: 2px; box-shadow: 0 0 0 4px rgba(255,255,255,.25), 0 14px 30px rgba(0,0,0,.45); }
+/* Drop: the same properties ease back, and after Escape the panel also glides home. */
+.hud-settling-target { transition: scale 120ms ease-out, translate 120ms ease-out, opacity 120ms ease-out, box-shadow 120ms ease-out, outline-color 120ms ease-out; outline: 2px solid transparent; outline-offset: 2px; }
+body.hud-moving, body.hud-moving * { cursor: grabbing !important; user-select: none !important; }
+
+/* The slot a carried panel left: a faint dashed outline so the origin never just vanishes on a dark scene. */
+.hud-origin-slot { position: fixed; left: 0; top: 0; box-sizing: border-box; border: 2px dashed rgba(255,255,255,.4); background: rgba(255,255,255,.07); pointer-events: none; z-index: 168; }
+
+/* Where a drag will land when its spot would cover another panel: a dashed slot the panel glides into on drop. */
+.hud-drop-ghost { position: fixed; left: 0; top: 0; box-sizing: border-box; border: 2px dashed rgba(255,189,86,.9); background: rgba(255,189,86,.12); pointer-events: none; opacity: 0; z-index: 170; transition: opacity 100ms ease-out; }
