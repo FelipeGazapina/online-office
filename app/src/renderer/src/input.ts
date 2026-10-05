@@ -1,4 +1,4 @@
-import { get, set, setSetting } from './store.ts';
+import { get, set, setSetting, toggleCamera } from './store.ts';
 import { KEYS_INTENT, runtime, STEER_KEYS } from './runtime.ts';
 import { setPtt } from './talk.ts';
 import { toggleMeetingDoor } from './meeting.ts';
@@ -34,6 +34,20 @@ export function installInput() {
     }
 
     switch (e.code) {
+      case 'Tab':
+        e.preventDefault();
+        if (!e.repeat && !s.modal) {
+          toggleCamera();
+          if (get().camera === 'first') window.dispatchEvent(new Event('office:lock-pointer'));
+        }
+        return;
+      case 'KeyC':
+        if (s.camera === 'first') {
+          e.preventDefault();
+          if (!e.repeat) window.dispatchEvent(new Event('office:toggle-pointer-lock'));
+          return;
+        }
+        break;
       case 'Digit2':
         return setSetting('camera', 'iso');
       case 'KeyH':

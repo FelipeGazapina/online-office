@@ -40,9 +40,10 @@ export const runtime = {
   // Direction the owner last travelled. The queue trails this, not the body yaw,
   // so turning to look at the first asker does not swing the whole line around.
   queueYaw: Math.PI,
+  // blend is how far the camera has travelled from the overview (0) to the owner's eyes (1).
   // yaw is where the camera looks; isoYawTarget is the 90 degree step the overview eases toward.
   // The overview is meant to read as a company map, so leave enough distance for shared rooms and expansion plots.
-  view: { yaw: Math.PI, pitch: 0.44, dist: 6.2, isoDist: 62, fpPitch: 0, isoYawTarget: (-3 * Math.PI) / 4 },
+  view: { yaw: Math.PI, pitch: 0.44, dist: 6.2, isoDist: 62, fpPitch: 0, blend: 0, isoYawTarget: (-3 * Math.PI) / 4 },
   avatars: new Map<string, AvatarRT>(),
   // employee id -> question id already announced (chime, TTS, card)
   arrived: new Map<string, string>(),

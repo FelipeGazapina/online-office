@@ -17,7 +17,7 @@ import type {
 import type { Language, VoiceQuality } from '../../shared/voice.ts';
 import { initialVoice, type VoiceState } from './voice/chip.ts';
 
-export type CameraMode = 'iso';
+export type CameraMode = 'iso' | 'first';
 export type MicMode = 'proximity' | 'push';
 export type Lang = 'en-US' | 'pt-BR' | 'auto';
 export type ComputerView = 'office' | 'mirror';
@@ -122,6 +122,8 @@ export function setSetting<K extends keyof Settings>(key: K, value: Settings[K])
     JSON.stringify({ camera: s.camera, interrupt: s.interrupt, mic: s.mic, lang: s.lang, voiceQuality: s.voiceQuality }),
   );
 }
+
+export const toggleCamera = () => setSetting('camera', get().camera === 'iso' ? 'first' : 'iso');
 
 let toastId = 0;
 export function toast(text: string, tone: Toast['tone'] = 'info') {

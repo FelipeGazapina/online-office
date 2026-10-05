@@ -35,7 +35,7 @@ Download `Online-Office-<version>-arm64.dmg` from the [latest release](https://g
 
 The build is signed ad hoc and not notarized, because the repo has no Apple Developer identity, so macOS blocks the first open. Open System Settings > Privacy & Security, scroll to Security, and click **Open Anyway** next to Online Office. You do this once.
 
-After that, updates arrive in the app. It checks for a newer release when it starts and every hour. When one exists, a button appears at the top right of the office. Click it to download the update, quit, and reopen on the new version. Employees' sessions stop when the app restarts. In the follow and first-person cameras the mouse is captured, so press **C** to free it before you click. A failed update turns the button red. Click it to check again, which reads the release from scratch. The Settings window on the office computer has an **Updates** row that checks by hand. `pnpm dev` and `pnpm start` never show any of this, because only an installed Mac build can update itself.
+After that, updates arrive in the app. It checks for a newer release when it starts and every hour. When one exists, a button appears at the top right of the office. Click it to download the update, quit, and reopen on the new version. Employees' sessions stop when the app restarts. In first person the mouse is captured, so press **C** or **Esc** to free it before you click. A failed update turns the button red. Click it to check again, which reads the release from scratch. The Settings window on the office computer has an **Updates** row that checks by hand. `pnpm dev` and `pnpm start` never show any of this, because only an installed Mac build can update itself.
 
 **Releases.** Every push to `main` that touches `app/` or `.github/workflows/release.yml` publishes a release, and CI is the only thing that writes to GitHub Releases. The version is the `major.minor` in `app/package.json` plus the number of commits on `main`, so it follows the commit and a re-run of the same commit never makes a second release. Change `major.minor` to start a new line. The `version` in `package.json` is only the placeholder for local builds. The workflow unzips the build before it publishes and checks the signature, the bundle version, and that `latest-mac.yml` names the same version and the zip's sha512. `pnpm package` builds into `dist/` and never publishes.
 
@@ -46,7 +46,10 @@ To prove the whole path on this machine, run `pnpm build` and then `node verify/
 | Key | Action |
 | --- | --- |
 | WASD / arrows, Shift | Walk, run |
-| 1 / 2 / 3 | Camera: follow, overview, first person |
+| Tab, or the camera button at the top left | Switch between the isometric camera and first person. The camera flies between them |
+| Q / E | Isometric: turn the view in 90 degree steps. First person: turn your head |
+| Mouse, wheel | Isometric: drag to turn, wheel to zoom. First person: the mouse looks around |
+| C or Esc | In first person, free the mouse (C again captures it). Click the office to capture it again |
 | Enter | Type to the nearest employee |
 | V (hold) | Push-to-talk, in either mic mode. Releasing sends what you said, and pressing it stops an employee who is talking |
 | H | Key help |
@@ -55,7 +58,7 @@ When you sit at the owner's desk and press **F**, Online Office becomes a live, 
 
 The project computer's **Task boards** app has a CronoSpark credentials section. Enter `CRONOSPARK_MCP_API_KEY` as the API key and `CRONOSPARK_MCP_USER_ID` as the MCP user ID, then click **Save CronoSpark**. The key is kept in the app's private credentials file (encrypted with the macOS keychain when available), never in `company.json` or renderer storage. A key already supplied in the app's environment can be kept by leaving the API key field blank.
 
-Click an employee, on the avatar or the name tag, for a menu with **Open chat** and **Go to**. In the Overview camera, click the floor to walk there and drag to turn the view. Press **F** near a task board or click its whiteboard to enlarge it. Click **Reveal** on a block to open its folder in Finder.
+Click an employee, on the avatar or the name tag, for a menu with **Open chat** and **Go to**. In the isometric camera, click the floor to walk there and drag to turn the view. Press **F** near a task board or click its whiteboard to enlarge it. Click **Reveal** on a block to open its folder in Finder.
 
 The project computer's **Task boards** app has a CronoSpark credentials section. Enter `CRONOSPARK_MCP_API_KEY` as the API key and `CRONOSPARK_MCP_USER_ID` as the MCP user ID, then click **Save CronoSpark**. The key is kept in the app's private credentials file (encrypted with the macOS keychain when available), never in `company.json` or renderer storage. A key already supplied in the app's environment can be kept by leaving the API key field blank.
 
