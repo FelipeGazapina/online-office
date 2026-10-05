@@ -3,6 +3,7 @@ import { KEYS_INTENT, runtime, STEER_KEYS } from './runtime.ts';
 import { setPtt } from './talk.ts';
 import { toggleMeetingDoor } from './meeting.ts';
 import { enterComputer, enterProjectComputer, leaveComputer } from './computer.ts';
+import { cancelArranging, nudgeArranging, placeArranging, turnArranging } from './arrange.ts';
 
 const isTyping = (t: EventTarget | null) =>
   t instanceof HTMLElement && (t.isContentEditable || t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT');
@@ -24,6 +25,23 @@ export function installInput() {
     }
 
     if (s.portalMode && e.code !== 'Escape') return;
+
+    // Moving a block takes the walking keys. Q and E still turn the camera, so the owner can look from another side.
+    if (s.arranging && !s.modal) {
+      const nudge: Record<string, [number, number]> = { ArrowUp: [1, 0], KeyW: [1, 0], ArrowDown: [-1, 0], KeyS: [-1, 0], ArrowLeft: [0, -1], KeyA: [0, -1], ArrowRight: [0, 1], KeyD: [0, 1] };
+      const step = nudge[e.code];
+      if (step) {
+        e.preventDefault();
+        return nudgeArranging(...step);
+      }
+      if (e.code === 'KeyR') return turnArranging(e.shiftKey ? -1 : 1);
+      if (e.code === 'Enter') {
+        e.preventDefault();
+        return placeArranging();
+      }
+      if (e.code === 'Escape') return cancelArranging();
+      if (e.code !== 'KeyQ' && e.code !== 'KeyE') return;
+    }
 
     if (!e.repeat && e.code === 'KeyF') {
       if (s.computerState === 'seated') leaveComputer();

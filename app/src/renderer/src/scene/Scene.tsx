@@ -2,6 +2,7 @@ import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import { useEffect, useRef } from 'react';
 import { setLabelLayer } from './labelLayer.ts';
 import { useStore } from '../store.ts';
+import { ArrangeOverlay } from './Arrange.tsx';
 import { BlockView } from './BlockView.tsx';
 import { CameraRig, SimDriver } from './CameraRig.tsx';
 import { EmployeeView } from './EmployeeView.tsx';
@@ -11,14 +12,16 @@ import { WalkMarker } from './WalkMarker.tsx';
 
 function World() {
   const company = useStore((s) => s.company);
+  const arranging = useStore((s) => s.arranging);
   return (
     <>
       <SimDriver />
       <CameraRig />
       <Office company={company} />
       {company?.blocks.map((b) => (
-        <BlockView key={b.id} block={b} employees={company.employees.filter((e) => e.blockId === b.id)} />
+        <BlockView key={b.id} block={b} employees={company.employees.filter((e) => e.blockId === b.id)} place={arranging?.blockId === b.id ? arranging.place : undefined} />
       ))}
+      {arranging && <ArrangeOverlay arranging={arranging} />}
       <OwnerView />
       <WalkMarker />
       {company?.employees.map((e) => (

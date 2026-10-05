@@ -30,7 +30,7 @@ export function CameraRig() {
       d.far ||= Math.hypot(e.clientX - d.ox, e.clientY - d.oy) >= DRAG_PX;
       if (d.far) runtime.view.isoYawTarget -= dx * 0.006;
     };
-    const down = (e: PointerEvent) => { drag.current = { x: e.clientX, y: e.clientY, ox: e.clientX, oy: e.clientY, far: false }; };
+    const down = (e: PointerEvent) => { if (get().arranging) return; drag.current = { x: e.clientX, y: e.clientY, ox: e.clientX, oy: e.clientY, far: false }; };
     const up = () => { drag.current = null; };
     const wheel = (e: WheelEvent) => { runtime.view.isoDist = clamp(runtime.view.isoDist + e.deltaY * 0.03, 8, 48); };
     el.addEventListener('pointerdown', down); window.addEventListener('pointermove', move); window.addEventListener('pointerup', up); el.addEventListener('wheel', wheel, { passive: true });

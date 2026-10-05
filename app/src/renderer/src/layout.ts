@@ -164,6 +164,11 @@ export function getLayout(blocks: readonly ProjectBlock[]): Layout {
   return cache;
 }
 
+// The room as it would be with one block standing somewhere else. Built fresh, so the walking layout's cache keeps its own.
+export function previewLayout(blocks: readonly ProjectBlock[], id: ProjectBlock['id'], place: BlockPlace): Layout {
+  return computeLayout(blocks.map((b) => (b.id === id ? { ...b, place } : b)));
+}
+
 function computeLayout(blocks: readonly ProjectBlock[]): Layout {
   const next = nextSlot(blocks);
   const ghostSlot = next < 6 ? next : null;

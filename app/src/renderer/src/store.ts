@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import type { Arranging } from './arrange.ts';
 import type {
   BlockId,
   ClientMessage,
@@ -28,7 +29,7 @@ export const LANGS: Record<Lang, { stt: Language; tts: 'en-US' | 'pt-BR' }> = {
   // Whisper's json answer does not say which language it heard, so the employees keep an English voice.
   auto: { stt: 'auto', tts: 'en-US' },
 };
-export type Modal = null | { kind: 'hire'; bypassLimit?: boolean } | { kind: 'block' } | { kind: 'whiteboard'; blockId: BlockId } | { kind: 'github'; blockId: BlockId } | { kind: 'github_setup'; blockId: BlockId } | { kind: 'task_board'; blockId: BlockId; taskId?: string } | { kind: 'linear_board'; blockId: BlockId } | { kind: 'remove_block'; blockId: BlockId };
+export type Modal = null | { kind: 'hire'; bypassLimit?: boolean } | { kind: 'block' } | { kind: 'whiteboard'; blockId: BlockId } | { kind: 'github'; blockId: BlockId } | { kind: 'github_setup'; blockId: BlockId } | { kind: 'task_board'; blockId: BlockId; taskId?: string } | { kind: 'linear_board'; blockId: BlockId } | { kind: 'block_menu'; blockId: BlockId };
 
 export type LogLine = { line: string; at: number };
 export type ChatLine = { from: 'owner' | 'employee'; text: string; at: number; image?: string; imageName?: string };
@@ -70,6 +71,8 @@ type State = Settings & {
   nearProjectComputer: BlockId | null;
   nearTaskBoard: BlockId | null;
   projectComputerId: BlockId | null;
+  // The block the owner is moving, with where it would stand now. Nothing is saved until they place it.
+  arranging: Arranging | null;
   // Facts derived by the per-frame sim, published only when they change.
   talkingTo: EmployeeId | null;
   nearbyIds: EmployeeId[];
@@ -103,6 +106,7 @@ export const useStore = create<State>()(() => ({
   nearProjectComputer: null,
   nearTaskBoard: null,
   projectComputerId: null,
+  arranging: null,
   talkingTo: null,
   nearbyIds: [],
   askerId: null,

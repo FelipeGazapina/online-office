@@ -1,3 +1,4 @@
+import { ArrangeBar } from './hud/ArrangeBar.tsx';
 import { Drawer } from './hud/Drawer.tsx';
 import { EmployeeMenu } from './hud/EmployeeMenu.tsx';
 import { Modals } from './hud/Modals.tsx';
@@ -30,6 +31,7 @@ export function App() {
         <ResizableHud itemKey="waiting-meter"><WaitingMeter /></ResizableHud>
         <ResizableHud itemKey="update-chip"><UpdateChip /></ResizableHud>
         <ResizableHud itemKey="bottom-talk"><Bottom /></ResizableHud>
+        <ArrangeBar />
       </div>
       {portalMode && <MacPortal />}
       <ResizableHud itemKey="toasts"><Toasts /></ResizableHud>

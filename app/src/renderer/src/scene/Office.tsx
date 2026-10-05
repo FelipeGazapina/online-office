@@ -8,6 +8,7 @@ import {
   BLOCK_W,
   DOOR,
   getLayout,
+  previewLayout,
   slotPlace,
   OWNER_CHAIR,
   OWNER_DESK,
@@ -372,7 +373,11 @@ function Lights({ b }: { b: Bounds }) {
 }
 
 export function Office({ company }: { company: Company | null }) {
-  const layout: Layout = getLayout(company?.blocks ?? []);
+  const arranging = useStore((s) => s.arranging);
+  const blocks = company?.blocks ?? [];
+  // While a block is being moved the walls already make room for it. Walking keeps the saved layout until it is placed.
+  const preview = useMemo(() => (arranging ? previewLayout(blocks, arranging.blockId, arranging.place) : null), [blocks, arranging]);
+  const layout: Layout = preview ?? getLayout(blocks);
   const b = layout.bounds;
   return (
     <>

@@ -41,7 +41,7 @@ function Sign({ blockId, name, cwd, color }: { blockId: ProjectBlock['id']; name
     <group
       onClick={(e) => {
         e.stopPropagation();
-        if (e.delta < 6) set({ modal: { kind: 'remove_block', blockId } });
+        if (e.delta < 6) set({ modal: { kind: 'block_menu', blockId } });
       }}
       onPointerOver={() => void (document.body.style.cursor = 'pointer')}
       onPointerOut={() => void (document.body.style.cursor = '')}

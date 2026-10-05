@@ -1,5 +1,5 @@
 // Run with `pnpm build && node verify/cdp.mjs verify/e2e-remove-block-3d.mjs`.
-// The owner removes a block from inside the 3D office. A real click on the block's sign opens a confirm dialog that
+// The owner removes a block from inside the 3D office. A real click on the block's sign opens its menu, and Remove a confirm dialog that
 // names who will be fired. Cancel keeps the block, and the confirm button removes it while the folder stays on disk.
 import { existsSync, mkdtempSync, realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -20,6 +20,8 @@ async function clickSign(s, cwd) {
   const top = await s.eval(`document.elementFromPoint(${at.x}, ${at.y})?.tagName`);
   assert(top === 'CANVAS', `the sign at ${at.x.toFixed(0)},${at.y.toFixed(0)} is on screen and not under the HUD (${top})`);
   await s.click(at.x, at.y);
+  await s.waitFor(`${modal}?.kind === 'block_menu'`);
+  await s.clickOn('.modal .btn', 'Remove');
 }
 
 export default async function removeBlock3d(s) {
@@ -32,14 +34,14 @@ export default async function removeBlock3d(s) {
   await s.sleep(500);
 
   await clickSign(s, other);
-  await s.waitFor(`${modal}?.kind === 'remove_block'`);
+  await s.waitFor(`${modal}?.kind === 'block_menu'`);
   assert(await s.eval(`document.querySelector('.modal').innerText.includes('Nobody works here yet')`), 'an empty block says nobody will be fired');
   await s.clickOn('.modal .btn', 'Cancel');
   await s.waitFor(`${modal} === null`);
   assert(await s.eval(`${company}.blocks.length === 2`), 'Cancel keeps the block');
 
   await clickSign(s, repo);
-  await s.waitFor(`${modal}?.kind === 'remove_block'`);
+  await s.waitFor(`${modal}?.kind === 'block_menu'`);
   assert(await s.eval(`document.querySelector('.modal').innerText.includes(${JSON.stringify(name)})`), `the dialog names ${name}, who will be fired`);
   await s.shot('remove-block-3d-confirm');
   await s.clickOn('.modal .btn', 'Fire and remove');

@@ -1785,3 +1785,35 @@ body.hud-moving, body.hud-moving * { cursor: grabbing !important; user-select: n
 
 /* Where a drag will land when its spot would cover another panel: a dashed slot the panel glides into on drop. */
 .hud-drop-ghost { position: fixed; left: 0; top: 0; box-sizing: border-box; border: 2px dashed rgba(255,189,86,.9); background: rgba(255,189,86,.12); pointer-events: none; opacity: 0; z-index: 170; transition: opacity 100ms ease-out; }
+
+/* Move mode for a block */
+.arrange-bar {
+  position: fixed;
+  left: 50%;
+  top: 72px;
+  z-index: 14;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  transform: translateX(-50%);
+  padding: 10px 12px 10px 16px;
+  border-radius: 16px;
+  background: #f8f6f1;
+  color: #1f2433;
+  box-shadow: 0 10px 28px rgba(20, 15, 40, 0.28);
+}
+.arrange-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 240px;
+  margin-right: 6px;
+  font-size: 12px;
+}
+.arrange-text b {
+  font-size: 14px;
+}
+.arrange-bar .turn {
+  font-size: 20px;
+  line-height: 1;
+  padding: 6px 12px;
+}

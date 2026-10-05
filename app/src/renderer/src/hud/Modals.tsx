@@ -11,6 +11,7 @@ import {
 } from '../../../shared/protocol.ts';
 import { useDiagram } from '../scene/whiteboard.ts';
 import { send, set, useStore } from '../store.ts';
+import { startArranging } from '../arrange.ts';
 import { tailPath } from './hooks.ts';
 
 const close = () => set({ modal: null });
@@ -470,12 +471,28 @@ function LinearBoardModal({ blockId }: { blockId: BlockId }) {
   return <div className="scrim" onMouseDown={close}><div className="modal wide board-page" data-hud-resize-target="modal-linear_board" onMouseDown={(event) => event.stopPropagation()}><div className="wb-head"><div><h2>Linear board</h2><p className="muted">{block.name} · live view from Linear</p></div><button className="btn ink" onClick={close}>Close</button></div><iframe title="Linear board" src={block.linearBoardUrl} allow="clipboard-read; clipboard-write" /></div></div>;
 }
 
-function RemoveBlockModal({ blockId }: { blockId: BlockId }) {
+function BlockMenuModal({ blockId }: { blockId: BlockId }) {
   const block = useStore((s) => s.company?.blocks.find((b) => b.id === blockId));
   const names = useStore((s) => s.company?.employees.filter((e) => e.blockId === blockId).map((e) => e.name).join(', '));
+  const [removing, setRemoving] = useState(false);
   if (!block) return null;
+  if (!removing) {
+    return (
+      <Modal kind="block_menu" title={block.name}>
+        <p className="muted">{tailPath(block.cwd, 48)}</p>
+        <div className="actions">
+          <button type="button" className="btn danger" onClick={() => setRemoving(true)}>
+            Remove…
+          </button>
+          <button type="button" className="btn primary" autoFocus onClick={() => startArranging(blockId)}>
+            Move or turn
+          </button>
+        </div>
+      </Modal>
+    );
+  }
   return (
-    <Modal kind="remove_block" title={`Remove ${block.name}?`}>
+    <Modal kind="block_menu" title={`Remove ${block.name}?`}>
       <p>{names ? `This fires ${names}. Their notes are kept with the alumni.` : 'Nobody works here yet.'}</p>
       <p className="muted">The folder {tailPath(block.cwd, 40)} stays on disk.</p>
       <div className="actions">
@@ -506,6 +523,6 @@ export function Modals() {
   if (modal.kind === 'github') return <GithubBoardModal blockId={modal.blockId} />;
   if (modal.kind === 'task_board') return <TaskBoardModal blockId={modal.blockId} />;
   if (modal.kind === 'linear_board') return <LinearBoardModal blockId={modal.blockId} />;
-  if (modal.kind === 'remove_block') return <RemoveBlockModal blockId={modal.blockId} />;
+  if (modal.kind === 'block_menu') return <BlockMenuModal blockId={modal.blockId} />;
   return <WhiteboardModal blockId={modal.blockId} />;
 }
