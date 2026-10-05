@@ -4,7 +4,7 @@ import { memo, useRef } from 'react';
 import type { Mesh } from 'three';
 import { PROVIDERS, type Employee } from '../../../shared/protocol.ts';
 import { fmtWait, useNow } from '../hud/hooks.ts';
-import { hash } from '../layout.ts';
+import { hash } from '../util.ts';
 import { runtime } from '../runtime.ts';
 import { set, useStore } from '../store.ts';
 import { ResizableHud } from '../hud/ResizableHud.tsx';

@@ -1,4 +1,4 @@
-// Today's static office as a Building. Mirrors renderer/src/layout.ts and scene/Office.tsx; S2 deletes those.
+// The static office the app shipped with, as a Building. A company.json without a building migrates through this.
 import { PAINT } from './catalog.ts';
 import { BENCH_COUNT, globalId, itemId, lotForSlot, meetingItems, perimeter, plantItems, rugTiles, teamItems } from './kit.ts';
 import { freeDesk, placeDesk } from './seats.ts';

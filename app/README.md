@@ -161,8 +161,9 @@ Install whisper.cpp once with `brew install whisper-cpp`.
 ```sh
 pnpm typecheck
 pnpm build
-node verify/nav-check.ts
-node --no-warnings verify/walk-check.mjs
+node verify/space-check.ts
+node verify/building-check.ts
+node --no-warnings verify/world-check.mjs
 node --no-warnings verify/chat-check.mjs
 node verify/voice-check.ts
 node verify/voice-logic-check.ts
@@ -179,8 +180,8 @@ node verify/cdp.mjs verify/e2e-long-wait.mjs
 node verify/cdp.mjs verify/e2e-voice.mjs
 ```
 
-- `verify/nav-check.ts` needs no model or Electron. It builds the walkable grid for one, two and three blocks and checks every path against an independent oracle that samples the segments: a route from the owner's seat to a talk spot at every bench seat and at the head desk, a route to every exit, no segment inside an obstacle grown by the owner's radius, everything inside the walls, a goal in the middle of a desk snapping outside it, and a sealed pocket having no route. It also checks the bench itself: each person faces their own desk, the two seats of a pair face each other, the six desks are flush with no overlap, the head desk closes the east end, every desk and chair is on the rug, and no level's per-block seat ceiling exceeds the bench.
-- `verify/walk-check.mjs` needs no model or Electron. It runs the real sim and store. It checks click walks that detour around desks, employees sitting facing their own desk whichever way it faces, steering keys winning over a walk, going to an employee and re-planning when they move, and employees routing around the meeting room: a new hire sits, a blocked employee arrives with the owner outside or inside, and a closed door keeps everyone at their desk until it opens.
+- `verify/building-check.ts` needs no model or Electron. It opens the real Office on a company.json from before the building and checks the migration (every employee on a desk item, the orchestrator at the PO desk), that a second launch leaves the file byte-identical, hire and fire seating, and build, reject, undo and redo.
+- `verify/world-check.mjs` needs no model or Electron. It runs the real sim and store on a building: click walks that detour around desks, a walk up the stairs to another story, steering keys winning over a walk, going to an employee, and employees routing around the meeting room whose door opens and closes.
 - `verify/chat-check.mjs` needs no model or Electron. It checks that what the owner says and what an employee says land in that employee's transcript, in order, capped at 200 lines.
 - `verify/voice-check.ts` runs the real whisper service against the real `whisper-server` and models, with clips made by `say`. It checks English and Portuguese, that requests wait their turn, downloads that resume, and that no server outlives the service. It needs macOS and whisper-cpp. `--offline` skips the one download from Hugging Face.
 - `verify/voice-logic-check.ts` needs neither. It checks the ring buffer, the half-duplex gate, and the line the HUD chip shows for every state.

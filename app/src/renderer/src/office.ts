@@ -27,6 +27,13 @@ export function applyServerMessage(msg: ServerMessage) {
     case 'snapshot':
       set({ company: msg.company, harnesses: msg.harnesses, catalogs: msg.catalogs, meetingDoor: msg.meetingDoor, taskBoards: msg.taskBoards, taskConnections: msg.taskConnections, mail: msg.mail });
       bridgeMail(msg.mail);
+      if (msg.buildingRev !== get().buildingRev) void fetchBuilding();
+      break;
+    case 'building':
+      if (msg.rev >= get().buildingRev) set({ building: msg.building, buildingRev: msg.rev });
+      break;
+    case 'build_rejected':
+      toast(`That change is not allowed: ${[...new Set(msg.violations.map((v) => v.kind.replaceAll('_', ' ')))].join(', ')}.`, 'warn');
       break;
     case 'said': {
       const e = employeeById(msg.employeeId);
@@ -55,6 +62,11 @@ export function applyServerMessage(msg: ServerMessage) {
       toast(msg.message, 'warn');
       break;
   }
+}
+
+async function fetchBuilding() {
+  const { building, rev } = await window.office.getBuilding();
+  if (rev >= get().buildingRev) set({ building, buildingRev: rev });
 }
 
 export async function startOffice() {

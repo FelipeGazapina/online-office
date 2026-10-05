@@ -74,7 +74,7 @@ export function Drawer() {
       <div className="facts">
         <span className={`pill ${s.kind}`}>{STATUS_LABEL[s.kind]}</span>
         <span>
-          {block?.name ?? 'No block'} · desk {e.desk + 1}
+          {block?.name ?? 'No block'}{e.seat ? (e.seat.includes(':po_desk:') ? ' · PO desk' : ` · desk ${Number(e.seat.slice(e.seat.lastIndexOf(':') + 1)) + 1}`) : ''}
         </span>
       </div>
 

@@ -1,0 +1,305 @@
+import { useFrame, type ThreeEvent } from '@react-three/fiber';
+import { memo, useLayoutEffect, useMemo, useRef } from 'react';
+import { Color, DoubleSide, InstancedMesh, Matrix4, MeshBasicMaterial, MeshStandardMaterial, Quaternion, RepeatWrapping, Vector3, type BufferGeometry } from 'three';
+import { PROVIDERS, type Employee } from '../../../../shared/protocol.ts';
+import { ITEM_DEFS, STORY_H, WALL_STYLES, YAW, type FloorGeometry, type ItemId } from '../../../../shared/space/index.ts';
+import { runtime } from '../../runtime.ts';
+import { get, set, useStore } from '../../store.ts';
+import { walkTo } from '../../sim.ts';
+import { chairOf } from '../../world.ts';
+import { codeTexture, plankTexture } from '../textures.ts';
+import { floorGeometry } from './floor.ts';
+import { chairModel, DEFAULT_TINT, DYNAMIC, modelOf, screenGeometry } from './models.ts';
+import { curbModel, facesCamera, glassModel, octantOf, VARIANTS, wallMatrix, wallModel, wallRecords, ZERO, type Variant } from './walls.ts';
+
+const up = new Vector3(0, 1, 0);
+const q = new Quaternion();
+const p3 = new Vector3();
+const one = new Vector3(1, 1, 1);
+const color = new Color();
+
+const woodMaterial = new MeshStandardMaterial({ map: plankTexture(), vertexColors: true, roughness: 0.85 });
+woodMaterial.map!.wrapS = woodMaterial.map!.wrapT = RepeatWrapping;
+const flatMaterial = new MeshStandardMaterial({ vertexColors: true, roughness: 0.9 });
+const furnitureMaterial = new MeshStandardMaterial({ vertexColors: true, roughness: 0.75 });
+const wallMaterial = new MeshStandardMaterial({ vertexColors: true, roughness: 0.95 });
+const glassMaterial = new MeshStandardMaterial({ color: '#cfe8ff', emissive: '#a8d4ff', emissiveIntensity: 0.9, roughness: 0.2, side: DoubleSide });
+const railMaterial = new MeshStandardMaterial({ color: '#c9cdd8', roughness: 0.5, metalness: 0.3 });
+const screenMaterial = new MeshBasicMaterial({ map: codeTexture(), toneMapped: false });
+
+function Instances({
+  geometry,
+  material,
+  count,
+  fill,
+  onClick,
+  castShadow = true,
+  receiveShadow = true,
+}: {
+  geometry: BufferGeometry;
+  material: MeshStandardMaterial | MeshBasicMaterial;
+  count: number;
+  fill: (mesh: InstancedMesh) => void;
+  onClick?: (e: ThreeEvent<MouseEvent>) => void;
+  castShadow?: boolean;
+  receiveShadow?: boolean;
+}) {
+  const ref = useRef<InstancedMesh>(null);
+  useLayoutEffect(() => {
+    const m = ref.current;
+    if (!m) return;
+    fill(m);
+    m.instanceMatrix.needsUpdate = true;
+    if (m.instanceColor) m.instanceColor.needsUpdate = true;
+  }, [fill]);
+  if (count === 0) return null;
+  return <instancedMesh ref={ref} args={[geometry, material, count]} frustumCulled={false} castShadow={castShadow} receiveShadow={receiveShadow} onClick={onClick} />;
+}
+
+const place = (m: Matrix4, x: number, y: number, z: number, yaw: number) => m.compose(p3.set(x, y, z), q.setFromAxisAngle(up, yaw), one);
+
+// ---------------------------------------------------------------- floor
+
+function Floor({ geom }: { geom: FloorGeometry }) {
+  const geo = useMemo(() => floorGeometry(geom), [geom]);
+  if (!geo) return null;
+  return (
+    <mesh
+      geometry={geo}
+      material={[woodMaterial, flatMaterial]}
+      receiveShadow
+      onClick={(e) => {
+        if (e.delta >= 6 || get().camera !== 'iso') return;
+        e.stopPropagation();
+        walkTo({ kind: 'point', at: { x: e.point.x, z: e.point.z }, floor: geom.index });
+      }}
+    />
+  );
+}
+
+// ---------------------------------------------------------------- walls
+
+function Walls({ geom }: { geom: FloorGeometry }) {
+  const records = useMemo(() => wallRecords(geom), [geom]);
+  const refs = useRef<Partial<Record<Variant | 'curb' | 'glass', InstancedMesh | null>>>({});
+  const seen = useRef(-2);
+  const curbCount = records.solid.length + records.window.length;
+
+  const apply = (cutYaw: number | null) => {
+    const m = new Matrix4();
+    let curbs = 0;
+    for (const v of VARIANTS) {
+      const mesh = refs.current[v];
+      if (!mesh) continue;
+      records[v].forEach((r, i) => {
+        const cut = cutYaw !== null && facesCamera(r, cutYaw);
+        if (cut && (v === 'solid' || v === 'window')) refs.current.curb?.setMatrixAt(curbs++, wallMatrix(r, m));
+        mesh.setMatrixAt(i, cut ? ZERO : wallMatrix(r, m));
+        if (v === 'window') refs.current.glass?.setMatrixAt(i, cut ? ZERO : wallMatrix(r, m));
+      });
+      mesh.instanceMatrix.needsUpdate = true;
+    }
+    const curb = refs.current.curb;
+    if (curb) {
+      curb.count = curbs;
+      curb.instanceMatrix.needsUpdate = true;
+    }
+    const glass = refs.current.glass;
+    if (glass) glass.instanceMatrix.needsUpdate = true;
+  };
+
+  useLayoutEffect(() => {
+    for (const v of VARIANTS) {
+      const mesh = refs.current[v];
+      records[v].forEach((r, i) => {
+        mesh?.setColorAt(i, color.set(WALL_STYLES[r.style]?.color ?? WALL_STYLES[0].color));
+      });
+      if (mesh?.instanceColor) mesh.instanceColor.needsUpdate = true;
+    }
+    // The curb takes the color of the wall it replaces, so it is colored when the cutaway fills it.
+    seen.current = -2;
+  }, [records]);
+
+  // The cutaway is decided per camera octant, never per frame. First person shows every wall at full height.
+  useFrame(() => {
+    const iso = runtime.view.blend < 0.5;
+    const key = iso ? octantOf(runtime.view.yaw) : -1;
+    if (key === seen.current) return;
+    seen.current = key;
+    apply(iso ? key * (Math.PI / 4) : null);
+    colorCurbs(key);
+  });
+
+  const colorCurbs = (key: number) => {
+    const curb = refs.current.curb;
+    if (!curb) return;
+    let n = 0;
+    const yaw = key * (Math.PI / 4);
+    for (const v of ['solid', 'window'] as const) {
+      for (const r of records[v]) {
+        if (key >= 0 && facesCamera(r, yaw)) curb.setColorAt(n++, color.set(WALL_STYLES[r.style]?.color ?? WALL_STYLES[0].color));
+      }
+    }
+    if (curb.instanceColor) curb.instanceColor.needsUpdate = true;
+  };
+
+  const ref = (key: Variant | 'curb' | 'glass') => (m: InstancedMesh | null) => void (refs.current[key] = m);
+  return (
+    <>
+      {VARIANTS.map((v) =>
+        records[v].length ? <instancedMesh key={`${v}${records[v].length}`} userData={{ wall: v }} ref={ref(v)} args={[wallModel(v), wallMaterial, records[v].length]} frustumCulled={false} castShadow receiveShadow /> : null,
+      )}
+      {records.window.length > 0 && <instancedMesh key={`glass${records.window.length}`} ref={ref('glass')} args={[glassModel(), glassMaterial, records.window.length]} frustumCulled={false} />}
+      {curbCount > 0 && <instancedMesh key={`curb${curbCount}`} userData={{ wall: 'curb' }} ref={ref('curb')} args={[curbModel(), wallMaterial, curbCount]} frustumCulled={false} receiveShadow />}
+    </>
+  );
+}
+
+// ---------------------------------------------------------------- items
+
+const shade = (hex: string, amount: number) => color.set(hex).multiplyScalar(amount);
+
+function Furniture({ geom }: { geom: FloorGeometry }) {
+  const blocks = useStore((s) => s.company?.blocks);
+  const hue = useMemo(() => new Map((blocks ?? []).map((b) => [b.id as string, b.color])), [blocks]);
+  const defs = useMemo(() => [...geom.render.items].filter(([def]) => !DYNAMIC.has(def)), [geom]);
+  const desks = useMemo(() => geom.story.items.filter((i) => ITEM_DEFS[i.def]?.seat), [geom]);
+
+  const pick = (ids: readonly ItemId[]) => (e: ThreeEvent<MouseEvent>) => {
+    if (e.delta >= 6 || e.instanceId === undefined) return;
+    set({ pickedItem: ids[e.instanceId] ?? null });
+    if (get().camera !== 'iso') return;
+    e.stopPropagation();
+    walkTo({ kind: 'point', at: { x: e.point.x, z: e.point.z }, floor: geom.index });
+  };
+
+  return (
+    <>
+      {defs.map(([def, data]) => (
+        <ModelInstances key={def} def={def} matrices={data.matrices} ids={data.ids} onClick={pick(data.ids)} />
+      ))}
+      <Instances
+        geometry={chairModel()}
+        material={furnitureMaterial}
+        count={desks.length}
+        onClick={pick(desks.map((d) => d.id))}
+        fill={useMemo(
+          () => (mesh: InstancedMesh) => {
+            const m = new Matrix4();
+            desks.forEach((d, i) => {
+              const c = chairOf(d)!;
+              mesh.setMatrixAt(i, place(m, c.x, 0, c.z, YAW[d.rot] + (ITEM_DEFS[d.def].seat?.yaw ?? 0)));
+              const base = d.blockId ? hue.get(d.blockId) : undefined;
+              mesh.setColorAt(i, base ? shade(base, 0.75) : color.set('#2f3a5f'));
+            });
+          },
+          [desks, hue],
+        )}
+      />
+      <Screens geom={geom} />
+    </>
+  );
+}
+
+function ModelInstances({ def, matrices, ids, onClick }: { def: string; matrices: Float32Array; ids: readonly ItemId[]; onClick: (e: ThreeEvent<MouseEvent>) => void }) {
+  const fill = useMemo(
+    () => (mesh: InstancedMesh) => {
+      const m = new Matrix4();
+      for (let i = 0; i < ids.length; i++) {
+        mesh.setMatrixAt(i, place(m, matrices[i * 5], matrices[i * 5 + 1], matrices[i * 5 + 2], matrices[i * 5 + 3]));
+        const tint = matrices[i * 5 + 4];
+        mesh.setColorAt(i, tint >= 0 ? color.setHex(tint) : color.setHex(DEFAULT_TINT[def] ?? 0xffffff));
+      }
+    },
+    [def, matrices, ids],
+  );
+  return <Instances geometry={modelOf(def)} material={furnitureMaterial} count={ids.length} fill={fill} onClick={onClick} />;
+}
+
+// A desk's screen shows what its sitter is doing. One mesh draws them all, and each frame sets each one's brightness.
+function Screens({ geom }: { geom: FloorGeometry }) {
+  const mesh = useRef<InstancedMesh>(null);
+  const desks = useMemo(() => geom.story.items.filter((i) => i.def === 'bench_desk' || i.def === 'po_desk'), [geom]);
+  const sitters = useRef<{ company: unknown; bySeat: Map<string, Employee> }>({ company: null, bySeat: new Map() });
+  const geo = useMemo(() => screenGeometry(), []);
+  const fill = useMemo(
+    () => (m: InstancedMesh) => {
+      const mat = new Matrix4();
+      desks.forEach((d, i) => {
+        const def = ITEM_DEFS[d.def];
+        const f = d.rot % 2 === 0 ? { w: def.w, d: def.d } : { w: def.d, d: def.w };
+        m.setMatrixAt(i, place(mat, (d.x + f.w / 2) / 2, 0, (d.z + f.d / 2) / 2, YAW[d.rot]));
+        m.setColorAt(i, color.setRGB(0.05, 0.05, 0.06));
+      });
+    },
+    [desks],
+  );
+
+  useFrame((state, dt) => {
+    const m = mesh.current;
+    if (!m) return;
+    const { company } = get();
+    if (sitters.current.company !== company) {
+      sitters.current = { company, bySeat: new Map((company?.employees ?? []).flatMap((e) => (e.seat ? [[e.seat as string, e] as const] : []))) };
+    }
+    const t = state.clock.elapsedTime;
+    codeTexture().offset.y -= dt * 0.1;
+    desks.forEach((d, i) => {
+      const e = sitters.current.bySeat.get(d.id);
+      const kind = e?.status.kind ?? 'none';
+      if (kind === 'working') {
+        color.set(PROVIDERS[e!.provider].color).lerp(new Color('#ffffff'), 0.3).multiplyScalar(0.9 + Math.sin(t * 3 + i) * 0.15);
+      } else if (kind === 'blocked_on_owner') {
+        color.set('#ffb340').multiplyScalar(0.55 + (Math.sin(t * 6) + 1) * 0.3);
+      } else if (kind === 'error') {
+        color.set('#ff4d4d');
+      } else if (kind === 'idle') {
+        color.set('#6a7898').multiplyScalar(0.3);
+      } else {
+        color.setRGB(0.04, 0.04, 0.05);
+      }
+      m.setColorAt(i, color);
+    });
+    if (m.instanceColor) m.instanceColor.needsUpdate = true;
+  });
+
+  return <Instances geometry={geo} material={screenMaterial} count={desks.length} fill={fill} castShadow={false} receiveShadow={false} />;
+}
+
+function Rails({ geom }: { geom: FloorGeometry }) {
+  const rails = geom.render.rails;
+  const fill = useMemo(
+    () => (mesh: InstancedMesh) => {
+      const m = new Matrix4();
+      for (let i = 0; i < rails.length / 5; i++) {
+        place(m, rails[i * 5], 0, rails[i * 5 + 1], rails[i * 5 + 2]);
+        mesh.setMatrixAt(i, m);
+      }
+    },
+    [rails],
+  );
+  return <Instances geometry={modelOf('rail')} material={railMaterial} count={rails.length / 5} fill={fill} />;
+}
+
+// ---------------------------------------------------------------- story
+
+/** One story of the building. Stories above the one the owner is on are not drawn. */
+export const StoryView = memo(function StoryView({ geom }: { geom: FloorGeometry }) {
+  const visible = useStore((s) => geom.index <= s.story);
+  if (!visible) return null;
+  const { lot } = geom;
+  return (
+    <group position-y={geom.index * STORY_H}>
+      {geom.index === 0 && (
+        <mesh position={[lot.x0 + lot.w / 2, -0.32, lot.z0 + lot.h / 2]} receiveShadow>
+          <boxGeometry args={[lot.w + 0.6, 0.6, lot.h + 0.6]} />
+          <meshStandardMaterial color="#6d4c37" roughness={1} />
+        </mesh>
+      )}
+      <Floor geom={geom} />
+      <Walls geom={geom} />
+      <Furniture geom={geom} />
+      <Rails geom={geom} />
+    </group>
+  );
+});

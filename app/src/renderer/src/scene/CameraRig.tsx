@@ -1,7 +1,7 @@
 import { useFrame, useThree } from '@react-three/fiber';
 import { useEffect, useRef } from 'react';
 import { Vector3, type Mesh, type Object3D, type PerspectiveCamera } from 'three';
-import { angleDiff } from '../layout.ts';
+import { angleDiff } from '../util.ts';
 import { runtime } from '../runtime.ts';
 import { get, useStore } from '../store.ts';
 import { stepSim } from '../sim.ts';
@@ -33,6 +33,7 @@ export function CameraRig() {
   const ui = useStore(() => uiOpen());
   const focus = useRef(new Vector3());
   const snap = useRef(true);
+  const placed = useRef(false);
   const drag = useRef<{ x: number; y: number; ox: number; oy: number; far: boolean } | null>(null);
   const locked = useRef(false);
   const scratch = useRef({ iso: new Vector3(), isoPos: new Vector3(), isoLook: new Vector3(), eye: new Vector3(), eyeLook: new Vector3(), look: new Vector3(), want: new Vector3() });
@@ -134,8 +135,10 @@ export function CameraRig() {
     view.blend = clamp(view.blend + (first ? dt : -dt) / FLIGHT, 0, 1);
     const t = smooth(view.blend);
 
+    // The owner is put at the door once the building is here, and the camera starts there, not at the origin.
+    if (owner.placed && !placed.current) { placed.current = true; snap.current = true; }
     // The overview pose, eased the way it always was.
-    focus.current.lerp(iso.set(owner.pos.x, 0.6, owner.pos.z), ease(dt, snap.current ? 100 : 5));
+    focus.current.lerp(iso.set(owner.pos.x, owner.pos.y + 0.6, owner.pos.z), ease(dt, snap.current ? 100 : 5));
     const fx = Math.sin(view.yaw), fz = Math.cos(view.yaw), c = Math.cos(ISO_PITCH);
     isoLook.copy(focus.current);
     want.set(isoLook.x - fx * c * view.isoDist, isoLook.y + Math.sin(ISO_PITCH) * view.isoDist, isoLook.z - fz * c * view.isoDist);
@@ -143,7 +146,7 @@ export function CameraRig() {
 
     // The eye pose. The bob is small and fades with speed.
     const bob = Math.sin(runtime.time * 9) * 0.02 * Math.min(1, owner.speed / 3);
-    eye.set(owner.pos.x + fx * 0.1, EYE + bob, owner.pos.z + fz * 0.1);
+    eye.set(owner.pos.x + fx * 0.1, owner.pos.y + EYE + bob, owner.pos.z + fz * 0.1);
     const cp = Math.cos(view.fpPitch);
     eyeLook.set(eye.x + fx * cp, eye.y + Math.sin(view.fpPitch), eye.z + fz * cp);
 

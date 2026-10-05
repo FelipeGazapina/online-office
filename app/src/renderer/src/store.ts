@@ -15,6 +15,7 @@ import type {
   UpdateState,
 } from '../../shared/protocol.ts';
 import { emptyMailView, type MailView } from '../../shared/mail.ts';
+import type { Building, ItemId } from '../../shared/space/index.ts';
 import type { Language, VoiceQuality } from '../../shared/voice.ts';
 import { initialVoice, type VoiceState } from './voice/chip.ts';
 
@@ -50,6 +51,13 @@ function loadSettings(): Settings {
 
 type State = Settings & {
   company: Company | null;
+  // The building and the rev main last gave it. The scene draws it and the sim walks it.
+  building: Building | null;
+  buildingRev: number;
+  // The story the owner is on. It and the ones below are drawn.
+  story: number;
+  // The last furniture clicked, for the build tools.
+  pickedItem: ItemId | null;
   harnesses: Record<Provider, HarnessStatus> | null;
   meetingDoor: MeetingDoor;
   catalogs: Record<Provider, ModelCatalog> | null;
@@ -86,6 +94,10 @@ type State = Settings & {
 export const useStore = create<State>()(() => ({
   ...loadSettings(),
   company: null,
+  building: null,
+  buildingRev: 0,
+  story: 0,
+  pickedItem: null,
   harnesses: null,
   meetingDoor: 'open',
   catalogs: null,

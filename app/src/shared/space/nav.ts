@@ -1,5 +1,4 @@
-// Per-floor walkable grid, A* with a line-of-sight pull, and the stair graph between floors. The search follows
-// renderer/src/nav.ts, which S2 deletes.
+// Per-floor walkable grid, A* with a line-of-sight pull, and the stair graph between floors.
 import { defOf, hasFloorAt, itemRect, stairsInfo, tileIndex, wallName, wkey } from './geom.ts';
 import { NAV_CELL, NAV_CLEARANCE, STORY_H, WALL_HALF, type FloorGeometry, type FloorNav, type FloorPos, type Leg, type StairLink, type Vec2, type WallSeg } from './types.ts';
 
