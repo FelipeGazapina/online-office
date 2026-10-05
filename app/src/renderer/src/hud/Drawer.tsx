@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { PROVIDERS, type Employee } from '../../../shared/protocol.ts';
-import { attachChatImage, get, send, set, useStore } from '../store.ts';
+import { attachChatImage, send, set, useStore } from '../store.ts';
+import { tell } from '../talk.ts';
 import { fmtWait, useNow } from './hooks.ts';
 
 const STATUS_LABEL = { idle: 'Idle', working: 'Working', blocked_on_owner: 'Waiting on you', error: 'Error' } as const;
@@ -116,7 +117,7 @@ export function Drawer() {
           ev.preventDefault();
           const text = draft.trim() || (image ? `Shared image: ${image.name}` : '');
           if (!text) return;
-          send({ type: 'interject', employeeId: e.id, text, style: get().interrupt });
+          tell(e.id, text);
           if (image) attachChatImage(e.id, text, image.data, image.name);
           setDraft('');
           setImage(undefined);
@@ -206,7 +207,7 @@ function GroupDrawer({ members }: { members: Employee[] }) {
           ev.preventDefault();
           const text = draft.trim();
           if (!text) return;
-          for (const member of members) send({ type: 'interject', employeeId: member.id, text, style: get().interrupt });
+          for (const member of members) tell(member.id, text);
           setDraft('');
         }}
       >

@@ -43,8 +43,9 @@ export type SessionHost = {
   // first out: the next one shows when the one in front is answered.
   ask(body: QuestionBody, signal?: AbortSignal): Promise<string>;
   // The office MCP server, already scoped to this employee by its URL. Every harness connects to it under this
-  // name, so tool ids read `mcp__office__ask_owner` and so on. It serves ask_owner, draw_diagram, remember, recall
-  // and forget. The URL is only valid for this session and this run of the app.
+  // name, so tool ids read `mcp__office__ask_owner` and so on. It serves ask_owner, draw_diagram, remember, recall,
+  // forget and the mailroom tools (team, message, request, requestGauntlet, reply, awaitReplies, inbox, cancelRequest,
+  // and hireTeammate for a PO). The URL is only valid for this session and this run of the app.
   readonly mcp: { readonly url: string; readonly name: 'office' };
   // Titles of this employee's and this block's saved notes, read now. Call it once when the harness session starts and
   // reuse the string for that whole session, so a note saved mid-session changes nothing until the next one.
@@ -53,8 +54,14 @@ export type SessionHost = {
   // a harness session starts and reuse it for that whole session, and pass it to `persona()` with the digest. Rules that
   // change later arrive through `rulesChanged`.
   rules(): string;
-  // Company awards the XP. Adapters call this once per finished task.
-  taskCompleted(): void;
+  // Company awards the XP and the mailroom settles the requests this turn served. Adapters call this once per finished
+  // task, with the turn's final text when the harness has it (it becomes the auto-reply). Call it before the status goes
+  // idle. A turn that fails reports `setStatus({ kind: 'error' })` instead, which settles those requests as failed.
+  taskCompleted(result?: string): void;
+  // Live text of the bubble the employee is writing through the office `message` or `reply` tool, as it is generated.
+  // `done` closes the bubble. Optional: a harness that cannot stream deltas leaves it out and the whole text arrives
+  // through `said`.
+  streamed?(delta: string, done?: boolean): void;
   // Report each subagent the harness starts for this employee, the moment it starts: what the harness's own delegation
   // tool spawns (Claude `Agent`, Hermes `delegate_task`). `id` is any string that is unique within this session.
   // `parentId` is the id of the subagent that spawned this one, or null when the employee did. Report a parent before
@@ -70,7 +77,8 @@ export type SessionHost = {
 
 // One per employee. Construction must be cheap: the real adapter starts its process on first message.
 export interface EmployeeSession {
-  assign(task: string): void;
+  // `task` is the whole prompt for the turn. `title` is a short name for it, for the desk and the status line.
+  assign(task: string, title?: string): void;
   // Company routes interjections to a blocked employee into the question it is waiting on, so this only sees idle/working/error.
   interject(text: string, style: InterruptStyle): void;
   // The owner picked another model. `host.model` already returns it. Apply it from the next turn, and never interrupt

@@ -23,7 +23,7 @@ export default async (s) => {
   const logs = (name) => s.eval(`(__office.store.getState().logs[${emp(name)}.id] ?? []).map((l) => l.line)`);
   const idle = (name, ms = 120000) => s.waitFor(`${emp(name)}.status.kind === 'idle'`, ms);
   const runTask = async (name, task) => {
-    await send({ type: 'assign', employeeId: await s.eval(`${emp(name)}.id`), task });
+    await send({ type: 'post', to: await s.eval(`${emp(name)}.id`), clientId: `c${Date.now()}`, as: 'request', text: task });
     await s.waitFor(`${emp(name)}.status.kind === 'working'`, 15000);
     await idle(name);
   };
@@ -71,7 +71,7 @@ export default async (s) => {
   const command = (file) => `node -e "require('fs').writeFileSync('${file}', 'x')"`;
   const node = (file) => `Use the Bash tool, not Write, to run exactly this command: ${command(file)}`;
   const flat = (text) => text.replace(/\s+/g, ' ');
-  await send({ type: 'assign', employeeId: benId, task: node('one.txt') });
+  await send({ type: 'post', to: benId, clientId: `c${Date.now()}`, as: 'request', text: node('one.txt') });
   const card = await answerCard('Ben', { always: true });
   assert(card.tool === 'Bash' && card.detail.includes('writeFileSync'), 'the first run of the command puts a permission card on the desk');
   await idle('Ben');
@@ -83,7 +83,7 @@ export default async (s) => {
   await runTask('Ben', node('one.txt'));
   assert(existsSync(join(repo, 'one.txt')) && (await s.eval('window.__cards')) === 0, 'the identical command ran again with no card');
   assert((await logs('Ben')).some((l) => l.startsWith('Allowed by your rule "node -e') && l.includes('one.txt')), 'and the log says the rule allowed it');
-  await send({ type: 'assign', employeeId: benId, task: node('two.txt') });
+  await send({ type: 'post', to: benId, clientId: `c${Date.now()}`, as: 'request', text: node('two.txt') });
   const other = await answerCard('Ben', {});
   assert(other.kind === 'permission' && other.detail.includes('two.txt'), 'another node command still asks, because the rule covers only the command it was made from');
   await idle('Ben');
@@ -91,7 +91,7 @@ export default async (s) => {
   await send({ type: 'remove_allow_rule', employeeId: benId, rule: rules[0] });
   await s.waitFor(`${emp('Ben')}.permissions.alwaysAllow.length === 0`, 5000);
   rmSync(join(repo, 'one.txt'));
-  await send({ type: 'assign', employeeId: benId, task: node('one.txt') });
+  await send({ type: 'post', to: benId, clientId: `c${Date.now()}`, as: 'request', text: node('one.txt') });
   await answerCard('Ben', {});
   await idle('Ben');
   assert(existsSync(join(repo, 'one.txt')), 'after remove_allow_rule the identical command asks again');
@@ -127,9 +127,11 @@ export default async (s) => {
   })()`);
   const cyId = await s.eval(`${emp('Cy')}.id`);
   await send({
-    type: 'assign',
-    employeeId: cyId,
-    task: 'Use the Agent tool exactly once, with run_in_background set to true. Give the subagent this prompt: "Read one.txt, two.txt and three.txt in the current folder one at a time, then reply with the word DONE." After you launch it, say only that you launched it.',
+    type: 'post',
+    to: cyId,
+    clientId: `c${Date.now()}`,
+    as: 'request',
+    text: 'Use the Agent tool exactly once, with run_in_background set to true. Give the subagent this prompt: "Read one.txt, two.txt and three.txt in the current folder one at a time, then reply with the word DONE." After you launch it, say only that you launched it.',
   });
   const from = Date.now();
   while (!(await s.eval('window.__cy.some((x) => x.n > 0) && window.__cy.at(-1).n === 0'))) {

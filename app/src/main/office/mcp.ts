@@ -9,6 +9,7 @@ import { isInitializeRequest, type CallToolResult } from '@modelcontextprotocol/
 import { z } from 'zod';
 import type { EmployeeId, QuestionBody } from '../../shared/protocol.ts';
 import { logger } from './debug.ts';
+import type { MailTools } from './mail-tools.ts';
 import type { Notebook } from './memory.ts';
 
 // What one employee's tools can reach. The office builds it from the employee's own session, so a tool call
@@ -17,7 +18,7 @@ export type EmployeeTools = {
   ask(body: QuestionBody, signal?: AbortSignal): Promise<string>;
   drawDiagram(title: string, mermaid: string): void;
   openBoard(title: string, target: string): Promise<void>;
-  delegateToTeammate(target: string | undefined, task: string): Promise<string>;
+  mail: MailTools;
   memory: Notebook;
 };
 
@@ -154,17 +155,89 @@ export async function startOfficeMcp(): Promise<OfficeMcp> {
       }),
     );
 
-    server.registerTool(
-      'delegate_to_teammate',
-      {
-        description: 'For a block orchestrator only. Give a clear task to another employee on the same project block. Leave target empty to choose an idle teammate.',
-        inputSchema: {
-          target: z.string().max(120).optional().describe('Teammate name, or empty to choose an idle teammate'),
-          task: z.string().min(1).max(4000).describe('The task to assign'),
-        },
-      },
-      (args, extra) => run('delegate_to_teammate', extra, async () => text(await tools.delegateToTeammate(args.target, args.task))),
+    const OUTCOME = z.enum(['done', 'blocked', 'failed', 'declined', 'cancelled']);
+    const { mail } = tools;
+    const tool = <S extends z.ZodRawShape>(name: string, description: string, shape: S, body: (args: z.infer<z.ZodObject<S>>, signal: AbortSignal) => unknown | Promise<unknown>) => {
+      const schema = z.object(shape);
+      return server.registerTool(name, { description, inputSchema: schema.shape as z.ZodRawShape }, (args, extra) =>
+        run(name, extra, async (signal) => json(await body(schema.parse(args), signal))),
+      );
+    };
+
+    tool('team', 'List the people on your project block: name, role, state, how many messages wait for them, and what they are doing now. Look before you delegate.', {}, () => mail.team());
+
+    tool(
+      'message',
+      'Say something to a teammate or to the owner. Use it FIRST in every turn that serves a request: one short acknowledgement ("On it. I will split this into the API and the UI.") before you start work. No reply is owed. "to" is a name, "po" or "owner".',
+      { to: z.string().min(1).max(120), text: z.string().min(1).max(4000) },
+      (a) => mail.message(a),
     );
+
+    tool(
+      'request',
+      'Ask a teammate to do a piece of work, or for help. A busy teammate queues it: busy is not an error. Their result comes back to you as a reply message when you next wake, or through awaitReplies. Split work along pieces that can be verified on their own, and write a concrete bar for each. intent "help" is for a quick question to a peer.',
+      {
+        to: z.string().min(1).max(120).describe('A name, or "po"'),
+        text: z.string().min(1).max(8000),
+        title: z.string().max(80).optional().describe('A short title for the piece, shown on the card'),
+        intent: z.enum(['work', 'help']).optional(),
+        bar: z.array(z.string().max(500)).max(12).optional().describe('What done looks like, one checkable line each'),
+        key: z.string().max(120).optional().describe('Repeating a call with the same key does not post twice'),
+      },
+      (a) => mail.request(a),
+    );
+
+    tool(
+      'requestGauntlet',
+      'Run a gauntlet loop on a piece that has a concrete bar. The office asks the builder, then shows ONLY the artifact and the bar to a different critic, who returns a pass or fail verdict. Findings go back to the builder until the critic passes or maxRounds runs out. You get one reply when it settles.',
+      {
+        piece: z.string().min(1).max(8000).describe('What the builder must make'),
+        bar: z.array(z.string().max(500)).min(1).max(12),
+        builder: z.string().min(1).max(120),
+        critic: z.string().min(1).max(120).describe('Must be a different person from the builder'),
+        maxRounds: z.number().int().min(1).max(10).optional(),
+        key: z.string().max(120).optional(),
+      },
+      (a) => mail.requestGauntlet(a),
+    );
+
+    tool(
+      'reply',
+      'Settle a request you were given, with its result. Finish the work completely first. If you end your turn without calling reply, your final text becomes the reply. When serving a gauntlet work request, list the artifact refs (paths, a diff command, a URL). A critic reviewing an artifact must send a verdict.',
+      {
+        requestId: z.string().min(1).max(80),
+        outcome: OUTCOME,
+        text: z.string().min(1).max(8000),
+        artifact: z.array(z.string().max(500)).max(20).optional(),
+        verdict: z.object({ pass: z.boolean(), findings: z.array(z.string().max(1000)).max(20) }).optional(),
+      },
+      (a) => mail.reply(a),
+    );
+
+    tool(
+      'awaitReplies',
+      'Wait for replies to requests you made. Returns when a listed reply arrives, or any other message arrives, or the timeout passes (an empty list). Use it when you cannot go on without the answer; otherwise end your turn and the reply will wake you.',
+      {
+        ids: z.array(z.string().max(80)).max(20).optional(),
+        mode: z.enum(['any', 'all']).optional(),
+        timeoutSec: z.number().min(1).max(600).optional(),
+      },
+      (a, signal) => mail.awaitReplies(a, signal),
+    );
+
+    tool('inbox', 'Read messages that arrived while you worked. peek keeps them unread.', { peek: z.boolean().optional() }, (a) => mail.inbox(a));
+
+    tool('cancelRequest', 'Cancel a request you made that is not settled yet.', { id: z.string().min(1).max(80) }, (a) => mail.cancelRequest(a));
+
+    if (mail.hireTeammate) {
+      const { hireTeammate } = mail;
+      tool(
+        'hireTeammate',
+        'For the block PO only. Hire one more employee into this block when the team is too short for the work. Hire only when the existing team cannot take the pieces: queueing work on a busy teammate is fine. Repeating a call with the same key hires once.',
+        { key: z.string().min(1).max(120), name: z.string().max(60).optional(), brief: z.string().max(2000).optional() },
+        (a) => hireTeammate(a),
+      );
+    }
 
     server.registerTool(
       'remember',

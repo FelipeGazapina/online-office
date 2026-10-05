@@ -9,9 +9,11 @@ import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/
 import type { BlockId, EmployeeId, Question } from '../src/shared/protocol.ts';
 import { Inbox } from '../src/main/office/inbox.ts';
 import { LIMITS, MemoryStore } from '../src/main/office/memory.ts';
+import { mailTools } from '../src/main/office/mail-tools.ts';
 import { startOfficeMcp } from '../src/main/office/mcp.ts';
 import { PSTACK_WORKFLOW, persona, resolvePstackSkillsPath } from '../src/main/office/persona.ts';
 import { check, finish, sleep, until } from './check.ts';
+import { ANA, B1, BRUNO, PO, world } from './mail-world.ts';
 
 const dir = mkdtempSync(join(tmpdir(), 'office-mcp-check-'));
 const memRoot = join(dir, 'memory');
@@ -24,6 +26,9 @@ const inbox = new Inbox({
 });
 const diagrams: { employeeId: string; title: string }[] = [];
 const mcp = await startOfficeMcp();
+
+const mailWorld = world();
+const nameOf = () => 'someone';
 
 const A = 'emp-a' as EmployeeId;
 const B = 'emp-b' as EmployeeId;
@@ -38,7 +43,7 @@ function attach(employeeId: EmployeeId, blockId: BlockId) {
   return mcp.attach(employeeId, {
     ask: (body, signal) => inbox.ask(employeeId, body, signal),
     openBoard: async () => {},
-    delegateToTeammate: async () => 'not available in this check',
+    mail: mailTools(mailWorld.room, employeeId, nameOf, false),
     drawDiagram: (title) => diagrams.push({ employeeId, title }),
     memory: memoryFor,
   });
@@ -110,7 +115,8 @@ const c = await connect(urlC);
 check(a.client.getServerVersion()?.name === 'office', `server name is "office" (${a.client.getServerVersion()?.name})`);
 const listedTools = (await a.client.listTools()).tools;
 const listed = listedTools.map((t) => t.name).sort();
-check(JSON.stringify(listed) === JSON.stringify(['ask_owner', 'delegate_to_teammate', 'draw_diagram', 'forget', 'open_board', 'recall', 'remember']), `tools: ${listed.join(', ')}`);
+check(JSON.stringify(listed) === JSON.stringify(['ask_owner', 'awaitReplies', 'cancelRequest', 'draw_diagram', 'forget', 'inbox', 'message', 'open_board', 'recall', 'remember', 'reply', 'request', 'requestGauntlet', 'team']), `tools: ${listed.join(', ')}`);
+check(!listed.includes('delegate_to_teammate') && !listed.includes('hireTeammate'), 'delegate_to_teammate is gone and hireTeammate is not offered to an employee');
 const askOwnerDescription = listedTools.find((t) => t.name === 'ask_owner')?.description ?? '';
 check(/material .*decision|material .*product/i.test(askOwnerDescription) && /observable fact/i.test(askOwnerDescription) && /options.*tradeoffs/i.test(askOwnerDescription), 'ask_owner asks only material decisions and requests evidence-backed options');
 
@@ -304,11 +310,45 @@ mkdirSync(join(legacyHome, '.cursor', 'skills'), { recursive: true });
 check(resolvePstackSkillsPath(legacyHome) === join(legacyHome, '.cursor', 'skills'), 'PStack path falls back to the legacy skills directory');
 mkdirSync(join(legacyHome, '.agents', 'skills'), { recursive: true });
 check(resolvePstackSkillsPath(legacyHome) === join(legacyHome, '.agents', 'skills'), 'PStack path prefers the installed agents skills directory');
-check(persona({ name: 'PO', company: 'x', block: 'y', role: 'orchestrator', digest: '', rules: '' }).includes('delegate them with the team tool'), 'the orchestrator persona explains team coordination');
+check(persona({ name: 'PO', company: 'x', block: 'y', role: 'orchestrator', digest: '', rules: '' }).includes('hireTeammate') && persona({ name: 'PO', company: 'x', block: 'y', role: 'orchestrator', digest: '', rules: '' }).includes('requestGauntlet'), 'the orchestrator persona explains planning, hiring and the gauntlet');
 check(!persona({ name: 'Ana', company: 'x', block: 'y', digest: '', rules: '' }).includes('What you remember'), 'the persona omits the digest when nothing is saved');
 const ruled = persona({ name: 'Ana', company: 'x', block: 'y', digest: digestA, rules: '- Never edit the billing folder' });
 check(ruled.includes('The rules your boss set for you') && ruled.includes('- Never edit the billing folder') && ruled.indexOf('billing') < ruled.indexOf('What you remember'), 'the persona carries the owner rules ahead of the digest');
 check(!persona({ name: 'Ana', company: 'x', block: 'y', digest: '', rules: '' }).includes('rules your boss'), 'the persona omits the rules heading when there are none');
+
+console.log('\n# mailroom tools');
+const mailUrl = (who: typeof PO) => mcp.attach(who, {
+  ask: async () => '',
+  openBoard: async () => {},
+  drawDiagram: () => {},
+  memory: memory.notebook({ employeeId: who, blockId: BLOCK1, provider: 'claude-code' }),
+  mail: mailTools(mailWorld.room, who, (actor) => mailWorld.members.find((m) => m.id === actor)?.name ?? actor, who === PO),
+});
+const po = await connect(mailUrl(PO));
+const ana = await connect(mailUrl(ANA));
+const poTools = (await po.client.listTools()).tools.map((t) => t.name);
+check(poTools.includes('hireTeammate') && !(await ana.client.listTools()).tools.some((t) => t.name === 'hireTeammate'), 'hireTeammate is offered to the PO only');
+const gh = mailWorld.room.post({ from: 'owner', to: 'po', blockId: B1, body: { kind: 'request', text: 'build it' } });
+const team = await call(po.client, 'team', {});
+check(team.json().length === 4 && team.json().some((m: any) => m.name === 'Ana' && m.queued === 0), `team lists the block, not other blocks (${team.text.slice(0, 80)})`);
+const sent = await call(po.client, 'request', { to: 'Ana', text: 'api piece', bar: ['returns csv'], title: 'API' });
+check(sent.json().ok === true && sent.json().delivery === 'delivered', `request posts under the caller's identity (${sent.text})`);
+const second = await call(po.client, 'request', { to: 'Ana', text: 'api piece', key: 'k' });
+check(second.json().ok === true && second.json().delivery === 'queued', 'a busy teammate queues the request instead of failing', second.text);
+const wrong = await call(po.client, 'request', { to: 'Zed', text: 'x' });
+check(wrong.json().ok === false && wrong.json().reason === 'cross_block', 'another block is refused with a reason');
+const waiting = call(po.client, 'awaitReplies', { timeoutSec: 5 });
+const reqId = sent.json().id as string;
+const replied = await call(ana.client, 'reply', { requestId: reqId, outcome: 'done', text: 'csv route done', artifact: ['src/csv.ts'] });
+check(replied.json().ok === true, 'reply settles a request');
+const got = (await waiting).json();
+check(got.length === 1 && got[0].kind === 'reply' && got[0].text === 'csv route done' && got[0].artifact[0] === 'src/csv.ts', 'awaitReplies returns the reply with its artifact');
+const hired = await call(po.client, 'hireTeammate', { key: 'h1', name: 'Dora' });
+const hired2 = await call(po.client, 'hireTeammate', { key: 'h1', name: 'Dora' });
+check(hired.json().ok === true && hired2.json().id === hired.json().id, 'hireTeammate hires once per key');
+check(gh.ok && BRUNO !== ANA, 'the owner request reached the PO', JSON.stringify(gh));
+await po.client.close();
+await ana.client.close();
 
 console.log('\n# lifecycle');
 await memory.archive(A);

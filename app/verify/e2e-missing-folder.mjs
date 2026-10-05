@@ -15,7 +15,7 @@ export default async function missingFolder(s) {
   const id = await s.eval(`${claude}.id`);
   rmSync(repo, { recursive: true, force: true });
 
-  await s.eval(`window.office.send({ type: 'interject', employeeId: '${id}', text: 'hello?', style: 'next' })`);
+  await s.eval(`window.office.send({ type: 'post', to: '${id}', clientId: 'missing-folder', as: 'request', text: 'hello?' })`);
   await s.waitFor(`__office.store.getState().toasts.some((t) => t.text.includes(${JSON.stringify(repo)}))`, 10000);
   await s.sleep(1500);
   assert((await s.eval(`${status}.kind`)) !== 'error', 'talking to an employee whose folder is gone names the folder and starts no harness');
