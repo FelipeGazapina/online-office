@@ -4,7 +4,9 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, realpathSync, renameSync, statSync, writeFileSync } from 'node:fs';
 import { basename, dirname, isAbsolute } from 'node:path';
 import { ALLOW_ANSWER, covers, isAllow, ruleFor, sameRule, type PermissionBody } from '../../shared/permissions.ts';
+import { nextSlot, placeProblem, snapPlace } from '../../shared/placement.ts';
 import {
+  type BlockPlace,
   DESKS_PER_BLOCK,
   MAX_LEVEL,
   PROVIDERS,
@@ -252,7 +254,7 @@ export class Office {
       case 'create_block':
         return this.createBlock(msg.cwd, msg.name, msg.githubRepo);
       case 'update_block':
-        return this.updateBlock(msg.blockId, msg.name, msg.cwd, msg.githubRepo);
+        return this.updateBlock(msg.blockId, msg.name, msg.cwd, msg.githubRepo, msg.place);
       case 'remove_block':
         return this.removeBlock(msg.blockId);
       case 'configure_task_board':
@@ -595,9 +597,7 @@ export class Office {
     const cwd = canonicalDir(dir);
     this.assertFolderFree(cwd);
     const { blocks } = this.company;
-    const slots = new Set(blocks.map((b) => b.slot));
-    let slot = 0;
-    while (slots.has(slot)) slot++;
+    const slot = nextSlot(blocks);
     const usedColors = new Set(blocks.map((b) => b.color));
     const color = BLOCK_COLORS.find((c) => !usedColors.has(c)) ?? BLOCK_COLORS[slot % BLOCK_COLORS.length]!;
     const repo = githubRepo?.trim().replace(/\/$/, '') || githubRemote(cwd);
@@ -610,8 +610,14 @@ export class Office {
     if (clash) throw new OfficeError(`${clash.name} already works in ${cwd}.`);
   }
 
-  private updateBlock(blockId: BlockId, name?: string, cwd?: string, githubRepo?: string) {
+  private updateBlock(blockId: BlockId, name?: string, cwd?: string, githubRepo?: string, place?: BlockPlace) {
     const block = this.block(blockId);
+    if (place) {
+      const snapped = snapPlace(place);
+      const problem = placeProblem(snapped, this.company.blocks.filter((b) => b !== block));
+      if (problem) throw new OfficeError(problem);
+      block.place = snapped;
+    }
     if (name) block.name = name.trim();
     if (githubRepo !== undefined) block.githubRepo = githubRepo.trim().replace(/\/$/, '') || undefined;
     if (cwd) {

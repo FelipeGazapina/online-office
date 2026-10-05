@@ -622,6 +622,23 @@ check(existsSync(repo), 'the folder of the remaining block is untouched');
 check(!JSON.parse(readFileSync(join(dir, 'company.json'), 'utf8')).blocks.some((b: { id: string }) => b.id === goneBlock), 'the removal is saved');
 check(refusal({ type: 'remove_block', blockId: goneBlock }).includes('No such block'), 'removing it twice is refused');
 
+console.log('\n# move and turn a block');
+const home = company().blocks[0]!;
+office.handle({ type: 'update_block', blockId: home.id, place: { x: 10.3, z: -15.2, turns: 1 } });
+const moved = company().blocks.find((b) => b.id === home.id)!;
+check(moved.place?.x === 10.5 && moved.place.z === -15 && moved.place.turns === 1, `a move snaps to the half-meter grid and keeps the turn (${JSON.stringify(moved.place)})`);
+check(JSON.parse(readFileSync(join(dir, 'company.json'), 'utf8')).blocks.find((b: { id: string }) => b.id === home.id).place.x === 10.5, 'the move is saved');
+check(company().employees.some((e) => e.name === 'Cara' && e.blockId === home.id) && !fc.stopped, 'moving a block keeps its people and their session');
+const spare = join(dir, 'spare');
+mkdirSync(spare);
+office.handle({ type: 'create_block', cwd: spare });
+const second = company().blocks.at(-1)!;
+check(second.slot === 0 && !second.place, `a new block takes the first grid spot nobody stands on, the one the moved block left (slot ${second.slot})`);
+const overlapRefused = refusal({ type: 'update_block', blockId: home.id, place: { x: -12, z: -5, turns: 0 } });
+check(overlapRefused.includes(second.name) && company().blocks.find((b) => b.id === home.id)!.place!.x === 10.5, `a move onto another block is refused and names it (${overlapRefused})`);
+const outsideRefused = refusal({ type: 'update_block', blockId: home.id, place: { x: 0, z: 3, turns: 0 } });
+check(outsideRefused.includes('outside') && company().blocks.find((b) => b.id === home.id)!.place!.z === -15, `a move into the lobby is refused (${outsideRefused})`);
+
 office.shutdown();
 check(fc.stopped, 'shutdown stops the sessions');
 check((await fetch(urlC, { method: 'POST', headers: { 'content-type': 'application/json', accept: 'application/json, text/event-stream' }, body: '{}' })).status === 404, 'shutdown detaches their MCP URLs');

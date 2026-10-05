@@ -44,6 +44,7 @@ const clientMessage = z.discriminatedUnion('type', [
     name: z.string().min(1).optional(),
     cwd: z.string().min(1).optional(),
     githubRepo: z.string().url().optional(),
+    place: z.object({ x: z.number().finite(), z: z.number().finite(), turns: z.union([z.literal(0), z.literal(1), z.literal(2), z.literal(3)]) }).optional(),
   }),
   z.object({ type: z.literal('remove_block'), blockId }),
   z.object({ type: z.literal('configure_task_board'), blockId, config: taskBoardConfig }),
