@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
-import { headcountCap, MAX_LEVEL, PROVIDERS, XP_FOR_LEVEL, type Employee, type TaskBoardSource, type TaskProvider } from '../../../shared/protocol.ts';
+import { headcountCap, MAX_LEVEL, PROVIDERS, XP_FOR_LEVEL, type BlockId, type Employee, type TaskBoardSource, type TaskProvider } from '../../../shared/protocol.ts';
 import type { VoiceQuality } from '../../../shared/voice.ts';
-import { set, setSetting, useStore, waitingQueue, type CameraMode, type Lang, type MicMode } from '../store.ts';
+import { send, set, setSetting, useStore, waitingQueue, type CameraMode, type Lang, type MicMode } from '../store.ts';
 import { fmtWait, tailPath, useNow } from './hooks.ts';
 import { UpdateSetting } from './UpdateControl.tsx';
 import { resetHudLayout } from './ResizableHud.tsx';
@@ -14,6 +14,7 @@ function statusClass(e: Employee) {
 
 export function CompanyPanel({ allowOverLimit = false }: { allowOverLimit?: boolean }) {
   const company = useStore((s) => s.company);
+  const [removing, setRemoving] = useState<BlockId | null>(null);
   if (!company) return <div className="panel company skeleton">Opening the office</div>;
 
   const lvl = company.level;
@@ -68,13 +69,27 @@ export function CompanyPanel({ allowOverLimit = false }: { allowOverLimit?: bool
         </div>
       )}
       <ul className="blocks">
-        {company.blocks.map((b) => (
+        {company.blocks.map((b) => {
+          const headcount = company.employees.filter((e) => e.blockId === b.id).length;
+          return (
           <li key={b.id}>
             <div className="b-name">
               <i className="swatch" style={{ background: b.color }} />
               <b>{b.name}</b>
               <button className="link reveal" title="Show this folder in Finder" onClick={() => window.office.revealFolder(b.cwd)}>
                 Reveal
+              </button>
+              <button
+                className={`link remove ${removing === b.id ? 'armed' : ''}`}
+                title="Remove this block from the office. The folder stays on disk."
+                onClick={() => {
+                  if (removing !== b.id) return setRemoving(b.id);
+                  send({ type: 'remove_block', blockId: b.id });
+                  setRemoving(null);
+                }}
+                onBlur={() => setRemoving(null)}
+              >
+                {removing !== b.id ? 'Remove' : headcount ? `Fire ${headcount} and remove?` : 'Really remove?'}
               </button>
             </div>
             <div className="b-cwd" title={b.cwd}>
@@ -94,7 +109,8 @@ export function CompanyPanel({ allowOverLimit = false }: { allowOverLimit?: bool
                 ))}
             </div>
           </li>
-        ))}
+          );
+        })}
       </ul>
     </div>
   );

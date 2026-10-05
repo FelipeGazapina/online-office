@@ -608,6 +608,20 @@ check(assignRefused.includes(deleted) && fd.assigned.length === 0, `a task for a
 const interjectRefused = refusal({ type: 'interject', employeeId: dora, text: 'hello?', style: 'next' });
 check(interjectRefused.includes(deleted) && fd.interjected.length === 0, `talking to that employee is refused the same way (${interjectRefused})`);
 
+console.log('\n# remove a block');
+const goneBlock = company().blocks.at(-1)!.id;
+mkdirSync(join(memRoot, 'employees', dora), { recursive: true });
+writeFileSync(join(memRoot, 'employees', dora, 'folder-moved.md'), 'note');
+const doraAsks = fd.host.ask({ kind: 'ask', text: 'Where did my folder go?' });
+office.handle({ type: 'remove_block', blockId: goneBlock });
+check(!company().blocks.some((b) => b.id === goneBlock) && !company().employees.some((e) => e.id === dora), 'the block and everyone in it are gone');
+check((await doraAsks) === '' && fd.stopped, "removing the block releases its employee's question and stops the session");
+check(company().employees.some((e) => e.name === 'Cara') && !fc.stopped, 'other blocks keep their people');
+check(await until(() => existsSync(join(memRoot, 'alumni', dora, 'folder-moved.md')) && !existsSync(join(memRoot, 'employees', dora))), "the removed block's employee notes moved to alumni/");
+check(existsSync(repo), 'the folder of the remaining block is untouched');
+check(!JSON.parse(readFileSync(join(dir, 'company.json'), 'utf8')).blocks.some((b: { id: string }) => b.id === goneBlock), 'the removal is saved');
+check(refusal({ type: 'remove_block', blockId: goneBlock }).includes('No such block'), 'removing it twice is refused');
+
 office.shutdown();
 check(fc.stopped, 'shutdown stops the sessions');
 check((await fetch(urlC, { method: 'POST', headers: { 'content-type': 'application/json', accept: 'application/json, text/event-stream' }, body: '{}' })).status === 404, 'shutdown detaches their MCP URLs');

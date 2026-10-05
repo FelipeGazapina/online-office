@@ -251,6 +251,8 @@ export type ClientMessage =
   | { type: 'fire'; employeeId: EmployeeId }
   | { type: 'create_block'; cwd: string; name?: string; githubRepo?: string }
   | { type: 'update_block'; blockId: BlockId; name?: string; cwd?: string; githubRepo?: string }
+  // Fires everyone in the block, then drops it. The folder on disk is never touched.
+  | { type: 'remove_block'; blockId: BlockId }
   | { type: 'configure_task_board'; blockId: BlockId; config: TaskBoardConfig }
   | { type: 'configure_linear_board'; blockId: BlockId; url: string }
   | { type: 'refresh_task_board'; blockId: BlockId }
