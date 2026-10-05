@@ -23,6 +23,7 @@ const run: ClaudeRun = ({ prompt, options }) => {
       p.calls.push(`setModel ${model}`);
       if (model === 'refused') throw new Error("Model 'refused' not found");
     },
+    setPermissionMode: async (mode) => void p.calls.push(`setPermissionMode ${mode}`),
     close: () => void (p.calls.push('close'), p.out.close()),
   };
 };
@@ -111,12 +112,25 @@ check(processes.length === 2 && processes[1]!.options.model === 'm3', 'the next 
 console.log('\n# permissions');
 ana.employee.permissions = { mode: 'yolo', alwaysAllow: [] };
 ana.session.permissionsChanged(ana.employee.permissions);
-check(first.calls.join() === 'setModel m2,setModel refused', 'a policy change touches no live process yet');
+check(first.calls.at(-1) === 'setPermissionMode bypassPermissions', 'a switch to yolo reaches the live process as bypassPermissions');
+const yoloAsked = ana.asked.length;
+const yolo = await canUse(first)('Bash', { command: 'rm -rf build' });
+check(yolo.behavior === 'allow' && ana.asked.length === yoloAsked, 'in yolo a shell command runs without a card');
+ana.employee.permissions = { mode: 'ask', alwaysAllow: [] };
+ana.session.permissionsChanged(ana.employee.permissions);
+check(first.calls.at(-1) === 'setPermissionMode default', 'ask maps to the default mode');
+ana.employee.permissions = { mode: 'auto', alwaysAllow: [] };
+ana.session.permissionsChanged(ana.employee.permissions);
+check(first.calls.at(-1) === 'setPermissionMode auto', 'auto maps to the auto mode');
 first.out.close();
 await until(() => ana.employee.status.kind === 'error');
 ana.session.assign('again');
 const second = processes[2]!;
-check(processes.length === 3 && second.options.permissionMode === 'acceptEdits' && second.options.resume === 'sess-1' && second.options.model === 'm2', 'a restart keeps acceptEdits until F1 maps the modes, resumes the conversation and starts on the model picked since');
+check(processes.length === 3 && second.options.permissionMode === 'auto' && second.options.resume === 'sess-1' && second.options.model === 'm2', 'a restart starts in the mode picked since, resumes the conversation and starts on the model picked since');
+const stillYolo = scripted('m1', { mode: 'yolo', alwaysAllow: [] });
+stillYolo.session.assign('go');
+const yoloStart = processes.at(-1)!.options;
+check(yoloStart.permissionMode === 'bypassPermissions' && yoloStart.allowDangerouslySkipPermissions === true, 'a yolo employee starts in bypassPermissions');
 
 console.log('\n# permission cards');
 const ask = canUse(second);
