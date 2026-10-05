@@ -88,7 +88,7 @@ export function Drawer() {
         <button className="link" onClick={() => send({ type: 'fresh_session', employeeId: e.id })}>Start fresh session</button>
       </section>
 
-      <section>
+      <section className="task">
         <h3>Current task</h3>
         <p>{s.kind === 'working' || s.kind === 'blocked_on_owner' ? s.task : s.kind === 'error' ? s.message : 'Nothing assigned.'}</p>
         {s.kind === 'working' && <p className="muted">{e.activity} · {fmtWait(now - s.startedAt)}</p>}
