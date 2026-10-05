@@ -45,28 +45,39 @@ export function fitText(g: CanvasRenderingContext2D, text: string, maxW: number,
   return s;
 }
 
+// A small seeded noise so the same texture comes out every launch.
+const noise = (seed: number) => {
+  let s = seed;
+  return () => ((s = (Math.imul(s, 1664525) + 1013904223) >>> 0) / 4294967296);
+};
+
 let plank: CanvasTexture | null = null;
 export function plankTexture() {
   if (plank) return plank;
   const c = document.createElement('canvas');
-  c.width = c.height = 512;
+  c.width = c.height = 1024;
   const g = c.getContext('2d')!;
-  const rows = 8;
-  const rh = 512 / rows;
-  for (let r = 0; r < rows; r++) {
-    // Staggered seams, each plank a slightly different honey tone.
-    let x = -((r * 173) % 256);
-    while (x < 512) {
-      const len = 200 + ((x * 7 + r * 31) % 160);
-      const l = 62 + ((x * 13 + r * 17) % 9);
-      g.fillStyle = `hsl(${30 + ((x + r * 11) % 5)}, ${46 + ((r * 7) % 8)}%, ${l}%)`;
-      g.fillRect(x, r * rh, len, rh);
-      g.fillStyle = 'rgba(90,55,25,0.22)';
-      g.fillRect(x, r * rh, 2, rh);
+  const r = noise(3);
+  const rows = 16;
+  const rh = 1024 / rows;
+  for (let row = 0; row < rows; row++) {
+    // Staggered seams, each plank a slightly different honey tone, with grain streaks along its length.
+    let x = -((row * 173) % 400);
+    while (x < 1024) {
+      const len = 380 + r() * 340;
+      const l = 63 + r() * 7;
+      g.fillStyle = `hsl(${30 + r() * 4}, ${46 + r() * 8}%, ${l}%)`;
+      g.fillRect(x, row * rh, len, rh);
+      for (let k = 0; k < 7; k++) {
+        g.fillStyle = r() < 0.5 ? 'rgba(120,70,30,0.10)' : 'rgba(255,235,200,0.10)';
+        g.fillRect(x, row * rh + r() * rh, len * (0.4 + r() * 0.6), 1 + r() * 2);
+      }
+      g.fillStyle = 'rgba(80,45,20,0.35)';
+      g.fillRect(x, row * rh, 2, rh);
       x += len;
     }
-    g.fillStyle = 'rgba(90,55,25,0.28)';
-    g.fillRect(0, r * rh, 512, 2);
+    g.fillStyle = 'rgba(80,45,20,0.32)';
+    g.fillRect(0, row * rh, 1024, 2);
   }
   const t = new CanvasTexture(c);
   t.colorSpace = SRGBColorSpace;
@@ -162,12 +173,6 @@ const tile = (size: number, draw: (g: CanvasRenderingContext2D) => void, repeat?
   t.anisotropy = 8;
   if (repeat) t.repeat.set(repeat, repeat);
   return t;
-};
-
-// A small seeded noise so the same texture comes out every launch.
-const noise = (seed: number) => {
-  let s = seed;
-  return () => ((s = (Math.imul(s, 1664525) + 1013904223) >>> 0) / 4294967296);
 };
 
 let grass: CanvasTexture | null = null;
