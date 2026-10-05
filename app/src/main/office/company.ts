@@ -1,7 +1,7 @@
 import { boardPage } from './board.ts';
 import { randomUUID } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, readFileSync, realpathSync, renameSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, realpathSync, renameSync, statSync, writeFileSync } from 'node:fs';
 import { basename, dirname, isAbsolute } from 'node:path';
 import { ALLOW_ANSWER, covers, isAllow, ruleFor, sameRule, type PermissionBody } from '../../shared/permissions.ts';
 import {
@@ -277,6 +277,7 @@ export class Office {
         const e = this.employee(msg.employeeId);
         // A boss speaking to someone who is waiting on a decision is the decision.
         if (e.status.kind === 'blocked_on_owner') return this.answer(e.id, e.status.question.id, msg.text);
+        this.assertFolderExists(e);
         return this.sessionOf(e).interject(msg.text, msg.style);
       }
       case 'meeting_door':
@@ -623,8 +624,16 @@ export class Office {
     if (e.status.kind === 'working' || e.status.kind === 'blocked_on_owner') {
       throw new OfficeError(`${e.name} is busy. Interject to redirect them.`);
     }
+    this.assertFolderExists(e);
     delete e.completedAt;
     this.sessionOf(e).assign(task.trim());
+  }
+
+  // The folder is checked when the block is made, but it can be deleted later. A harness started there fails with its
+  // own misleading error: Claude's blames its binary.
+  private assertFolderExists(e: Employee) {
+    const block = this.block(e.blockId);
+    if (!existsSync(block.cwd)) throw new OfficeError(`${block.name}'s folder ${block.cwd} no longer exists. Restore it, or make a new block on a folder that does.`);
   }
 
   private async delegateToTeammate(orchestrator: Employee, target: string | undefined, task: string): Promise<string> {

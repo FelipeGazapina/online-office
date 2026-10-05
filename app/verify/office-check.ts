@@ -586,6 +586,28 @@ office.handle({ type: 'create_block', cwd: repo });
 office.handle({ type: 'hire', provider: 'claude-code', blockId: company().blocks[0]!.id, name: 'Cara' });
 const fc = fakes.at(-1)!;
 const urlC = fc.host.mcp.url;
+
+console.log('\n# a block whose folder was deleted');
+const deleted = join(dir, 'deleted');
+mkdirSync(deleted);
+office.handle({ type: 'create_block', cwd: deleted });
+office.handle({ type: 'hire', provider: 'claude-code', blockId: company().blocks.at(-1)!.id, name: 'Dora' });
+const fd = fakes.at(-1)!;
+const dora = company().employees.at(-1)!.id;
+rmSync(deleted, { recursive: true });
+const refusal = (msg: Parameters<typeof office.handle>[0]) => {
+  try {
+    office.handle(msg);
+  } catch (e) {
+    return e instanceof OfficeError ? e.message : String(e);
+  }
+  return '';
+};
+const assignRefused = refusal({ type: 'assign', employeeId: dora, task: 'ship it' });
+check(assignRefused.includes(deleted) && fd.assigned.length === 0, `a task for a block whose folder is gone names the folder and never reaches the harness (${assignRefused})`);
+const interjectRefused = refusal({ type: 'interject', employeeId: dora, text: 'hello?', style: 'next' });
+check(interjectRefused.includes(deleted) && fd.interjected.length === 0, `talking to that employee is refused the same way (${interjectRefused})`);
+
 office.shutdown();
 check(fc.stopped, 'shutdown stops the sessions');
 check((await fetch(urlC, { method: 'POST', headers: { 'content-type': 'application/json', accept: 'application/json, text/event-stream' }, body: '{}' })).status === 404, 'shutdown detaches their MCP URLs');

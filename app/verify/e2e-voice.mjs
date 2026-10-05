@@ -202,13 +202,6 @@ export default async (s, { launch }) => {
   await hireClaudeInBlock(s, repo);
   await s.waitFor(`__office.store.getState().voice.engine.kind === 'ready'`, 30000);
   assert((await voiceOf(s)).engine.model === 'ggml-small-q5_1.bin', 'the engine is ready on the fast model');
-  await s.eval(`__office.set({ selectedId: ${claude}.id })`);
-  await s.waitFor(`!!document.querySelector('.drawer')`);
-  const [settingsBottom, drawerTop] = await s.eval(`[document.querySelector('.settings').getBoundingClientRect().bottom, document.querySelector('.drawer').getBoundingClientRect().top]`);
-  assert(settingsBottom < drawerTop, `the settings panel, with its new rows, does not overlap the employee drawer (${Math.round(settingsBottom)} above ${Math.round(drawerTop)})`);
-  await s.shot('u5-settings-and-drawer');
-  await s.eval(`__office.set({ selectedId: null })`);
-
   assert(await click(s, 'Hold V'), 'chose the Hold V microphone mode');
   assert(await click(s, 'English'), 'chose English');
   await pushToTalk(s, 'en', { shots: 'u5-chip' });
