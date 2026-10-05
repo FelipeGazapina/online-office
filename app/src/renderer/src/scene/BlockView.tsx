@@ -1,7 +1,8 @@
 import { memo, useEffect, useMemo, useState } from 'react';
 import { Color } from 'three';
 import { PROVIDERS, taskBoardColumns, type Employee, type ProjectBlock } from '../../../shared/protocol.ts';
-import { BENCH, blockCenter, deskPose, projectComputerPose, RUG_D, RUG_W, signPose, whiteboardPose, type DeskPose } from '../layout.ts';
+import { BENCH, deskPose, HUDDLE_AT, placementOf, projectComputerPose, RUG_D, RUG_W, SIGN_AT, turnYaw, WHITEBOARD_AT, type DeskPose } from '../layout.ts';
+import type { BlockPlace } from '../../../shared/protocol.ts';
 import { enterProjectComputer } from '../computer.ts';
 import { set, useStore } from '../store.ts';
 import { Chair, Desk, RoundedPlane } from './Furniture.tsx';
@@ -277,36 +278,35 @@ function Workstation({ pose, employee, chairColor, plate, blockId }: { pose: Des
   );
 }
 
-export const BlockView = memo(function BlockView({ block, employees }: { block: ProjectBlock; employees: Employee[] }) {
-  const c = blockCenter(block.slot);
-  const s = signPose(block.slot);
-  const w = whiteboardPose(block.slot);
+// Everything in a block is laid out from its center with no turn, and the group moves and turns it as a whole.
+const HOME: BlockPlace = { x: 0, z: 0, turns: 0 };
+
+export const BlockView = memo(function BlockView({ block, employees, place }: { block: ProjectBlock; employees: Employee[]; place?: BlockPlace }) {
+  const at = place ?? placementOf(block);
   const rug = useMemo(() => new Color(block.color).lerp(new Color('#d7dde2'), 0.62).getStyle(), [block.color]);
   const chairColor = useMemo(() => shade(block.color, 0.75), [block.color]);
   const trim = useMemo(() => new Color(block.color).lerp(new Color('#738195'), 0.5).getStyle(), [block.color]);
   const author = block.whiteboard ? employees.find((e) => e.id === block.whiteboard!.by)?.name : undefined;
 
   return (
-    <group>
-      <group position={[c.x, 0, c.z]}>
-        <RoundedPlane w={RUG_W + 0.5} d={RUG_D + 0.5} r={0.5} color="#d6dbe0" y={0.008} />
-        <RoundedPlane w={RUG_W} d={RUG_D} r={0.35} color={rug} y={0.014} />
-        <PodBoundary color={trim} />
-      </group>
+    <group position={[at.x, 0, at.z]} rotation-y={turnYaw(at)}>
+      <RoundedPlane w={RUG_W + 0.5} d={RUG_D + 0.5} r={0.5} color="#d6dbe0" y={0.008} />
+      <RoundedPlane w={RUG_W} d={RUG_D} r={0.35} color={rug} y={0.014} />
+      <PodBoundary color={trim} />
       {BENCH.map((_, i) => (
-        <Workstation key={i} pose={deskPose(block.slot, i)} employee={employees.find((e) => e.desk === i)} chairColor={chairColor} />
+        <Workstation key={i} pose={deskPose(HOME, i)} employee={employees.find((e) => e.desk === i)} chairColor={chairColor} />
       ))}
-      <Workstation pose={projectComputerPose(block.slot)} chairColor={chairColor} plate="PO" blockId={block.id} />
+      <Workstation pose={projectComputerPose(HOME)} chairColor={chairColor} plate="PO" blockId={block.id} />
       {employees.filter((employee) => employee.desk >= BENCH.length).map((employee) => (
-        <Workstation key={employee.id} pose={deskPose(block.slot, employee.desk)} employee={employee} chairColor={chairColor} />
+        <Workstation key={employee.id} pose={deskPose(HOME, employee.desk)} employee={employee} chairColor={chairColor} />
       ))}
-      <group position={[s.x, 0, s.z]}>
+      <group position={[SIGN_AT.x, 0, SIGN_AT.z]}>
         <Sign blockId={block.id} name={block.name} cwd={block.cwd} color={block.color} />
       </group>
-      <group position={[w.x, 0, w.z]}>
+      <group position={[WHITEBOARD_AT.x, 0, WHITEBOARD_AT.z]}>
         {block.linearBoardUrl ? <LinearBoardWhiteboard block={block} /> : block.taskBoard?.sources.length ? <TaskBoardWhiteboard block={block} /> : block.githubRepo ? <GithubWhiteboard block={block} /> : <Whiteboard block={block} authorName={author} />}
       </group>
-      <group position={[c.x + 2.65, 0, c.z - 2.15]}><DailyHuddle color={trim} /></group>
+      <group position={[HUDDLE_AT.x, 0, HUDDLE_AT.z]}><DailyHuddle color={trim} /></group>
     </group>
   );
 });

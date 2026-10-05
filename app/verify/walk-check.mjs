@@ -5,10 +5,11 @@ const src = '../src/renderer/src/';
 const { get, set } = await import(`${src}store.ts`);
 const { KEYS_INTENT, runtime } = await import(`${src}runtime.ts`);
 const { stepSim, walkTo } = await import(`${src}sim.ts`);
-const { angleDiff, deskPose, getLayout, MEETING_ROOM, OWNER_RADIUS, OWNER_START, WALL_MARGIN, withMeetingRoom } = await import(`${src}layout.ts`);
+const { angleDiff, deskPose: atSlot, getLayout, slotPlace, MEETING_ROOM, OWNER_RADIUS, OWNER_START, WALL_MARGIN, withMeetingRoom } = await import(`${src}layout.ts`);
 const { LISTEN_RADIUS } = await import(`${src}audio.ts`);
 const { check, finish } = await import('./check.ts');
 
+const deskPose = (slot, d) => atSlot(slotPlace(slot), d);
 const TALK_REPLAN = 1.35;
 const block = { id: 'b1', name: 'Block', cwd: '/work/b1', color: '#5b8def', slot: 0 };
 const person = (id, name, desk) => ({ id, name, provider: 'claude-code', blockId: 'b1', desk, status: { kind: 'idle' }, activity: '', hiredAt: 0 });

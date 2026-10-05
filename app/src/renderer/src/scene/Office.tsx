@@ -6,9 +6,9 @@ import type { Company } from '../../../shared/protocol.ts';
 import {
   BLOCK_D,
   BLOCK_W,
-  blockCenter,
   DOOR,
   getLayout,
+  slotPlace,
   OWNER_CHAIR,
   OWNER_DESK,
   MEETING_ROOM,
@@ -155,7 +155,7 @@ function Floor({ b }: { b: Bounds }) {
 }
 
 function GhostSlot({ slot }: { slot: number }) {
-  const c = blockCenter(slot);
+  const c = slotPlace(slot);
   const tex = useCanvasTexture(512, 320, (g) => {
     g.setLineDash([26, 18]);
     g.lineWidth = 6;

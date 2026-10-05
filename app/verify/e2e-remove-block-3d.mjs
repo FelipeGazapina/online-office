@@ -4,7 +4,7 @@
 import { existsSync, mkdtempSync, realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { signPose } from '../src/renderer/src/layout.ts';
+import { placementOf, signPose } from '../src/renderer/src/layout.ts';
 import { assert, claude, company, hireClaudeInBlock, scratch } from './lib.mjs';
 
 const { dataDir, repo } = scratch();
@@ -14,8 +14,8 @@ export const env = { OFFICE_DATA_DIR: dataDir, OFFICE_START_LEVEL: '5' };
 const modal = '__office.store.getState().modal';
 
 async function clickSign(s, cwd) {
-  const slot = await s.eval(`${company}.blocks.find((b) => b.cwd === ${JSON.stringify(cwd)}).slot`);
-  const { x, z } = signPose(slot);
+  const block = await s.eval(`${company}.blocks.find((b) => b.cwd === ${JSON.stringify(cwd)})`);
+  const { x, z } = signPose(placementOf(block));
   const at = await s.eval(`__office.project(${x}, 1.25, ${z})`);
   const top = await s.eval(`document.elementFromPoint(${at.x}, ${at.y})?.tagName`);
   assert(top === 'CANVAS', `the sign at ${at.x.toFixed(0)},${at.y.toFixed(0)} is on screen and not under the HUD (${top})`);

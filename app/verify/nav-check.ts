@@ -1,7 +1,8 @@
 // Proves the walkable grid and the path search in plain Node. Run: node verify/nav-check.ts
 import {
   BENCH,
-  blockCenter,
+  placementOf,
+  slotPlace,
   deskPose,
   getLayout,
   headPose,
@@ -65,21 +66,26 @@ const report = (names: string[]) => names.slice(0, 3).join('; ');
 
 const seat = { x: OWNER_DESK.x + 0.9, z: OWNER_DESK.z };
 const SEATS = DESKS_PER_BLOCK + 1;
-const seatsOf = (slot: number) => [
-  ...BENCH.map((_, d) => ({ name: `block ${slot} desk ${d}`, pose: deskPose(slot, d) })),
-  { name: `block ${slot} head desk`, pose: headPose(slot) },
+const seatsOf = (slot: number, place = slotPlace(slot)) => [
+  ...BENCH.map((_, d) => ({ name: `block ${slot} desk ${d}`, pose: deskPose(place, d) })),
+  { name: `block ${slot} head desk`, pose: headPose(place) },
 ];
-const layouts = [1, 2, 3].map((n) => ({ n, label: `${n} block${n > 1 ? 's' : ''}`, layout: getLayout(blocksOf(n)) }));
+// Block 0 moved north-east and turned a quarter, block 1 turned half, block 2 left in its slot.
+const arranged = blocksOf(3).map((b, i): ProjectBlock => (i === 0 ? { ...b, place: { x: -10.5, z: -15, turns: 1 } } : i === 1 ? { ...b, place: { ...slotPlace(1), turns: 2 } } : b));
+const layouts = [
+  ...[1, 2, 3].map((n) => ({ label: `${n} block${n > 1 ? 's' : ''}`, blocks: blocksOf(n) })),
+  { label: '3 blocks moved and turned', blocks: arranged },
+].map((l) => ({ ...l, n: l.blocks.length, layout: getLayout(l.blocks) }));
 
-for (const { n, label, layout } of layouts) {
+for (const { n, label, layout, blocks } of layouts) {
   const nav = gridOf(layout);
   const boxes = grow(layout.obstacles);
 
   const approaches: Trip[] = [];
   const snaps: Trip[] = [];
   const exits: Trip[] = [];
-  for (let slot = 0; slot < n; slot++) {
-    for (const { name: where, pose } of seatsOf(slot)) {
+  for (const b of blocks) {
+    for (const { name: where, pose } of seatsOf(b.slot, placementOf(b))) {
       for (const [name, from] of [['the seat', seat], ['the start', OWNER_START]] as const) {
         const path = findApproach(nav, from, pose.chair, { dist: 1, others: [] });
         approaches.push({ name: `${name} to ${where}`, from, goal: pose.chair, path });
@@ -142,9 +148,9 @@ for (const { n, label, layout } of layouts) {
   check(direct !== null && direct.length === 1 && direct[0].x === b.x && direct[0].z === b.z, `${label}: open floor between two points gives exactly [goal]`, JSON.stringify(direct));
 
   const before = nav.open.slice();
-  const again = findPath(nav, OWNER_START, deskPose(0, 4).desk);
-  const first = findPath(nav, OWNER_START, deskPose(n - 1, 0).chair);
-  const second = findPath(nav, OWNER_START, deskPose(n - 1, 0).chair);
+  const again = findPath(nav, OWNER_START, deskPose(placementOf(blocks[0]!), 4).desk);
+  const first = findPath(nav, OWNER_START, deskPose(placementOf(blocks[n - 1]!), 0).chair);
+  const second = findPath(nav, OWNER_START, deskPose(placementOf(blocks[n - 1]!), 0).chair);
   const untouched = before.every((v, i) => v === nav.open[i]);
   check(untouched && again !== null && first !== second && JSON.stringify(first) === JSON.stringify(second), `${label}: findPath leaves the grid alone and returns a fresh array each call`);
 
@@ -186,9 +192,9 @@ const head = seatBlocks[0].seats[BENCH.length];
 check(BENCH.length === DESKS_PER_BLOCK, `the bench has one seat for each of the ${DESKS_PER_BLOCK} desks a hire can be given`);
 const overBench = [-1, ...Array.from({ length: MAX_LEVEL + 1 }, (_, level) => level), MAX_LEVEL + 3].filter((level) => seatCeiling(level).perBlock > BENCH.length);
 check(overBench.length === 0, `no level lets the owner set more seats per block than the bench's ${BENCH.length}`, overBench.map((level) => `level ${level} allows ${seatCeiling(level).perBlock}`).join('; '));
-const headHome = headPose(0).desk;
+const headHome = headPose(slotPlace(0)).desk;
 check(
-  [-1, ...BENCH.keys(), BENCH.length, 99].every((d) => dist(deskPose(0, d).desk, headHome) > 1),
+  [-1, ...BENCH.keys(), BENCH.length, 99].every((d) => dist(deskPose(slotPlace(0), d).desk, headHome) > 1),
   'no desk index, in range or not, puts anyone at the head desk',
 );
 
@@ -247,7 +253,7 @@ check(wrongObstacle.length === 0, 'every desk is an obstacle of its own footprin
 // The chair seat is 0.5 m wide and its back stands 0.25 m behind the middle.
 const CHAIR_HALF = 0.3;
 const offRug = seatBlocks.flatMap(({ slot, seats }) => {
-  const c = blockCenter(slot);
+  const c = slotPlace(slot);
   const on = (x: number, z: number, hw: number, hd: number) => Math.abs(x - c.x) + hw <= RUG_W / 2 && Math.abs(z - c.z) + hd <= RUG_D / 2;
   return seats.flatMap((s) => [
     ...(on(s.box.cx, s.box.cz, s.box.hw, s.box.hd) ? [] : [`${s.name} desk`]),
@@ -297,10 +303,10 @@ check(cornered === null, 'a talk spot in a sealed pocket has no path');
 
 const grids = layouts.map((l) => navFor(l.layout));
 check(navFor(layouts[0].layout) === grids[0] && navFor(layouts[2].layout) === grids[2], 'navFor returns the same grid for the same layout object');
-check(new Set(grids).size === 3, 'navFor returns a different grid for a different layout object');
+check(new Set(grids).size === layouts.length, 'navFor returns a different grid for a different layout object');
 check(grids[0].cell === 0.25 && grids[0].boxes[0].hw === layouts[0].layout.obstacles[0].hw + CLEARANCE, 'navFor builds with cell 0.25 and the owner radius as clearance');
 
-const desk = deskPose(0, 0).desk;
+const desk = deskPose(slotPlace(0), 0).desk;
 const through = [{ x: desk.x - 3, z: desk.z }, { x: desk.x + 3, z: desk.z }];
 const graze = [{ x: desk.x - 3, z: desk.z + 0.4 + CLEARANCE }, { x: desk.x + 3, z: desk.z + 0.4 + CLEARANCE }];
 const deskBoxes = grow(layouts[0].layout.obstacles);

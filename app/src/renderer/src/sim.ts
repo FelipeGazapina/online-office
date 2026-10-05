@@ -11,6 +11,7 @@ import {
   DOOR,
   deskPose,
   getLayout,
+  placementOf,
   OWNER_CHAIR,
   projectComputerPose,
   OWNER_RADIUS,
@@ -57,14 +58,14 @@ export function queueSlot(k: number): Vec2 {
 
 export function seatFor(e: Employee, company: Company): DeskPose | null {
   const block = company.blocks.find((b) => b.id === e.blockId);
-  return block ? deskPose(block.slot, e.desk) : null;
+  return block ? deskPose(placementOf(block), e.desk) : null;
 }
 
 export function taskBoardTarget(company: Company, pos: Vec2): BlockId | null {
   let nearest: { id: BlockId; distance: number } | undefined;
   for (const block of company.blocks) {
     if (!block.taskBoard?.sources.length && !block.linearBoardUrl) continue;
-    const board = whiteboardPose(block.slot);
+    const board = whiteboardPose(placementOf(block));
     const distance = dist2(pos, board);
     if (distance >= TASK_BOARD_RADIUS || (nearest && distance >= nearest.distance)) continue;
     nearest = { id: block.id, distance };
@@ -253,6 +254,9 @@ function stepAvatar(
   const blocked = e.status.kind === 'blocked_on_owner';
   const ownerPos = runtime.owner.pos;
 
+  // The owner moved the block out from under them, so they get up and walk to where their desk is now.
+  if (av.seated && dist2(av.pos, seat.chair) > 0.05) av.seated = false;
+
   let target: Vec2;
   if (blocked && meetingDoor === 'closed') {
     // Permission cards remain blocked in main, but nobody walks to a closed meeting room.
@@ -367,7 +371,7 @@ export function stepSim(rawDt: number) {
   const nearbyIds = nearbyInRange(company);
   const nearComputer = Math.hypot(runtime.owner.pos.x - OWNER_CHAIR.x, runtime.owner.pos.z - OWNER_CHAIR.z) < 1.75;
   const nearProjectComputer = company.blocks.find((block) => {
-    const chair = projectComputerPose(block.slot).chair;
+    const chair = projectComputerPose(placementOf(block)).chair;
     return Math.hypot(runtime.owner.pos.x - chair.x, runtime.owner.pos.z - chair.z) < 1.75;
   })?.id ?? null;
   const nearTaskBoard = taskBoardTarget(company, runtime.owner.pos);

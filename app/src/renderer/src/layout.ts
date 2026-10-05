@@ -1,15 +1,11 @@
 // Pure office geometry. Units are meters. +x east, +z south (toward the entrance), -z north.
 // A yaw of 0 faces +z; forward = (sin yaw, cos yaw); right = (-cos yaw, sin yaw).
-import type { ProjectBlock } from '../../shared/protocol.ts';
+import type { BlockPlace, ProjectBlock } from '../../shared/protocol.ts';
+import { AISLE, BLOCK_D, BLOCK_W, COLS, footprint, LOBBY_Z0, nextSlot, placementOf, slotPlace, X0 } from '../../shared/placement.ts';
 
-export const BLOCK_W = 10;
-export const BLOCK_D = 8;
+export { AISLE, BLOCK_D, BLOCK_W, COLS, LOBBY_Z0, placementOf, slotPlace, X0 };
 export const RUG_W = BLOCK_W - 1;
 export const RUG_D = BLOCK_D - 1;
-export const AISLE = 2;
-export const COLS = 3;
-export const X0 = -18;
-export const LOBBY_Z0 = -1;
 export const Z1 = 9;
 export const WALL_H = 3.2;
 // The owner's body. Collision pushes out by this radius and walking paths keep this far from furniture.
@@ -22,13 +18,13 @@ export type Box = { cx: number; cz: number; hw: number; hd: number };
 
 export type Bounds = { x0: number; x1: number; z0: number; z1: number; cols: number; rows: number };
 
-export function blockCenter(slot: number): Vec2 {
-  const col = slot % COLS;
-  const row = Math.floor(slot / COLS);
-  return {
-    x: X0 + AISLE / 2 + BLOCK_W / 2 + col * (BLOCK_W + AISLE),
-    z: -(BLOCK_D / 2 + 1) - row * (BLOCK_D + AISLE),
-  };
+// The turn as a yaw. Turns are clockwise seen from above, and a positive yaw turns south toward east, which is the other way.
+export const turnYaw = (place: BlockPlace) => (-place.turns * Math.PI) / 2;
+
+// A point given in meters from the block center, as the block stands now.
+export function onBlock(place: BlockPlace, x: number, z: number): Vec2 {
+  const a = turnYaw(place);
+  return { x: place.x + x * Math.cos(a) + z * Math.sin(a), z: place.z + z * Math.cos(a) - x * Math.sin(a) };
 }
 
 // A seat is a desk center and the way the person sitting at it faces, in meters from the block center.
@@ -59,34 +55,33 @@ export const BENCH: readonly Seat[] = [1, 0, -1].flatMap((column) => [
 export const HEAD: Seat = { x: BENCH_X + DESK_W + (DESK_W + DESK_D) / 2, z: 0, yaw: FACE_WEST };
 
 // The person sits in a chair behind the desk they face and steps out to the exit farther back.
-function poseOf(slot: number, seat: Seat): DeskPose {
-  const c = blockCenter(slot);
+function poseOf(place: BlockPlace, seat: Seat): DeskPose {
   const fx = Math.sin(seat.yaw);
   const fz = Math.cos(seat.yaw);
-  const back = (d: number) => ({ x: c.x + seat.x - fx * d, z: c.z + seat.z - fz * d });
-  return { desk: back(0), chair: back(CHAIR_BACK), exit: back(EXIT_BACK), yaw: seat.yaw };
+  const back = (d: number) => onBlock(place, seat.x - fx * d, seat.z - fz * d);
+  return { desk: back(0), chair: back(CHAIR_BACK), exit: back(EXIT_BACK), yaw: seat.yaw + turnYaw(place) };
 }
 
-export function deskPose(slot: number, desk: number): DeskPose {
+export function deskPose(place: BlockPlace, desk: number): DeskPose {
   const seat = BENCH[desk];
-  if (seat) return poseOf(slot, seat);
+  if (seat) return poseOf(place, seat);
   const overflow = Math.max(0, desk - BENCH.length);
   const row = Math.floor(overflow / 3);
   const column = overflow % 3;
-  return poseOf(slot, {
+  return poseOf(place, {
     x: BENCH_X + (column - 1) * DESK_W,
     z: -1.8 - row * 1.25,
     yaw: FACE_NORTH,
   });
 }
 
-export function headPose(slot: number): DeskPose {
-  return poseOf(slot, HEAD);
+export function headPose(place: BlockPlace): DeskPose {
+  return poseOf(place, HEAD);
 }
 
 // The PO workstation is the block's project computer. It is reserved for board configuration.
-export function projectComputerPose(slot: number): DeskPose {
-  return headPose(slot);
+export function projectComputerPose(place: BlockPlace): DeskPose {
+  return headPose(place);
 }
 
 // A desk is wide across the person's line of sight, so one that faces east or west is turned on the floor plan.
@@ -95,15 +90,13 @@ function deskBox(pose: DeskPose): Box {
   return { cx: pose.desk.x, cz: pose.desk.z, hw: (sideways ? DESK_D : DESK_W) / 2, hd: (sideways ? DESK_W : DESK_D) / 2 };
 }
 
-export function whiteboardPose(slot: number): Vec2 {
-  const c = blockCenter(slot);
-  return { x: c.x, z: c.z - BLOCK_D / 2 + 0.7 };
-}
+// In meters from the block center. The scene places them inside the block's turned group, the layout through onBlock.
+export const WHITEBOARD_AT: Vec2 = { x: 0, z: -BLOCK_D / 2 + 0.7 };
+export const SIGN_AT: Vec2 = { x: -BLOCK_W / 2 + 1.6, z: BLOCK_D / 2 - 0.4 };
+export const HUDDLE_AT: Vec2 = { x: 2.65, z: -2.15 };
 
-export function signPose(slot: number): Vec2 {
-  const c = blockCenter(slot);
-  return { x: c.x - BLOCK_W / 2 + 1.6, z: c.z + BLOCK_D / 2 - 0.4 };
-}
+export const whiteboardPose = (place: BlockPlace): Vec2 => onBlock(place, WHITEBOARD_AT.x, WHITEBOARD_AT.z);
+export const signPose = (place: BlockPlace): Vec2 => onBlock(place, SIGN_AT.x, SIGN_AT.z);
 
 export const DOOR: Vec2 = { x: X0 + 8, z: Z1 };
 export const OWNER_START: Vec2 = { x: X0 + 8, z: Z1 - 4.8 };
@@ -164,7 +157,7 @@ let cacheKey = '';
 let cache: Layout | null = null;
 
 export function getLayout(blocks: readonly ProjectBlock[]): Layout {
-  const key = blocks.map((b) => `${b.id}:${b.slot}`).join(',');
+  const key = blocks.map((b) => { const p = placementOf(b); return `${b.id}:${p.x}:${p.z}:${p.turns}`; }).join(',');
   if (cache && key === cacheKey) return cache;
   cacheKey = key;
   cache = computeLayout(blocks);
@@ -172,15 +165,17 @@ export function getLayout(blocks: readonly ProjectBlock[]): Layout {
 }
 
 function computeLayout(blocks: readonly ProjectBlock[]): Layout {
-  const maxSlot = blocks.reduce((m, b) => Math.max(m, b.slot), -1);
-  const ghostSlot = maxSlot + 1 < 6 ? maxSlot + 1 : null;
-  const shown = ghostSlot === null ? maxSlot + 1 : ghostSlot + 1;
+  const next = nextSlot(blocks);
+  const ghostSlot = next < 6 ? next : null;
+  const shown = Math.max(blocks.length, ghostSlot === null ? 0 : ghostSlot + 1);
   const cols = Math.max(2, Math.min(COLS, shown));
   const rows = Math.max(1, Math.ceil(shown / COLS));
+  // The room holds every block where it stands, the ghost spot, and at least the grid it started as.
+  const spots = [...blocks.map((b) => footprint(placementOf(b))), ...(ghostSlot === null ? [] : [footprint(slotPlace(ghostSlot))])];
   const bounds: Bounds = {
     x0: X0,
-    x1: X0 + cols * (BLOCK_W + AISLE),
-    z0: -rows * (BLOCK_D + AISLE),
+    x1: Math.max(X0 + cols * (BLOCK_W + AISLE), ...spots.map((f) => f.x1 + AISLE / 2)),
+    z0: Math.min(-rows * (BLOCK_D + AISLE), ...spots.map((f) => f.z0 - AISLE / 2)),
     z1: Z1,
     cols,
     rows,
@@ -188,9 +183,11 @@ function computeLayout(blocks: readonly ProjectBlock[]): Layout {
 
   const obstacles: Box[] = [{ cx: OWNER_DESK.x, cz: OWNER_DESK.z, hw: 0.45, hd: 1.0 }];
   for (const b of blocks) {
-    for (const pose of [...BENCH.map((_, d) => deskPose(b.slot, d)), headPose(b.slot)]) obstacles.push(deskBox(pose));
-    const wb = whiteboardPose(b.slot);
-    obstacles.push({ cx: wb.x, cz: wb.z, hw: 2.3, hd: 0.15 });
+    const place = placementOf(b);
+    for (const pose of [...BENCH.map((_, d) => deskPose(place, d)), headPose(place)]) obstacles.push(deskBox(pose));
+    const wb = whiteboardPose(place);
+    const turned = place.turns % 2 === 1;
+    obstacles.push({ cx: wb.x, cz: wb.z, hw: turned ? 0.15 : 2.3, hd: turned ? 2.3 : 0.15 });
   }
 
   const plants: Vec2[] = [

@@ -193,12 +193,19 @@ export type TaskBoardState =
 // The user id is safe to show back in the settings UI. The API key never crosses the main-process boundary in a snapshot.
 export type TaskConnectionState = { kind: 'ready' | 'connecting' | 'needs_auth' | 'missing' | 'error'; message?: string; userId?: string; hasApiKey?: boolean };
 
+// Quarter turns clockwise seen from above. Desks, walls and walking paths stay square to the room.
+export type Turns = 0 | 1 | 2 | 3;
+// The block's center on the floor and how it is turned. See shared/placement.ts.
+export type BlockPlace = { x: number; z: number; turns: Turns };
+
 export type ProjectBlock = {
   id: BlockId;
   name: string;
   cwd: string;
   color: string;
+  // The grid spot a new block was given. A block the owner moved has `place`, which wins.
   slot: number;
+  place?: BlockPlace;
   githubRepo?: string;
   whiteboard?: Whiteboard;
   taskBoard?: TaskBoardConfig;
@@ -250,7 +257,7 @@ export type ClientMessage =
   | { type: 'hire'; provider: Provider; blockId: BlockId; name?: string; model?: ModelId; role?: EmployeeRole; bypassLimit?: boolean }
   | { type: 'fire'; employeeId: EmployeeId }
   | { type: 'create_block'; cwd: string; name?: string; githubRepo?: string }
-  | { type: 'update_block'; blockId: BlockId; name?: string; cwd?: string; githubRepo?: string }
+  | { type: 'update_block'; blockId: BlockId; name?: string; cwd?: string; githubRepo?: string; place?: BlockPlace }
   // Fires everyone in the block, then drops it. The folder on disk is never touched.
   | { type: 'remove_block'; blockId: BlockId }
   | { type: 'configure_task_board'; blockId: BlockId; config: TaskBoardConfig }
