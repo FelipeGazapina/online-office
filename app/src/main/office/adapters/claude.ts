@@ -5,13 +5,14 @@ import {
   query,
   type CanUseTool,
   type Options,
+  type PermissionMode as SdkPermissionMode,
   type Query,
   type SDKMessage,
   type SDKResultMessage,
   type SDKUserMessage,
 } from '@anthropic-ai/claude-agent-sdk';
 import { SHELL_TOOL, isAllow } from '../../../shared/permissions.ts';
-import type { InterruptStyle, ModelCatalog, ModelId, ModelOption, PermissionPolicy, QuestionBody } from '../../../shared/protocol.ts';
+import type { InterruptStyle, ModelCatalog, ModelId, ModelOption, PermissionMode, PermissionPolicy, QuestionBody } from '../../../shared/protocol.ts';
 import { logger } from '../debug.ts';
 import { persona } from '../persona.ts';
 import type { EmployeeSession, SessionFactory, SessionHost } from './types.ts';
@@ -96,8 +97,13 @@ const str = (v: unknown) => (typeof v === 'string' ? v : '');
 
 // Permission policy. Everything that decides whether a tool asks the boss is in this block, so it can be swapped
 // for the owner's own settings in one place. Every question still goes out through `host.ask` in `canUseTool`.
-// F1 maps the four modes onto Claude's here. Until then every mode runs the way it always has.
-const permissionModeFor = (_policy: PermissionPolicy) => 'acceptEdits' as const;
+// docs/beta-plan.md maps each mode onto Claude's. Inherit keeps acceptEdits until the owner's own settings are read.
+const MODES: Record<PermissionMode, SdkPermissionMode> = {
+  inherit: 'acceptEdits',
+  ask: 'default',
+  auto: 'auto',
+  yolo: 'bypassPermissions',
+};
 
 // Tools that can never hurt anything, so the boss is not bothered.
 const AUTO_ALLOW = new Set(['Read', 'Glob', 'Grep', 'LS', 'WebSearch', 'WebFetch', 'TodoWrite', 'Task', 'Agent']);
@@ -189,7 +195,7 @@ function permissionBody(name: string, input: Record<string, unknown>, cwd: strin
 }
 
 // The part of the SDK's Query that a session uses, so a check can stand in for the SDK.
-type Live = AsyncIterable<SDKMessage> & Pick<Query, 'interrupt' | 'setModel' | 'close'>;
+type Live = AsyncIterable<SDKMessage> & Pick<Query, 'interrupt' | 'setModel' | 'setPermissionMode' | 'close'>;
 export type ClaudeRun = (params: { prompt: AsyncIterable<SDKUserMessage>; options: Options }) => Live;
 
 // The SDK's streaming input takes an async iterable. This is the smallest one we can push into.
@@ -295,8 +301,16 @@ export class ClaudeSession implements EmployeeSession {
     );
   }
 
+  // A live session switches mode at once. Without one, the next start reads `this.policy`.
   permissionsChanged(policy: PermissionPolicy) {
+    const changed = policy.mode !== this.policy.mode;
     this.policy = policy;
+    if (!changed) return;
+    const mode = MODES[policy.mode];
+    this.q?.setPermissionMode(mode).then(
+      () => debug(`permission mode switched to ${mode}`),
+      (e: unknown) => this.host.log(`Could not switch to ${policy.mode}, still on the previous mode: ${e instanceof Error ? e.message : String(e)}`),
+    );
   }
 
   // A process that is not running reads the rules when it starts.
@@ -355,7 +369,9 @@ export class ClaudeSession implements EmployeeSession {
         model: this.host.model,
         // 'project' only: the boss's global plugins and hooks must not leak into employees.
         settingSources: ['project'],
-        permissionMode: permissionModeFor(this.policy),
+        permissionMode: MODES[this.policy.mode],
+        // Lets a live session switch to yolo later. It bypasses nothing by itself.
+        allowDangerouslySkipPermissions: true,
         systemPrompt: {
           type: 'preset',
           preset: 'claude_code',
@@ -487,7 +503,8 @@ export class ClaudeSession implements EmployeeSession {
   }
 
   private canUseTool: CanUseTool = async (toolName, input, { signal }) => {
-    if (runsUnasked(toolName)) return { behavior: 'allow', updatedInput: input };
+    // bypassPermissions still asks about a few protected paths, and YOLO bypasses every check.
+    if (this.policy.mode === 'yolo' || runsUnasked(toolName)) return { behavior: 'allow', updatedInput: input };
     const { cwd } = this.host.block;
     const answer = await this.host.ask(permissionBody(toolName, input, cwd), AbortSignal.any([signal, this.life.signal]));
     if (isAllow(answer)) return { behavior: 'allow', updatedInput: input };
