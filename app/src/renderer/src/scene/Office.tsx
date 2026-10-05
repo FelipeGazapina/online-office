@@ -19,6 +19,7 @@ import {
 import { get, set, useStore } from '../store.ts';
 import { enterComputer } from '../computer.ts';
 import { toggleMeetingDoor } from '../meeting.ts';
+import { runtime } from '../runtime.ts';
 import { walkTo } from '../sim.ts';
 import { Chair, Desk, Plant, RoundedPlane } from './Furniture.tsx';
 import { fitText, FONT_BODY, FONT_DISPLAY, plankTexture, roundRect, useCanvasTexture } from './textures.ts';
@@ -44,7 +45,8 @@ function Wall({
     const cam = state.camera.position;
     const outside = (cam.x - center[0]) * normal[0] + (cam.z - center[1]) * normal[1] > 0.5;
     // A lintel floats above the doorway, so it vanishes instead of shrinking to a curb.
-    const target = outside ? (lintel ? 0.001 : 0.12) : 1;
+    // Walls only drop in the overview. Once the camera is mostly at the owner's eyes they stand at full height.
+    const target = outside && runtime.view.blend < 0.5 ? (lintel ? 0.001 : 0.12) : 1;
     g.current!.scale.y += (target - g.current!.scale.y) * (1 - Math.exp(-dt * 9));
   });
   const h = lintel ? 0.7 : WALL_H;
