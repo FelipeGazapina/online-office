@@ -3,7 +3,7 @@
 // OFFICE_SHOT_PREFIX names the files (default "v1-"), so a before run can save "v1-before-".
 import { copyFileSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { assert, scratch } from './lib.mjs';
+import { scratch } from './lib.mjs';
 
 const PREFIX = process.env.OFFICE_SHOT_PREFIX ?? 'v1-';
 const SHOTS = '/Users/feliperico/.claude/orchestrate/online-office-game/shots';
@@ -14,7 +14,6 @@ writeFileSync(join(dataDir, 'company.json'), readFileSync(new URL('./fixtures/co
 export const env = { OFFICE_DATA_DIR: dataDir, OFFICE_START_LEVEL: '5' };
 
 const store = '__office.store.getState()';
-const state = (s) => s.eval('__office.state()');
 async function save(s, name) {
   const path = await s.shot(name);
   mkdirSync(SHOTS, { recursive: true });
