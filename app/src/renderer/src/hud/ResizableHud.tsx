@@ -504,7 +504,8 @@ export function ResizableHud({ itemKey, children }: { itemKey: HudItemKey; child
     let frame = 0;
     if (projected) {
       const refresh = () => {
-        sync();
+        const s = stateRef.current;
+        if (s.kind !== 'idle' || s.panel || s.grip) sync();
         frame = requestAnimationFrame(refresh);
       };
       frame = requestAnimationFrame(refresh);

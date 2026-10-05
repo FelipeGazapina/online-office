@@ -6,6 +6,7 @@ import { BlockView } from './BlockView.tsx';
 import { CameraRig, SimDriver } from './CameraRig.tsx';
 import { EmployeeView } from './EmployeeView.tsx';
 import { Office } from './Office.tsx';
+import { CrowdMeshes } from './people/CrowdMeshes.tsx';
 import { OwnerView } from './OwnerView.tsx';
 import { WalkMarker } from './WalkMarker.tsx';
 
@@ -19,6 +20,7 @@ function World() {
       {company?.blocks.map((b) => (
         <BlockView key={b.id} block={b} employees={company.employees.filter((e) => e.blockId === b.id)} />
       ))}
+      <CrowdMeshes />
       <OwnerView />
       <WalkMarker />
       {company?.employees.map((e) => (

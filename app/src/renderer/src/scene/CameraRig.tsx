@@ -1,10 +1,11 @@
 import { useFrame, useThree } from '@react-three/fiber';
 import { useEffect, useRef } from 'react';
-import { Vector3, type Mesh, type Object3D, type PerspectiveCamera } from 'three';
+import { Vector3, type Object3D, type PerspectiveCamera } from 'three';
 import { angleDiff } from '../layout.ts';
 import { runtime } from '../runtime.ts';
 import { get, useStore } from '../store.ts';
 import { stepSim } from '../sim.ts';
+import { crowd } from './people/crowd.ts';
 
 const ISO_PITCH = 0.58;
 const FOV_ISO = 26;
@@ -155,15 +156,14 @@ export function CameraRig() {
     if (Math.abs(cam.fov - fov) > 0.001 || cam.near !== 0.1) { cam.fov = fov; cam.near = 0.1; cam.updateProjectionMatrix(); }
     // Read by verify/e2e-camera.mjs. ownerVisible asks the scene graph itself whether the owner's body would be drawn.
     const ownerVisible = () => {
-      let seen = false;
-      state.scene.traverse((o) => {
-        if (o.type !== 'Mesh' || (o as Mesh).geometry.type !== 'CapsuleGeometry') return;
-        const p = o.getWorldPosition(probe);
-        if (Math.hypot(p.x - owner.pos.x, p.z - owner.pos.z) > 0.05) return;
-        for (let n: Object3D | null = o; n; n = n.parent) if (!n.visible) return;
-        seen = true;
-      });
-      return seen;
+      for (const e of crowd) {
+        const p = e.joints.root.getWorldPosition(probe);
+        if (e.hidden || Math.hypot(p.x - owner.pos.x, p.z - owner.pos.z) > 0.05) continue;
+        let shown = true;
+        for (let n: Object3D | null = e.joints.root; n; n = n.parent) if (!n.visible) shown = false;
+        if (shown) return true;
+      }
+      return false;
     };
     (window as unknown as { __officeCamera: unknown }).__officeCamera = { ownerVisible, x: cam.position.x, y: cam.position.y, z: cam.position.z, fov: cam.fov, blend: view.blend, yaw: view.yaw, pitch: view.fpPitch, locked: locked.current };
   }, -1);
