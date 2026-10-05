@@ -18,9 +18,9 @@ const lines = (id) => get().chat[id] ?? [];
 const texts = (id) => lines(id).map((l) => l.text).join(' | ');
 
 const owned = [
-  [{ type: 'interject', employeeId: 'ann', text: 'stop and rebase', style: 'now' }, 'stop and rebase'],
+  [{ type: 'post', to: 'ann', clientId: 'c1', as: 'say', text: 'stop and rebase', urgency: 'now' }, 'stop and rebase'],
   [{ type: 'answer', employeeId: 'ann', questionId: 'q1', text: 'use sqlite' }, 'use sqlite'],
-  [{ type: 'assign', employeeId: 'ann', task: 'write the docs' }, 'write the docs'],
+  [{ type: 'post', to: 'ann', clientId: 'c2', as: 'request', text: 'write the docs' }, 'write the docs'],
 ];
 for (const [message, words] of owned) {
   send(message);
@@ -39,8 +39,8 @@ applyServerMessage({ type: 'said', employeeId: 'bob', text: 'the build is green'
 check(lines('bob').at(-1)?.from === 'employee' && lines('bob').at(-1).text === 'the build is green', 'a said message adds an employee line');
 
 set({ chat: {} });
-send({ type: 'assign', employeeId: 'ann', task: 'a1' });
-send({ type: 'assign', employeeId: 'bob', task: 'b1' });
+send({ type: 'post', to: 'ann', clientId: 'c3', as: 'request', text: 'a1' });
+send({ type: 'post', to: 'bob', clientId: 'c4', as: 'request', text: 'b1' });
 applyServerMessage({ type: 'said', employeeId: 'ann', text: 'a2' });
 applyServerMessage({ type: 'said', employeeId: 'bob', text: 'b2' });
 send({ type: 'answer', employeeId: 'ann', questionId: 'q2', text: 'a3' });

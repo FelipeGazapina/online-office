@@ -3,6 +3,7 @@
 // an employee whose status is `blocked_on_owner` walks to the owner; everyone else walks back to their desk.
 
 import type { Building, BuildOp, ItemId, Violation } from './space/types.ts';
+import type { MailClientMessage, MailServerMessage, MailView } from './mail.ts';
 import type { VoiceApi } from './voice.ts';
 
 export type EmployeeId = string & { readonly __brand: 'EmployeeId' };
@@ -260,12 +261,9 @@ export type ClientMessage =
   | { type: 'refresh_task_board'; blockId: BlockId }
   | { type: 'connect_task_provider'; provider: TaskProvider }
   | { type: 'configure_task_provider'; provider: 'cronospark'; apiKey: string; userId: string }
-  | { type: 'assign_task'; blockId: BlockId; taskId: string; employeeId: EmployeeId }
-  | { type: 'assign'; employeeId: EmployeeId; task: string }
   // `always` counts only on a permission card, and only when `text` allows it. The office then adds a rule for that
   // employee that covers the same command or tool from now on.
   | { type: 'answer'; employeeId: EmployeeId; questionId: QuestionId; text: string; always?: boolean }
-  | { type: 'interject'; employeeId: EmployeeId; text: string; style: InterruptStyle }
   | { type: 'meeting_door'; state: MeetingDoor }
   // Asks a harness for its model list. The answer arrives as that provider's catalog in the next snapshots.
   | { type: 'load_models'; provider: Provider }
@@ -278,7 +276,9 @@ export type ClientMessage =
   // Edits to the building. Main applies them all or none and answers a refusal with `build_rejected`.
   | { type: 'build'; ops: BuildOp[] }
   | { type: 'undo' }
-  | { type: 'redo' };
+  | { type: 'redo' }
+  // Everything the owner says to anyone, a task or a word, goes through the mailroom.
+  | MailClientMessage;
 
 export type Snapshot = {
   type: 'snapshot';
@@ -290,6 +290,7 @@ export type Snapshot = {
   buildingRev: number;
   taskBoards: Record<string, TaskBoardState>;
   taskConnections: Record<TaskProvider, TaskConnectionState>;
+  mail: MailView;
 };
 
 export type ServerMessage =
@@ -298,7 +299,8 @@ export type ServerMessage =
   | { type: 'log'; employeeId: EmployeeId; line: string; at: number }
   | { type: 'building'; building: Building; rev: number }
   | { type: 'build_rejected'; violations: readonly Violation[] }
-  | { type: 'error'; message: string };
+  | { type: 'error'; message: string }
+  | MailServerMessage;
 
 // What the preload exposes as `window.office`. Main validates every ClientMessage, so the renderer can send freely.
 export type OfficeApi = {

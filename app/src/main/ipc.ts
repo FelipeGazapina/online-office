@@ -15,6 +15,7 @@ import {
   type TaskProvider,
 } from '../shared/protocol.ts';
 import type { BuildOp, Item, ItemId, WallSeg } from '../shared/space/types.ts';
+import type { ConvoKey, MessageId } from '../shared/mail.ts';
 import { Office, OfficeError, type OfficeServices } from './office/company.ts';
 
 // The one place untrusted input becomes a ClientMessage. Ids are opaque strings to the renderer.
@@ -81,10 +82,18 @@ const clientMessage = z.discriminatedUnion('type', [
   z.object({ type: z.literal('refresh_task_board'), blockId }),
   z.object({ type: z.literal('connect_task_provider'), provider: taskProvider }),
   z.object({ type: z.literal('configure_task_provider'), provider: z.literal('cronospark'), apiKey: z.string().max(2000), userId: z.string().max(200) }),
-  z.object({ type: z.literal('assign_task'), blockId, taskId: z.string().min(1).max(400), employeeId }),
-  z.object({ type: z.literal('assign'), employeeId, task: z.string().min(1) }),
+  z.object({
+    type: z.literal('post'),
+    to: z.string().min(1).max(200),
+    blockId: blockId.optional(),
+    clientId: z.string().min(1).max(200),
+    as: z.enum(['request', 'say']),
+    text: z.string().min(1).max(20_000),
+    urgency: z.enum(['queue', 'next', 'now']).optional(),
+  }),
+  z.object({ type: z.literal('cancel_message'), messageId: z.string().min(1).transform((s) => s as MessageId) }),
+  z.object({ type: z.literal('load_history'), convo: z.string().regex(/^dm:.+/).transform((s) => s as ConvoKey), before: z.string().min(1).transform((s) => s as MessageId).optional(), limit: z.number().int().min(1).max(200) }),
   z.object({ type: z.literal('answer'), employeeId, questionId, text: z.string(), always: z.boolean().optional() }),
-  z.object({ type: z.literal('interject'), employeeId, text: z.string().min(1), style: z.enum(['next', 'now']) }),
   z.object({ type: z.literal('meeting_door'), state: meetingDoor }),
   z.object({ type: z.literal('load_models'), provider }),
   z.object({ type: z.literal('set_model'), employeeId, model: modelId }),
@@ -133,6 +142,11 @@ export function startOffice({ dataFile, harnesses, window, services }: Options) 
       rejected: (violations) => emit({ type: 'build_rejected', violations }),
       said: (employeeId, text) => emit({ type: 'said', employeeId, text }),
       log: (employeeId, line, at) => emit({ type: 'log', employeeId, line, at }),
+      // Mail and live tokens are sparse and the owner is waiting on them, so they skip the coalescer.
+      mail: (view) => emit({ type: 'mail', view }),
+      stream: (employeeId, replyingTo, delta, done) => emit({ type: 'stream', employeeId, replyingTo, delta, ...(done ? { done } : {}) }),
+      history: (convo, messages, hasMore) => emit({ type: 'history', convo, messages, hasMore }),
+      error: (message) => emit({ type: 'error', message }),
     },
     services,
   );

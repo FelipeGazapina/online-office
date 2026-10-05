@@ -14,6 +14,7 @@ import type {
   TaskConnectionState,
   UpdateState,
 } from '../../shared/protocol.ts';
+import { emptyMailView, type MailView } from '../../shared/mail.ts';
 import type { Language, VoiceQuality } from '../../shared/voice.ts';
 import { initialVoice, type VoiceState } from './voice/chip.ts';
 
@@ -56,6 +57,9 @@ type State = Settings & {
   taskConnections: Record<'linear' | 'cronospark', TaskConnectionState>;
   logs: Record<string, LogLine[]>;
   chat: Record<EmployeeId, ChatLine[]>;
+  // The mailroom's live state, and the bubble each employee is writing right now.
+  mail: MailView;
+  streams: Record<string, { text: string; replyingTo: string | null; at: number }>;
   bubbles: Record<string, { text: string; until: number }>;
   selectedId: EmployeeId | null;
   menu: { employeeId: EmployeeId; x: number; y: number } | null;
@@ -89,6 +93,8 @@ export const useStore = create<State>()(() => ({
   taskConnections: { linear: { kind: 'needs_auth' }, cronospark: { kind: 'needs_auth' } },
   logs: {},
   chat: {},
+  mail: emptyMailView(),
+  streams: {},
   bubbles: {},
   selectedId: null,
   menu: null,
@@ -163,11 +169,10 @@ export function send(m: ClientMessage) {
   // Only these messages carry words the owner said, so only they join the transcript.
   switch (m.type) {
     case 'answer':
-    case 'interject':
       addChat(m.employeeId, 'owner', m.text);
       break;
-    case 'assign':
-      addChat(m.employeeId, 'owner', m.task);
+    case 'post':
+      addChat(m.to as EmployeeId, 'owner', m.text);
       break;
   }
   window.office.send(m);

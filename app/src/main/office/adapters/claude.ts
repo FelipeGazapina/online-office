@@ -95,6 +95,35 @@ const short = (s: string, n: number) => {
 
 const str = (v: unknown) => (typeof v === 'string' ? v : '');
 
+// The decoded value of the "text" argument in a tool input that is still being generated, so far. The JSON is cut
+// anywhere, including inside an escape.
+export function partialText(json: string): string {
+  const start = /"text"\s*:\s*"/.exec(json);
+  if (!start) return '';
+  const body = json.slice(start.index + start[0].length);
+  let out = '';
+  for (let i = 0; i < body.length; i++) {
+    const c = body[i]!;
+    if (c === '"') break;
+    if (c !== '\\') {
+      out += c;
+      continue;
+    }
+    const n = body[i + 1];
+    if (n === undefined) break;
+    if (n === 'u') {
+      const hex = body.slice(i + 2, i + 6);
+      if (hex.length < 4) break;
+      out += String.fromCharCode(Number.parseInt(hex, 16));
+      i += 5;
+    } else {
+      out += n === 'n' ? '\n' : n === 't' ? '\t' : n;
+      i++;
+    }
+  }
+  return out;
+}
+
 // Permission policy. Everything that decides whether a tool asks the boss is in this block, so it can be swapped
 // for the owner's own settings in one place. Every question still goes out through `host.ask` in `canUseTool`.
 // docs/beta-plan.md maps each mode onto Claude's. Inherit keeps acceptEdits until the owner's own settings are read.
@@ -114,6 +143,9 @@ const SUBAGENT_TOOLS = new Set(['Agent', 'Task']);
 
 // The office's own tools are how an employee reaches the boss, so they never ask.
 const OFFICE_TOOL_PREFIX = 'mcp__office__';
+
+// The office tools whose `text` argument is a bubble the owner reads. Their arguments stream while the model writes them.
+const BUBBLE_TOOLS = new Set([`${OFFICE_TOOL_PREFIX}message`, `${OFFICE_TOOL_PREFIX}reply`]);
 
 // OFFICE_BASH=allow skips the question for shell commands and everything else that would ask.
 const runsUnasked = (toolName: string) =>
@@ -171,6 +203,16 @@ function describeTool(name: string, input: Record<string, unknown>, cwd: string)
       return 'Asking the boss';
     case `${OFFICE_TOOL_PREFIX}draw_diagram`:
       return 'Drawing on the whiteboard';
+    case `${OFFICE_TOOL_PREFIX}message`:
+    case `${OFFICE_TOOL_PREFIX}reply`:
+      return 'Writing a message';
+    case `${OFFICE_TOOL_PREFIX}request`:
+    case `${OFFICE_TOOL_PREFIX}requestGauntlet`:
+      return 'Delegating work';
+    case `${OFFICE_TOOL_PREFIX}awaitReplies`:
+      return 'Waiting on a teammate';
+    case `${OFFICE_TOOL_PREFIX}hireTeammate`:
+      return 'Hiring';
     case `${OFFICE_TOOL_PREFIX}remember`:
       return 'Writing a note';
     case `${OFFICE_TOOL_PREFIX}recall`:
@@ -242,6 +284,8 @@ export class ClaudeSession implements EmployeeSession {
   private task = '';
   private startedAt = 0;
   private lastSaid = '';
+  // Bubble tool calls being generated, by content block index: the JSON so far and how much of its text went out.
+  private bubbles = new Map<number, { json: string; sent: number }>();
   // Ends with the process, so a permission question left open by a dead process is withdrawn from the owner's desk.
   private life = new AbortController();
 
@@ -261,8 +305,8 @@ export class ClaudeSession implements EmployeeSession {
     this.policy = host.permissions;
   }
 
-  assign(task: string) {
-    this.beginTask(task);
+  assign(task: string, title?: string) {
+    this.beginTask(title ?? task);
     this.send(this.withNotices(task));
   }
 
@@ -367,6 +411,7 @@ export class ClaudeSession implements EmployeeSession {
         cwd: block.cwd,
         ...(executable && { pathToClaudeCodeExecutable: executable }),
         model: this.host.model,
+        includePartialMessages: true,
         // 'project' only: the boss's global plugins and hooks must not leak into employees.
         settingSources: ['project'],
         permissionMode: MODES[this.policy.mode],
@@ -431,6 +476,8 @@ export class ClaudeSession implements EmployeeSession {
       debug(
         `init model=${m.model} tools=${m.tools.length} skills=${m.skills.length} plugins=${m.plugins.map((p) => p.name)} mcp=${m.mcp_servers.map((s) => `${s.name}:${s.status}`)}`,
       );
+    } else if (m.type === 'stream_event') {
+      this.onStream(m);
     } else if (m.type === 'assistant') {
       this.onAssistant(m);
     } else if (m.type === 'system' && m.subtype === 'task_notification') {
@@ -439,6 +486,24 @@ export class ClaudeSession implements EmployeeSession {
       this.onUser(m);
     } else if (m.type === 'result') {
       this.onResult(m);
+    }
+  }
+
+  // Streams the text of a `message` or `reply` call as the model writes it, so the first bubble shows within the first tokens.
+  private onStream(m: Extract<SDKMessage, { type: 'stream_event' }>) {
+    const { event } = m;
+    if (m.parent_tool_use_id !== null || !this.host.streamed) return;
+    if (event.type === 'content_block_start' && event.content_block.type === 'tool_use' && BUBBLE_TOOLS.has(event.content_block.name)) {
+      this.bubbles.set(event.index, { json: '', sent: 0 });
+    } else if (event.type === 'content_block_delta' && event.delta.type === 'input_json_delta') {
+      const bubble = this.bubbles.get(event.index);
+      if (!bubble) return;
+      bubble.json += event.delta.partial_json;
+      const text = partialText(bubble.json);
+      if (text.length > bubble.sent) this.host.streamed(text.slice(bubble.sent));
+      bubble.sent = Math.max(bubble.sent, text.length);
+    } else if (event.type === 'content_block_stop' && this.bubbles.delete(event.index)) {
+      this.host.streamed('', true);
     }
   }
 
@@ -494,7 +559,7 @@ export class ClaudeSession implements EmployeeSession {
       return this.reportError(('errors' in m && m.errors.join('; ')) || ('result' in m && m.result) || m.subtype);
     }
     const text = m.result.trim();
-    host.taskCompleted();
+    host.taskCompleted(text);
     host.setActivity(short(text, 120) || 'Finished the task');
     host.setStatus({ kind: 'idle' });
     // The last assistant text block usually is the result. Do not say it twice.

@@ -8,6 +8,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { covers, isAllow, ruleFor, sameRule, type PermissionBody } from '../src/shared/permissions.ts';
 import { SEAT_CEILING, type AllowRule, type Company, type Employee, type EmployeeId, type EmployeeStatus, type HarnessStatus, type ModelCatalog, type ModelId, type PermissionPolicy, type Provider, type Question, type Subagent } from '../src/shared/protocol.ts';
+import type { Message } from '../src/shared/mail.ts';
 import { HARNESSES } from '../src/main/office/adapters/index.ts';
 import type { SessionHost } from '../src/main/office/adapters/types.ts';
 import { Office, OfficeError } from '../src/main/office/company.ts';
@@ -41,9 +42,9 @@ HARNESSES['claude-code'] = {
     const fake: Fake = { host, assigned: [], interjected: [], models: [], policies: [], notices: [], stopped: false };
     fakes.push(fake);
     return {
-      assign: (task) => {
+      assign: (task, title) => {
         fake.assigned.push(task);
-        host.setStatus({ kind: 'working', task, startedAt: Date.now() });
+        host.setStatus({ kind: 'working', task: title ?? task, startedAt: Date.now() });
         host.setActivity('Getting started');
       },
       interject: (text) => void fake.interjected.push(text),
@@ -56,11 +57,23 @@ HARNESSES['claude-code'] = {
 };
 
 const noBuild = { building() {}, rejected() {} };
+const statusOf2 = (o: Office, id: EmployeeId) => o.snapshot().company.employees.find((e) => e.id === id)!.status.kind;
 const logs: string[] = [];
+const errors: string[] = [];
+// The owner talks to anyone through the mailroom: a task is a request, a word to someone mid-task is a say.
+let posts = 0;
+const post = (o: Office, to: EmployeeId, text: string, as: 'request' | 'say' = 'request', urgency?: 'queue' | 'next' | 'now') =>
+  o.handle({ type: 'post', to, clientId: `c${++posts}`, as, text, ...(urgency ? { urgency } : {}) });
+// What an adapter does when a turn ends well.
+const finishTurn = async (fake: { host: SessionHost }, text = 'done') => {
+  fake.host.taskCompleted(text);
+  fake.host.setStatus({ kind: 'idle' });
+  await sleep(5);
+};
 const office = new Office(
   join(dir, 'company.json'),
   { 'claude-code': { kind: 'ready', version: 'fake' }, codex: { kind: 'missing' }, hermes: { kind: 'missing' } },
-  { ...noBuild, changed() {}, said() {}, log: (_id, line) => void logs.push(line) },
+  { ...noBuild, changed() {}, said() {}, log: (_id, line) => void logs.push(line), error: (m) => void errors.push(m) },
   { mcp, memory },
 );
 
@@ -232,7 +245,7 @@ check(capRefused && capOffice.snapshot().company.employees.length === 4 && capOf
 capOffice.shutdown();
 
 console.log('\n# owner questions');
-office.handle({ type: 'assign', employeeId: ana, task: 'Refactor billing' });
+post(office, ana, 'Refactor billing');
 fa.host.setActivity('Running npm test');
 const xp0 = company().xp;
 const ac1 = new AbortController();
@@ -256,10 +269,11 @@ check((await p2) === 'Deny', 'the second caller gets its own answer');
 const back = statusOf(ana);
 check(back.kind === 'idle' && who(ana).activity === 'Both helpers are running', 'with the line empty the employee goes back to what the adapter last reported (idle)');
 
-office.handle({ type: 'assign', employeeId: ana, task: 'Second task' });
+await finishTurn(fa);
+post(office, ana, 'Second task');
 const p3 = fa.host.ask({ kind: 'ask', text: 'Which database?', options: ['pg', 'sqlite'] });
 check(shown(ana)?.kind === 'ask' && logs.includes('Asking the boss: Which database? [pg / sqlite]'), 'an ask_owner style question shows as an ask card with its options');
-office.handle({ type: 'interject', employeeId: ana, text: 'use pg', style: 'next' });
+post(office, ana, 'use pg', 'say', 'next');
 check((await p3) === 'use pg' && fa.interjected.length === 0, 'talking to a blocked employee answers the shown question and does not reach the harness');
 const resumed = statusOf(ana);
 check(resumed.kind === 'working' && resumed.task === 'Second task' && who(ana).activity === 'Got the answer, back to work', 'they go back to the same task after an answer');
@@ -287,7 +301,7 @@ try {
   stale = e instanceof OfficeError ? e.message : String(e);
 }
 check(/no open question/.test(stale), `an answer to a card that is not there is refused (${stale})`);
-office.handle({ type: 'interject', employeeId: ana, text: 'tap tap', style: 'next' });
+post(office, ana, 'tap tap', 'say', 'next');
 check(fa.interjected.join() === 'tap tap', 'talking to a working employee still reaches the harness');
 
 office.handle({ type: 'meeting_door', state: 'closed' });
@@ -405,7 +419,7 @@ check(labLogs.includes('Model: next-model, from the next turn') && stored(labFil
 lab.handle({ type: 'set_permissions', employeeId: dia, mode: 'ask' });
 check(inLab(dia).permissions.mode === 'ask' && fakeOf(dia).host.permissions.mode === 'ask' && fakeOf(dia).policies.at(-1)?.mode === 'ask' && fakeOf(eli).policies.length === 0 && inLab(eli).permissions.mode === 'inherit', 'set_permissions changes the mode, tells that session and leaves the others');
 
-lab.handle({ type: 'assign', employeeId: dia, task: 'Ship it' });
+post(lab, dia, 'Ship it');
 const npmTest = fakeOf(dia).host.ask(perm('npm test --watch=false'));
 check(detailOf(labShown(dia)) === 'npm test --watch=false', 'a command nobody allowed yet asks');
 labAnswer(dia, 'Allow', true);
@@ -604,10 +618,14 @@ const refusal = (msg: Parameters<typeof office.handle>[0]) => {
   }
   return '';
 };
-const assignRefused = refusal({ type: 'assign', employeeId: dora, task: 'ship it' });
-check(assignRefused.includes(deleted) && fd.assigned.length === 0, `a task for a block whose folder is gone names the folder and never reaches the harness (${assignRefused})`);
-const interjectRefused = refusal({ type: 'interject', employeeId: dora, text: 'hello?', style: 'next' });
-check(interjectRefused.includes(deleted) && fd.interjected.length === 0, `talking to that employee is refused the same way (${interjectRefused})`);
+post(office, dora, 'ship it');
+check(errors.some((m) => m.includes(deleted)) && fd.assigned.length === 0, `a task for a block whose folder is gone names the folder and never reaches the harness (${errors.at(-1)})`);
+const lost = office.snapshot().mail.tail.find((m) => m.kind === 'request' && m.to === dora);
+const goneReply = office.snapshot().mail.tail.find((m) => m.kind === 'reply' && lost && m.requestId === lost.id);
+check(goneReply?.kind === 'reply' && goneReply.outcome === 'failed' && goneReply.text.includes(deleted), 'the request settles failed with the reason instead of throwing at the sender');
+errors.length = 0;
+post(office, dora, 'hello?', 'say', 'next');
+check(errors.some((m) => m.includes(deleted)) && fd.interjected.length === 0, 'talking to that employee is refused the same way');
 
 console.log('\n# remove a block');
 const goneBlock = company().blocks.at(-1)!.id;
@@ -622,6 +640,78 @@ check(await until(() => existsSync(join(memRoot, 'alumni', dora, 'folder-moved.m
 check(existsSync(repo), 'the folder of the remaining block is untouched');
 check(!JSON.parse(readFileSync(join(dir, 'company.json'), 'utf8')).blocks.some((b: { id: string }) => b.id === goneBlock), 'the removal is saved');
 check(refusal({ type: 'remove_block', blockId: goneBlock }).includes('No such block'), 'removing it twice is refused');
+
+console.log('\n# the mailroom, end to end with scripted employees');
+{
+  process.env.OFFICE_START_LEVEL = '5';
+  const history: Message[][] = [];
+  const mailOffice = new Office(join(dir, 'mail-company.json'), { 'claude-code': { kind: 'ready', version: 'fake' }, codex: { kind: 'missing' }, hermes: { kind: 'missing' } }, { ...noBuild, changed() {}, said() {}, log() {}, history: (_c, messages) => void history.push(messages) }, { mcp, memory });
+  process.env.OFFICE_START_LEVEL = '3';
+  mailOffice.handle({ type: 'create_block', cwd: repo });
+  const mb = mailOffice.snapshot().company.blocks[0]!.id;
+  const hireInto = (name: string, role?: 'orchestrator') => {
+    const before = fakes.length;
+    mailOffice.handle({ type: 'hire', provider: 'claude-code', blockId: mb, name, ...(role ? { role } : {}) });
+    return { fake: fakes[before]!, id: mailOffice.snapshot().company.employees.find((e) => e.name === name)!.id };
+  };
+  const po = hireInto('Pia', 'orchestrator');
+  const anna = hireInto('Anna');
+  const benj = hireInto('Benj');
+  const connectAs = async (fake: Fake) => {
+    const c = new Client({ name: 'mail-check', version: '0.0.0' });
+    await c.connect(new StreamableHTTPClientTransport(new URL(fake.host.mcp.url)));
+    const tool = async (name: string, args: Record<string, unknown>) => JSON.parse(((await c.callTool({ name, arguments: args })).content as { text: string }[])[0]!.text);
+    return { c, tool };
+  };
+  const asPo = await connectAs(po.fake);
+  const asAnna = await connectAs(anna.fake);
+  const asBenj = await connectAs(benj.fake);
+  const tools = (await asAnna.c.listTools()).tools.map((t) => t.name);
+  check(tools.includes('request') && tools.includes('requestGauntlet') && !tools.includes('delegate_to_teammate') && !tools.includes('hireTeammate'), 'an employee gets the mailroom tools and no hire');
+  check((await asPo.c.listTools()).tools.some((t) => t.name === 'hireTeammate'), 'the PO also gets hireTeammate');
+
+  mailOffice.handle({ type: 'post', to: 'po', blockId: mb, clientId: 'goal-1', as: 'request', text: 'Add CSV export with tests' });
+  check(po.fake.assigned.length === 1 && /Add CSV export with tests/.test(po.fake.assigned[0]!) && statusOf2(mailOffice, po.id) === 'working', 'the owner post reaches the PO, and the desk shows the request title');
+  const rootId = /\[Request (\w+) from the owner/.exec(po.fake.assigned[0]!)![1]!;
+
+  await asPo.tool('message', { to: 'owner', text: 'On it. I will split this into the API and the UI.' });
+  const toAnna = await asPo.tool('request', { to: 'Anna', title: 'CSV route', text: 'Backend: GET /reports.csv', bar: ['route returns RFC4180 CSV'] });
+  const toBenj = await asPo.tool('request', { to: 'Benj', title: 'Export button', text: 'UI: Export button', bar: ['button downloads the file'] });
+  const hired = await asPo.tool('hireTeammate', { key: 'csv-r2', name: 'Cleo' });
+  const hiredAgain = await asPo.tool('hireTeammate', { key: 'csv-r2', name: 'Cleo' });
+  check(toAnna.ok && toBenj.ok && anna.fake.assigned.length === 1 && benj.fake.assigned.length === 1, 'two requests reach two employees');
+  check(hired.ok && hiredAgain.id === hired.id && mailOffice.snapshot().company.employees.filter((e) => e.name === 'Cleo' && e.blockId === mb && e.role === 'employee').length === 1, 'hireTeammate created one employee in the block, and a repeat with the same key hired nobody');
+  await finishTurn(po.fake, 'Split into two pieces.');
+  check(!mailOffice.snapshot().mail.tail.some((m) => m.kind === 'reply' && m.requestId === rootId), 'the owner request is not settled while its children are open');
+
+  await asAnna.tool('reply', { requestId: toAnna.id, outcome: 'done', text: 'route shipped', artifact: ['src/csv.ts'] });
+  await finishTurn(anna.fake, 'route shipped');
+  await asBenj.tool('reply', { requestId: toBenj.id, outcome: 'done', text: 'button shipped' });
+  await finishTurn(benj.fake, 'button shipped');
+  check(po.fake.assigned.length >= 2 && /route shipped/.test(po.fake.assigned.join('\n')), 'the replies wake the PO with the results');
+  const last = await asPo.tool('reply', { requestId: rootId, outcome: 'done', text: 'CSV export shipped, both pieces verified' });
+  check(last.ok === true, 'the PO replies to the owner');
+  await finishTurn(po.fake, 'CSV export shipped');
+  await sleep(30);
+
+  mailOffice.handle({ type: 'load_history', convo: `dm:${po.id}`, limit: 50 });
+  const thread = history.at(-1) ?? [];
+  const shape = thread.filter((m) => m.kind !== 'event').map((m) => `${m.kind}:${m.from === 'owner' ? 'owner' : m.from === po.id ? 'PO' : m.from === anna.id ? 'Anna' : m.from === benj.id ? 'Benj' : m.from}>${m.to === 'owner' ? 'owner' : m.to === po.id ? 'PO' : m.to === anna.id ? 'Anna' : m.to === benj.id ? 'Benj' : m.to}`);
+  const at = (needle: string) => shape.indexOf(needle);
+  check(shape[0] === 'request:owner>PO', `the owner request opens the thread (${shape.join(' | ')})`);
+  check(at('say:PO>owner') > 0 && at('say:PO>owner') < at('request:PO>Anna') && at('request:PO>Anna') < at('request:PO>Benj'), 'the PO ack comes before the two delegation requests, in order');
+  check(shape.at(-1) === 'reply:PO>owner' && at('reply:Anna>PO') < shape.length - 1 && at('reply:Benj>PO') < shape.length - 1, 'the final reply to the owner is last, after both employee replies');
+  check(thread.some((m) => m.kind === 'event' && m.event === 'hired'), 'the hire is recorded in the thread');
+  check(thread.filter((m) => m.kind === 'request' && m.from === po.id).length === 2, 'the thread holds exactly the 2 delegation requests');
+  check(mailOffice.snapshot().mail.open.length === 0, 'nothing is left open');
+
+  const fileLines = readFileSync(join(dir, 'mail-company.mail.jsonl'), 'utf8').trim().split('\n').length;
+  mailOffice.shutdown();
+  const reopened = new Office(join(dir, 'mail-company.json'), { 'claude-code': { kind: 'ready', version: 'fake' }, codex: { kind: 'missing' }, hermes: { kind: 'missing' } }, { ...noBuild, changed() {}, said() {}, log() {} }, { mcp, memory });
+  check(fileLines > 5 && reopened.snapshot().mail.tail.some((m) => m.kind === 'reply' && m.to === 'owner') && reopened.snapshot().mail.open.length === 0, 'the thread survives a restart');
+  reopened.shutdown();
+  for (const c of [asPo, asAnna, asBenj]) await c.c.close().catch(() => undefined);
+}
 
 office.shutdown();
 check(fc.stopped, 'shutdown stops the sessions');
