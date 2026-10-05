@@ -231,14 +231,13 @@ function buildRender(b: Building, index: number, hole: Uint8Array, wallAt: Reado
   }
 
   const wallBuf: Record<'solid' | 'door' | 'window' | 'arch', number[]> = { solid: [], door: [], window: [], arch: [] };
-  const normals: number[] = [];
+  const normals: Record<'solid' | 'door' | 'window' | 'arch', number[]> = { solid: [], door: [], window: [], arch: [] };
   for (const w of story.walls) {
     const len = w.d === 'sd' || w.d === 'nd' ? Math.SQRT2 : 1;
     const mx = w.d === 'e' ? w.x + 0.5 : w.d === 's' ? w.x : w.x + 0.5;
     const mz = w.d === 'e' ? w.z : w.d === 's' ? w.z + 0.5 : w.z + 0.5;
     const variant = w.open ?? 'solid';
     wallBuf[variant].push(mx, mz, WALL_ANGLE[w.d], len, w.style);
-    if (variant !== 'solid') continue;
     let nx: number;
     let nz: number;
     let sideA: boolean;
@@ -263,8 +262,11 @@ function buildRender(b: Building, index: number, hole: Uint8Array, wallAt: Reado
     if (sideA && !sideB) {
       nx = -nx;
       nz = -nz;
+    } else if (sideA === sideB) {
+      nx = 0;
+      nz = 0;
     }
-    normals.push(nx, nz);
+    normals[variant].push(nx, nz);
   }
 
   const groups = new Map<string, { m: number[]; ids: ItemId[] }>();
@@ -308,7 +310,12 @@ function buildRender(b: Building, index: number, hole: Uint8Array, wallAt: Reado
       window: Float32Array.from(wallBuf.window),
       arch: Float32Array.from(wallBuf.arch),
     },
-    wallNormals: Float32Array.from(normals),
+    wallNormals: {
+      solid: Float32Array.from(normals.solid),
+      door: Float32Array.from(normals.door),
+      window: Float32Array.from(normals.window),
+      arch: Float32Array.from(normals.arch),
+    },
     items,
     rails: Float32Array.from(rails),
   };

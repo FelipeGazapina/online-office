@@ -4,7 +4,7 @@ import { memo, useRef } from 'react';
 import type { Mesh } from 'three';
 import { PROVIDERS, type Employee } from '../../../shared/protocol.ts';
 import { fmtWait, useNow } from '../hud/hooks.ts';
-import { hash } from '../layout.ts';
+import { hash } from '../util.ts';
 import { runtime } from '../runtime.ts';
 import { set, useStore } from '../store.ts';
 import { ResizableHud } from '../hud/ResizableHud.tsx';
@@ -26,6 +26,8 @@ export const EmployeeView = memo(function EmployeeView({ employee }: { employee:
   const talking = useStore((s) => s.talkingTo === employee.id);
   const meetingDoor = useStore((s) => s.meetingDoor);
   const selected = useStore((s) => s.selectedId === employee.id);
+  // People on a story above the one the owner is on are not drawn, like the story itself.
+  const upstairs = useStore((s) => (s.avatarFloors[employee.id] ?? 0) > s.story);
   const ring = useRef<Mesh>(null);
 
   useFrame((state) => {
@@ -37,6 +39,7 @@ export const EmployeeView = memo(function EmployeeView({ employee }: { employee:
   return (
     <Person
       look={lookFor(employee)}
+      hidden={upstairs}
       read={() => runtime.avatars.get(employee.id) ?? null}
       typing={employee.status.kind === 'working'}
       onPick={({ x, y }) => set({ menu: { employeeId: employee.id, x, y } })}

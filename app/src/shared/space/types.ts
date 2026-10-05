@@ -100,7 +100,8 @@ export type Room = { id: number; story: number; area: number; bbox: Lot; doors: 
 export type FloorRender = {
   floor: { position: Float32Array; index: Uint32Array; paint: Uint8Array };
   walls: Readonly<Record<'solid' | 'door' | 'window' | 'arch', Float32Array>>;
-  wallNormals: Float32Array;
+  /** Per variant, two floats per segment: the unit normal pointing to the side with less floor, which an outside camera sees. Zero for a wall with floor on both sides or on neither. */
+  wallNormals: Readonly<Record<'solid' | 'door' | 'window' | 'arch', Float32Array>>;
   items: ReadonlyMap<string, { matrices: Float32Array; ids: readonly ItemId[] }>;
   rails: Float32Array;
 };

@@ -1,5 +1,6 @@
 // Test-only: a small company with a conversation in every state the chat can show, so a test needs no real agent.
 import type { BlockId, Company, Employee, EmployeeId, ModelId } from '../../../../shared/protocol.ts';
+import type { ItemId } from '../../../../shared/space/index.ts';
 import type { ActorView, MailView, Message, MessageId, RequestView } from '../../../../shared/mail.ts';
 import { set } from '../../store.ts';
 
@@ -24,7 +25,7 @@ export function loadMailFixture(company: Company) {
   const t0 = Date.now() - 12 * 60_000;
   const at = (min: number) => t0 + min * 60_000;
   const person = (id: EmployeeId, name: string, desk: number, status: Employee['status'], role?: Employee['role']): Employee => ({
-    id, name, provider: 'claude-code', role, blockId: F.block, desk, status, activity: 'typing', model: 'fake' as ModelId,
+    id, name, provider: 'claude-code', role, blockId: F.block, seat: `${F.block}:${role === 'orchestrator' ? 'po_desk' : 'bench_desk'}:${String(desk).padStart(2, '0')}` as ItemId, status, activity: 'typing', model: 'fake' as ModelId,
     permissions: { mode: company.settings.defaultPermissions, alwaysAllow: [] }, subagents: [], hiredAt: t0,
   });
   const working = (task: string): Employee['status'] => ({ kind: 'working', task, startedAt: t0 });

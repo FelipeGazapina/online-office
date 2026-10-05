@@ -2,6 +2,7 @@ import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import { useEffect, useRef } from 'react';
 import { setLabelLayer } from './labelLayer.ts';
 import { useStore } from '../store.ts';
+import { BuildingLayer } from './building/BuildingLayer.tsx';
 import { BlockView } from './BlockView.tsx';
 import { CameraRig, SimDriver } from './CameraRig.tsx';
 import { EmployeeView } from './EmployeeView.tsx';
@@ -16,6 +17,7 @@ function World() {
     <>
       <SimDriver />
       <CameraRig />
+      <BuildingLayer />
       <Office company={company} />
       {company?.blocks.map((b) => (
         <BlockView key={b.id} block={b} employees={company.employees.filter((e) => e.blockId === b.id)} />

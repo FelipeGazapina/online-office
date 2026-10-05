@@ -1,16 +1,18 @@
 // Per-frame mutable world state. Lives outside React so the sim can write it 60 times a second.
 import { Vector3 } from 'three';
 import type { EmployeeId } from '../../shared/protocol.ts';
-import { OWNER_START, type Vec2 } from './layout.ts';
-import type { NavGrid } from './nav.ts';
+import type { FloorPos, StairLink, Trip, Vec2, World } from './world.ts';
 
-// The way an avatar is taking to where it is headed. `to` is what the route was planned for and `grid` the office it
-// was planned in. A null path means there is no way there.
-export type Route = { path: Vec2[] | null; to: Vec2; grid: NavGrid };
+// The way an avatar is taking to where it is headed. `to` is what the trip was planned for and `world` the office it
+// was planned in. A null trip means there is no way there.
+export type Route = { trip: Trip | null; to: FloorPos; world: World };
 
 export type AvatarRT = {
   id: string;
   pos: Vector3;
+  floor: number;
+  // The staircase being climbed, or null on level ground.
+  climb: StairLink | null;
   yaw: number;
   speed: number;
   seated: boolean;
@@ -18,10 +20,10 @@ export type AvatarRT = {
   route: Route | null;
 };
 
-export type WalkGoal = { kind: 'point'; at: Vec2 } | { kind: 'employee'; employeeId: EmployeeId };
+export type WalkGoal = { kind: 'point'; at: Vec2; floor: number } | { kind: 'employee'; employeeId: EmployeeId };
 
-// What steers the owner. `path` holds the waypoints still to visit, and its last one is where the walk ends.
-export type OwnerIntent = { kind: 'keys' } | { kind: 'walk'; path: Vec2[]; goal: WalkGoal };
+// What steers the owner. `trip` holds the legs still to walk, floor by floor, and the last waypoint of the last leg is where the walk ends.
+export type OwnerIntent = { kind: 'keys' } | { kind: 'walk'; trip: Trip; goal: WalkGoal };
 export const KEYS_INTENT: OwnerIntent = { kind: 'keys' };
 
 // A walk yields to any of these, whether held or only tapped.
@@ -29,7 +31,11 @@ export const STEER_KEYS: readonly string[] = ['KeyW', 'KeyA', 'KeyS', 'KeyD', 'A
 
 export const runtime = {
   owner: {
-    pos: new Vector3(OWNER_START.x, 0, OWNER_START.z),
+    pos: new Vector3(0, 0, 0),
+    floor: 0,
+    climb: null as StairLink | null,
+    // False until the sim has put the owner at the front door of the building it was given.
+    placed: false,
     vel: new Vector3(),
     yaw: Math.PI,
     speed: 0,

@@ -3,16 +3,19 @@ import { _roots } from '@react-three/fiber';
 import { Vector3 } from 'three';
 import type { BlockId, Employee, EmployeeId, ModelId, ProjectBlock } from '../../shared/protocol.ts';
 import { DESKS_PER_BLOCK } from '../../shared/protocol.ts';
+import { legacyBuilding } from '../../shared/space/index.ts';
 import { applyServerMessage } from './office.ts';
 import { loadMailFixture } from './hud/chat/fixture.ts';
 import { renders } from './hud/chat/renders.ts';
 import { KEYS_INTENT, runtime } from './runtime.ts';
-import { stepSim } from './sim.ts';
+import { stepSim, tripEnd, walkTo } from './sim.ts';
 import { get, sendTap, set, setSetting, useStore } from './store.ts';
 
 const intentState = () => {
   const i = runtime.owner.intent;
-  return i.kind === 'walk' ? { kind: i.kind, goal: i.goal, dest: i.path[i.path.length - 1], left: i.path.length } : { kind: i.kind };
+  if (i.kind !== 'walk') return { kind: i.kind };
+  const end = tripEnd(i.trip);
+  return { kind: i.kind, goal: i.goal, dest: end.at, floor: end.floor, left: end.waypoints, legs: end.legs };
 };
 
 // Test-only: replaces the company in the renderer store with `count` fake employees spread over as many blocks as they
@@ -28,12 +31,14 @@ function injectFake(count: number) {
     color: colors[slot % colors.length],
     slot,
   }));
+  const desks = Array.from({ length: count }, (_, i) => ({ id: `fake-emp-${i}`, blockId: blocks[Math.floor(i / DESKS_PER_BLOCK)].id, desk: i % DESKS_PER_BLOCK, orchestrator: false }));
+  const { building, seats } = legacyBuilding(blocks.map((b) => ({ id: b.id, slot: b.slot })), desks);
   const employees: Employee[] = Array.from({ length: count }, (_, i) => ({
     id: `fake-emp-${i}` as EmployeeId,
     name: `Fake ${i}`,
     provider: 'claude-code',
     blockId: blocks[Math.floor(i / DESKS_PER_BLOCK)].id,
-    desk: i % DESKS_PER_BLOCK,
+    seat: seats.get(`fake-emp-${i}`) ?? null,
     status: i % 3 === 2 ? { kind: 'idle' } : { kind: 'working', task: 'fake task', startedAt: Date.now() },
     activity: 'typing',
     model: 'fake' as ModelId,
@@ -41,7 +46,7 @@ function injectFake(count: number) {
     subagents: [],
     hiredAt: Date.now(),
   }));
-  set({ company: { ...company, blocks, employees } });
+  set({ company: { ...company, blocks, employees }, building });
 }
 
 // Test-only: real frame times over `ms` of requestAnimationFrame, plus the renderer's draw-call counters.
@@ -68,13 +73,29 @@ function measureFrames(ms: number) {
   });
 }
 
+// Test-only: how many wall pieces stand at full height, and how many curbs stand where the cutaway dropped a wall.
+function wallStats() {
+  const root = _roots.values().next().value;
+  if (!root) throw new Error('no canvas');
+  const stats = { full: 0, curbs: 0, hidden: 0 };
+  root.store.getState().scene.traverse((o) => {
+    const tag = o.userData?.wall as string | undefined;
+    const mesh = o as import('three').InstancedMesh;
+    if (!tag || !mesh.isInstancedMesh) return;
+    if (tag === 'curb') return void (stats.curbs += mesh.count);
+    if (tag !== 'solid') return;
+    for (let i = 0; i < mesh.count; i++) (mesh.instanceMatrix.array[i * 16] === 0 ? stats.hidden++ : stats.full++);
+  });
+  return stats;
+}
+
 export function installDebug() {
   (window as unknown as { __office: unknown }).__office = {
     step(seconds: number, fps = 30) {
       for (let i = 0; i < seconds * fps; i++) stepSim(1 / fps);
     },
     teleport(x: number, z: number, yaw = runtime.owner.yaw) {
-      runtime.owner.pos.set(x, 0, z);
+      runtime.owner.pos.set(x, runtime.owner.pos.y, z);
       runtime.owner.yaw = yaw;
       runtime.owner.intent = KEYS_INTENT;
       runtime.queueYaw = yaw;
@@ -85,8 +106,8 @@ export function installDebug() {
       else runtime.keys.delete(code);
     },
     state: () => ({
-      owner: { x: runtime.owner.pos.x, z: runtime.owner.pos.z, yaw: runtime.owner.yaw },
-      avatars: [...runtime.avatars.values()].map((a) => ({ id: a.id, x: +a.pos.x.toFixed(2), z: +a.pos.z.toFixed(2), seated: a.seated, speed: +a.speed.toFixed(2) })),
+      owner: { x: runtime.owner.pos.x, y: runtime.owner.pos.y, z: runtime.owner.pos.z, floor: runtime.owner.floor, yaw: runtime.owner.yaw },
+      avatars: [...runtime.avatars.values()].map((a) => ({ id: a.id, x: +a.pos.x.toFixed(2), z: +a.pos.z.toFixed(2), floor: a.floor, seated: a.seated, speed: +a.speed.toFixed(2) })),
       talkingTo: get().talkingTo,
       askerId: get().askerId,
       intent: intentState(),
@@ -102,6 +123,9 @@ export function installDebug() {
       const p = new Vector3(x, y, z).project(camera);
       return { x: size.left + ((p.x + 1) / 2) * size.width, y: size.top + ((1 - p.y) / 2) * size.height };
     },
+    wallStats,
+    // The same walk a floor click starts, aimed at any story. The overview draws only the stories up to the owner's, so a click cannot reach a higher one yet.
+    walkTo: (floor: number, x: number, z: number) => walkTo({ kind: 'point', at: { x, z }, floor }),
     injectFake,
     // Test-only: the chat with a whole conversation in it. Main never hears about these people.
     loadMailFixture() {

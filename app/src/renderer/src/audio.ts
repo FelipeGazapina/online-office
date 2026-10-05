@@ -1,5 +1,5 @@
 import type { Employee } from '../../shared/protocol.ts';
-import { hash } from './layout.ts';
+import { hash } from './util.ts';
 import { get, LANGS, set } from './store.ts';
 import { runtime } from './runtime.ts';
 import { gate } from './voice/gate.ts';

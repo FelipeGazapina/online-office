@@ -118,7 +118,7 @@ export type Roster = { employee: Employee; last: Message | null };
 
 // PO first, then by desk. Only people of one block: the block is the room the owner is standing in.
 export function rosterOf(employees: Employee[], blockId: Employee['blockId'], messages: Message[]): Roster[] {
-  const mine = employees.filter((e) => e.blockId === blockId).sort((a, b) => Number((b.role ?? 'employee') === 'orchestrator') - Number((a.role ?? 'employee') === 'orchestrator') || a.desk - b.desk);
+  const mine = employees.filter((e) => e.blockId === blockId).sort((a, b) => Number((b.role ?? 'employee') === 'orchestrator') - Number((a.role ?? 'employee') === 'orchestrator') || (a.seat ?? '').localeCompare(b.seat ?? ''));
   return mine.map((employee) => ({ employee, last: [...messages].reverse().find((m) => m.kind !== 'event' && (m.from === employee.id || m.to === employee.id)) ?? null }));
 }
 

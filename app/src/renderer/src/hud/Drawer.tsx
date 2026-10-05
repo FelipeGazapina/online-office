@@ -144,7 +144,8 @@ function Details({ e }: { e: Employee }) {
       <div className="facts">
         <span className={`pill ${s.kind}`}>{STATUS_LABEL[s.kind]}</span>
         <span>
-          <i className="pdot" style={{ background: p.color }} /> {p.label} · {block?.name ?? 'No block'} · desk {e.desk + 1}
+          <i className="pdot" style={{ background: p.color }} /> {p.label} · {block?.name ?? 'No block'}
+          {e.seat ? (e.seat.includes(':po_desk:') ? ' · PO desk' : ` · desk ${Number(e.seat.slice(e.seat.lastIndexOf(':') + 1)) + 1}`) : ''}
         </span>
       </div>
 

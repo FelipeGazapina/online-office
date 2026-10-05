@@ -4,6 +4,7 @@ import { voiceApi } from './voice.ts';
 
 const office: OfficeApi = {
   getSnapshot: () => ipcRenderer.invoke(IPC.snapshot),
+  getBuilding: () => ipcRenderer.invoke(IPC.building),
   send: (msg) => ipcRenderer.send(IPC.send, msg),
   subscribe(cb) {
     const listener = (_e: unknown, msg: ServerMessage) => cb(msg);

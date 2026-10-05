@@ -8,8 +8,8 @@ export default async (s) => {
   await s.waitFor('!!window.__office && !!window.office');
   await s.eval(`window.office.send({ type: 'create_block', cwd: ${JSON.stringify(repo)} })`);
   await s.waitFor('__office.store.getState().company.blocks.length === 1');
-  // Slot 0 project computer chair: block center (-12, -5), PO station at (-8.95, -5).
-  await s.eval("__office.teleport(-8.95, -5, Math.PI); __office.step(0.5)");
+  // Slot 0 board terminal: block center (-12, -5), the terminal stands at (-8.5, -8.25) and is used from just south of it.
+  await s.eval("__office.teleport(-8.5, -7.4, Math.PI); __office.step(0.5)");
   await s.press('KeyF', 'f');
   await s.waitFor("__office.store.getState().portalMode === true");
   await s.waitFor("!!document.querySelector('.task-config')");
@@ -34,7 +34,7 @@ export default async (s) => {
   await s.eval('document.activeElement?.blur()');
   await s.press('KeyF', 'f');
   await s.waitFor("__office.store.getState().portalMode === false");
-  await s.eval("__office.teleport(-12, -6.7, Math.PI); __office.step(0.5)");
+  await s.eval("__office.teleport(-12, -7.4, Math.PI); __office.step(0.5)");
   assert(await s.eval("document.body.innerText.includes('open the task board')"), 'the nearby board advertises the F shortcut');
   await s.press('KeyF', 'f');
   await s.waitFor("__office.store.getState().modal?.kind === 'task_board'");

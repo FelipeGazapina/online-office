@@ -68,7 +68,7 @@ export default async (s) => {
   assert((await state(s)).camera === 'iso', 'key 2 switched to the Overview camera');
   await settle(s);
 
-  const target = { x: -11, z: -6.9 };
+  const target = { x: -11, z: -7.1 };
   await floorClick(s, target.x, target.z);
   await s.waitFor(`__office.state().intent.kind === 'walk'`);
   const walk = (await state(s)).intent;

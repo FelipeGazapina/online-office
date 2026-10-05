@@ -5,7 +5,6 @@ import { appendFileSync, existsSync, mkdirSync, readFileSync, realpathSync, rena
 import { basename, dirname, isAbsolute } from 'node:path';
 import { ALLOW_ANSWER, covers, isAllow, ruleFor, sameRule, type PermissionBody } from '../../shared/permissions.ts';
 import {
-  DESKS_PER_BLOCK,
   MAX_LEVEL,
   PROVIDERS,
   XP_FOR_LEVEL,
@@ -36,6 +35,8 @@ import {
   type TaskBoardState,
   type TaskProvider,
 } from '../../shared/protocol.ts';
+import { applyOps, BuildHistory, deskOf, encodeBuilding, freeDesk, legacyBuilding, parseBuilding, placeDesk, teamKit, ITEM_DEFS } from '../../shared/space/index.ts';
+import type { Building, BuildOp, EmployeeId as SpaceEmployeeId, ItemId, SpaceContext, Violation } from '../../shared/space/index.ts';
 import type { ActorId, ConvoKey, LedgerEntry, MailView, MessageId } from '../../shared/mail.ts';
 import { HARNESSES } from './adapters/index.ts';
 import type { EmployeeSession, SessionHost } from './adapters/types.ts';
@@ -67,6 +68,8 @@ export type OfficeEvents = {
   changed(): void;
   said(employeeId: EmployeeId, text: string): void;
   log(employeeId: EmployeeId, line: string, at: number): void;
+  building(building: Building, rev: number): void;
+  rejected(violations: readonly Violation[]): void;
   // Mail changed, or an employee is writing a bubble. Both go past the snapshot coalescer.
   mail?(view: MailView): void;
   stream?(employeeId: EmployeeId, replyingTo: MessageId | null, delta: string, done: boolean): void;
@@ -139,10 +142,10 @@ function githubRemote(cwd: string): string | undefined {
   }
 }
 
-function seed(): Company {
+function seed(): Loaded {
   const requested = Number.parseInt(process.env.OFFICE_START_LEVEL ?? '1', 10);
   const level = Math.min(Math.max(Number.isNaN(requested) ? 1 : requested, 1), MAX_LEVEL);
-  return {
+  const company: Company = {
     name: 'Gazapina Labs',
     level,
     xp: XP_FOR_LEVEL[level],
@@ -150,11 +153,13 @@ function seed(): Company {
     blocks: [],
     employees: [],
   };
+  return { company, building: legacyBuilding([], []).building };
 }
 
 // What company.json can hold: a company from before models, permissions and settings existed, or from after.
-type StoredEmployee = Omit<Employee, 'model' | 'permissions' | 'subagents' | 'role'> & Partial<Pick<Employee, 'model' | 'permissions' | 'role'>>;
-type StoredCompany = Omit<Company, 'settings' | 'employees'> & { settings?: Partial<CompanySettings>; employees: StoredEmployee[] };
+type StoredEmployee = Omit<Employee, 'model' | 'permissions' | 'subagents' | 'role' | 'seat'> &
+  Partial<Pick<Employee, 'model' | 'permissions' | 'role' | 'seat'>> & { desk?: number };
+type StoredCompany = Omit<Company, 'settings' | 'employees'> & { settings?: Partial<CompanySettings>; employees: StoredEmployee[]; building?: unknown };
 
 // Every field added after the first release gets its default here and nowhere else, so an old file and a new one
 // load to the same company, and saving what this returns is the same file again.
@@ -168,8 +173,9 @@ function migrate(c: StoredCompany): Company {
     ...c,
     settings,
     blocks: c.blocks.map((b) => ({ ...b, githubRepo: b.githubRepo ?? githubRemote(b.cwd) })),
-    employees: c.employees.map((e) => ({
+    employees: c.employees.map(({ desk: _desk, ...e }) => ({
       ...e,
+      seat: e.seat ?? null,
       role: e.role ?? 'employee',
       model: e.model ?? HARNESSES[e.provider].defaultModel(),
       permissions: e.permissions ?? { mode: settings.defaultPermissions, alwaysAllow: [] },
@@ -178,7 +184,49 @@ function migrate(c: StoredCompany): Company {
   };
 }
 
-function load(file: string): Company | undefined {
+const spaceCtx = (company: Company, seats: ReadonlyMap<SpaceEmployeeId, ItemId>): SpaceContext => ({
+  blocks: new Set(company.blocks.map((b) => b.id)),
+  employees: new Map(company.employees.map((e) => [e.id, { blockId: e.blockId, orchestrator: e.role === 'orchestrator' }])),
+  seats,
+});
+
+const seatsOf = (company: Company): Map<SpaceEmployeeId, ItemId> =>
+  new Map(company.employees.flatMap((e) => (e.seat ? [[e.id, e.seat] as const] : [])));
+
+// Gives every employee a desk of the right kind in their own block. A seat that is gone, shared or in the wrong
+// block is dropped and the employee goes to the team's next free desk, or with `grow` to a new one beside the team.
+function seatEveryone(company: Company, building: Building, grow = true): Building {
+  const seats = new Map<SpaceEmployeeId, ItemId>();
+  const ok = (e: Employee) => {
+    const item = e.seat ? deskOf(building, new Map([[e.id, e.seat]]), e.id) : null;
+    const kind = e.role === 'orchestrator' ? 'po_desk' : 'bench_desk';
+    return !!item && ITEM_DEFS[item.def]?.kind === kind && item.blockId === e.blockId;
+  };
+  for (const e of company.employees) if (ok(e) && ![...seats.values()].includes(e.seat!)) seats.set(e.id, e.seat!);
+  let b = building;
+  for (const e of company.employees) {
+    if (seats.has(e.id)) continue;
+    const orchestrator = e.role === 'orchestrator';
+    let desk = freeDesk(b, seats, e.blockId, orchestrator);
+    if (!desk) {
+      const put = grow && company.blocks.some((x) => x.id === e.blockId) ? placeDesk(b, e.blockId, orchestrator, spaceCtx(company, seats)) : null;
+      const applied = put && applyOps(b, put, spaceCtx(company, seats));
+      if (applied?.ok) {
+        b = applied.building;
+        desk = freeDesk(b, seats, e.blockId, orchestrator);
+      }
+    }
+    if (desk) seats.set(e.id, desk.id);
+  }
+  for (const e of company.employees) e.seat = seats.get(e.id) ?? null;
+  return b;
+}
+
+type Loaded = { company: Company; building: Building };
+
+// A company.json from before the building keeps its desks: the static office becomes a building and every employee
+// sits where the old desk index put them. Saving the result and loading it again changes nothing.
+function load(file: string): Loaded | undefined {
   let raw: unknown;
   try {
     raw = JSON.parse(readFileSync(file, 'utf8'));
@@ -189,14 +237,32 @@ function load(file: string): Company | undefined {
   const c = raw as Partial<StoredCompany> | null;
   if (!c || typeof c.name !== 'string' || typeof c.level !== 'number' || typeof c.xp !== 'number') return undefined;
   if (!Array.isArray(c.blocks) || !Array.isArray(c.employees)) return undefined;
-  return migrate(c as StoredCompany);
+  const stored = c as StoredCompany;
+  const company = migrate(stored);
+  let building: Building | undefined;
+  if (stored.building !== undefined) {
+    try {
+      building = parseBuilding(stored.building);
+    } catch (err) {
+      console.warn(`company.json: ${err instanceof Error ? err.message : err}. Rebuilding the office from its teams.`);
+    }
+  }
+  if (!building) {
+    const legacy = legacyBuilding(
+      company.blocks.map((b) => ({ id: b.id, slot: b.slot })),
+      stored.employees.map((e) => ({ id: e.id, blockId: e.blockId, desk: e.desk ?? -1, orchestrator: (e.role ?? 'employee') === 'orchestrator' })),
+    );
+    building = legacy.building;
+    for (const e of company.employees) e.seat = legacy.seats.get(e.id) ?? null;
+  }
+  return { company, building: seatEveryone(company, building) };
 }
 
 // Subagents belong to a running session, so they are never written.
-function save(file: string, company: Company) {
+function save(file: string, company: Company, building: Building) {
   mkdirSync(dirname(file), { recursive: true });
   const tmp = `${file}.tmp`;
-  const stored = { ...company, employees: company.employees.map(({ subagents: _, ...e }) => e) };
+  const stored = { ...company, employees: company.employees.map(({ subagents: _, ...e }) => e), building: encodeBuilding(building) };
   writeFileSync(tmp, JSON.stringify(stored, null, 2));
   renameSync(tmp, file);
 }
@@ -220,6 +286,10 @@ function readLedger(file: string): LedgerEntry[] {
 
 export class Office {
   private company: Company;
+  private building: Building;
+  // Counts changes in this run, so the renderer can tell a building it already holds from a new one.
+  private buildingRev = 1;
+  private history = new BuildHistory();
   // Deliberately not persisted with company.json. Every app session starts with an open door.
   private meetingDoor: MeetingDoor = 'open';
   private sessions = new Map<EmployeeId, EmployeeSession>();
@@ -249,7 +319,9 @@ export class Office {
         if (block.taskBoard?.sources.some((source) => source.provider === 'linear')) void this.refreshTaskBoard(block.id);
       }
     });
-    this.company = load(dataFile) ?? seed();
+    const loaded = load(dataFile) ?? seed();
+    this.company = loaded.company;
+    this.building = loaded.building;
     this.ledgerFile = dataFile.replace(/\.json$/, '') + '.mail.jsonl';
     this.mail = this.openMail(readLedger(this.ledgerFile));
     for (const e of this.company.employees) {
@@ -259,7 +331,7 @@ export class Office {
       }
       this.startSession(e);
     }
-    save(dataFile, this.company);
+    save(dataFile, this.company, this.building);
     for (const block of this.company.blocks) if (block.taskBoard?.sources.length) void this.refreshTaskBoard(block.id);
     // Sessions exist now, so whatever a crash left half delivered can go out again.
     this.mail.recoverOnStart();
@@ -313,9 +385,13 @@ export class Office {
 
   snapshot(): Snapshot {
     return {
-      type: 'snapshot', company: this.company, harnesses: this.harnesses, catalogs: this.catalogs, meetingDoor: this.meetingDoor,
+      type: 'snapshot', company: this.company, harnesses: this.harnesses, catalogs: this.catalogs, meetingDoor: this.meetingDoor, buildingRev: this.buildingRev,
       taskBoards: Object.fromEntries(this.taskBoards), taskConnections: this.services.taskBoards.connectionStates(), mail: this.mail.view(),
     };
+  }
+
+  buildingState(): { building: Building; rev: number } {
+    return { building: this.building, rev: this.buildingRev };
   }
 
   shutdown() {
@@ -375,6 +451,12 @@ export class Office {
         return this.freshSession(msg.employeeId);
       case 'reset_company':
         return this.reset();
+      case 'build':
+        return this.build(msg.ops);
+      case 'undo':
+        return this.rewrite(this.history.undo(this.building, this.ctx()));
+      case 'redo':
+        return this.rewrite(this.history.redo(this.building, this.ctx()));
       default: {
         const unreachable: never = msg;
         throw new OfficeError(`Unhandled message ${JSON.stringify(unreachable)}`);
@@ -399,8 +481,44 @@ export class Office {
   }
 
   private commit() {
-    save(this.dataFile, this.company);
+    save(this.dataFile, this.company, this.building);
     this.events.changed();
+  }
+
+  private ctx(): SpaceContext {
+    return spaceCtx(this.company, seatsOf(this.company));
+  }
+
+  private setBuilding(building: Building) {
+    this.building = seatEveryone(this.company, building, false);
+    this.buildingRev++;
+    this.events.building(building, this.buildingRev);
+  }
+
+  private build(ops: BuildOp[]) {
+    const applied = applyOps(this.building, ops, this.ctx());
+    if (!applied.ok) return this.events.rejected(applied.violations);
+    this.history.push({ forward: applied.forward, inverse: applied.inverse, label: 'build' });
+    this.setBuilding(applied.building);
+    this.commit();
+  }
+
+  private rewrite(applied: ReturnType<BuildHistory['undo']>) {
+    if (!applied) return;
+    if (!applied.ok) return this.events.rejected(applied.violations);
+    this.setBuilding(applied.building);
+    this.commit();
+  }
+
+  // Office-made edits (a team's kit, a hire's new desk) are not the owner's to undo, so they skip the history.
+  private apply(ops: BuildOp[]): boolean {
+    const applied = applyOps(this.building, ops, this.ctx());
+    if (!applied.ok) {
+      console.warn(`The office could not change the building: ${applied.violations.map((v) => v.kind).join(', ')}`);
+      return false;
+    }
+    this.setBuilding(applied.building);
+    return true;
   }
 
   private employee(id: EmployeeId): Employee {
@@ -638,10 +756,14 @@ export class Office {
     if (!bypassLimit && company.employees.length >= cap) {
       throw new OfficeError(`Headcount cap reached (${cap} at level ${company.level}). Earn XP to grow the company.`);
     }
-    const taken = new Set(company.employees.filter((e) => e.blockId === blockId).map((e) => e.desk));
-    let desk = 0;
-    while (taken.has(desk)) desk++;
-    if (!bypassLimit && desk >= DESKS_PER_BLOCK && Number.isFinite(cap)) throw new OfficeError(`${block.name} has no free desk at this level`);
+    const orchestrator = role === 'orchestrator';
+    let desk = freeDesk(this.building, seatsOf(company), blockId, orchestrator);
+    if (!desk) {
+      if (!bypassLimit && Number.isFinite(cap)) throw new OfficeError(`${block.name} has no free desk at this level`);
+      const put = placeDesk(this.building, blockId, orchestrator, this.ctx());
+      if (put && this.apply(put)) desk = freeDesk(this.building, seatsOf(company), blockId, orchestrator);
+      if (!desk) throw new OfficeError(`${block.name} has no room for another desk`);
+    }
 
     const employee: Employee = {
       id: newId<EmployeeId>(),
@@ -649,7 +771,7 @@ export class Office {
       provider,
       role,
       blockId,
-      desk,
+      seat: desk.id,
       status: { kind: 'idle' },
       activity: 'Just started, settling in at my desk',
       model: requestedModel ?? company.settings.defaultModels[provider] ?? HARNESSES[provider].defaultModel(),
@@ -701,8 +823,18 @@ export class Office {
     const block = this.block(blockId);
     for (const e of this.company.employees.filter((x) => x.blockId === blockId)) this.dismiss(e);
     this.company.blocks = this.company.blocks.filter((b) => b !== block);
+    this.dropItems(blockId);
     this.taskBoards.delete(blockId);
     this.commit();
+  }
+
+  // The team's furniture goes with it. The floor and walls stay, so the owner keeps the space.
+  private dropItems(blockId: BlockId) {
+    const ops: BuildOp[] = this.building.stories.flatMap((s, story) => {
+      const del = s.items.filter((i) => i.blockId === blockId).map((i) => i.id);
+      return del.length ? [{ t: 'items' as const, story, put: [], del }] : [];
+    });
+    if (ops.length) this.apply(ops);
   }
 
   private createBlock(dir: string, name?: string, githubRepo?: string) {
@@ -715,7 +847,9 @@ export class Office {
     const usedColors = new Set(blocks.map((b) => b.color));
     const color = BLOCK_COLORS.find((c) => !usedColors.has(c)) ?? BLOCK_COLORS[slot % BLOCK_COLORS.length]!;
     const repo = githubRepo?.trim().replace(/\/$/, '') || githubRemote(cwd);
-    blocks.push({ id: newId<BlockId>(), name: name?.trim() || basename(cwd), cwd, color, slot, ...(repo && { githubRepo: repo }) });
+    const block: ProjectBlock = { id: newId<BlockId>(), name: name?.trim() || basename(cwd), cwd, color, slot, ...(repo && { githubRepo: repo }) };
+    blocks.push(block);
+    this.apply(teamKit(this.building, block.id, slot));
     this.commit();
   }
 
@@ -838,7 +972,10 @@ export class Office {
 
   private reset() {
     for (const id of [...this.sessions.keys()]) this.stopSession(id);
-    this.company = seed();
+    const fresh = seed();
+    this.company = fresh.company;
+    this.history = new BuildHistory();
+    this.setBuilding(fresh.building);
     rmSync(this.ledgerFile, { force: true });
     this.mail = this.openMail([]);
     this.meetingDoor = 'open';
