@@ -17,7 +17,7 @@ import type {
 import type { Language, VoiceQuality } from '../../shared/voice.ts';
 import { initialVoice, type VoiceState } from './voice/chip.ts';
 
-export type CameraMode = 'iso';
+export type CameraMode = 'iso' | 'first';
 export type MicMode = 'proximity' | 'push';
 export type Lang = 'en-US' | 'pt-BR' | 'auto';
 export type ComputerView = 'office' | 'mirror';
@@ -41,7 +41,9 @@ const defaults: Settings = { camera: 'iso', interrupt: 'next', mic: 'proximity',
 
 function loadSettings(): Settings {
   try {
-    return { ...defaults, ...JSON.parse(localStorage.getItem(SETTINGS_KEY) ?? '{}'), camera: 'iso' };
+    const saved = { ...defaults, ...JSON.parse(localStorage.getItem(SETTINGS_KEY) ?? '{}') };
+    // Older builds saved a follow camera that no longer exists.
+    return { ...saved, camera: saved.camera === 'first' ? 'first' : 'iso' };
   } catch {
     return defaults;
   }

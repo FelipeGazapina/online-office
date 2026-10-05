@@ -4,7 +4,7 @@ import { Vector3 } from 'three';
 import { applyServerMessage } from './office.ts';
 import { KEYS_INTENT, runtime } from './runtime.ts';
 import { stepSim } from './sim.ts';
-import { get, set, setSetting, useStore } from './store.ts';
+import { get, set, setSetting, useStore, type CameraMode } from './store.ts';
 
 const intentState = () => {
   const i = runtime.owner.intent;
@@ -45,7 +45,7 @@ export function installDebug() {
       const p = new Vector3(x, y, z).project(camera);
       return { x: size.left + ((p.x + 1) / 2) * size.width, y: size.top + ((1 - p.y) / 2) * size.height };
     },
-    setCamera: () => setSetting('camera', 'iso'),
+    setCamera: (c: CameraMode) => setSetting('camera', c),
     apply: applyServerMessage,
     store: useStore,
     set,

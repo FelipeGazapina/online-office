@@ -33,9 +33,20 @@ export function installInput() {
       return;
     }
 
+    if (!e.repeat && e.code === 'KeyC' && s.camera === 'first') {
+      e.preventDefault();
+      window.dispatchEvent(new Event('office:toggle-pointer-lock'));
+      return;
+    }
+
     switch (e.code) {
       case 'Digit2':
         return setSetting('camera', 'iso');
+      case 'Digit3':
+        e.preventDefault();
+        setSetting('camera', 'first');
+        if (!document.pointerLockElement) window.dispatchEvent(new Event('office:toggle-pointer-lock'));
+        return;
       case 'KeyH':
         return set({ helpOpen: !s.helpOpen });
       case 'Enter':
