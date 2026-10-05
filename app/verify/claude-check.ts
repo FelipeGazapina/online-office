@@ -38,7 +38,7 @@ function scripted(model = 'm1', policy: PermissionPolicy = { mode: 'inherit', al
     name: 'Ana',
     provider: 'claude-code',
     blockId: 'b1' as BlockId,
-    desk: 0,
+    seat: null,
     status: { kind: 'idle' },
     activity: '',
     model: model as ModelId,

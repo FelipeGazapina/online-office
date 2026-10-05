@@ -55,11 +55,12 @@ HARNESSES['claude-code'] = {
   },
 };
 
+const noBuild = { building() {}, rejected() {} };
 const logs: string[] = [];
 const office = new Office(
   join(dir, 'company.json'),
   { 'claude-code': { kind: 'ready', version: 'fake' }, codex: { kind: 'missing' }, hermes: { kind: 'missing' } },
-  { changed() {}, said() {}, log: (_id, line) => void logs.push(line) },
+  { ...noBuild, changed() {}, said() {}, log: (_id, line) => void logs.push(line) },
   { mcp, memory },
 );
 
@@ -216,7 +217,7 @@ check(/^http:\/\/127\.0\.0\.1:\d+\/mcp\/[0-9a-f]{64}$/.test(fa.host.mcp.url) && 
 check(fa.host.memoryDigest() === '', 'the digest is empty before any note is saved');
 check(fa.host.rules() === '' && fb.host.rules() === '', 'no rules are in scope until F2 reads the rule files');
 
-const capOffice = new Office(join(dir, 'cap-company.json'), { 'claude-code': { kind: 'ready', version: 'fake' }, codex: { kind: 'missing' }, hermes: { kind: 'missing' } }, { changed() {}, said() {}, log() {} }, { mcp, memory });
+const capOffice = new Office(join(dir, 'cap-company.json'), { 'claude-code': { kind: 'ready', version: 'fake' }, codex: { kind: 'missing' }, hermes: { kind: 'missing' } }, { ...noBuild, changed() {}, said() {}, log() {} }, { mcp, memory });
 capOffice.handle({ type: 'create_block', cwd: repo });
 const capBlock = capOffice.snapshot().company.blocks[0]!.id;
 for (const name of ['Fay', 'Gus', 'Hana']) capOffice.handle({ type: 'hire', provider: 'claude-code', blockId: capBlock, name });
@@ -329,7 +330,7 @@ await client.close().catch(() => undefined);
 
 console.log('\n# an old company.json');
 const statuses: Record<Provider, HarnessStatus> = { 'claude-code': { kind: 'ready', version: 'fake' }, codex: { kind: 'missing' }, hermes: { kind: 'missing' } };
-const quiet = { changed() {}, said() {}, log() {} };
+const quiet = { ...noBuild, changed() {}, said() {}, log() {} };
 const fixture = readFileSync(new URL('./fixtures/company-v1.json', import.meta.url), 'utf8').replaceAll('__REPO__', repo);
 const stored = (file: string) => JSON.parse(readFileSync(file, 'utf8')) as Company;
 const oldFile = join(dir, 'old', 'company.json');
@@ -378,7 +379,7 @@ console.log('\n# model, mode and Always allow');
 const labFile = join(dir, 'lab', 'company.json');
 const labLogs: string[] = [];
 let labChanges = 0;
-const labEvents = { changed: () => void labChanges++, said() {}, log: (_id: EmployeeId, line: string) => void labLogs.push(line) };
+const labEvents = { ...noBuild, changed: () => void labChanges++, said() {}, log: (_id: EmployeeId, line: string) => void labLogs.push(line) };
 const lab = new Office(labFile, statuses, labEvents, { mcp, memory });
 lab.handle({ type: 'create_block', cwd: repo });
 const labBlock = lab.snapshot().company.blocks[0]!.id;

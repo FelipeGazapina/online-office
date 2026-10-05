@@ -256,7 +256,7 @@ const flat = (stories = 1, size = 20): Building => {
   check(kinds(other).includes('desk_wrong_block'), 'giving a seated desk to another team is desk_wrong_block');
   const dbl = validate(grown, { ...kitCtx, seats: new Map([['k0', id('b3:bench_desk:01')], ['k1', id('b3:bench_desk:01')]]) });
   check(dbl.some((v) => v.kind === 'desk_double_occupied'), 'two employees on one desk is desk_double_occupied');
-  const stale = applyOps(grown, [put(0, item('zz', 'plant', 0, 0))], { ...kitCtx, seats: new Map([['k0', id('b3:po_desk:00')]]) });
+  const stale = applyOps(grown, [put(0, item('zz', 'plant', 30, -30))], { ...kitCtx, seats: new Map([['k0', id('b3:po_desk:00')]]) });
   check(stale.ok, 'a seat that was already wrong does not block unrelated edits');
 }
 

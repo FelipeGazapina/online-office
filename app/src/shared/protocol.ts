@@ -2,6 +2,7 @@
 // Main is the source of truth for *logical* state. The renderer derives every avatar pose from it:
 // an employee whose status is `blocked_on_owner` walks to the owner; everyone else walks back to their desk.
 
+import type { Building, BuildOp, ItemId, Violation } from './space/types.ts';
 import type { VoiceApi } from './voice.ts';
 
 export type EmployeeId = string & { readonly __brand: 'EmployeeId' };
@@ -69,7 +70,8 @@ export type Employee = {
   provider: Provider;
   role?: EmployeeRole;
   blockId: BlockId;
-  desk: number;
+  // The desk item this employee sits at, or null when the block had no room for another. Main assigns it.
+  seat: ItemId | null;
   status: EmployeeStatus;
   activity: string;
   // What the harness runs on from the next turn. Chosen at hire, changed with `set_model`.
@@ -216,7 +218,7 @@ export type Company = {
 
 export const MAX_LEVEL = 5;
 export const XP_FOR_LEVEL = [0, 0, 30, 80, 150, 250] as const;
-// The bench seats in renderer/layout.ts. The head desk is not one of them.
+// The bench desks a team starts with (space/kit.ts). The PO desk is not one of them.
 export const DESKS_PER_BLOCK = 6;
 export const headcountCap = (level: number) => (level >= MAX_LEVEL ? Infinity : Math.min(level, MAX_LEVEL));
 
@@ -272,7 +274,11 @@ export type ClientMessage =
   | { type: 'remove_allow_rule'; employeeId: EmployeeId; rule: AllowRule }
   // Stops the employee's session and starts another with no memory of the conversation. Notes, model and rules stay.
   | { type: 'fresh_session'; employeeId: EmployeeId }
-  | { type: 'reset_company' };
+  | { type: 'reset_company' }
+  // Edits to the building. Main applies them all or none and answers a refusal with `build_rejected`.
+  | { type: 'build'; ops: BuildOp[] }
+  | { type: 'undo' }
+  | { type: 'redo' };
 
 export type Snapshot = {
   type: 'snapshot';
@@ -280,6 +286,8 @@ export type Snapshot = {
   harnesses: Record<Provider, HarnessStatus>;
   catalogs: Record<Provider, ModelCatalog>;
   meetingDoor: MeetingDoor;
+  // Changes whenever the building does. The building itself arrives on its own channel.
+  buildingRev: number;
   taskBoards: Record<string, TaskBoardState>;
   taskConnections: Record<TaskProvider, TaskConnectionState>;
 };
@@ -288,11 +296,14 @@ export type ServerMessage =
   | Snapshot
   | { type: 'said'; employeeId: EmployeeId; text: string }
   | { type: 'log'; employeeId: EmployeeId; line: string; at: number }
+  | { type: 'building'; building: Building; rev: number }
+  | { type: 'build_rejected'; violations: readonly Violation[] }
   | { type: 'error'; message: string };
 
 // What the preload exposes as `window.office`. Main validates every ClientMessage, so the renderer can send freely.
 export type OfficeApi = {
   getSnapshot(): Promise<Snapshot>;
+  getBuilding(): Promise<{ building: Building; rev: number }>;
   send(msg: ClientMessage): void;
   subscribe(cb: (msg: ServerMessage) => void): () => void;
   // The OS folder picker. Resolves null when the owner cancels.
@@ -329,6 +340,7 @@ export type UpdateState =
 
 export const IPC = {
   snapshot: 'office:snapshot',
+  building: 'office:building',
   send: 'office:send',
   event: 'office:event',
   pickFolder: 'office:pick-folder',

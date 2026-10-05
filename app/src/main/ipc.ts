@@ -14,6 +14,7 @@ import {
   type TaskBoardConfig,
   type TaskProvider,
 } from '../shared/protocol.ts';
+import type { BuildOp, Item, ItemId, WallSeg } from '../shared/space/types.ts';
 import { Office, OfficeError, type OfficeServices } from './office/company.ts';
 
 // The one place untrusted input becomes a ClientMessage. Ids are opaque strings to the renderer.
@@ -33,6 +34,35 @@ const taskProvider = z.enum(['linear', 'cronospark']) satisfies z.ZodType<TaskPr
 const taskBoardConfig = z.object({
   sources: z.array(z.object({ provider: taskProvider, projectId: z.string().min(1).max(200), label: z.string().max(120).optional() })).max(8),
 }) satisfies z.ZodType<TaskBoardConfig>;
+
+const tile = z.number().int().min(-4096).max(4096);
+const rot = z.union([z.literal(0), z.literal(1), z.literal(2), z.literal(3)]);
+const wallDir = z.enum(['e', 's', 'sd', 'nd']);
+const wallRef = z.object({ x: tile, z: tile, d: wallDir });
+const wallSeg: z.ZodType<WallSeg> = z.object({ x: tile, z: tile, d: wallDir, style: z.number().int().min(0).max(255), open: z.enum(['door', 'window', 'arch']).optional() });
+const itemIdSchema = z.string().min(1).max(200).transform((s) => s as ItemId);
+const item: z.ZodType<Item> = z.object({
+  id: itemIdSchema,
+  def: z.string().min(1).max(60),
+  x: tile,
+  z: tile,
+  rot,
+  blockId: z.string().min(1).optional(),
+  tint: z.number().int().min(0).max(0xffffff).optional(),
+});
+const lot = z.object({ x0: tile, z0: tile, w: z.number().int().min(1).max(64), h: z.number().int().min(1).max(64) });
+const MANY = 4096;
+const buildOp: z.ZodType<BuildOp> = z.discriminatedUnion('t', [
+  z.object({ t: z.literal('lot'), lot }),
+  z.object({ t: z.literal('stories'), count: z.number().int().min(1).max(4) }),
+  z.object({ t: z.literal('walls'), story: z.number().int().min(0).max(3), put: z.array(wallSeg).max(MANY), del: z.array(wallRef).max(MANY) }),
+  z.object({
+    t: z.literal('floor'),
+    story: z.number().int().min(0).max(3),
+    cells: z.array(z.object({ x: tile, z: tile, half: z.union([z.literal(0), z.literal(1)]), paint: z.number().int().min(0).max(255) })).max(MANY),
+  }),
+  z.object({ t: z.literal('items'), story: z.number().int().min(0).max(3), put: z.array(item).max(MANY), del: z.array(itemIdSchema).max(MANY) }),
+]);
 
 const clientMessage = z.discriminatedUnion('type', [
   z.object({ type: z.literal('hire'), provider, blockId, name: z.string().optional(), model: modelId.optional(), role: z.enum(['employee', 'orchestrator']).optional(), bypassLimit: z.boolean().optional() }),
@@ -62,6 +92,9 @@ const clientMessage = z.discriminatedUnion('type', [
   z.object({ type: z.literal('remove_allow_rule'), employeeId, rule: allowRule }),
   z.object({ type: z.literal('fresh_session'), employeeId }),
   z.object({ type: z.literal('reset_company') }),
+  z.object({ type: z.literal('build'), ops: z.array(buildOp).min(1).max(64) }),
+  z.object({ type: z.literal('undo') }),
+  z.object({ type: z.literal('redo') }),
 ]);
 // Compile-time proof the schema and the contract agree in both directions.
 type Parsed = z.infer<typeof clientMessage>;
@@ -96,6 +129,8 @@ export function startOffice({ dataFile, harnesses, window, services }: Options) 
           emit(office.snapshot());
         }, 50);
       },
+      building: (building, rev) => emit({ type: 'building', building, rev }),
+      rejected: (violations) => emit({ type: 'build_rejected', violations }),
       said: (employeeId, text) => emit({ type: 'said', employeeId, text }),
       log: (employeeId, line, at) => emit({ type: 'log', employeeId, line, at }),
     },
@@ -108,6 +143,11 @@ export function startOffice({ dataFile, harnesses, window, services }: Options) 
   ipcMain.handle(IPC.snapshot, (e) => {
     if (!trusted(e)) throw new Error('Untrusted sender');
     return office.snapshot();
+  });
+
+  ipcMain.handle(IPC.building, (e) => {
+    if (!trusted(e)) throw new Error('Untrusted sender');
+    return office.buildingState();
   });
 
   ipcMain.on(IPC.send, (e, raw: unknown) => {

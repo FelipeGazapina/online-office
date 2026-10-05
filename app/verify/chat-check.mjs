@@ -11,7 +11,7 @@ const { get, send, set } = await import('../src/renderer/src/store.ts');
 const { applyServerMessage } = await import('../src/renderer/src/office.ts');
 const { check, finish } = await import('./check.ts');
 
-const person = (id, name) => ({ id, name, provider: 'claude-code', blockId: 'b1', desk: 0, status: { kind: 'idle' }, activity: '', hiredAt: 0 });
+const person = (id, name) => ({ id, name, provider: 'claude-code', blockId: 'b1', seat: null, status: { kind: 'idle' }, activity: '', hiredAt: 0 });
 set({ company: { name: 'Test', level: 3, xp: 0, blocks: [], employees: [person('ann', 'Ann'), person('bob', 'Bob')] } });
 
 const lines = (id) => get().chat[id] ?? [];
