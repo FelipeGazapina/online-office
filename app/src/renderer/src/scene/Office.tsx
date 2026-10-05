@@ -7,6 +7,7 @@ import { enterComputer } from '../computer.ts';
 import { toggleMeetingDoor } from '../meeting.ts';
 import { set, useStore } from '../store.ts';
 import { ownerSeat, worldFor, type World } from '../world.ts';
+import { LobbyDecor } from './Decor.tsx';
 import { Environment } from './Environment.tsx';
 import { Chair, Desk, RoundedPlane } from './Furniture.tsx';
 import { fitText, FONT_BODY, FONT_DISPLAY, roundRect, useCanvasTexture } from './textures.ts';
@@ -237,6 +238,7 @@ export function Office({ company }: { company: Company | null }) {
       <Environment b={b} />
       <CompanySign name={company?.name ?? 'Online Office'} b={b} />
       <SharedFacilities b={b} world={world} />
+      <LobbyDecor cx={(b.x0 + b.x1) / 2} z1={b.z1} right={b.x1 - 4} doorX={DOOR_X} />
       <MeetingRoom world={world} />
       <OwnerCorner world={world} />
       <mesh position={[DOOR_X, 1.5, b.z1 + 2.2]} rotation-y={Math.PI}>

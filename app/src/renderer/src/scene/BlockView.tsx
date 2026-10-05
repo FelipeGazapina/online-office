@@ -5,6 +5,7 @@ import { BLOCK_D, BLOCK_W, STORY_H, YAW, blockCenter, type Building, type Item }
 import { enterProjectComputer } from '../computer.ts';
 import { set, useStore } from '../store.ts';
 import { itemCenter } from '../world.ts';
+import { PodDecor } from './Decor.tsx';
 import { Chair, RoundedPlane } from './Furniture.tsx';
 import { fitText, FONT_BODY, FONT_DISPLAY, ownerComputerTexture, roundRect, useCanvasTexture } from './textures.ts';
 import { useDiagram } from './whiteboard.ts';
@@ -333,6 +334,7 @@ export const BlockView = memo(function BlockView({ block, employees }: { block: 
         <RoundedPlane w={RUG_W + 0.5} d={RUG_D + 0.5} r={0.5} color="#d6dbe0" y={0.008} />
         <RoundedPlane w={RUG_W} d={RUG_D} r={0.35} color={rug} y={0.014} />
         <PodBoundary color={trim} />
+        <PodDecor />
       </group>
       {sign && (
         <AtItem at={sign}>
