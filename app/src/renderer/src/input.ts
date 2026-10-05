@@ -3,6 +3,9 @@ import { KEYS_INTENT, runtime, STEER_KEYS } from './runtime.ts';
 import { setPtt } from './talk.ts';
 import { toggleMeetingDoor } from './meeting.ts';
 import { enterComputer, enterProjectComputer, leaveComputer } from './computer.ts';
+import { holdModifier } from './hud/build/actions.ts';
+import { buildKey } from './hud/build/keys.ts';
+import { buildView } from './hud/build/state.ts';
 
 const isTyping = (t: EventTarget | null) =>
   t instanceof HTMLElement && (t.isContentEditable || t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT');
@@ -11,10 +14,12 @@ const MOVE_KEYS = new Set(['KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowUp', 'ArrowDown
 
 export function installInput() {
   window.addEventListener('keydown', (e) => {
+    holdModifier(e.code, true);
     if (isTyping(e.target)) {
       if (e.key === 'Escape') (e.target as HTMLElement).blur();
       return;
     }
+    if (buildKey(e)) return;
     if (e.metaKey || e.ctrlKey || e.altKey) return;
     const s = get();
 
@@ -85,12 +90,17 @@ export function installInput() {
   });
 
   window.addEventListener('keyup', (e) => {
+    holdModifier(e.code, false);
+    buildView.keys.delete(e.code);
     runtime.keys.delete(e.code);
     if (e.code === 'KeyV') setPtt(false);
   });
 
   window.addEventListener('blur', () => {
     runtime.keys.clear();
+    buildView.keys.clear();
+    holdModifier('ShiftLeft', false);
+    holdModifier('ControlLeft', false);
     setPtt(false);
   });
 }

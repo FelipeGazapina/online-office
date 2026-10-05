@@ -498,10 +498,12 @@ export function stepSim(rawDt: number) {
   const askerId = meetingDoor === 'open' && front && front.status.kind === 'blocked_on_owner' && runtime.arrived.get(front.id) === front.status.question.id ? front.id : null;
 
   const nearbyChanged = nearbyIds.length !== state.nearbyIds.length || nearbyIds.some((id, i) => id !== state.nearbyIds[i]);
-  if (story !== state.story || talkingTo !== state.talkingTo || askerId !== state.askerId || nearbyChanged || nearComputer !== state.nearComputer || nearProjectComputer !== state.nearProjectComputer || nearTaskBoard !== state.nearTaskBoard) {
+  // While the owner builds, the story on screen is the one they chose, not the one they stand on.
+  const shown = get().build ? state.story : story;
+  if (shown !== state.story || talkingTo !== state.talkingTo || askerId !== state.askerId || nearbyChanged || nearComputer !== state.nearComputer || nearProjectComputer !== state.nearProjectComputer || nearTaskBoard !== state.nearTaskBoard) {
     if (talkingTo !== state.talkingTo) cancelSpeech();
     set({
-      story,
+      story: shown,
       talkingTo,
       nearbyIds,
       askerId,
