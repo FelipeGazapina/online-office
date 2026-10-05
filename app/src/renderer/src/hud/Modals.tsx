@@ -470,6 +470,33 @@ function LinearBoardModal({ blockId }: { blockId: BlockId }) {
   return <div className="scrim" onMouseDown={close}><div className="modal wide board-page" data-hud-resize-target="modal-linear_board" onMouseDown={(event) => event.stopPropagation()}><div className="wb-head"><div><h2>Linear board</h2><p className="muted">{block.name} · live view from Linear</p></div><button className="btn ink" onClick={close}>Close</button></div><iframe title="Linear board" src={block.linearBoardUrl} allow="clipboard-read; clipboard-write" /></div></div>;
 }
 
+function RemoveBlockModal({ blockId }: { blockId: BlockId }) {
+  const block = useStore((s) => s.company?.blocks.find((b) => b.id === blockId));
+  const names = useStore((s) => s.company?.employees.filter((e) => e.blockId === blockId).map((e) => e.name).join(', '));
+  if (!block) return null;
+  return (
+    <Modal kind="remove_block" title={`Remove ${block.name}?`}>
+      <p>{names ? `This fires ${names}. Their notes are kept with the alumni.` : 'Nobody works here yet.'}</p>
+      <p className="muted">The folder {tailPath(block.cwd, 40)} stays on disk.</p>
+      <div className="actions">
+        <button type="button" className="btn ghost" autoFocus onClick={close}>
+          Cancel
+        </button>
+        <button
+          type="button"
+          className="btn danger armed"
+          onClick={() => {
+            send({ type: 'remove_block', blockId });
+            close();
+          }}
+        >
+          {names ? 'Fire and remove' : 'Remove block'}
+        </button>
+      </div>
+    </Modal>
+  );
+}
+
 export function Modals() {
   const modal = useStore((s) => s.modal);
   if (!modal) return null;
@@ -479,5 +506,6 @@ export function Modals() {
   if (modal.kind === 'github') return <GithubBoardModal blockId={modal.blockId} />;
   if (modal.kind === 'task_board') return <TaskBoardModal blockId={modal.blockId} />;
   if (modal.kind === 'linear_board') return <LinearBoardModal blockId={modal.blockId} />;
+  if (modal.kind === 'remove_block') return <RemoveBlockModal blockId={modal.blockId} />;
   return <WhiteboardModal blockId={modal.blockId} />;
 }

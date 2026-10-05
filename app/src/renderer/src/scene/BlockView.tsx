@@ -14,7 +14,7 @@ function shade(hex: string, amount: number) {
   return `#${new Color(hex).multiplyScalar(amount).getHexString()}`;
 }
 
-function Sign({ name, cwd, color }: { name: string; cwd: string; color: string }) {
+function Sign({ blockId, name, cwd, color }: { blockId: ProjectBlock['id']; name: string; cwd: string; color: string }) {
   const tex = useCanvasTexture(1024, 320, (g) => {
     g.fillStyle = '#344256';
     roundRect(g, 0, 0, 1024, 320, 44);
@@ -37,7 +37,14 @@ function Sign({ name, cwd, color }: { name: string; cwd: string; color: string }
     g.fillText('Project lead · ' + (cwd.length > 32 ? `…${cwd.slice(-31)}` : cwd), 214, 236);
   }, [name, cwd, color]);
   return (
-    <group>
+    <group
+      onClick={(e) => {
+        e.stopPropagation();
+        if (e.delta < 6) set({ modal: { kind: 'remove_block', blockId } });
+      }}
+      onPointerOver={() => void (document.body.style.cursor = 'pointer')}
+      onPointerOut={() => void (document.body.style.cursor = '')}
+    >
       <mesh castShadow position={[0, 0.35, -0.05]}>
         <boxGeometry args={[0.12, 0.7, 0.12]} />
         <meshStandardMaterial color="#3a3f4e" />
@@ -294,7 +301,7 @@ export const BlockView = memo(function BlockView({ block, employees }: { block: 
         <Workstation key={employee.id} pose={deskPose(block.slot, employee.desk)} employee={employee} chairColor={chairColor} />
       ))}
       <group position={[s.x, 0, s.z]}>
-        <Sign name={block.name} cwd={block.cwd} color={block.color} />
+        <Sign blockId={block.id} name={block.name} cwd={block.cwd} color={block.color} />
       </group>
       <group position={[w.x, 0, w.z]}>
         {block.linearBoardUrl ? <LinearBoardWhiteboard block={block} /> : block.taskBoard?.sources.length ? <TaskBoardWhiteboard block={block} /> : block.githubRepo ? <GithubWhiteboard block={block} /> : <Whiteboard block={block} authorName={author} />}
