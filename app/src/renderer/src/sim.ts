@@ -459,6 +459,10 @@ export function stepSim(rawDt: number) {
     stepAvatar(av, e, dt, world, qi, state.talkingTo === e.id, meetingDoor);
   }
 
+  const floors = Object.fromEntries([...runtime.avatars.values()].map((a) => [a.id, a.floor]));
+  const moved = Object.keys(floors).length !== Object.keys(state.avatarFloors).length || Object.entries(floors).some(([id, f]) => state.avatarFloors[id] !== f);
+  if (moved) set({ avatarFloors: floors });
+
   const nearbyIds = nearbyInRange(company);
   const desk = ownerSeat(world);
   const chair = desk ? desk.chair : null;

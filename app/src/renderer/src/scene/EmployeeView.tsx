@@ -26,6 +26,8 @@ export const EmployeeView = memo(function EmployeeView({ employee }: { employee:
   const talking = useStore((s) => s.talkingTo === employee.id);
   const meetingDoor = useStore((s) => s.meetingDoor);
   const selected = useStore((s) => s.selectedId === employee.id);
+  // People on a story above the one the owner is on are not drawn, like the story itself.
+  const upstairs = useStore((s) => (s.avatarFloors[employee.id] ?? 0) > s.story);
   const ring = useRef<Mesh>(null);
 
   useFrame((state) => {
@@ -37,6 +39,7 @@ export const EmployeeView = memo(function EmployeeView({ employee }: { employee:
   return (
     <Person
       look={lookFor(employee)}
+      hidden={upstairs}
       read={() => runtime.avatars.get(employee.id) ?? null}
       typing={employee.status.kind === 'working'}
       onPick={({ x, y }) => set({ menu: { employeeId: employee.id, x, y } })}

@@ -1,26 +1,15 @@
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import { useEffect, useRef } from 'react';
 import { setLabelLayer } from './labelLayer.ts';
-import type { Group } from 'three';
-import { runtime } from '../runtime.ts';
-import { get, useStore } from '../store.ts';
+import { useStore } from '../store.ts';
 import { BuildingLayer } from './building/BuildingLayer.tsx';
 import { BlockView } from './BlockView.tsx';
 import { CameraRig, SimDriver } from './CameraRig.tsx';
 import { EmployeeView } from './EmployeeView.tsx';
 import { Office } from './Office.tsx';
+import { CrowdMeshes } from './people/CrowdMeshes.tsx';
 import { OwnerView } from './OwnerView.tsx';
 import { WalkMarker } from './WalkMarker.tsx';
-
-// People on a story above the one the owner is on are not drawn, like the story itself.
-function OnStory({ id, children }: { id: string; children: React.ReactNode }) {
-  const group = useRef<Group>(null);
-  useFrame(() => {
-    const av = runtime.avatars.get(id);
-    if (group.current) group.current.visible = !av || av.floor <= get().story;
-  });
-  return <group ref={group}>{children}</group>;
-}
 
 function World() {
   const company = useStore((s) => s.company);
@@ -33,12 +22,11 @@ function World() {
       {company?.blocks.map((b) => (
         <BlockView key={b.id} block={b} employees={company.employees.filter((e) => e.blockId === b.id)} />
       ))}
+      <CrowdMeshes />
       <OwnerView />
       <WalkMarker />
       {company?.employees.map((e) => (
-        <OnStory key={e.id} id={e.id}>
-          <EmployeeView employee={e} />
-        </OnStory>
+        <EmployeeView key={e.id} employee={e} />
       ))}
     </>
   );

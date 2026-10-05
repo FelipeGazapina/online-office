@@ -5,9 +5,11 @@ import type { BlockId, Employee, EmployeeId, ModelId, ProjectBlock } from '../..
 import { DESKS_PER_BLOCK } from '../../shared/protocol.ts';
 import { legacyBuilding } from '../../shared/space/index.ts';
 import { applyServerMessage } from './office.ts';
+import { loadMailFixture } from './hud/chat/fixture.ts';
+import { renders } from './hud/chat/renders.ts';
 import { KEYS_INTENT, runtime } from './runtime.ts';
 import { stepSim, tripEnd, walkTo } from './sim.ts';
-import { get, set, setSetting, useStore } from './store.ts';
+import { get, sendTap, set, setSetting, useStore } from './store.ts';
 
 const intentState = () => {
   const i = runtime.owner.intent;
@@ -125,6 +127,17 @@ export function installDebug() {
     // The same walk a floor click starts, aimed at any story. The overview draws only the stories up to the owner's, so a click cannot reach a higher one yet.
     walkTo: (floor: number, x: number, z: number) => walkTo({ kind: 'point', at: { x, z }, floor }),
     injectFake,
+    // Test-only: the chat with a whole conversation in it. Main never hears about these people.
+    loadMailFixture() {
+      const company = get().company;
+      if (!company) throw new Error('no company yet');
+      return loadMailFixture(company);
+    },
+    renders,
+    // Test-only: hand every message the UI would send to `fn` instead of main.
+    tapSend(fn: (m: unknown) => void) {
+      sendTap.fn = fn;
+    },
     measureFrames,
     setCamera: () => setSetting('camera', 'iso'),
     apply: applyServerMessage,
