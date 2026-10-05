@@ -253,6 +253,8 @@ export class Office {
         return this.createBlock(msg.cwd, msg.name, msg.githubRepo);
       case 'update_block':
         return this.updateBlock(msg.blockId, msg.name, msg.cwd, msg.githubRepo);
+      case 'remove_block':
+        return this.removeBlock(msg.blockId);
       case 'configure_task_board':
         return this.configureTaskBoard(msg.blockId, msg.config);
       case 'configure_linear_board':
@@ -343,6 +345,7 @@ export class Office {
     this.taskBoards.set(blockId, { kind: 'loading', cards: previous?.cards ?? [], ...(previous && 'lastFetchedAt' in previous && previous.lastFetchedAt ? { lastFetchedAt: previous.lastFetchedAt } : {}) });
     this.events.changed();
     const result = await this.services.taskBoards.fetchSources(block.taskBoard?.sources ?? []);
+    if (!this.company.blocks.includes(block)) return;
     const now = Date.now();
     this.taskBoards.set(blockId, result.errors.length && !result.cards.length
       ? { kind: 'error', cards: result.cards, message: result.errors.join(' ') }
@@ -569,12 +572,23 @@ export class Office {
   }
 
   private fire(id: EmployeeId) {
-    const e = this.employee(id);
+    this.dismiss(this.employee(id));
+    this.commit();
+  }
+
+  private dismiss(e: Employee) {
     this.stopSession(e.id);
     this.company.employees = this.company.employees.filter((x) => x.id !== e.id);
-    this.commit();
     // Their own notes go to alumni/. The block's notes stay for whoever works there next.
     this.services.memory.archive(e.id).catch((err) => console.error(`Could not archive ${e.name}'s notes:`, err));
+  }
+
+  private removeBlock(blockId: BlockId) {
+    const block = this.block(blockId);
+    for (const e of this.company.employees.filter((x) => x.blockId === blockId)) this.dismiss(e);
+    this.company.blocks = this.company.blocks.filter((b) => b !== block);
+    this.taskBoards.delete(blockId);
+    this.commit();
   }
 
   private createBlock(dir: string, name?: string, githubRepo?: string) {

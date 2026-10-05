@@ -1531,6 +1531,12 @@ h3 {
 .b-name .reveal {
   margin-left: auto;
 }
+.b-name .remove {
+  color: var(--tomato);
+}
+.b-name .remove.armed {
+  text-decoration: underline;
+}
 .first-run {
   margin-top: 10px;
   padding: 14px;
