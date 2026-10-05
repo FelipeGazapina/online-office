@@ -1,62 +1,12 @@
 // No model, no Electron, no sessions. The pure mailroom core and its shell, driven through fake ports.
 // Run from app/: node verify/mail-check.ts   Exits 1 on any failed check.
-import type { BlockId, EmployeeId } from '../src/shared/protocol.ts';
-import type { ActorId, LedgerEntry, Message, MessageId } from '../src/shared/mail.ts';
+import type { EmployeeId } from '../src/shared/protocol.ts';
+import type { LedgerEntry, MessageId } from '../src/shared/mail.ts';
 import { MAX_HOPS } from '../src/shared/mail.ts';
-import { emptyMail, fold, Mailroom, recover, serving, type Hired, type HireSpec, type MailState, type Member } from '../src/main/office/mail.ts';
+import { emptyMail, fold, Mailroom, recover, serving, type MailState } from '../src/main/office/mail.ts';
 import { check, finish } from './check.ts';
 
-const B1 = 'b1' as BlockId;
-const B2 = 'b2' as BlockId;
-const id = (s: string) => s as EmployeeId;
-const PO = id('po');
-const ANA = id('ana');
-const BRUNO = id('bruno');
-const CLEO = id('cleo');
-const OUTSIDER = id('zed');
-
-const roster = (): Member[] => [
-  { id: PO, name: 'Pia', role: 'orchestrator', blockId: B1, status: 'idle' },
-  { id: ANA, name: 'Ana', role: 'employee', blockId: B1, status: 'idle' },
-  { id: BRUNO, name: 'Bruno', role: 'employee', blockId: B1, status: 'idle' },
-  { id: CLEO, name: 'Cleo', role: 'employee', blockId: B1, status: 'idle' },
-  { id: OUTSIDER, name: 'Zed', role: 'employee', blockId: B2, status: 'idle' },
-];
-
-function world(ledger: readonly LedgerEntry[] = []) {
-  const members = roster();
-  const prompts = new Map<string, string[]>();
-  const steers: { to: string; text: string; style: string }[] = [];
-  const persisted: LedgerEntry[] = [...ledger];
-  const hires: HireSpec[] = [];
-  let n = 0;
-  let failDeliver: EmployeeId | undefined;
-  const nameOf = (a: ActorId) => (a === 'owner' ? 'the owner' : a === 'mailroom' ? 'the office' : (members.find((m) => m.id === a)?.name ?? a));
-  const room = new Mailroom(
-    {
-      members: () => members,
-      nameOf,
-      deliver: (to, prompt) => {
-        if (failDeliver === to) throw new Error('folder is gone');
-        prompts.set(to, [...(prompts.get(to) ?? []), prompt]);
-      },
-      steer: (to, text, style) => void steers.push({ to, text, style }),
-      hire: (_from, spec): Hired => {
-        hires.push(spec);
-        const hired = { id: id(`new${hires.length}`), name: spec.name ?? `New${hires.length}` };
-        members.push({ id: hired.id, name: hired.name, role: 'employee', blockId: B1, status: 'idle' });
-        return { ok: true, ...hired };
-      },
-      persist: (entry) => void persisted.push(entry),
-      changed: () => {},
-      stream: () => {},
-      now: () => 1_000 + n,
-      newId: () => `m${String(++n).padStart(4, '0')}`,
-    },
-    ledger,
-  );
-  return { room, prompts, steers, persisted, hires, members, failDeliver: (e?: EmployeeId) => void (failDeliver = e) };
-}
+import { ANA, B1, BRUNO, CLEO, PO, world, type World } from './mail-world.ts';
 
 const owner = (to: string, text: string, as: 'request' | 'say' = 'request', extra: { key?: string } = {}) =>
   ({ from: 'owner' as const, to, blockId: B1, body: as === 'request' ? { kind: 'request' as const, text } : { kind: 'say' as const, text }, ...extra });
@@ -66,19 +16,19 @@ const posted = (r: ReturnType<Mailroom['post']>) => {
   return r;
 };
 const ids = (r: ReturnType<Mailroom['post']>) => posted(r).id;
-const life = (w: ReturnType<typeof world>, m: MessageId) => w.room.state.life.get(m)?.s;
-const replyTo = (w: ReturnType<typeof world>, m: MessageId) => {
+const life = (w: World, m: MessageId) => w.room.state.life.get(m)?.s;
+const replyTo = (w: World, m: MessageId) => {
   const l = w.room.state.life.get(m);
   const r = l?.s === 'settled' ? w.room.state.messages.get(l.by) : undefined;
   return r?.kind === 'reply' ? r : undefined;
 };
 const requestIn = (prompt: string) => /\[Request (\w+) /.exec(prompt)![1]!;
 // An employee answers with the reply tool, then the turn ends.
-const answer = (w: ReturnType<typeof world>, who: EmployeeId, r: Parameters<Mailroom['reply']>[2]) => {
+const answer = (w: World, who: EmployeeId, r: Parameters<Mailroom['reply']>[2]) => {
   w.room.reply(who, requestIn(lastPrompt(w, who)), r);
   w.room.turnEnded(who, r.text, true);
 };
-const lastPrompt = (w: ReturnType<typeof world>, who: EmployeeId) => w.prompts.get(who)?.at(-1) ?? '';
+const lastPrompt = (w: World, who: EmployeeId) => w.prompts.get(who)?.at(-1) ?? '';
 
 const dump = (s: MailState) =>
   JSON.stringify({

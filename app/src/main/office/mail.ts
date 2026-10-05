@@ -242,6 +242,14 @@ export const renderBatch = (batch: readonly Message[], redelivered: boolean, nam
   return `${note}${parts.join('\n\n')}`;
 };
 
+// What the desk shows while this batch is being worked: the first request's title, else the first words.
+export const titleOfBatch = (batch: readonly Message[]): string => {
+  const request = batch.find((m) => m.kind === 'request');
+  if (request?.kind === 'request') return request.title;
+  const first = batch[0];
+  return first && 'text' in first ? titleOf(first.text) : 'Messages';
+};
+
 export const titleOf = (text: string): string => {
   const line = text.trim().split('\n')[0]!.trim();
   return line.length > 80 ? `${line.slice(0, 79).trimEnd()}…` : line || 'Untitled';
@@ -303,7 +311,7 @@ export type MailPorts = {
   members(): Member[];
   nameOf(actor: ActorId): string;
   // Starts a turn. May throw (a missing folder, a session that is gone): the turn then fails and its requests settle failed.
-  deliver(to: EmployeeId, prompt: string): void;
+  deliver(to: EmployeeId, prompt: string, title: string): void;
   steer(to: EmployeeId, text: string, style: 'next' | 'now'): void;
   hire(from: EmployeeId, spec: HireSpec): Hired;
   persist(entry: LedgerEntry): void;
@@ -411,7 +419,7 @@ export class Mailroom {
       const running = hasMailbox(target.id) ? this.state.active.get(target.id) : undefined;
       if (running && urgency !== 'queue') {
         this.append({ t: 'deliver', ids: [b.id], to: target.id, turn: running, at: this.ports.now() });
-        this.ports.steer(target.id as EmployeeId, renderBatch([this.state.messages.get(b.id)!], false, this.ports.nameOf), urgency);
+        this.ports.steer(target.id as EmployeeId, req.from === 'owner' ? body.text : renderBatch([this.state.messages.get(b.id)!], false, this.ports.nameOf), urgency);
       }
     } else {
       this.put({ ...b, kind: 'request', intent: body.intent ?? 'work', title: body.title ?? titleOf(body.text), text: body.text, ...(body.bar?.length ? { bar: body.bar } : {}) });
@@ -558,7 +566,7 @@ export class Mailroom {
     this.append({ t: 'deliver', ids: batch.map((m) => m.id), to, turn, at: this.ports.now() });
     const prompt = renderBatch(batch, redelivered, this.ports.nameOf);
     try {
-      this.ports.deliver(to, prompt);
+      this.ports.deliver(to, prompt, titleOfBatch(batch));
     } catch (e) {
       this.turnEnded(to, e instanceof Error ? e.message : String(e), false);
     }

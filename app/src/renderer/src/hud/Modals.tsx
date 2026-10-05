@@ -455,7 +455,7 @@ function TaskBoardModal({ blockId }: { blockId: BlockId }) {
               <p className="muted">{selected.priority ? `Priority ${selected.priority}` : 'No priority set'}</p>
               {selected.url && <a href={selected.url} target="_blank" rel="noreferrer">Open in {selected.sourceLabel}</a>}
               <h4>Assign to an AI employee</h4>
-              {employees.length ? employees.map((employee) => <button className="btn primary task-assign" key={employee.id} onClick={() => { send({ type: 'assign_task', blockId, taskId: selected.id, employeeId: employee.id }); close(); }}>{employee.name}</button>) : <p className="muted">Every AI employee in this block is busy. Wait for one to become idle.</p>}
+              {employees.length ? employees.map((employee) => <button className="btn primary task-assign" key={employee.id} onClick={() => { send({ type: 'post', to: employee.id, clientId: crypto.randomUUID(), as: 'request', text: `Work on ${selected.identifier}: ${selected.title} [${selected.sourceLabel}]${selected.url ? ` ${selected.url}` : ''}` }); close(); }}>{employee.name}</button>) : <p className="muted">Every AI employee in this block is busy. Wait for one to become idle.</p>}
             </> : <p className="muted">Select an issue to see its details and assign it to an idle AI employee.</p>}
           </aside>
         </div>

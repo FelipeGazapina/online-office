@@ -52,7 +52,7 @@ const routed = (s) =>
   s.mainLogs
     .join('\n')
     .split('\n')
-    .filter((l) => /^\[ipc\] \{"type":"(assign|interject|answer)"/.test(l))
+    .filter((l) => /^\[ipc\] \{"type":"(post|answer)"/.test(l))
     .map((l) => {
       try {
         return JSON.parse(l.slice('[ipc] '.length));
@@ -60,7 +60,7 @@ const routed = (s) =>
         return { type: /"type":"(\w+)"/.exec(l)[1], truncated: true };
       }
     });
-const wordsOf = (m) => m.task ?? m.text;
+const wordsOf = (m) => m.text;
 
 const ANNOUNCEMENT = 'This is a long announcement from your colleague, so the microphone has to stay closed while I keep on talking for several seconds without any pause at all.';
 const employeeSays = async (s, words) => s.eval(`__office.apply({ type: 'said', employeeId: ${claude}.id, text: ${JSON.stringify(words)} })`);
@@ -97,7 +97,7 @@ async function arrived(s, before, lang, how) {
   assert(all.length === before + 1, `${how}: exactly one message reached the office (${all.length - before})`);
   const heard = wordsOf(all.at(-1));
   assert(hears(heard, PHRASES[lang].words), `${how}: the office received the right words: "${heard}"`);
-  assert(all.at(-1).type === 'assign', `${how}: an idle employee got it as a task`);
+  assert(all.at(-1).type === 'post' && all.at(-1).as === 'request', `${how}: an idle employee got it as a task`);
   return heard;
 }
 
@@ -161,7 +161,7 @@ async function answerByVoice(s) {
   const how = 'the question card, en';
   await quiet(s);
   assert(await click(s, 'Hold V'), `${how}: chose the Hold V microphone mode, where the detector is otherwise off`);
-  await s.eval(`window.office.send({ type: 'assign', employeeId: ${claude}.id, task: 'Call the ask_owner tool to ask me which fruit I want, with exactly two options: Banana and Apple. Then say the fruit I chose.' })`);
+  await s.eval(`window.office.send({ type: 'post', to: ${claude}.id, clientId: 'fruit', as: 'request', text: 'Call the ask_owner tool to ask me which fruit I want, with exactly two options: Banana and Apple. Then say the fruit I chose.' })`);
   await s.waitFor(`${status}.kind === 'blocked_on_owner'`, 120000);
   await stepUntil(s, `__office.state().askerId === ${claude}.id && !!document.querySelector('.qcard')`, 60000, 'the question card');
   await stopTalking(s);

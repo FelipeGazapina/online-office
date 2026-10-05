@@ -2,7 +2,7 @@
 // adapter starts the SDK with, what it sends it, and what it tells the office about what comes back.
 // Run from app/: node verify/claude-check.ts   Exits 1 on any failed check.
 import type { CanUseTool, Options, SDKMessage, SDKUserMessage } from '@anthropic-ai/claude-agent-sdk';
-import { ClaudeSession, PushQueue, type ClaudeRun } from '../src/main/office/adapters/claude.ts';
+import { ClaudeSession, PushQueue, partialText, type ClaudeRun } from '../src/main/office/adapters/claude.ts';
 import type { SessionHost } from '../src/main/office/adapters/types.ts';
 import type { BlockId, Employee, EmployeeId, ModelId, PermissionPolicy, QuestionBody, Subagent } from '../src/shared/protocol.ts';
 import { check, finish, sleep, until } from './check.ts';
@@ -51,6 +51,8 @@ function scripted(model = 'm1', policy: PermissionPolicy = { mode: 'inherit', al
   const logs: string[] = [];
   const started: Subagent[] = [];
   const finished: string[] = [];
+  const completed: (string | undefined)[] = [];
+  const streamed: string[] = [];
   let answer = 'Allow';
   let rules = '';
   const host: SessionHost = {
@@ -72,11 +74,12 @@ function scripted(model = 'm1', policy: PermissionPolicy = { mode: 'inherit', al
     mcp: { url: 'http://127.0.0.1:1/mcp/scripted', name: 'office' },
     memoryDigest: () => '',
     rules: () => rules,
-    taskCompleted() {},
+    taskCompleted: (result) => void completed.push(result),
+    streamed: (delta, done) => void streamed.push(done ? '<done>' : delta),
     subagentStarted: (subagent) => void started.push(subagent),
     subagentFinished: (id) => void finished.push(id),
   };
-  return { employee, host, asked, said, logs, started, finished, answers: (text: string) => void (answer = text), setRules: (text: string) => void (rules = text), session: new ClaudeSession(host, run) };
+  return { employee, host, asked, said, logs, started, finished, completed, streamed, answers: (text: string) => void (answer = text), setRules: (text: string) => void (rules = text), session: new ClaudeSession(host, run) };
 }
 const canUse = (p: Process) => async (name: string, input: Record<string, unknown>) => {
   const decision = await p.options.canUseTool!(name, input, { signal: new AbortController().signal, toolUseID: 'toolu_x' } as Parameters<CanUseTool>[2]);
@@ -235,6 +238,26 @@ cold.session.assign('after the crash');
 const revived = processes.at(-1)!;
 await until(() => revived.sent.length === 1);
 check(revived.sent[0]!.message.content === 'after the crash', 'a change held when the process died is dropped with it');
+
+console.log('\n# live bubble text');
+check(partialText('{"to":"owner","te') === '' && partialText('{"to":"owner","text":"On it') === 'On it', 'partialText reads the text argument as it grows');
+check(partialText('{"text":"Say \\"hi\\"\\nnow \\u00e9') === 'Say "hi"\nnow é' && partialText('{"text":"cut\\') === 'cut' && partialText('{"text":"a\\u00') === 'a', 'it decodes escapes and stops cleanly in the middle of one');
+check(partialText('{"text":"done","other":"x"}') === 'done', 'it stops at the closing quote');
+const live = scripted();
+live.session.assign('go');
+const liveProc = processes.at(-1)!;
+const delta = (index: number, partial_json: string) => sdk({ type: 'stream_event', parent_tool_use_id: null, event: { type: 'content_block_delta', index, delta: { type: 'input_json_delta', partial_json } } });
+await feed(liveProc, sdk({ type: 'stream_event', parent_tool_use_id: null, event: { type: 'content_block_start', index: 1, content_block: { type: 'tool_use', name: 'mcp__office__message', id: 't1', input: {} } } }));
+await feed(liveProc, delta(1, '{"to":"owner","text":"On '));
+await feed(liveProc, delta(1, 'it, splitting this up."}'));
+await feed(liveProc, sdk({ type: 'stream_event', parent_tool_use_id: null, event: { type: 'content_block_stop', index: 1 } }));
+await feed(liveProc, sdk({ type: 'stream_event', parent_tool_use_id: null, event: { type: 'content_block_start', index: 2, content_block: { type: 'tool_use', name: 'Bash', id: 't2', input: {} } } }));
+await feed(liveProc, delta(2, '{"command":"ls","text":"secret"}'));
+check(liveProc.options.includePartialMessages === true, 'partial messages are on');
+check(live.streamed.join('') === 'On it, splitting this up.<done>', `the message tool's text streams as it is written (${live.streamed.join('|')})`);
+await feed(liveProc, turnEnd());
+check(live.completed.length === 1, 'the finished turn reports its end once');
+live.session.stop();
 
 ana.session.stop();
 idle.session.stop();
