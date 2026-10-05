@@ -109,7 +109,7 @@ export function Scene() {
         camera={{ fov: 55, near: 0.1, far: 220, position: [-10, 6, 12] }}
         gl={{ antialias: true, powerPreference: 'high-performance' }}
       >
-        <color attach="background" args={['#2a2530']} />
+        <color attach="background" args={['#d6e8f2']} />
         <AdaptiveQuality />
         <World />
       </Canvas>

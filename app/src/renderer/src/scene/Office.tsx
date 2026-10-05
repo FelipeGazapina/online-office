@@ -7,6 +7,7 @@ import { enterComputer } from '../computer.ts';
 import { toggleMeetingDoor } from '../meeting.ts';
 import { set, useStore } from '../store.ts';
 import { ownerSeat, worldFor, type World } from '../world.ts';
+import { Environment } from './Environment.tsx';
 import { Chair, Desk, RoundedPlane } from './Furniture.tsx';
 import { fitText, FONT_BODY, FONT_DISPLAY, roundRect, useCanvasTexture } from './textures.ts';
 
@@ -195,7 +196,7 @@ function Lights({ b }: { b: Bounds }) {
   }, [target, cx, cz]);
   return (
     <>
-      <hemisphereLight args={['#fff3e2', '#c9a37c', 1.15]} />
+      <hemisphereLight args={['#f4f6ff', '#bba383', 1.15]} />
       <directionalLight
         target={target}
         castShadow
@@ -231,6 +232,7 @@ export function Office({ company }: { company: Company | null }) {
   return (
     <>
       <Lights b={b} />
+      <Environment b={b} />
       <CompanySign name={company?.name ?? 'Online Office'} b={b} />
       <SharedFacilities b={b} world={world} />
       <MeetingRoom world={world} />
