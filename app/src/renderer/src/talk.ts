@@ -1,5 +1,5 @@
 // Owner speech: routing text to the right protocol message, and the microphone pipeline that produces it.
-import type { EmployeeId } from '../../shared/protocol.ts';
+import type { EmployeeId, InterruptStyle } from '../../shared/protocol.ts';
 import type { MicAccess } from '../../shared/voice.ts';
 import { cancelSpeech } from './audio.ts';
 import { employeeById, get, LANGS, send, set, toast, useStore } from './store.ts';
@@ -9,6 +9,15 @@ import { openCapture, type Capture } from './voice/mic.ts';
 import type { Vad, VadEvents } from './voice/vad.ts';
 import { SAMPLE_RATE } from './voice/ring.ts';
 
+// Says `text` to an employee the way a boss would: a word to someone mid-task steers them, anything else is a request that
+// queues if they are busy. The mailroom answers a boss who speaks to someone waiting on a decision by itself.
+export function tell(employeeId: EmployeeId, text: string, style: InterruptStyle = get().interrupt) {
+  const clientId = crypto.randomUUID();
+  const status = employeeById(employeeId)?.status;
+  if (status?.kind === 'blocked_on_owner') return send({ type: 'answer', employeeId, questionId: status.question.id, text });
+  send(status?.kind === 'working' ? { type: 'post', to: employeeId, clientId, as: 'say', text, urgency: style } : { type: 'post', to: employeeId, clientId, as: 'request', text });
+}
+
 // What a sentence means depends on what the listener is doing, exactly like in a real office.
 export function routeText(employeeId: EmployeeId, text: string) {
   const e = employeeById(employeeId);
@@ -16,14 +25,14 @@ export function routeText(employeeId: EmployeeId, text: string) {
   if (!e || !clean) return;
   const s = e.status;
   if (s.kind === 'blocked_on_owner') {
-    send({ type: 'answer', employeeId, questionId: s.question.id, text: clean });
+    tell(employeeId, clean);
     toast(`Answered ${e.name}: ${clean}`, 'ok');
   } else if (s.kind === 'working') {
     const style = get().interrupt;
-    send({ type: 'interject', employeeId, text: clean, style });
+    tell(employeeId, clean, style);
     toast(`${style === 'now' ? 'Stopped' : 'Tapped'} ${e.name}: ${clean}`, 'ok');
   } else {
-    send({ type: 'assign', employeeId, task: clean });
+    tell(employeeId, clean);
     toast(`Assigned to ${e.name}: ${clean}`, 'ok');
   }
 }

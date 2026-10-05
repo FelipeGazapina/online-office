@@ -1,7 +1,7 @@
 import { boardPage } from './board.ts';
 import { randomUUID } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, realpathSync, renameSync, statSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { basename, dirname, isAbsolute } from 'node:path';
 import { ALLOW_ANSWER, covers, isAllow, ruleFor, sameRule, type PermissionBody } from '../../shared/permissions.ts';
 import {
@@ -36,10 +36,13 @@ import {
   type TaskBoardState,
   type TaskProvider,
 } from '../../shared/protocol.ts';
+import type { ActorId, ConvoKey, LedgerEntry, MailView, MessageId } from '../../shared/mail.ts';
 import { HARNESSES } from './adapters/index.ts';
 import type { EmployeeSession, SessionHost } from './adapters/types.ts';
 import { logger } from './debug.ts';
 import { Inbox, type Left } from './inbox.ts';
+import { defaultIds, Mailroom, type HireSpec, type Hired, type Member } from './mail.ts';
+import { mailTools } from './mail-tools.ts';
 import type { OfficeMcp } from './mcp.ts';
 import type { MemoryStore } from './memory.ts';
 import { TaskBoardService } from './task-board.ts';
@@ -64,6 +67,12 @@ export type OfficeEvents = {
   changed(): void;
   said(employeeId: EmployeeId, text: string): void;
   log(employeeId: EmployeeId, line: string, at: number): void;
+  // Mail changed, or an employee is writing a bubble. Both go past the snapshot coalescer.
+  mail?(view: MailView): void;
+  stream?(employeeId: EmployeeId, replyingTo: MessageId | null, delta: string, done: boolean): void;
+  history?(convo: ConvoKey, messages: import('../../shared/mail.ts').Message[], hasMore: boolean): void;
+  // Something the owner must hear about that no request is open for, like a folder that was deleted.
+  error?(message: string): void;
 };
 
 // The things every session leans on, started before the first employee so a session can connect the moment it is built.
@@ -192,6 +201,23 @@ function save(file: string, company: Company) {
   renameSync(tmp, file);
 }
 
+function readLedger(file: string): LedgerEntry[] {
+  let raw: string;
+  try {
+    raw = readFileSync(file, 'utf8');
+  } catch {
+    return [];
+  }
+  // Only this process writes the file. A line cut short by a crash is dropped.
+  return raw.split('\n').flatMap((line) => {
+    try {
+      return line ? [JSON.parse(line) as LedgerEntry] : [];
+    } catch {
+      return [];
+    }
+  });
+}
+
 export class Office {
   private company: Company;
   // Deliberately not persisted with company.json. Every app session starts with an open door.
@@ -207,6 +233,10 @@ export class Office {
   private readonly events: OfficeEvents;
   private readonly services: OfficeServices & { taskBoards: TaskBoardService };
   private readonly taskBoards = new Map<BlockId, TaskBoardState>();
+  private readonly ledgerFile: string;
+  private mail!: Mailroom;
+  // The last thing each employee said in the turn they are on. It is the reply when the harness gives no final text.
+  private lastSaid = new Map<EmployeeId, string>();
 
   constructor(dataFile: string, harnesses: Record<Provider, HarnessStatus>, events: OfficeEvents, services: OfficeServices) {
     this.dataFile = dataFile;
@@ -220,6 +250,8 @@ export class Office {
       }
     });
     this.company = load(dataFile) ?? seed();
+    this.ledgerFile = dataFile.replace(/\.json$/, '') + '.mail.jsonl';
+    this.mail = this.openMail(readLedger(this.ledgerFile));
     for (const e of this.company.employees) {
       if (e.status.kind === 'working' || e.status.kind === 'blocked_on_owner') {
         e.status = { kind: 'idle' };
@@ -229,12 +261,60 @@ export class Office {
     }
     save(dataFile, this.company);
     for (const block of this.company.blocks) if (block.taskBoard?.sources.length) void this.refreshTaskBoard(block.id);
+    // Sessions exist now, so whatever a crash left half delivered can go out again.
+    this.mail.recoverOnStart();
+  }
+
+  private openMail(ledger: LedgerEntry[]): Mailroom {
+    const nameOf = (a: ActorId) => (a === 'owner' ? 'the owner' : a === 'mailroom' ? 'the office' : (this.company.employees.find((e) => e.id === a)?.name ?? 'someone who left'));
+    return new Mailroom(
+      {
+        members: () => this.company.employees.map((e): Member => ({ id: e.id, name: e.name, role: e.role ?? 'employee', blockId: e.blockId, status: e.status.kind, ...('task' in e.status ? { doing: e.status.task } : {}) })),
+        nameOf,
+        deliver: (to, prompt, title) => this.deliver(to, prompt, title),
+        steer: (to, text, style) => this.steer(to, text, style),
+        hire: (from, spec) => this.hireFor(from, spec),
+        persist: (entry) => {
+          mkdirSync(dirname(this.ledgerFile), { recursive: true });
+          appendFileSync(this.ledgerFile, `${JSON.stringify(entry)}\n`);
+        },
+        changed: (view) => {
+          this.events.mail?.(view);
+          this.events.changed();
+        },
+        stream: (employeeId, replyingTo, delta, done) => this.events.stream?.(employeeId, replyingTo, delta, done),
+        now: () => Date.now(),
+        newId: defaultIds,
+      },
+      ledger,
+    );
+  }
+
+  // A turn starts. The prompt is the chat transcript of what is waiting. A missing folder throws, and the mailroom settles those requests failed.
+  private deliver(id: EmployeeId, prompt: string, title: string) {
+    const e = this.employee(id);
+    try {
+      this.assertFolderExists(e);
+    } catch (err) {
+      this.events.error?.(err instanceof Error ? err.message : String(err));
+      throw err;
+    }
+    delete e.completedAt;
+    this.lastSaid.delete(id);
+    this.sessionOf(e).assign(prompt, title);
+  }
+
+  // A boss speaking to someone who is waiting on a decision is the decision. Everyone else is told in the middle of the turn.
+  private steer(id: EmployeeId, text: string, style: 'next' | 'now') {
+    const e = this.employee(id);
+    if (e.status.kind === 'blocked_on_owner') return this.answer(e.id, e.status.question.id, text);
+    this.sessionOf(e).interject(text, style);
   }
 
   snapshot(): Snapshot {
     return {
       type: 'snapshot', company: this.company, harnesses: this.harnesses, catalogs: this.catalogs, meetingDoor: this.meetingDoor,
-      taskBoards: Object.fromEntries(this.taskBoards), taskConnections: this.services.taskBoards.connectionStates(),
+      taskBoards: Object.fromEntries(this.taskBoards), taskConnections: this.services.taskBoards.connectionStates(), mail: this.mail.view(),
     };
   }
 
@@ -246,7 +326,8 @@ export class Office {
   handle(msg: ClientMessage): void {
     switch (msg.type) {
       case 'hire':
-        return this.hire(msg.provider, msg.blockId, msg.name, msg.model, msg.role, msg.bypassLimit);
+        this.hire(msg.provider, msg.blockId, msg.name, msg.model, msg.role, msg.bypassLimit);
+        return;
       case 'fire':
         return this.fire(msg.employeeId);
       case 'create_block':
@@ -269,19 +350,17 @@ export class Office {
         this.services.taskBoards.configureCronoSpark(msg.apiKey, msg.userId);
         this.events.changed();
         return;
-      case 'assign_task':
-        return this.assignTask(msg.blockId, msg.taskId, msg.employeeId);
-      case 'assign':
-        return this.assign(msg.employeeId, msg.task);
+      case 'post':
+        return this.postFromOwner(msg);
+      case 'cancel_message':
+        this.mail.cancel('owner', msg.messageId);
+        return;
+      case 'load_history': {
+        const page = this.mail.history(msg.convo, msg.before, msg.limit);
+        return this.events.history?.(msg.convo, page.messages, page.hasMore);
+      }
       case 'answer':
         return this.answer(msg.employeeId, msg.questionId, msg.text, msg.always);
-      case 'interject': {
-        const e = this.employee(msg.employeeId);
-        // A boss speaking to someone who is waiting on a decision is the decision.
-        if (e.status.kind === 'blocked_on_owner') return this.answer(e.id, e.status.question.id, msg.text);
-        this.assertFolderExists(e);
-        return this.sessionOf(e).interject(msg.text, msg.style);
-      }
       case 'meeting_door':
         return this.setMeetingDoor(msg.state);
       case 'load_models':
@@ -301,6 +380,22 @@ export class Office {
         throw new OfficeError(`Unhandled message ${JSON.stringify(unreachable)}`);
       }
     }
+  }
+
+  private postFromOwner(msg: Extract<ClientMessage, { type: 'post' }>) {
+    const target = this.mail.resolve('owner', msg.to, msg.blockId);
+    if (!target.ok) throw new OfficeError(target.detail);
+    if (target.id === 'owner' || target.id === 'mailroom') throw new OfficeError('Pick someone on a block to talk to.');
+    const e = this.employee(target.id);
+    // A boss speaking to someone who is waiting on a decision is the decision.
+    if (msg.as === 'say' && e.status.kind === 'blocked_on_owner') return this.answer(e.id, e.status.question.id, msg.text);
+    const posted = this.mail.post({
+      from: 'owner',
+      to: e.id,
+      key: msg.clientId,
+      body: msg.as === 'say' ? { kind: 'say', text: msg.text, ...(msg.urgency ? { urgency: msg.urgency } : {}) } : { kind: 'request', text: msg.text },
+    });
+    if (!posted.ok) throw new OfficeError(posted.detail);
   }
 
   private commit() {
@@ -353,16 +448,6 @@ export class Office {
     this.events.changed();
   }
 
-  private assignTask(blockId: BlockId, taskId: string, employeeId: EmployeeId) {
-    const block = this.block(blockId);
-    const employee = this.employee(employeeId);
-    if (employee.blockId !== block.id) throw new OfficeError(`${employee.name} does not work in ${block.name}`);
-    const card = this.taskBoards.get(blockId)?.cards.find((candidate) => candidate.id === taskId);
-    if (!card) throw new OfficeError('That ticket is no longer on the board. Refresh and try again.');
-    const link = card.url ? ` ${card.url}` : '';
-    this.assign(employeeId, `Work on ${card.identifier}: ${card.title} [${card.sourceLabel}]${link}`);
-  }
-
   private sessionOf(e: Employee): EmployeeSession {
     const s = this.sessions.get(e.id);
     if (!s) throw new OfficeError(`${e.name} has no session`);
@@ -393,6 +478,7 @@ export class Office {
       employee.status = { kind: 'error', message: `${PROVIDERS[employee.provider].label} is not connected to the office yet` };
       return;
     }
+    const nameOf = (a: ActorId) => (a === 'owner' ? 'the owner' : a === 'mailroom' ? 'the office' : (this.company.employees.find((e) => e.id === a)?.name ?? 'someone who left'));
     const notebook = this.services.memory.notebook({ employeeId: employee.id, blockId: block.id, provider: employee.provider });
     const ask: SessionHost['ask'] = (body, signal) => {
       if (this.sessions.get(employee.id) !== session) return Promise.resolve('');
@@ -421,9 +507,15 @@ export class Office {
         block.whiteboard = { title, mermaid: '', page, by: employee.id, at: Date.now() };
         this.commit();
       },
-      delegateToTeammate: async (target, task) => this.delegateToTeammate(employee, target, task),
+      mail: mailTools(this.mail, employee.id, nameOf, (employee.role ?? 'employee') === 'orchestrator'),
       memory: notebook,
     });
+    // Adapters keep reporting for a moment after a turn ends (activity, idle). The next turn must start after that, or the
+    // late idle would wipe its working status.
+    const endTurn = (text: string, ok: boolean) =>
+      queueMicrotask(() => {
+        if (this.sessions.get(employee.id) === session) this.mail.turnEnded(employee.id, text, ok);
+      });
     const host: SessionHost = {
       employee,
       block,
@@ -434,23 +526,31 @@ export class Office {
       get permissions() {
         return employee.permissions;
       },
-      setStatus: live((status) => this.report(employee, { status })),
+      setStatus: live((status) => {
+        this.report(employee, { status });
+        if (status.kind === 'error') endTurn(status.message, false);
+      }),
       setActivity: live((text) => this.report(employee, { activity: text })),
       setSessionId: live((id) => {
         employee.sessionId = id;
         this.commit();
       }),
-      said: live((text) => this.events.said(employee.id, text)),
+      said: live((text) => {
+        this.lastSaid.set(employee.id, text);
+        this.events.said(employee.id, text);
+      }),
       log: live((line) => this.events.log(employee.id, line, Date.now())),
       ask,
       mcp: { url, name: 'office' },
       memoryDigest: () => notebook.digest(block.name),
       // F2 reads the rule files here.
       rules: () => '',
-      taskCompleted: live(() => {
+      taskCompleted: live((result) => {
         employee.completedAt = Date.now();
         this.addXp(XP_PER_TASK);
+        endTurn(result?.trim() || this.lastSaid.get(employee.id) || '', true);
       }),
+      streamed: live((delta, done = false) => this.mail.streamed(employee.id, delta, done)),
       subagentStarted: live((subagent) => this.startSubagent(employee, subagent)),
       subagentFinished: live((id) => this.finishSubagent(employee, id)),
     };
@@ -524,7 +624,7 @@ export class Office {
     this.commit();
   }
 
-  private hire(provider: Provider, blockId: BlockId, requestedName?: string, requestedModel?: ModelId, role: EmployeeRole = 'employee', bypassLimit = false) {
+  private hire(provider: Provider, blockId: BlockId, requestedName?: string, requestedModel?: ModelId, role: EmployeeRole = 'employee', bypassLimit = false): Employee {
     const { company } = this;
     const block = this.block(blockId);
     const harness = this.harnesses[provider];
@@ -560,6 +660,19 @@ export class Office {
     company.employees.push(employee);
     this.startSession(employee);
     this.commit();
+    return employee;
+  }
+
+  // The one place a PO's hire becomes an employee, so the seat model can change it in one spot.
+  private hireFor(from: EmployeeId, spec: HireSpec): Hired {
+    const po = this.employee(from);
+    try {
+      const hired = this.hire(po.provider, po.blockId, spec.name, undefined, 'employee');
+      return { ok: true, id: hired.id, name: hired.name };
+    } catch (err) {
+      if (err instanceof OfficeError) return { ok: false, reason: err.message };
+      throw err;
+    }
   }
 
   private pickName(): string {
@@ -577,6 +690,7 @@ export class Office {
   }
 
   private dismiss(e: Employee) {
+    this.mail.employeeFired(e.id);
     this.stopSession(e.id);
     this.company.employees = this.company.employees.filter((x) => x.id !== e.id);
     // Their own notes go to alumni/. The block's notes stay for whoever works there next.
@@ -633,34 +747,11 @@ export class Office {
     this.commit();
   }
 
-  private assign(id: EmployeeId, task: string) {
-    const e = this.employee(id);
-    if (e.status.kind === 'working' || e.status.kind === 'blocked_on_owner') {
-      throw new OfficeError(`${e.name} is busy. Interject to redirect them.`);
-    }
-    this.assertFolderExists(e);
-    delete e.completedAt;
-    this.sessionOf(e).assign(task.trim());
-  }
-
   // The folder is checked when the block is made, but it can be deleted later. A harness started there fails with its
   // own misleading error: Claude's blames its binary.
   private assertFolderExists(e: Employee) {
     const block = this.block(e.blockId);
     if (!existsSync(block.cwd)) throw new OfficeError(`${block.name}'s folder ${block.cwd} no longer exists. Restore it, or make a new block on a folder that does.`);
-  }
-
-  private async delegateToTeammate(orchestrator: Employee, target: string | undefined, task: string): Promise<string> {
-    if ((orchestrator.role ?? 'employee') !== 'orchestrator') return 'Only the block orchestrator can delegate team tasks.';
-    const teammates = this.company.employees.filter((candidate) => candidate.blockId === orchestrator.blockId && candidate.id !== orchestrator.id);
-    const normalized = target?.trim().toLocaleLowerCase();
-    const teammate = normalized
-      ? teammates.find((candidate) => candidate.name.toLocaleLowerCase() === normalized)
-      : teammates.find((candidate) => candidate.status.kind === 'idle');
-    if (!teammate) return normalized ? `No teammate named ${target} works in this block.` : 'Every teammate is busy or this block has no other employees.';
-    if (teammate.status.kind === 'working' || teammate.status.kind === 'blocked_on_owner') return `${teammate.name} is busy. Ask them to finish or choose another teammate.`;
-    this.assign(teammate.id, task.trim());
-    return `Assigned ${teammate.name}: ${task.trim()}`;
   }
 
   private answer(id: EmployeeId, questionId: QuestionId, text: string, always = false) {
@@ -740,12 +831,16 @@ export class Office {
     e.activity = 'Started a fresh session';
     this.events.log(id, 'Started a fresh session', Date.now());
     this.startSession(e);
+    // What it was serving is over. Anything queued behind goes to the new session.
+    this.mail.turnEnded(id, 'The session was restarted before this finished.', false);
     this.commit();
   }
 
   private reset() {
     for (const id of [...this.sessions.keys()]) this.stopSession(id);
     this.company = seed();
+    rmSync(this.ledgerFile, { force: true });
+    this.mail = this.openMail([]);
     this.meetingDoor = 'open';
     this.commit();
     this.services.memory.wipe().catch((err) => console.error('Could not wipe memory:', err));
