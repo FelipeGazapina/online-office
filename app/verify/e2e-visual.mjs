@@ -44,6 +44,7 @@ export default async (s) => {
   await s.sleep(1500);
   await save(s, 'iso');
 
+  await s.eval('__office.teleport(-5, 7, Math.PI)');
   await s.press('Tab');
   await s.waitFor('window.__officeCamera && window.__officeCamera.blend >= 0.999', 10000);
   await s.eval('__office.step(0.2)');

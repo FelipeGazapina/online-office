@@ -1,13 +1,14 @@
 import { useFrame, type ThreeEvent } from '@react-three/fiber';
 import { memo, useLayoutEffect, useMemo, useRef } from 'react';
-import { Color, DoubleSide, InstancedMesh, Matrix4, MeshBasicMaterial, MeshStandardMaterial, Quaternion, RepeatWrapping, Vector3, type BufferGeometry } from 'three';
+import { BackSide, BoxGeometry, BufferGeometry, Color, DoubleSide, Group, InstancedMesh, Matrix4, MeshBasicMaterial, MeshStandardMaterial, Quaternion, RepeatWrapping, Vector3 } from 'three';
 import { PROVIDERS, type Employee } from '../../../../shared/protocol.ts';
 import { ITEM_DEFS, STORY_H, WALL_STYLES, YAW, type FloorGeometry, type ItemId } from '../../../../shared/space/index.ts';
+import { hasFloorAt, tileIndex } from '../../../../shared/space/geom.ts';
 import { runtime } from '../../runtime.ts';
 import { get, set, useStore } from '../../store.ts';
 import { walkTo } from '../../sim.ts';
 import { chairOf } from '../../world.ts';
-import { codeTexture, plankTexture } from '../textures.ts';
+import { ceilingTexture, codeTexture, plankTexture } from '../textures.ts';
 import { floorGeometry } from './floor.ts';
 import { chairModel, DEFAULT_TINT, DYNAMIC, modelOf, screenGeometry } from './models.ts';
 import { curbModel, facesCamera, glassModel, octantOf, VARIANTS, wallMatrix, wallModel, wallRecords, ZERO, type Variant } from './walls.ts';
@@ -25,6 +26,13 @@ const furnitureMaterial = new MeshStandardMaterial({ vertexColors: true, roughne
 const wallMaterial = new MeshStandardMaterial({ vertexColors: true, roughness: 0.95 });
 const glassMaterial = new MeshStandardMaterial({ color: '#cfe8ff', emissive: '#a8d4ff', emissiveIntensity: 0.9, roughness: 0.2, side: DoubleSide });
 const railMaterial = new MeshStandardMaterial({ color: '#c9cdd8', roughness: 0.5, metalness: 0.3 });
+const ceilingMap = ceilingTexture();
+ceilingMap.repeat.set(6.5, 6.5);
+const ceilingMaterial = new MeshStandardMaterial({ map: ceilingMap, roughness: 0.95, side: BackSide, emissive: '#fff4e0', emissiveIntensity: 0.4 });
+const slabMaterial = new MeshStandardMaterial({ color: '#cdbfa9', roughness: 0.95 });
+const fixtureMaterial = new MeshBasicMaterial({ color: '#fff6dc', toneMapped: false });
+const fixtureGeometry = new BoxGeometry(1.3, 0.05, 0.5);
+const CEILING_Y = STORY_H - 0.3;
 const screenMaterial = new MeshBasicMaterial({ map: codeTexture(), toneMapped: false });
 
 function Instances({
@@ -281,6 +289,74 @@ function Rails({ geom }: { geom: FloorGeometry }) {
   return <Instances geometry={modelOf('rail')} material={railMaterial} count={rails.length / 5} fill={fill} />;
 }
 
+// ---------------------------------------------------------------- ceiling and slab
+
+// A story's ceiling, drawn only in first person. In the overview it would hide the rooms from above.
+function Ceiling({ geom }: { geom: FloorGeometry }) {
+  const group = useRef<Group>(null);
+  const geo = useMemo(() => {
+    const floor = floorGeometry(geom);
+    if (!floor) return null;
+    const g = new BufferGeometry();
+    g.setAttribute('position', floor.getAttribute('position'));
+    g.setAttribute('normal', floor.getAttribute('normal'));
+    g.setAttribute('uv', floor.getAttribute('uv'));
+    g.setIndex(floor.getIndex());
+    g.computeBoundingSphere();
+    return g;
+  }, [geom]);
+  const lamps = useMemo(() => {
+    const out: [number, number][] = [];
+    const { lot, story } = geom;
+    for (let tz = lot.z0; tz < lot.z0 + lot.h; tz++) {
+      for (let tx = lot.x0; tx < lot.x0 + lot.w; tx++) {
+        if (((tx % 4) + 4) % 4 !== 1 || ((tz % 4) + 4) % 4 !== 1) continue;
+        const i = tileIndex(lot, tx, tz);
+        if (hasFloorAt(story, i) && !geom.hole[i]) out.push([tx + 0.5, tz + 0.5]);
+      }
+    }
+    return out;
+  }, [geom]);
+  const fill = useMemo(
+    () => (mesh: InstancedMesh) => {
+      const m = new Matrix4();
+      lamps.forEach(([x, z], i) => mesh.setMatrixAt(i, place(m, x, CEILING_Y - 0.03, z, 0)));
+    },
+    [lamps],
+  );
+  useFrame(() => {
+    const g = group.current;
+    if (g) g.visible = runtime.view.blend > 0.5;
+  });
+  if (!geo) return null;
+  return (
+    <group ref={group} visible={false}>
+      <mesh geometry={geo} material={ceilingMaterial} position-y={CEILING_Y} />
+      <Instances geometry={fixtureGeometry} material={fixtureMaterial} count={lamps.length} fill={fill} castShadow={false} receiveShadow={false} />
+    </group>
+  );
+}
+
+// Upper stories rest on a slab. Its edge is what the overview sees, so it is a thick plaster band under the floor.
+function Slab({ geom }: { geom: FloorGeometry }) {
+  const box = useMemo(() => {
+    const p = geom.render.floor.position;
+    if (!p.length) return null;
+    let x0 = Infinity, x1 = -Infinity, z0 = Infinity, z1 = -Infinity;
+    for (let i = 0; i < p.length; i += 3) {
+      x0 = Math.min(x0, p[i]); x1 = Math.max(x1, p[i]);
+      z0 = Math.min(z0, p[i + 2]); z1 = Math.max(z1, p[i + 2]);
+    }
+    return { x: (x0 + x1) / 2, z: (z0 + z1) / 2, w: x1 - x0 + 0.2, d: z1 - z0 + 0.2 };
+  }, [geom]);
+  if (!box) return null;
+  return (
+    <mesh position={[box.x, -0.15, box.z]} material={slabMaterial} receiveShadow castShadow>
+      <boxGeometry args={[box.w, 0.28, box.d]} />
+    </mesh>
+  );
+}
+
 // ---------------------------------------------------------------- story
 
 /** One story of the building. Stories above the one the owner is on are not drawn. */
@@ -296,7 +372,9 @@ export const StoryView = memo(function StoryView({ geom }: { geom: FloorGeometry
           <meshStandardMaterial color="#6d4c37" roughness={1} />
         </mesh>
       )}
+      {geom.index > 0 && <Slab geom={geom} />}
       <Floor geom={geom} />
+      <Ceiling geom={geom} />
       <Walls geom={geom} />
       <Furniture geom={geom} />
       <Rails geom={geom} />

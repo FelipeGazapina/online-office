@@ -263,3 +263,19 @@ export function blobShadowTexture() {
   blob = new CanvasTexture(c);
   return blob;
 }
+
+let ceiling: CanvasTexture | null = null;
+export function ceilingTexture() {
+  return (ceiling ??= tile(128, (g) => {
+    const r = noise(11);
+    g.fillStyle = '#f3f0ea';
+    g.fillRect(0, 0, 128, 128);
+    for (let i = 0; i < 260; i++) {
+      g.fillStyle = r() < 0.5 ? 'rgba(120,110,95,0.10)' : 'rgba(255,255,255,0.35)';
+      g.fillRect(r() * 128, r() * 128, 1.5, 1.5);
+    }
+    g.fillStyle = 'rgba(110,100,85,0.45)';
+    g.fillRect(0, 0, 128, 3);
+    g.fillRect(0, 0, 3, 128);
+  }));
+}
