@@ -4,9 +4,11 @@ import { Vector3 } from 'three';
 import type { BlockId, Employee, EmployeeId, ModelId, ProjectBlock } from '../../shared/protocol.ts';
 import { DESKS_PER_BLOCK } from '../../shared/protocol.ts';
 import { applyServerMessage } from './office.ts';
+import { loadMailFixture } from './hud/chat/fixture.ts';
+import { renders } from './hud/chat/renders.ts';
 import { KEYS_INTENT, runtime } from './runtime.ts';
 import { stepSim } from './sim.ts';
-import { get, set, setSetting, useStore } from './store.ts';
+import { get, sendTap, set, setSetting, useStore } from './store.ts';
 
 const intentState = () => {
   const i = runtime.owner.intent;
@@ -101,6 +103,17 @@ export function installDebug() {
       return { x: size.left + ((p.x + 1) / 2) * size.width, y: size.top + ((1 - p.y) / 2) * size.height };
     },
     injectFake,
+    // Test-only: the chat with a whole conversation in it. Main never hears about these people.
+    loadMailFixture() {
+      const company = get().company;
+      if (!company) throw new Error('no company yet');
+      return loadMailFixture(company);
+    },
+    renders,
+    // Test-only: hand every message the UI would send to `fn` instead of main.
+    tapSend(fn: (m: unknown) => void) {
+      sendTap.fn = fn;
+    },
     measureFrames,
     setCamera: () => setSetting('camera', 'iso'),
     apply: applyServerMessage,

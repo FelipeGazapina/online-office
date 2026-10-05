@@ -1,80 +1,150 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { PROVIDERS, type Employee } from '../../../shared/protocol.ts';
-import { attachChatImage, send, set, useStore } from '../store.ts';
-import { tell } from '../talk.ts';
+import { get, send, set, useStore } from '../store.ts';
+import { Composer } from './chat/Composer.tsx';
+import { avatarColor, isPo, liveState, mergeMessages, rosterOf, textOf } from './chat/model.ts';
+import { countRender } from './chat/renders.ts';
+import { Roster } from './chat/Roster.tsx';
+import { Thread } from './chat/Thread.tsx';
 import { fmtWait, useNow } from './hooks.ts';
 
 const STATUS_LABEL = { idle: 'Idle', working: 'Working', blocked_on_owner: 'Waiting on you', error: 'Error' } as const;
 const time = (at: number) => new Date(at).toLocaleTimeString([], { hour12: false });
 
-async function readImage(file: File) {
-  if (!file.type.startsWith('image/')) throw new Error('Choose an image file.');
-  if (file.size > 8 * 1024 * 1024) throw new Error('Images must be smaller than 8 MB.');
-  return await new Promise<string>((resolve, reject) => { const reader = new FileReader(); reader.onload = () => resolve(String(reader.result)); reader.onerror = () => reject(new Error('Could not read image.')); reader.readAsDataURL(file); });
+// Cmd+K opens the chat on the PO if it is closed and puts the cursor in the composer. Enter does the same for the keyboard
+// walker, ahead of the global handler that would send it to the talk bar.
+function useChatKeys() {
+  useEffect(() => {
+    const focusComposer = () => requestAnimationFrame(() => document.getElementById('drawer-input')?.focus());
+    const onKey = (ev: KeyboardEvent) => {
+      const s = get();
+      if ((ev.metaKey || ev.ctrlKey) && ev.key.toLowerCase() === 'k') {
+        ev.preventDefault();
+        if (!s.selectedId) {
+          const first = s.company?.employees.find((e) => (e.role ?? 'employee') === 'orchestrator') ?? s.company?.employees[0];
+          if (!first) return;
+          set({ selectedId: first.id });
+        }
+        set({ chatDetails: false });
+        focusComposer();
+        return;
+      }
+      if (ev.code !== 'Enter' || ev.metaKey || ev.ctrlKey || ev.altKey || ev.shiftKey || !s.selectedId || s.modal) return;
+      const el = ev.target;
+      if (el instanceof HTMLElement && (el.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT', 'BUTTON', 'A'].includes(el.tagName))) return;
+      ev.preventDefault();
+      ev.stopPropagation();
+      set({ chatDetails: false });
+      focusComposer();
+    };
+    document.addEventListener('keydown', onKey, true);
+    return () => document.removeEventListener('keydown', onKey, true);
+  }, []);
 }
 
 export function Drawer() {
+  countRender('drawer');
+  useChatKeys();
   const id = useStore((s) => s.selectedId);
-  const e = useStore((s) => s.company?.employees.find((x) => x.id === id));
-  const block = useStore((s) => s.company?.blocks.find((b) => b.id === e?.blockId));
-  const logs = useStore((s) => (id ? s.logs[id] : undefined));
-  const lines = useStore((s) => (id ? s.chat[id] : undefined)) ?? [];
-  const nearbyIds = useStore((s) => s.nearbyIds);
-  const company = useStore((s) => s.company);
+  const employees = useStore((s) => s.company?.employees);
+  const blocks = useStore((s) => s.company?.blocks);
+  const tail = useStore((s) => s.mail.tail);
+  const history = useStore((s) => s.history);
+  const e = employees?.find((x) => x.id === id);
+  const block = blocks?.find((b) => b.id === e?.blockId);
+  const messages = useMemo(() => mergeMessages(tail, ...Object.values(history).map((h) => h.messages)), [tail, history]);
+  const roster = useMemo(() => (employees && e ? rosterOf(employees, e.blockId, messages) : []), [employees, e?.blockId, messages]);
+  const people = useMemo(() => roster.map((r) => r.employee), [roster]);
+  const lasts = useMemo(() => roster.map((r) => r.last), [roster]);
+
+  if (!e) return null;
+  const po = people.find(isPo);
+  return (
+    <aside className="drawer cp" data-hud-resize-target="drawer" aria-label="Chat">
+      <Roster people={people} lasts={lasts} blockName={block?.name ?? 'No block'} />
+      <Main who={e} po={po} />
+    </aside>
+  );
+}
+
+function Main({ who, po }: { who: Employee; po: Employee | undefined }) {
+  const sub = useStore((s) => s.chatSub);
+  const details = useStore((s) => s.chatDetails);
+  const root = useStore((s) => (s.chatSub ? s.mail.tail.find((m) => m.id === s.chatSub) ?? Object.values(s.history).flatMap((h) => h.messages).find((m) => m.id === s.chatSub) : undefined));
+  const assignee = useStore((s) => (root?.kind === 'request' ? s.company?.employees.find((x) => x.id === root.to) : undefined));
+  return (
+    <section className="cp-main">
+      <Head who={who} sub={sub ? { title: root ? textOf(root) : 'Request', assignee } : null} details={details} />
+      {details ? (
+        <Details e={who} />
+      ) : (
+        <>
+          <Thread who={who} />
+          <Composer key={who.id} who={who} po={po} assignee={sub ? assignee : undefined} />
+        </>
+      )}
+    </section>
+  );
+}
+
+function Head({ who, sub, details }: { who: Employee; sub: { title: string; assignee: Employee | undefined } | null; details: boolean }) {
+  const streaming = useStore((s) => Boolean(s.streams[who.id]));
+  const actor = useStore((s) => s.mail.actors[who.id]);
+  const open = useStore((s) => s.mail.open);
+  const live = liveState(who, actor, open, streaming);
+  return (
+    <div className="cp-head">
+      {sub ? (
+        <button className="cp-back" onClick={() => set({ chatSub: null })} title="Back to the thread (Esc)">
+          ‹ {who.name}
+        </button>
+      ) : (
+        <i className={`cp-av lg ${live.kind}`} style={{ background: avatarColor(who.id) }} aria-hidden>{who.name[0]}</i>
+      )}
+      <div className="cp-head-main">
+        <h2>{sub ? sub.title : who.name}</h2>
+        <div className="sub">
+          {sub ? (
+            <>assigned to {sub.assignee?.name ?? 'a teammate'}</>
+          ) : (
+            <>
+              {isPo(who) ? 'Product owner' : PROVIDERS[who.provider].label} · <span className={`cp-live-state ${live.kind}`}>{live.text}</span>
+            </>
+          )}
+        </div>
+      </div>
+      <button className={`link cp-details-btn ${details ? 'on' : ''}`} aria-pressed={details} onClick={() => set({ chatDetails: !details })}>
+        {details ? 'Back to chat' : 'Details'}
+      </button>
+      <button className="x" title="Close (Esc)" onClick={() => set({ selectedId: null })}>
+        ×
+      </button>
+    </div>
+  );
+}
+
+// Everything about the person except the conversation: settings, the current task, the tool log, firing.
+function Details({ e }: { e: Employee }) {
+  const block = useStore((s) => s.company?.blocks.find((b) => b.id === e.blockId));
+  const logs = useStore((s) => s.logs[e.id]);
   const catalogs = useStore((s) => s.catalogs);
   const now = useNow(1000);
-  const [draft, setDraft] = useState('');
-  const [image, setImage] = useState<{ data: string; name: string }>();
   const [confirm, setConfirm] = useState(false);
   const [showLog, setShowLog] = useState(false);
-  const input = useRef<HTMLInputElement>(null);
-  const threadEnd = useRef<HTMLDivElement>(null);
-  const logEnd = useRef<HTMLDivElement>(null);
-  const groupMembers = useMemo(
-    () =>
-      nearbyIds
-        .map((nearbyId) => company?.employees.find((employee) => employee.id === nearbyId))
-        .filter((employee): employee is Employee => Boolean(employee)),
-    [company, nearbyIds],
-  );
-
-  useEffect(() => {
-    threadEnd.current?.scrollIntoView({ block: 'end' });
-  }, [lines.length, id]);
-  useEffect(() => {
-    logEnd.current?.scrollIntoView({ block: 'end' });
-  }, [logs?.length, showLog]);
   useEffect(() => {
     setConfirm(false);
     setShowLog(false);
-    setDraft('');
-  }, [id]);
-
-  if (!e) return null;
-  if (groupMembers.length > 1) return <GroupDrawer members={groupMembers} />;
+  }, [e.id]);
   const p = PROVIDERS[e.provider];
   const catalog = catalogs?.[e.provider];
   const s = e.status;
 
   return (
-    <aside className="drawer" data-hud-resize-target="drawer" key={e.id}>
-      <header>
-        <div>
-          <h2>{e.name}</h2>
-          <div className="sub">
-            <i className="pdot" style={{ background: p.color }} />
-            {p.label} · {(e.role ?? 'employee') === 'orchestrator' ? 'Block orchestrator' : 'Employee'}
-          </div>
-        </div>
-        <button className="x" title="Close (Esc)" onClick={() => set({ selectedId: null })}>
-          ×
-        </button>
-      </header>
-
+    <div className="cp-details">
       <div className="facts">
         <span className={`pill ${s.kind}`}>{STATUS_LABEL[s.kind]}</span>
         <span>
-          {block?.name ?? 'No block'} · desk {e.desk + 1}
+          <i className="pdot" style={{ background: p.color }} /> {p.label} · {block?.name ?? 'No block'} · desk {e.desk + 1}
         </span>
       </div>
 
@@ -100,36 +170,6 @@ export function Drawer() {
         )}
       </section>
 
-      <div className="thread" role="log">
-        {lines.length === 0 && <p className="muted">Nothing said yet. Type below and it reaches {e.name} as if you stood at their desk.</p>}
-        {lines.map((l, i) => (
-          <div key={i} className={`msg ${l.from}`}>
-            {l.image && <img className="chat-image" src={l.image} alt={l.imageName ?? 'Shared image'} />}
-            {l.text && <span>{l.text}</span>}
-          </div>
-        ))}
-        <div ref={threadEnd} />
-      </div>
-
-      <form
-        className="compose"
-        onSubmit={(ev) => {
-          ev.preventDefault();
-          const text = draft.trim() || (image ? `Shared image: ${image.name}` : '');
-          if (!text) return;
-          tell(e.id, text);
-          if (image) attachChatImage(e.id, text, image.data, image.name);
-          setDraft('');
-          setImage(undefined);
-          input.current?.focus();
-        }}
-      >
-        <label className="attach-image" title="Share an image"><input type="file" accept="image/*" onChange={async (ev) => { const file = ev.target.files?.[0]; if (!file) return; try { setImage({ data: await readImage(file), name: file.name }); } catch (error) { window.alert(error instanceof Error ? error.message : String(error)); } ev.currentTarget.value = ''; }} /><span>＋</span></label><input id="drawer-input" ref={input} value={draft} onChange={(ev) => setDraft(ev.target.value)} placeholder={image ? image.name : `Message ${e.name}`} />
-        <button type="submit" className="btn ink" disabled={!draft.trim() && !image}>
-          Send
-        </button>
-      </form>
-
       <button className="link" onClick={() => setShowLog(!showLog)}>
         {showLog ? 'Hide tool log' : `Tool log (${logs?.length ?? 0})`}
       </button>
@@ -142,7 +182,6 @@ export function Drawer() {
               <span>{l.line}</span>
             </div>
           ))}
-          <div ref={logEnd} />
         </div>
       )}
 
@@ -157,65 +196,6 @@ export function Drawer() {
       >
         {confirm ? `Really fire ${e.name}?` : 'Fire'}
       </button>
-    </aside>
-  );
-}
-
-function GroupDrawer({ members }: { members: Employee[] }) {
-  const [draft, setDraft] = useState('');
-  const threadEnd = useRef<HTMLDivElement>(null);
-  const chats = useStore((s) => s.chat);
-  const lines = useMemo(
-    () =>
-      members
-        .flatMap((member) => (chats[member.id] ?? []).map((line) => ({ ...line, employee: member.name })))
-        .sort((a, b) => a.at - b.at),
-    [chats, members],
-  );
-  useEffect(() => {
-    threadEnd.current?.scrollIntoView({ block: 'end' });
-  }, [lines.length]);
-
-  return (
-    <aside className="drawer" data-hud-resize-target="drawer" key="group">
-      <header>
-        <div>
-          <h2>Nearby team</h2>
-          <div className="sub">{members.map((member) => member.name).join(' · ')}</div>
-        </div>
-        <button className="x" title="Close (Esc)" onClick={() => set({ selectedId: null })}>
-          ×
-        </button>
-      </header>
-      <div className="facts">
-        <span className="pill working">Group chat</span>
-        <span>{members.length} employees in earshot</span>
-      </div>
-      <div className="thread" role="log">
-        {lines.length === 0 && <p className="muted">Nothing said yet. Messages here reach everyone nearby.</p>}
-        {lines.map((line, i) => (
-          <div key={`${line.at}-${i}`} className={`msg ${line.from}`}>
-            <small className="group-speaker">{line.employee}</small>
-            {line.text}
-          </div>
-        ))}
-        <div ref={threadEnd} />
-      </div>
-      <form
-        className="compose"
-        onSubmit={(ev) => {
-          ev.preventDefault();
-          const text = draft.trim();
-          if (!text) return;
-          for (const member of members) tell(member.id, text);
-          setDraft('');
-        }}
-      >
-        <input value={draft} onChange={(ev) => setDraft(ev.target.value)} placeholder="Message everyone nearby" />
-        <button type="submit" className="btn ink" disabled={!draft.trim()}>
-          Send
-        </button>
-      </form>
-    </aside>
+    </div>
   );
 }

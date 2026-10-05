@@ -177,10 +177,13 @@ function ChatBar({ target }: { target: Employee | undefined }) {
 }
 
 export function Bottom() {
-  const s = useStore();
-  const asker = useEmployee(s.askerId);
-  const talking = useEmployee(s.talkingTo);
-  const selected = useEmployee(s.selectedId);
+  // Field by field: a whole-store subscription here would redraw the bar on every streamed token.
+  const meetingDoor = useStore((s) => s.meetingDoor);
+  const cardMinimized = useStore((s) => s.cardMinimized);
+  const asker = useEmployee(useStore((s) => s.askerId));
+  const talking = useEmployee(useStore((s) => s.talkingTo));
+  const selected = useEmployee(useStore((s) => s.selectedId));
+  const s = { meetingDoor, cardMinimized };
   const showCard = s.meetingDoor === 'open' && asker && asker.status.kind === 'blocked_on_owner' && !s.cardMinimized;
   const visibleSelected = selected && (s.meetingDoor === 'open' || selected.status.kind !== 'blocked_on_owner') ? selected : undefined;
   const target = talking ?? (s.meetingDoor === 'open' ? asker : undefined) ?? visibleSelected;

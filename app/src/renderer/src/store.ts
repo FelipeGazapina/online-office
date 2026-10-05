@@ -14,7 +14,7 @@ import type {
   TaskConnectionState,
   UpdateState,
 } from '../../shared/protocol.ts';
-import { emptyMailView, type MailView } from '../../shared/mail.ts';
+import { emptyMailView, type MailView, type Message, type MessageId } from '../../shared/mail.ts';
 import type { Language, VoiceQuality } from '../../shared/voice.ts';
 import { initialVoice, type VoiceState } from './voice/chip.ts';
 
@@ -32,7 +32,8 @@ export const LANGS: Record<Lang, { stt: Language; tts: 'en-US' | 'pt-BR' }> = {
 export type Modal = null | { kind: 'hire'; bypassLimit?: boolean } | { kind: 'block' } | { kind: 'whiteboard'; blockId: BlockId } | { kind: 'github'; blockId: BlockId } | { kind: 'github_setup'; blockId: BlockId } | { kind: 'task_board'; blockId: BlockId; taskId?: string } | { kind: 'linear_board'; blockId: BlockId };
 
 export type LogLine = { line: string; at: number };
-export type ChatLine = { from: 'owner' | 'employee'; text: string; at: number; image?: string; imageName?: string };
+// A post the owner just sent, shown at once. The mail view takes over when it carries the same `clientId` as its key.
+export type PendingPost = { clientId: string; to: string; text: string; as: 'request' | 'say'; at: number };
 export type Toast = { id: number; text: string; tone: 'info' | 'warn' | 'ok' };
 
 // Settings the user is tuning while deciding how this should feel; kept across reloads.
@@ -56,7 +57,13 @@ type State = Settings & {
   taskBoards: Record<string, TaskBoardState>;
   taskConnections: Record<'linear' | 'cronospark', TaskConnectionState>;
   logs: Record<string, LogLine[]>;
-  chat: Record<EmployeeId, ChatLine[]>;
+  // Chat panel: the request whose chain is open (null is the person's own thread), whether the composer targets the PO, and the details view.
+  chatSub: MessageId | null;
+  chatToPo: boolean;
+  chatDetails: boolean;
+  pending: PendingPost[];
+  // Older messages loaded by `load_history`, per conversation.
+  history: Record<string, { messages: Message[]; hasMore: boolean }>;
   // The mailroom's live state, and the bubble each employee is writing right now.
   mail: MailView;
   streams: Record<string, { text: string; replyingTo: string | null; at: number }>;
@@ -92,7 +99,11 @@ export const useStore = create<State>()(() => ({
   taskBoards: {},
   taskConnections: { linear: { kind: 'needs_auth' }, cronospark: { kind: 'needs_auth' } },
   logs: {},
-  chat: {},
+  chatSub: null,
+  chatToPo: false,
+  chatDetails: false,
+  pending: [],
+  history: {},
   mail: emptyMailView(),
   streams: {},
   bubbles: {},
@@ -155,25 +166,16 @@ export function askedAt(e: Employee) {
   return e.status.kind === 'blocked_on_owner' ? e.status.question.askedAt : Infinity;
 }
 
-const CHAT_CAP = 200;
-
-export function addChat(employeeId: EmployeeId, from: ChatLine['from'], text: string, image?: string, imageName?: string) {
-  set((s) => ({ chat: { ...s.chat, [employeeId]: [...(s.chat[employeeId] ?? []).slice(-(CHAT_CAP - 1)), { from, text, at: Date.now(), ...(image ? { image, imageName } : {}) }] } }));
-}
-
-export function attachChatImage(employeeId: EmployeeId, text: string, image: string, imageName: string) {
-  set((s) => { const lines = [...(s.chat[employeeId] ?? [])]; const index = lines.findLastIndex((line) => line.from === 'owner' && line.text === text); if (index < 0) return s; lines[index] = { ...lines[index], image, imageName }; return { chat: { ...s.chat, [employeeId]: lines } }; });
-}
+// Test-only: window.office is frozen by the context bridge, so a test that must read what the UI sends taps it here.
+export const sendTap: { fn: ((m: ClientMessage) => void) | null } = { fn: null };
 
 export function send(m: ClientMessage) {
-  // Only these messages carry words the owner said, so only they join the transcript.
-  switch (m.type) {
-    case 'answer':
-      addChat(m.employeeId, 'owner', m.text);
-      break;
-    case 'post':
-      addChat(m.to as EmployeeId, 'owner', m.text);
-      break;
-  }
-  window.office.send(m);
+  if (m.type === 'post') set((s) => ({ pending: [...s.pending, { clientId: m.clientId, to: m.to, text: m.text, as: m.as, at: Date.now() }] }));
+  if (sendTap.fn) sendTap.fn(m);
+  else window.office.send(m);
 }
+
+// A new conversation starts from the person's own thread, aimed at them.
+useStore.subscribe((s, prev) => {
+  if (s.selectedId !== prev.selectedId && (s.chatSub || s.chatToPo || s.chatDetails)) set({ chatSub: null, chatToPo: false, chatDetails: false });
+});

@@ -48,7 +48,7 @@ function Menu({ employee, x, y }: { employee: Employee; x: number; y: number }) 
       <button
         onClick={() => {
           if (get().selectedId === employee.id) document.getElementById('drawer-input')?.focus();
-          set({ selectedId: employee.id, menu: null });
+          set({ selectedId: employee.id, menu: null, chatSub: null, chatToPo: false, chatDetails: false });
         }}
       >
         Open chat
