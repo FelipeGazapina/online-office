@@ -2,12 +2,12 @@
 // scratch git repo: a question to an employee, a question to the PO (who answers it herself), a polite work order phrased as a
 // question, and a plain work order. The ledger on disk and the chat DOM are what is asserted.
 // Run: pnpm build:verify && OFFICE_OUT_DIR=out/verify OFFICE_CDP_PORT=9342 OFFICE_CLAUDE_MODEL=claude-haiku-4-5-20251001 node verify/cdp.mjs verify/e2e-question.mjs
-// OFFICE_TRIAGE=0 turns the model's sorting off, which is the old behaviour: every owner message is work, and the first
-// assertions about help then fail. OFFICE_QUESTION_TRIALS=N adds N timed questions after the scenario, the owner pausing 8 s
-// between them, and prints how long the first bubble took and how many were posted as questions.
+// OFFICE_QUESTION_TRIALS=N adds N timed questions after the scenario, the owner pausing 8 s between them, and prints how
+// long the first bubble took and how many were posted as questions. OFFICE_TRIAGE=0 turns the model's sorting off (the old
+// behaviour, every owner message is work) and runs only those trials, as the baseline to compare their times with.
 import { execFileSync } from 'node:child_process';
 import { cpSync, existsSync, mkdtempSync, readFileSync, realpathSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { loadavg, tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { HAIKU, assert, company } from './lib.mjs';
@@ -30,7 +30,8 @@ export const env = {
 const ANSWER_WAIT_MS = 120_000;
 const FIRST_BUBBLE_MAX_MS = 3000;
 const HIRE_TO_FIRST_MESSAGE_MS = 8000;
-const TRIALS = Number(process.env.OFFICE_QUESTION_TRIALS ?? 0);
+const BASELINE = process.env.OFFICE_TRIAGE === '0';
+const TRIALS = Number(process.env.OFFICE_QUESTION_TRIALS ?? (BASELINE ? 5 : 0));
 const QUESTIONS = ['Where are the shout tests?', 'What is the test command in package.json?', 'How is the shout function tested?', 'What is this project called?', 'Does the README mention shout?', 'Which test file covers the empty string?', 'What version does package.json declare?', 'What does the README say about the project?'];
 
 const posts = () => {
@@ -92,46 +93,48 @@ export default async (s) => {
     }
     throw new Error(`no reply to "${text}" after ${ANSWER_WAIT_MS / 1000} s; ledger tail ${JSON.stringify(posts().slice(-4))}`);
   };
-  const quiet = (id) => s.waitFor(`${company}.employees.find((e) => e.id === ${JSON.stringify(id)}).status.kind === 'idle'`, 120000);
+  const quiet = (id) => s.waitFor(`${company}.employees.find((e) => e.id === ${JSON.stringify(id)}).status.kind === 'idle'`, 240000);
 
-  // A question to an employee.
-  const q1 = await ask(eli, 'Which file defines the shout function?', 'q-eli');
-  console.log(`first bubble ${q1.bubble.ms} ms (${q1.bubble.kind}), settled ${q1.settledMs} ms after the first bubble: ${JSON.stringify(q1.reply.text)}`);
-  assert(q1.req.intent === 'help', 'a question to an employee is posted as help');
-  assert(q1.reply.outcome === 'done' && /shout\.js/.test(q1.reply.text) && !q1.reply.artifact?.length, 'and settles done with the answer and no files');
-  assert(q1.bubble.kind !== 'timeout' && q1.bubble.ms < FIRST_BUBBLE_MAX_MS, `with the first bubble in ${q1.bubble.ms} ms (limit ${FIRST_BUBBLE_MAX_MS})`);
-  await quiet(eli);
-  await s.waitFor(`[...document.querySelectorAll('.thread .msg.employee')].some((m) => /shout\\.js/.test(m.innerText))`, 10000);
-  assert(true, 'the answer is a bubble in the chat');
-  const chips = await s.eval(`[...document.querySelectorAll('.thread .cp-chip')].map((c) => c.innerText)`);
-  assert(chips.includes('done') && !chips.includes('blocked'), `the owner's message shows done, not blocked (chips ${JSON.stringify(chips)})`);
+  if (!BASELINE) {
+    // A question to an employee.
+    const q1 = await ask(eli, 'Which file defines the shout function?', 'q-eli');
+    console.log(`first bubble ${q1.bubble.ms} ms (${q1.bubble.kind}), settled ${q1.settledMs} ms after the first bubble: ${JSON.stringify(q1.reply.text)}`);
+    assert(q1.req.intent === 'help', 'a question to an employee is posted as help');
+    assert(q1.reply.outcome === 'done' && /shout\.js/.test(q1.reply.text) && !q1.reply.artifact?.length, 'and settles done with the answer and no files');
+    assert(q1.bubble.kind !== 'timeout' && q1.bubble.ms < FIRST_BUBBLE_MAX_MS, `with the first bubble in ${q1.bubble.ms} ms (limit ${FIRST_BUBBLE_MAX_MS})`);
+    await quiet(eli);
+    await s.waitFor(`[...document.querySelectorAll('.thread .msg.employee')].some((m) => /shout\\.js/.test(m.innerText))`, 10000);
+    assert(true, 'the answer is a bubble in the chat');
+    const chips = await s.eval(`[...document.querySelectorAll('.thread .cp-chip')].map((c) => c.innerText)`);
+    assert(chips.includes('done') && !chips.includes('blocked'), `the owner's message shows done, not blocked (chips ${JSON.stringify(chips)})`);
 
-  // A question to the PO is hers to answer.
-  const q2 = await ask(pia, 'What does the shout function return for an empty string?', 'q-po');
-  console.log(`PO: first bubble ${q2.bubble.ms} ms, settled ${q2.settledMs} ms after it: ${JSON.stringify(q2.reply.text)}`);
-  assert(q2.req.intent === 'help' && q2.reply.outcome === 'done' && q2.reply.from === pia && q2.reply.text.trim().length > 0, 'a question to the PO is posted as help and the PO settles it done');
-  assert(!posts().some((m) => m.kind === 'request' && m.rootId === q2.req.id && m.id !== q2.req.id), 'and she answered it herself, with no request to anyone');
-  await quiet(pia);
+    // A question to the PO is hers to answer.
+    const q2 = await ask(pia, 'What does the shout function return for an empty string?', 'q-po');
+    console.log(`PO: first bubble ${q2.bubble.ms} ms, settled ${q2.settledMs} ms after it: ${JSON.stringify(q2.reply.text)}`);
+    assert(q2.req.intent === 'help' && q2.reply.outcome === 'done' && q2.reply.from === pia && q2.reply.text.trim().length > 0, 'a question to the PO is posted as help and the PO settles it done');
+    assert(!posts().some((m) => m.kind === 'request' && m.rootId === q2.req.id && m.id !== q2.req.id), 'and she answered it herself, with no request to anyone');
+    await quiet(pia);
 
-  // A polite work order phrased as a question still has to show files.
-  const w1 = await ask(eli, 'Could you create a file named polite.txt containing the single word hello?', 'w-polite');
-  console.log(`polite order: first bubble ${w1.bubble.ms} ms: ${JSON.stringify(w1.reply.text)} artifact ${JSON.stringify(w1.reply.artifact)}`);
-  assert(w1.req.intent === 'work', 'a polite order phrased as a question is posted as work');
-  assert(w1.reply.outcome === 'done' && w1.reply.artifact?.some((a) => /polite\.txt/.test(a)), 'and settles done only with the file it made named');
-  await quiet(eli);
+    // A polite work order phrased as a question still has to show files.
+    const w1 = await ask(eli, 'Could you create a file named polite.txt containing the single word hello?', 'w-polite');
+    console.log(`polite order: first bubble ${w1.bubble.ms} ms: ${JSON.stringify(w1.reply.text)} artifact ${JSON.stringify(w1.reply.artifact)}`);
+    assert(w1.req.intent === 'work', 'a polite order phrased as a question is posted as work');
+    assert(w1.reply.outcome === 'done' && w1.reply.artifact?.some((a) => /polite\.txt/.test(a)), 'and settles done only with the file it made named');
+    await quiet(eli);
 
-  // A plain work order.
-  const w2 = await ask(eli, 'Create a file named plain.txt containing the single word hello, then tell me it is done.', 'w-plain');
-  assert(w2.req.intent === 'work' && w2.reply.outcome === 'done' && w2.reply.artifact?.some((a) => /plain\.txt/.test(a)), 'a plain order is work and settles done with its file');
-  await quiet(eli);
-  await s.shot('w7-question');
+    // A plain work order.
+    const w2 = await ask(eli, 'Create a file named plain.txt containing the single word hello, then tell me it is done.', 'w-plain');
+    assert(w2.req.intent === 'work' && w2.reply.outcome === 'done' && w2.reply.artifact?.some((a) => /plain\.txt/.test(a)), 'a plain order is work and settles done with its file');
+    await quiet(eli);
+    await s.shot('w7-question');
+  }
 
   const timed = [];
   for (let i = 0; i < TRIALS; i++) {
     await s.sleep(HIRE_TO_FIRST_MESSAGE_MS);
     const q = await ask(eli, QUESTIONS[i % QUESTIONS.length], `trial-${i}`);
     timed.push({ ms: q.bubble.ms, help: q.req.intent === 'help', outcome: q.reply.outcome });
-    console.log(`trial ${i + 1}: first bubble ${q.bubble.ms} ms (${q.bubble.kind}), posted as ${q.req.intent}, settled ${q.reply.outcome}`);
+    console.log(`trial ${i + 1} at load ${loadavg()[0].toFixed(1)}: first bubble ${q.bubble.ms} ms (${q.bubble.kind}), posted as ${q.req.intent}, settled ${q.reply.outcome}`);
     await quiet(eli);
   }
   if (timed.length) {

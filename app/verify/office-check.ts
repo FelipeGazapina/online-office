@@ -789,7 +789,14 @@ console.log('\n# the owner\'s words: a question or a work order');
   await sleep(10);
   const texts = ownerRequests().map((m) => (m.kind === 'request' ? m.text : ''));
   check(texts.slice(-2).join('|') === 'which branch is this?|Rename the helper to something clearer', 'and both are posted in the order the owner sent them');
+  let late!: (v: 'help') => void;
+  answers.set('which commit is this?', new Promise<'help'>((r) => (late = r)));
+  tell('which commit is this?');
+  const sessions = fakes.length;
   o.shutdown();
+  late('help');
+  await sleep(10);
+  check(!o.snapshot().mail.tail.some((m) => m.kind === 'request' && m.text === 'which commit is this?') && fakes.length === sessions, 'an answer that arrives after shutdown posts nothing and starts no session')
 }
 
 office.shutdown();

@@ -316,7 +316,7 @@ export class Office {
   private mail!: Mailroom;
   private readonly acker: Pick<Acknowledger, 'warm' | 'ack' | 'stop'> & Partial<Pick<Acknowledger, 'triage'>>;
   // Owner posts that wait for a triage answer, and the end of the line they keep their order in.
-  private ownerPosts = { waiting: 0, tail: Promise.resolve() };
+  private ownerPosts = { waiting: 0, tail: Promise.resolve(), closed: false };
   // The last thing each employee said in the turn they are on. It is the reply when the harness gives no final text.
   private lastSaid = new Map<EmployeeId, string>();
 
@@ -508,6 +508,7 @@ export class Office {
   }
 
   shutdown() {
+    this.ownerPosts.closed = true;
     for (const id of [...this.sessions.keys()]) this.stopSession(id);
     this.acker.stop();
     void this.services.taskBoards.close();
@@ -627,7 +628,7 @@ export class Office {
       await before;
       trace(msg.clientId, 'triaged');
       try {
-        this.postOwner(e.id, msg, asked ?? 'work');
+        if (!this.ownerPosts.closed) this.postOwner(e.id, msg, asked ?? 'work');
       } catch (err) {
         this.events.error?.(err instanceof Error ? err.message : String(err));
       } finally {
