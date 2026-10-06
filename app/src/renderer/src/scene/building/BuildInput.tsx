@@ -23,7 +23,7 @@ import {
   wallsToDelete,
   wallsToPut,
 } from '../../../../shared/space/buildersGesture.ts';
-import { canTurn, pickUpBlock, rotate, sendOps, setTool, stepBack, toolItem } from '../../hud/build/actions.ts';
+import { pickUpBlock, rotate, sendOps, setTool, stepBack, toolItem } from '../../hud/build/actions.ts';
 import { buildView, draft, modifiers, setGhost, spaceContext, VIOLATION_TEXT, type Ghost } from '../../hud/build/state.ts';
 import { get, set, useStore, type BuildCursor, type BuildState, type BuildTool } from '../../store.ts';
 import { groundPoint, tileOf, vertexOf } from './Picking.ts';
@@ -311,8 +311,7 @@ export function BuildInput() {
       const fits = !!pl && verdictOf(b, pl.ops).ok;
       if (pl && fits && pl.ops.length) sendOps(pl.ops);
       // A piece or block that is dropped lets go, whether or not it moved. A drag that ends somewhere it does not fit puts it back.
-      const carrying = (tool.kind === 'item' && tool.carry) || (tool.kind === 'block' && tool.carry);
-      if (carrying && (fits || wasGrab)) {
+      if ((tool.kind === 'item' || tool.kind === 'block') && tool.carry && (fits || wasGrab)) {
         if (tool.kind === 'block') setTool({ kind: 'block', carry: null });
         else setTool({ kind: 'select' });
       }
@@ -322,7 +321,7 @@ export function BuildInput() {
     const onWheel = (e: WheelEvent) => {
       if (!e.shiftKey && !modifiers.shift) return;
       const tool = get().build?.tool;
-      if (!tool || !canTurn(tool)) return;
+      if (tool?.kind !== 'item' && !(tool?.kind === 'block' && tool.carry)) return;
       e.preventDefault();
       e.stopImmediatePropagation();
       rotate((e.deltaY || e.deltaX) > 0 ? 1 : -1);
