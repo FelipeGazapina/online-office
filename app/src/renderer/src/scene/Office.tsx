@@ -1,6 +1,8 @@
 import { Html } from '@react-three/drei';
 import { useEffect, useMemo } from 'react';
-import { Object3D } from 'three';
+import { MeshStandardMaterial, Object3D, type BufferGeometry } from 'three';
+import { box, cyl, merge } from './building/models.ts';
+import { detail } from './shading.ts';
 import type { Company } from '../../../shared/protocol.ts';
 import { BLOCK_D, BLOCK_W, blockCenter, DOOR_X } from '../../../shared/space/index.ts';
 import { enterComputer } from '../computer.ts';
@@ -16,27 +18,88 @@ import { fitText, FONT_BODY, FONT_DISPLAY, roundRect, useCanvasTexture } from '.
 
 type Bounds = { x0: number; x1: number; z0: number; z1: number };
 
+const siteMaterial = detail(new MeshStandardMaterial({ vertexColors: true, roughness: 0.85 }), 'furniture');
+
+// The empty slot is a construction site: staked bare earth, hazard tape on posts, cones, a scaffold frame and a board
+// that says what the site is for. Everything solid is one merged mesh; clicking any of it opens the add-a-project dialog.
+function siteGeometry(w: number, d: number) {
+  const hx = w / 2;
+  const hz = d / 2;
+  const parts: BufferGeometry[] = [];
+  const yellow = '#f2c230';
+  const black = '#22232a';
+  const post = (x: number, z: number) => parts.push(box(0.09, 0.9, 0.09, x, 0.45, z, '#8c6a4a'), box(0.12, 0.05, 0.12, x, 0.92, z, yellow));
+  const tape = (x0: number, z0: number, x1: number, z1: number) => {
+    const len = Math.hypot(x1 - x0, z1 - z0);
+    const n = Math.round(len / 0.35);
+    for (let i = 0; i < n; i++) {
+      const t = (i + 0.5) / n;
+      const along = x1 !== x0;
+      const seg = len / n;
+      parts.push(box(along ? seg : 0.012, 0.09, along ? 0.012 : seg, x0 + (x1 - x0) * t, 0.62, z0 + (z1 - z0) * t, i % 2 ? black : yellow));
+    }
+  };
+  const corners: [number, number][] = [[-hx, -hz], [hx, -hz], [hx, hz], [-hx, hz]];
+  corners.forEach(([x, z]) => post(x, z));
+  for (let i = 1; i < 4; i++) {
+    const n = Math.round((i === 1 || i === 3 ? d : w) / 3.2);
+    for (let k = 1; k < n; k++) {
+      const [ax, az] = corners[i - 1];
+      const [bx, bz] = corners[i];
+      post(ax + ((bx - ax) * k) / n, az + ((bz - az) * k) / n);
+    }
+  }
+  tape(-hx, -hz, hx, -hz);
+  tape(hx, -hz, hx, hz);
+  tape(hx, hz, -hx, hz);
+  tape(-hx, hz, -hx, -hz);
+  const cone = (x: number, z: number) => parts.push(cyl(0.03, 0.2, 0.55, x, 0.275, z, '#f26a1b', 10), cyl(0.1, 0.12, 0.08, x, 0.3, z, '#f6f3ea', 10), box(0.5, 0.04, 0.5, x, 0.02, z, '#2b2e38'));
+  [[-hx + 1.2, hz + 0.7], [-hx + 4.2, hz + 0.7], [hx - 1.2, hz + 0.7], [hx + 0.7, -hz + 1.5]].forEach(([x, z]) => cone(x, z));
+  // A scaffold frame: four poles, ledgers and a plank deck, with a pile of boards and a barrel beside it.
+  const sx = hx - 2.6;
+  const sz = -hz + 2.2;
+  for (const ox of [-1.1, 1.1]) for (const oz of [-0.6, 0.6]) parts.push(cyl(0.04, 0.04, 2.4, sx + ox, 1.2, sz + oz, '#9aa3ad', 6));
+  for (const y of [0.8, 1.6, 2.4]) parts.push(box(2.3, 0.05, 0.05, sx, y, sz - 0.6, '#9aa3ad'), box(2.3, 0.05, 0.05, sx, y, sz + 0.6, '#9aa3ad'));
+  parts.push(box(2.4, 0.06, 1.3, sx, 1.62, sz, '#c59e73'), box(0.05, 1.7, 0.05, sx + 1.1, 1.0, sz - 0.6, '#9aa3ad'));
+  for (let i = 0; i < 4; i++) parts.push(box(1.8, 0.07, 0.2, -hx + 2.2, 0.04 + i * 0.075, -hz + 1.2 + (i % 2) * 0.05, '#d1b080'));
+  parts.push(cyl(0.3, 0.3, 0.75, -hx + 4.1, 0.38, -hz + 1.2, '#3b6f9a', 12), cyl(0.31, 0.31, 0.05, -hx + 4.1, 0.55, -hz + 1.2, '#2b4a66', 12));
+  // Survey stakes with pink flags, scattered inside the line.
+  [[-2, 0.4], [1.5, -0.8], [-0.5, 1.6], [3, 1.2]].forEach(([x, z]) => parts.push(box(0.04, 0.5, 0.04, x, 0.25, z, '#c9a77c'), box(0.16, 0.1, 0.01, x + 0.08, 0.45, z, '#f0509a')));
+  // The placard: two legs and a board facing the camera side of the slot.
+  parts.push(box(0.1, 1.1, 0.1, -0.9, 0.55, hz - 0.1, '#6a4d34'), box(0.1, 1.1, 0.1, 0.9, 0.55, hz - 0.1, '#6a4d34'), box(2.3, 0.9, 0.08, 0, 1.15, hz - 0.1, '#f2c230'));
+  return merge(parts);
+}
+
 function GhostSlot({ slot }: { slot: number }) {
   const c = blockCenter(slot);
-  const tex = useCanvasTexture(512, 320, (g) => {
-    g.setLineDash([26, 18]);
-    g.lineWidth = 6;
-    g.strokeStyle = 'rgba(70,50,35,0.45)';
-    roundRect(g, 10, 10, 492, 300, 44);
-    g.stroke();
-    g.setLineDash([]);
-    g.fillStyle = 'rgba(70,50,35,0.55)';
+  const w = BLOCK_W - 0.6;
+  const d = BLOCK_D - 0.6;
+  const geo = useMemo(() => siteGeometry(w, d), [w, d]);
+  const dirt = useCanvasTexture(512, 400, (g) => {
+    g.fillStyle = '#9a7650';
+    g.fillRect(0, 0, 512, 400);
+    for (let i = 0; i < 900; i++) {
+      g.fillStyle = i % 3 ? 'rgba(70,45,25,0.18)' : 'rgba(200,170,120,0.2)';
+      g.fillRect((i * 97) % 512, (i * 61) % 400, 3 + (i % 5), 2 + (i % 4));
+    }
+    g.strokeStyle = 'rgba(60,40,25,0.35)';
+    g.lineWidth = 14;
+    for (const y of [150, 210]) { g.beginPath(); g.moveTo(0, y); g.bezierCurveTo(150, y - 30, 330, y + 40, 512, y); g.stroke(); }
+  }, []);
+  const board = useCanvasTexture(512, 200, (g) => {
+    g.fillStyle = '#f2c230';
+    g.fillRect(0, 0, 512, 200);
+    g.fillStyle = '#22232a';
     g.textAlign = 'center';
     g.textBaseline = 'middle';
-    g.font = `700 48px ${FONT_DISPLAY}`;
-    g.fillText('EXPAND', 256, 140);
-    g.font = `500 30px ${FONT_BODY}`;
-    g.fillText('Click to add a project', 256, 196);
+    g.font = `800 82px ${FONT_DISPLAY}`;
+    g.fillText('EXPAND', 256, 72);
+    g.font = `600 38px ${FONT_BODY}`;
+    g.fillText('Click to add a project', 256, 150);
   }, []);
   return (
-    <mesh
-      rotation-x={-Math.PI / 2}
-      position={[c.x, 0.012, c.z]}
+    <group
+      position={[c.x, 0, c.z]}
       onClick={(e) => {
         e.stopPropagation();
         if (e.delta < 6) set({ modal: { kind: 'block' } });
@@ -44,9 +107,16 @@ function GhostSlot({ slot }: { slot: number }) {
       onPointerOver={() => void (document.body.style.cursor = 'pointer')}
       onPointerOut={() => void (document.body.style.cursor = '')}
     >
-      <planeGeometry args={[BLOCK_W - 0.6, BLOCK_D - 0.6]} />
-      <meshBasicMaterial map={tex} transparent depthWrite={false} />
-    </mesh>
+      <mesh rotation-x={-Math.PI / 2} position={[0, 0.02, 0]} receiveShadow>
+        <planeGeometry args={[w, d]} />
+        <meshStandardMaterial map={dirt} roughness={1} polygonOffset polygonOffsetFactor={-2} />
+      </mesh>
+      <mesh geometry={geo} material={siteMaterial} castShadow receiveShadow />
+      <mesh position={[0, 1.15, d / 2 - 0.05]}>
+        <planeGeometry args={[2.2, 0.86]} />
+        <meshBasicMaterial map={board} />
+      </mesh>
+    </group>
   );
 }
 
