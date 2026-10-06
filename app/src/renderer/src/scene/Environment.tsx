@@ -230,7 +230,7 @@ function groundGeometry(b: Bounds) {
     pos.setXYZ(i, x, terrainHeight(x, z, b), z);
     const n = Math.sin(x * 0.11) * Math.cos(z * 0.09) + Math.sin(x * 0.031 + z * 0.047) * 0.8 + Math.sin(x * 0.27 + 2) * Math.cos(z * 0.23) * 0.35;
     const t = (n + 1.6) / 3.2;
-    c.setRGB(0.68 + t * 0.55, 0.84 + t * 0.26, 0.62 + (1 - t) * 0.4);
+    c.setRGB(0.8 + t * 0.55, 0.98 + t * 0.26, 0.7 + (1 - t) * 0.4);
     colors[i * 3] = c.r; colors[i * 3 + 1] = c.g; colors[i * 3 + 2] = c.b;
   }
   g.setAttribute('color', new Float32BufferAttribute(colors, 3));
@@ -263,7 +263,7 @@ export function Environment({ b }: { b: Bounds }) {
   const grass = useMemo(() => grassTexture(), []);
   const pavers = useMemo(() => paverTexture(), []);
   const g = useMemo(() => garden(b), [b.x0, b.x1, b.z0, b.z1]);
-  const grassMat = useMemo(() => new MeshStandardMaterial({ map: grass, roughness: 1, vertexColors: true }), [grass]);
+  const grassMat = useMemo(() => new MeshStandardMaterial({ map: grass, roughness: 1, vertexColors: true, emissive: '#ffffff', emissiveMap: grass, emissiveIntensity: 0.22 }), [grass]);
   const ground = useMemo(() => groundGeometry(b), [b.x0, b.x1, b.z0, b.z1]);
   const edgingMat = useMemo(() => new MeshStandardMaterial({ vertexColors: true, roughness: 0.9 }), []);
   const apron = useMemo(() => {

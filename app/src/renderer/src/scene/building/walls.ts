@@ -6,7 +6,7 @@ export type Variant = 'solid' | 'door' | 'window' | 'arch';
 export const VARIANTS: readonly Variant[] = ['solid', 'door', 'window', 'arch'];
 
 const T = WALL_HALF * 2;
-const CURB = 0.4;
+const CURB = 0.28;
 // A window opens from the sill to the head: low and tall, so a standing eye sees sky above the hedge line.
 const SILL = 0.6;
 const HEAD = 2.85;
@@ -24,7 +24,7 @@ const merge = (parts: BufferGeometry[]) => {
   if (!g) throw new Error('A wall model failed to merge');
   return g;
 };
-const cap = (y: number) => part(1, 0.08, T + 0.06, y, CAP);
+const cap = (y: number) => part(1, 0.05, T + 0.04, y, CAP);
 const SHADE: [number, number, number] = [0.8, 0.78, 0.74];
 // Crown molding: a coping that overhangs the wall and a shadow band under it, so the roofline reads from far away.
 const cornice = (): BufferGeometry[] => [part(1, 0.1, T + 0.22, STORY_H + 0.05, CAP), part(1, 0.1, T + 0.12, STORY_H - 0.05, SHADE)];

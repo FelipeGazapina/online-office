@@ -1,14 +1,13 @@
-import { useThree } from '@react-three/fiber';
+import { useFrame, useThree } from '@react-three/fiber';
 import { useEffect, useLayoutEffect, useMemo, useRef } from 'react';
-import { AdditiveBlending, Color, InstancedMesh, Matrix4, MeshBasicMaterial, MeshStandardMaterial, Object3D, PlaneGeometry, PMREMGenerator, Quaternion, Vector3 } from 'three';
-import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
+import { AdditiveBlending, Color, CubeCamera, HalfFloatType, Texture, WebGLCubeRenderTarget, InstancedMesh, Matrix4, MeshBasicMaterial, MeshStandardMaterial, Object3D, PlaneGeometry, PMREMGenerator, Quaternion, Vector3 } from 'three';
 import { blockCenter, DOOR_X } from '../../../shared/space/index.ts';
 import type { Bounds } from './Environment.tsx';
 import { poolTexture } from './textures.ts';
 
 // Pools of lamplight lie on the floor under every zone's lights: one additive decal each, all drawn together. They
 // are the cheap half of the room lighting; a couple of real point lights give the lobby its glow.
-const poolMaterial = new MeshBasicMaterial({ map: poolTexture(), transparent: true, depthWrite: false, blending: AdditiveBlending, opacity: 0.16, fog: false, polygonOffset: true, polygonOffsetFactor: -3 });
+const poolMaterial = new MeshBasicMaterial({ map: poolTexture(), transparent: true, depthWrite: false, blending: AdditiveBlending, opacity: 0.24, fog: false, polygonOffset: true, polygonOffsetFactor: -3 });
 const poolGeometry = new PlaneGeometry(1, 1).rotateX(-Math.PI / 2);
 const q = new Quaternion();
 const m = new Matrix4();
@@ -60,27 +59,41 @@ export function usePools(b: Bounds, slots: readonly number[]) {
 // also act as ambient light and flatten the sun, but on a glossy floor it reads as a faint sheen of the room above it.
 export const reflective = new Map<MeshStandardMaterial, number>();
 
-function useRoomReflections() {
-  const { gl } = useThree();
-  useEffect(() => {
-    const pmrem = new PMREMGenerator(gl);
-    const room = new RoomEnvironment();
-    const target = pmrem.fromScene(room, 0.04);
+// The polished floors and the glass reflect the real room: one cube capture from the middle of the office, taken a few
+// frames after load once the scene is built, filtered into an environment map. Taken once, so it costs a single extra render.
+function useRoomReflections(at: Vector3) {
+  const { gl, scene } = useThree();
+  const target = useRef<{ texture: Texture; dispose: () => void } | null>(null);
+  const frames = useRef(0);
+  const apply = (texture: Texture | null) => {
     for (const [material, strength] of reflective) {
-      material.envMap = target.texture;
+      material.envMap = texture;
       material.envMapIntensity = strength;
       material.needsUpdate = true;
     }
-    return () => {
-      for (const material of reflective.keys()) {
-        material.envMap = null;
-        material.needsUpdate = true;
-      }
-      target.dispose();
-      pmrem.dispose();
-      room.dispose();
-    };
-  }, [gl]);
+  };
+  useFrame(() => {
+    if (target.current || ++frames.current < 90) return;
+    const cube = new WebGLCubeRenderTarget(256, { type: HalfFloatType });
+    const cam = new CubeCamera(0.1, 220, cube);
+    cam.position.copy(at);
+    apply(null);
+    cam.update(gl, scene);
+    const pmrem = new PMREMGenerator(gl);
+    const filtered = pmrem.fromCubemap(cube.texture);
+    pmrem.dispose();
+    cube.dispose();
+    target.current = filtered;
+    apply(filtered.texture);
+  });
+  useEffect(
+    () => () => {
+      apply(null);
+      target.current?.dispose();
+      target.current = null;
+    },
+    [],
+  );
 }
 
 // Late afternoon sun through the windows. Its shadows are wide and soft, and the sky and bounce fill is strong enough that
@@ -94,21 +107,21 @@ export function Lights({ b, slots }: { b: Bounds; slots: readonly number[] }) {
     target.position.set(cx, 0, cz);
     target.updateMatrixWorld();
   }, [target, cx, cz]);
-  useRoomReflections();
+  useRoomReflections(useMemo(() => new Vector3(cx, 1.5, cz), [cx, cz]));
   const pools = usePools(b, slots);
   return (
     <>
-      <hemisphereLight args={['#c3d2f0', '#d3a273', 0.95]} />
+      <hemisphereLight args={['#b9cdf2', '#caa27a', 0.62]} />
       <directionalLight
         target={target}
         castShadow
-        color="#ffc88a"
-        intensity={3.0}
+        color="#ffc98c"
+        intensity={4.6}
         position={[cx + 38, 12, cz + 14]}
         shadow-mapSize={[2048, 2048]}
         shadow-bias={-0.0004}
         shadow-normalBias={0.03}
-        shadow-radius={5}
+        shadow-radius={2.5}
         shadow-camera-left={-ext}
         shadow-camera-right={ext}
         shadow-camera-top={ext}
