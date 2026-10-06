@@ -1,7 +1,7 @@
 import { useMemo } from 'react';
-import { MeshBasicMaterial, MeshStandardMaterial, type BufferGeometry } from 'three';
+import { CapsuleGeometry, MeshBasicMaterial, MeshStandardMaterial, type BufferGeometry } from 'three';
 import { DOOR_X } from '../../../shared/space/index.ts';
-import { box, cyl, merge } from './building/models.ts';
+import { box, cyl, merge, paint } from './building/models.ts';
 import { detail } from './shading.ts';
 import { pottedPlant } from './Decor.tsx';
 import { useCanvasTexture } from './textures.ts';
@@ -41,17 +41,29 @@ function porch(z1: number): { solid: BufferGeometry[]; glow: BufferGeometry[] } 
   return { solid, glow };
 }
 
+// A car is built nose along +x: a rounded body, a dark glass cabin with a roof, headlights and four wheels with hubs.
 function car(x: number, z: number, color: string, yaw: 0 | 1 = 0): BufferGeometry[] {
-  const a = yaw === 0 ? { w: 4.2, d: 1.9 } : { w: 1.9, d: 4.2 };
-  const long = (l: number, s: number, ox: number, oy: number, h: number, c: string) =>
-    yaw === 0 ? box(l, h, s, x + ox, oy, z, c) : box(s, h, l, x, oy, z + ox, c);
-  return [
-    long(a.w, a.d, 0, 0.5, 0.5, color),
-    long(1.9, a.d - 0.12, -0.25, 1.0, 0.42, '#2f3d4a'),
-    long(1.7, a.d - 0.04, -0.25, 1.24, 0.08, color),
-    long(0.2, a.d + 0.02, 1.95, 0.4, 0.25, '#2b2e38'),
-    ...[-1.35, 1.35].flatMap((o) => [-1, 1].map((sd) => long(0.7, 0.2, o, 0.34, 0.68, '#1c1f27').translate(yaw === 0 ? 0 : sd * (a.d / 2 - 0.02), 0, yaw === 0 ? sd * (a.d / 2 - 0.02) : 0))),
+  const body = (r: number, len: number, sx: number, sy: number, sz: number, px: number, py: number, c: string) =>
+    paint(new CapsuleGeometry(r, len, 4, 14).rotateZ(Math.PI / 2).scale(sx, sy, sz).translate(px, py, 0), c);
+  const wheel = (px: number, side: number) => [
+    cyl(0.34, 0.34, 0.24, px, 0.34, side * 0.86, '#17191f', 14).rotateX(Math.PI / 2),
+    cyl(0.18, 0.18, 0.26, px, 0.34, side * 0.86, '#aeb4bd', 10).rotateX(Math.PI / 2),
   ];
+  const parts = [
+    body(0.5, 3.0, 1, 0.62, 1.78, 0, 0.6, color),
+    body(0.44, 1.2, 1, 0.72, 1.5, -0.2, 1.02, '#27323c'),
+    body(0.38, 1.0, 1, 0.34, 1.4, -0.2, 1.3, color),
+    box(0.06, 0.12, 0.34, 2.0, 0.62, 0.55, '#fff3c4'),
+    box(0.06, 0.12, 0.34, 2.0, 0.62, -0.55, '#fff3c4'),
+    box(0.06, 0.12, 0.3, -2.0, 0.62, 0.55, '#a02a2a'),
+    box(0.06, 0.12, 0.3, -2.0, 0.62, -0.55, '#a02a2a'),
+    ...[-1.3, 1.3].flatMap((px) => [-1, 1].flatMap((side) => wheel(px, side))),
+  ];
+  for (const g of parts) {
+    if (yaw === 1) g.rotateY(Math.PI / 2);
+    g.translate(x, 0, z);
+  }
+  return parts;
 }
 
 function lamp(x: number, z: number): { solid: BufferGeometry[]; glow: BufferGeometry[] } {
@@ -66,8 +78,8 @@ function plaza(b: Bounds): { solid: BufferGeometry[]; glow: BufferGeometry[] } {
   const px = DOOR_X + 17;
   const pz = b.z1 + 9.2;
   const solid: BufferGeometry[] = [];
-  [0, 1, 3, 5].forEach((i, n) => solid.push(...car(px - 7 + i * 2.8 + 1.4, pz + 3.1, colors[(n * 2 + 1) % colors.length], 1)));
-  solid.push(...car(px - 5.6, pz - 3.3, colors[0], 1), ...car(px + 8.4, pz - 3.3, colors[2], 1));
+  [0, 3, 5].forEach((i, n) => solid.push(...car(px - 7 + i * 2.8 + 1.4, pz + 3.1, colors[(n * 2 + 1) % colors.length], 1)));
+  solid.push(...car(px - 5.6, pz - 3.3, colors[0], 1));
   // Curb stops along the near bay, a bike rack and a bench by the path.
   for (let i = 0; i < 6; i++) solid.push(box(1.2, 0.16, 0.22, px - 7 + i * 2.8 + 1.4, 0.08, pz + 5.1, '#b6b0a4'));
   for (let i = 0; i < 5; i++) solid.push(box(0.05, 0.6, 0.05, DOOR_X + 7 + i * 0.5, 0.3, b.z1 + 4.9, '#8a9099'), box(0.4, 0.04, 0.04, DOOR_X + 7.2 + i * 0.5, 0.62, b.z1 + 4.9, '#8a9099'));

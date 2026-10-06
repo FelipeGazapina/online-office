@@ -70,6 +70,10 @@ export default async (s) => {
   await s.sleep(2500);
   await save(s, 'iso');
 
+  await s.eval('__office.teleport(0, 16, Math.PI)');
+  await s.sleep(2500);
+  await save(s, 'site');
+
   await s.eval('__office.teleport(-11.6, -0.4, Math.PI)');
   await firstPerson(s, 'first-desks');
 

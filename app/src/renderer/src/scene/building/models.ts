@@ -5,7 +5,7 @@ import { BoxGeometry, BufferGeometry, Color, CylinderGeometry, Float32BufferAttr
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { ITEM_DEFS, STORY_H } from '../../../../shared/space/index.ts';
 
-const paint = (g: BufferGeometry, color: string | number | [number, number, number]): BufferGeometry => {
+export const paint = (g: BufferGeometry, color: string | number | [number, number, number]): BufferGeometry => {
   const flat = g.index ? g.toNonIndexed() : g;
   const n = flat.getAttribute('position').count;
   const c = Array.isArray(color) ? new Color(color[0], color[1], color[2]) : new Color(color as string);
