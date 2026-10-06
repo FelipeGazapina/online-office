@@ -232,8 +232,9 @@ export function skyTexture(horizon: string) {
   const grad = g.createLinearGradient(0, 0, 0, 512);
   grad.addColorStop(0, horizon);
   grad.addColorStop(0.5, horizon);
-  grad.addColorStop(0.62, '#a9d2ee');
-  grad.addColorStop(1, '#4f93dc');
+  grad.addColorStop(0.58, '#f1cfa6');
+  grad.addColorStop(0.7, '#b8cde0');
+  grad.addColorStop(1, '#4d82cc');
   g.fillStyle = grad;
   g.fillRect(0, 0, 1024, 512);
   const r = noise(5);
@@ -242,8 +243,8 @@ export function skyTexture(horizon: string) {
     for (let k = 0; k < 6; k++) {
       const px = x + (r() - 0.5) * w, py = y + (r() - 0.5) * 16, rad = 18 + r() * 26;
       const cg = g.createRadialGradient(px, py, 0, px, py, rad);
-      cg.addColorStop(0, 'rgba(255,255,255,0.8)');
-      cg.addColorStop(1, 'rgba(255,255,255,0)');
+      cg.addColorStop(0, 'rgba(255,233,208,0.8)');
+      cg.addColorStop(1, 'rgba(255,233,208,0)');
       g.fillStyle = cg;
       for (const ox of [-1024, 0, 1024]) { g.beginPath(); g.arc(px + ox, py, rad, 0, 6.3); g.fill(); }
     }

@@ -37,22 +37,48 @@ const buildOps = () => [
   { t: 'items', story: 1, put: [{ id: 'plant:50', def: 'plant', x: 24, z: 12, rot: 0 }, { id: 'sofa:00', def: 'sofa', x: 20, z: 10, rot: 0 }], del: [] },
 ];
 
+// The wheel is how a player zooms; this sends the same event, from the current zoom to `dist` meters (the zoom clamps at 8..48).
+const zoomBy = (s, deltaY) => s.eval(`document.querySelector('canvas').dispatchEvent(new WheelEvent('wheel', { deltaY: ${deltaY} }))`);
+const settle = async (s) => { await s.eval('__office.step(0.2)'); await s.sleep(1400); };
+const firstPerson = async (s, name) => {
+  await s.press('Tab');
+  await s.waitFor('window.__officeCamera && window.__officeCamera.blend >= 0.999', 10000);
+  await settle(s);
+  await save(s, name);
+  await s.press('Tab');
+  await s.waitFor('window.__officeCamera && window.__officeCamera.blend <= 0.001', 10000);
+};
+
 export default async (s) => {
   await s.resize(1440, 900);
   await s.waitFor(`!!${store}.company && !!${store}.building`);
   await s.eval('__office.step(8)');
+
+  // Where a new owner stands: first person, no teleport.
+  await firstPerson(s, 'first-spawn');
+
+  // Matched framing for the bar: the live camera as a player gets it, the owner at the workspace.
+  await s.eval('__office.teleport(-10.6, -1.2, Math.PI)');
+  await s.sleep(2500);
+  await save(s, 'iso-mid');
+  await zoomBy(s, -300);
+  await s.eval('__office.teleport(-8, -6.4, Math.PI)');
+  await s.sleep(2500);
+  await save(s, 'close-working');
+  await zoomBy(s, 1200);
   await s.eval('__office.teleport(-10.4, 4.6, Math.PI)');
   await s.sleep(2500);
   await save(s, 'iso');
 
-  await s.eval('__office.teleport(-5, 7, Math.PI)');
-  await s.press('Tab');
-  await s.waitFor('window.__officeCamera && window.__officeCamera.blend >= 0.999', 10000);
-  await s.eval('__office.step(0.2)');
-  await s.sleep(1200);
-  await save(s, 'first');
-  await s.press('Tab');
-  await s.waitFor('window.__officeCamera && window.__officeCamera.blend <= 0.001', 10000);
+  await s.eval('__office.teleport(0, 16, Math.PI)');
+  await s.sleep(2500);
+  await save(s, 'site');
+
+  await s.eval('__office.teleport(-11.5, 1.5, Math.PI)');
+  await firstPerson(s, 'first-desks');
+
+  await s.eval('__office.teleport(-4.5, 5.5, Math.PI)');
+  await firstPerson(s, 'first');
 
   await s.eval(`window.office.send({ type: 'build', ops: ${JSON.stringify(buildOps())} })`);
   await s.waitFor(`${store}.building.stories.length === 2`);

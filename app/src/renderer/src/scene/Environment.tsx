@@ -1,5 +1,5 @@
 import { useLayoutEffect, useMemo, useRef } from 'react';
-import { BackSide, Color, ConeGeometry, CylinderGeometry, Float32BufferAttribute, Fog, IcosahedronGeometry, InstancedMesh, Matrix4, MeshBasicMaterial, MeshStandardMaterial, PlaneGeometry, Quaternion, Vector3, type BufferGeometry } from 'three';
+import { BackSide, Color, ConeGeometry, CylinderGeometry, DodecahedronGeometry, Float32BufferAttribute, Fog, IcosahedronGeometry, InstancedMesh, Matrix4, MeshBasicMaterial, MeshStandardMaterial, PlaneGeometry, Quaternion, Vector3, type BufferGeometry } from 'three';
 import { useThree } from '@react-three/fiber';
 import { DOOR_X } from '../../../shared/space/index.ts';
 import { box, merge } from './building/models.ts';
@@ -8,7 +8,8 @@ import { grassTexture, paverTexture, skyTexture, blobShadowTexture } from './tex
 export type Bounds = { x0: number; x1: number; z0: number; z1: number };
 
 export const GROUND_Y = -0.62;
-const HORIZON = '#d6e8f2';
+// Late afternoon: a peach haze at the horizon that the fog fades distant hills into.
+const HORIZON = '#f1d9bd';
 
 const smooth01 = (a: number, b: number, v: number) => {
   const t = Math.min(1, Math.max(0, (v - a) / (b - a)));
@@ -22,7 +23,8 @@ export function terrainHeight(x: number, z: number, b: Bounds): number {
   const r = Math.hypot(dx, dz);
   const swell = Math.sin(x * 0.085 + 1.3) * Math.cos(z * 0.07) * 0.5 + 0.5;
   const ridge = smooth01(34, 120, r) * (3.2 + swell * 5.5);
-  const roll = smooth01(22, 50, r) * (Math.sin(x * 0.21) * Math.cos(z * 0.17) * 0.25 + 0.25);
+  // Gentle berms and dips start close to the building, so the lawn is a landscape and not a table.
+  const roll = smooth01(15, 46, r) * (Math.sin(x * 0.21) * Math.cos(z * 0.17) * 0.55 + Math.sin(x * 0.07 + z * 0.09 + 1) * 0.45 + 0.9);
   return ridge + roll;
 }
 
@@ -66,6 +68,8 @@ const crownGeo = new IcosahedronGeometry(1, 1);
 const pineGeo = new ConeGeometry(1, 2.2, 7).translate(0, 1.1, 0);
 const bushGeo = new IcosahedronGeometry(1, 1);
 const flowerGeo = new IcosahedronGeometry(1, 0);
+const rockGeo = new DodecahedronGeometry(1, 0);
+const rockMat = new MeshStandardMaterial({ color: '#ffffff', roughness: 1, flatShading: true });
 const blobGeo = new PlaneGeometry(1, 1).rotateX(-Math.PI / 2);
 const trunkMat = new MeshStandardMaterial({ color: '#ffffff', roughness: 1, flatShading: true });
 const leafMat = new MeshStandardMaterial({ color: '#ffffff', roughness: 0.9, flatShading: true });
@@ -74,6 +78,8 @@ const blobMat = new MeshBasicMaterial({ map: blobShadowTexture(), transparent: t
 
 const LEAF = ['#4f9a4a', '#5fae52', '#3f8844', '#6cbb5a', '#79b94d'];
 const PINE = ['#2f6b46', '#3a7a4e', '#285d3d'];
+const SHRUB = ['#3f7a40', '#4f8a45', '#5d9a4a', '#6f8f3c', '#386f4a'];
+const ROCK = ['#8d8a82', '#a29d92', '#77746d', '#b3ab9b'];
 const FLOWER = ['#f06292', '#ffd54f', '#ffffff', '#ba68c8', '#ff8a65', '#7fb2ff'];
 
 function garden(b: Bounds) {
@@ -87,32 +93,77 @@ function garden(b: Bounds) {
   const pines: Placement[] = [];
   const blobs: Placement[] = [];
   const pick = <T,>(a: T[]) => a[Math.floor(rand() * a.length)];
-  let guard = 0;
-  while (trunks.length + pines.length < 90 && guard++ < 2000) {
-    const a = rand() * Math.PI * 2;
-    const reach = 9 + Math.pow(rand(), 0.7) * 85;
-    const x = cx + Math.cos(a) * (hx + reach) * (0.9 + rand() * 0.2);
-    const z = cz + Math.sin(a) * (hz + reach) * (0.9 + rand() * 0.2);
-    if (x > b.x0 - 7 && x < b.x1 + 7 && z > b.z0 - 7 && z < b.z1 + 8) continue;
-    if (x > DOOR_X + 4 && x < DOOR_X + 31 && z > b.z1 + 2 && z < b.z1 + 17) continue;
-    if (Math.abs(x - DOOR_X) < 4 && z > b.z1) continue;
+  const free = (x: number, z: number) =>
+    !(x > b.x0 - 7 && x < b.x1 + 7 && z > b.z0 - 7 && z < b.z1 + 8) &&
+    !(x > DOOR_X + 4 && x < DOOR_X + 31 && z > b.z1 + 2 && z < b.z1 + 17) &&
+    !(Math.abs(x - DOOR_X) < 4 && z > b.z1);
+  const tree = (x: number, z: number, h: number, pine: boolean) => {
     const gy = GROUND_Y + terrainHeight(x, z, b);
-    const near = Math.max(0, 1 - reach / 60);
-    const h = 3.2 + rand() * 3 + near * 0.8;
-    const pine = rand() < 0.38;
     const yaw = rand() * 6.28;
     if (pine) {
-      const r = 1.3 + rand() * 0.9;
+      const r = 0.9 + h * 0.17 + rand() * 0.4;
       trunks.push({ x, y: gy, z, sx: 1, sy: h * 0.35, sz: 1, yaw, color: '#5b4330' });
       pines.push({ x, y: gy + h * 0.3, z, sx: r, sy: h * 0.62, sz: r, yaw, color: pick(PINE) });
       blobs.push({ x, y: gy + 0.02, z, sx: r * 3.2, sy: 1, sz: r * 3.2, yaw: 0, color: '#000' });
     } else {
-      const r = 1.6 + rand() * 1.4;
+      const r = 1.2 + h * 0.2 + rand() * 0.6;
       trunks.push({ x, y: gy, z, sx: 1.2, sy: h * 0.55, sz: 1.2, yaw, color: '#6b4d36' });
       crowns.push({ x, y: gy + h * 0.7, z, sx: r, sy: r * 0.85, sz: r, yaw, color: pick(LEAF) });
       crowns.push({ x: x + (rand() - 0.5) * r, y: gy + h * 0.7 + r * 0.55, z: z + (rand() - 0.5) * r, sx: r * 0.7, sy: r * 0.62, sz: r * 0.7, yaw, color: pick(LEAF) });
       blobs.push({ x, y: gy + 0.02, z, sx: r * 3.4, sy: 1, sz: r * 3.4, yaw: 0, color: '#000' });
     }
+  };
+  const shrubs: Placement[] = [];
+  const rocks: Placement[] = [];
+  // Groves: a few tall trees with young ones and shrubs around them, spread at every distance from the building.
+  let groves = 0;
+  for (let guard = 0; groves < 22 && guard < 900; guard++) {
+    const a = rand() * Math.PI * 2;
+    const reach = 11 + Math.pow(rand(), 0.8) * 75;
+    const gx = cx + Math.cos(a) * (hx + reach) * (0.9 + rand() * 0.2);
+    const gz = cz + Math.sin(a) * (hz + reach) * (0.9 + rand() * 0.2);
+    if (!free(gx, gz)) continue;
+    groves++;
+    const n = 4 + Math.floor(rand() * 6);
+    const spread = 2.5 + rand() * 3;
+    const conifer = rand() < 0.4;
+    for (let k = 0; k < n; k++) {
+      const x = gx + (rand() - 0.5) * spread * 2;
+      const z = gz + (rand() - 0.5) * spread * 2;
+      if (!free(x, z)) continue;
+      const tall = k === 0 ? 1.5 : 0.55 + rand() * 0.8;
+      tree(x, z, (3 + rand() * 3.2) * tall + 1, rand() < (conifer ? 0.8 : 0.2));
+    }
+    for (let k = 0; k < 3 + Math.floor(rand() * 4); k++) {
+      const x = gx + (rand() - 0.5) * spread * 3;
+      const z = gz + (rand() - 0.5) * spread * 3;
+      if (!free(x, z)) continue;
+      const r = 0.45 + rand() * 0.55;
+      shrubs.push({ x, y: GROUND_Y + terrainHeight(x, z, b) + r * 0.35, z, sx: r * 1.2, sy: r * 0.8, sz: r * 1.2, yaw: rand() * 6, color: pick(SHRUB) });
+    }
+    if (rand() < 0.6) {
+      const x = gx + (rand() - 0.5) * spread * 2.4;
+      const z = gz + (rand() - 0.5) * spread * 2.4;
+      if (free(x, z)) rocks.push({ x, y: GROUND_Y + terrainHeight(x, z, b) + 0.1, z, sx: 0.4 + rand() * 0.7, sy: 0.3 + rand() * 0.4, sz: 0.4 + rand() * 0.6, yaw: rand() * 6, color: pick(ROCK) });
+    }
+  }
+  // Rocks and lone shrubs scattered through the open lawn, and a low hedge line that closes the lot at the back.
+  for (let i = 0; i < 70; i++) {
+    const a = rand() * Math.PI * 2;
+    const reach = 9 + rand() * 60;
+    const x = cx + Math.cos(a) * (hx + reach);
+    const z = cz + Math.sin(a) * (hz + reach);
+    if (!free(x, z)) continue;
+    const gy = GROUND_Y + terrainHeight(x, z, b);
+    if (i % 3 === 0) rocks.push({ x, y: gy + 0.08, z, sx: 0.3 + rand() * 0.6, sy: 0.25 + rand() * 0.3, sz: 0.3 + rand() * 0.5, yaw: rand() * 6, color: pick(ROCK) });
+    else shrubs.push({ x, y: gy + 0.25, z, sx: 0.6 + rand() * 0.6, sy: 0.5 + rand() * 0.3, sz: 0.6 + rand() * 0.6, yaw: rand() * 6, color: pick(SHRUB) });
+  }
+  for (let x = b.x0 - 6; x <= b.x1 + 6; x += 1.5) {
+    const z = b.z0 - 5.5;
+    shrubs.push({ x, y: GROUND_Y + terrainHeight(x, z, b) + 0.3, z, sx: 1.0, sy: 0.55 + rand() * 0.12, sz: 0.8, yaw: 0, color: pick(SHRUB) });
+  }
+  for (const side of [b.x0 - 6, b.x1 + 6]) {
+    for (let z = b.z0 - 5.5; z <= b.z1 + 4; z += 1.5) shrubs.push({ x: side, y: GROUND_Y + terrainHeight(side, z, b) + 0.3, z, sx: 0.8, sy: 0.55 + rand() * 0.12, sz: 1.0, yaw: 0, color: pick(SHRUB) });
   }
   // Hedges along the sides, and a raised flower bed on each side of the porch and along the front wall.
   const bushes: Placement[] = [];
@@ -159,7 +210,7 @@ function garden(b: Bounds) {
   }
   // Stone curbs along the front path.
   for (const sx of [-2.5, 2.5]) edge.push(box(0.2, 0.14, 54, DOOR_X + sx, GROUND_Y + 0.07, b.z1 + 4.5 + 27, '#bdb4a3'));
-  return { trunks, crowns, pines, bushes, flowers, blobs, edging: merge(edge) };
+  return { trunks, crowns, pines, bushes: [...bushes, ...shrubs], rocks, flowers, blobs, edging: merge(edge) };
 }
 
 // The ground is one grid whose height follows the terrain and whose vertex colors patch the lawn in meadow, shade and
@@ -242,6 +293,7 @@ export function Environment({ b }: { b: Bounds }) {
       <Scatter geometry={crownGeo} material={leafMat} items={g.crowns} />
       <Scatter geometry={pineGeo} material={leafMat} items={g.pines} />
       <Scatter geometry={bushGeo} material={leafMat} items={g.bushes} />
+      <Scatter geometry={rockGeo} material={rockMat} items={g.rocks} castShadow />
       <Scatter geometry={flowerGeo} material={flowerMat} items={g.flowers} />
       <Scatter geometry={blobGeo} material={blobMat} items={g.blobs} />
     </>

@@ -250,7 +250,7 @@ function MeetingRoom({ world }: { world: World }) {
         <boxGeometry args={along === 'z' ? [0.12, 2.5, span * 2] : [span * 2, 2.5, 0.12]} />
         <meshStandardMaterial color={doorOpen ? '#63b996' : '#d95d63'} roughness={0.72} transparent opacity={doorOpen ? 0.42 : 0.92} />
       </mesh>
-      <Html position={[doorAt.x - (along === 'z' ? 0.2 : 0), 2.75, doorAt.z]} rotation-y={along === 'z' ? Math.PI / 2 : 0} transform pointerEvents="none">
+      <Html position={[doorAt.x - (along === 'z' ? 0.2 : 0), 2.75, doorAt.z]} rotation-y={along === 'z' ? Math.PI / 2 : 0} transform scale={0.55} pointerEvents="none">
         <div className={`meeting-door-label ${doorOpen ? 'open' : 'closed'}`}>
           <b>Meeting room</b>
           <span>{doorOpen ? 'OPEN · E to close' : 'CLOSED · E to open'}</span>
@@ -272,13 +272,13 @@ function Lights({ b, slots }: { b: Bounds; slots: readonly number[] }) {
   const pools = usePools(b, slots);
   return (
     <>
-      <hemisphereLight args={['#cfdcff', '#c79f78', 0.95]} />
+      <hemisphereLight args={['#b4c8ee', '#d3a273', 0.9]} />
       <directionalLight
         target={target}
         castShadow
-        color="#ffd7a1"
-        intensity={2.7}
-        position={[cx + 34, 17, cz + 9]}
+        color="#ffbd78"
+        intensity={3.1}
+        position={[cx + 38, 12, cz + 14]}
         shadow-mapSize={[2048, 2048]}
         shadow-bias={-0.0004}
         shadow-normalBias={0.03}
@@ -288,7 +288,7 @@ function Lights({ b, slots }: { b: Bounds; slots: readonly number[] }) {
         shadow-camera-top={ext}
         shadow-camera-bottom={-ext}
         shadow-camera-near={1}
-        shadow-camera-far={90}
+        shadow-camera-far={110}
       />
       <LightPools pools={pools} />
       <primitive object={target} />

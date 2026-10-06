@@ -38,11 +38,11 @@ const fixtureMaterial = new MeshBasicMaterial({ vertexColors: true, toneMapped: 
 // A pendant: a dark cross beam on the ceiling, a cord, a brass drum shade and the glowing disc inside it.
 const fixtureGeometry = merge([
   box(1.7, 0.12, 0.2, 0, 0.1, 0, '#3a2c22'),
-  cyl(0.012, 0.012, 0.55, 0, -0.25, 0, '#2b2e38', 4),
-  cyl(0.08, 0.25, 0.22, 0, -0.62, 0, '#b08a4e', 14),
-  cyl(0.23, 0.23, 0.03, 0, -0.74, 0, '#ffe6b0', 14),
+  cyl(0.012, 0.012, 0.3, 0, -0.12, 0, '#2b2e38', 4),
+  cyl(0.07, 0.2, 0.18, 0, -0.35, 0, '#b08a4e', 14),
+  cyl(0.18, 0.18, 0.03, 0, -0.45, 0, '#ffd08a', 14),
 ]);
-const poolMaterial = new MeshBasicMaterial({ map: poolTexture(), color: '#ffc982', transparent: true, depthWrite: false, blending: AdditiveBlending, opacity: 0.3, fog: false, polygonOffset: true, polygonOffsetFactor: -3 });
+const poolMaterial = new MeshBasicMaterial({ map: poolTexture(), color: '#ffb865', transparent: true, depthWrite: false, blending: AdditiveBlending, opacity: 0.3, fog: false, polygonOffset: true, polygonOffsetFactor: -3 });
 const poolGeometry = new PlaneGeometry(4.6, 4.6).rotateX(-Math.PI / 2);
 const blobMaterial = new MeshBasicMaterial({ map: blobShadowTexture(), transparent: true, depthWrite: false, opacity: 0.55, polygonOffset: true, polygonOffsetFactor: -2 });
 const blobGeometry = new PlaneGeometry(1, 1).rotateX(-Math.PI / 2);

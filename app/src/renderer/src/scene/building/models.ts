@@ -1,12 +1,12 @@
 // Every simple furniture def as one merged geometry with its colors baked in as vertex colors, so a def costs one draw
 // call per story however many of it there are. A model sits on the floor with its origin at the middle of the item's
 // footprint and faces +z at rot 0, the way the space module's seats do.
-import { BufferGeometry, PlaneGeometry } from 'three';
+import { BufferGeometry, IcosahedronGeometry, PlaneGeometry } from 'three';
 import { ITEM_DEFS, STORY_H } from '../../../../shared/space/index.ts';
 import { FURNITURE } from './furniture.ts';
-import { blob, box, cyl, merge } from './parts.ts';
+import { at, blob, box, cyl, merge, paint } from './parts.ts';
 
-export { blob, box, cyl, merge };
+export { blob, box, cyl, merge, paint };
 
 const WOOD = '#efe0c6';
 const DARK = '#3a3f4e';
@@ -61,17 +61,18 @@ export function chairModel(): BufferGeometry {
 }
 
 const LEAVES = ['#5f9f6c', '#78b97a', '#4d8a5d', '#8ccb84'];
+// A potted plant about 1.1 m tall: a short pot and a loose crown of smooth leaf masses, not a few big spiky stones.
+export const leafMass = (r: number, x: number, y: number, z: number, color: string) => paint(at(new IcosahedronGeometry(r, 1), x, y, z), color);
 function plant() {
   const leaves: [number, number, number, number][] = [
-    [0, 0.85, 0, 0.36],
-    [0.22, 1.05, 0.1, 0.28],
-    [-0.2, 1.1, -0.08, 0.3],
-    [0.05, 1.35, -0.05, 0.26],
-    [-0.1, 0.75, 0.2, 0.24],
+    [0, 0.62, 0, 0.24],
+    [0.14, 0.78, 0.07, 0.18],
+    [-0.13, 0.82, -0.05, 0.19],
+    [0.03, 0.98, -0.02, 0.16],
+    [-0.07, 0.56, 0.13, 0.15],
+    [0.12, 0.58, -0.1, 0.14],
   ];
-  const g = merge([cyl(0.3, 0.22, 0.5, 0, 0.25, 0, '#f1ebe0'), ...leaves.map(([x, y, z, r], i) => blob(r, x, y, z, LEAVES[i % LEAVES.length]))]);
-  g.scale(0.85, 0.85, 0.85);
-  return g;
+  return merge([cyl(0.2, 0.15, 0.36, 0, 0.18, 0, '#f1ebe0'), cyl(0.21, 0.21, 0.03, 0, 0.37, 0, '#4a3a2b'), ...leaves.map(([x, y, z, r], i) => leafMass(r, x, y, z, LEAVES[i % LEAVES.length]))]);
 }
 
 function stairs(): BufferGeometry {
