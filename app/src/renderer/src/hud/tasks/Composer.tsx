@@ -9,7 +9,7 @@ import { Chevron, Notes, PriorityIcon, StageIcon } from './icons.tsx';
 
 type PickerId = 'assignee' | 'priority';
 
-type Option<V> = { key: string; value: V; text: string; node: ReactNode };
+type Option<V> = { key: string; value: V; node: ReactNode };
 
 // A list opened under the pills, in the card's flow so the hint and the Create button stay in view. Arrow keys move through it,
 // Enter picks, Esc shuts it and Tab moves on from its pill. Focus never leaves the composer, so the composer can tell a click
@@ -66,7 +66,6 @@ function PersonOption({ person }: { person: Employee }) {
 const noOne = (stage: TaskStage): Option<string | undefined> => ({
   key: 'none',
   value: undefined,
-  text: 'No one yet',
   node: (
     <>
       <i className="tb-av empty" style={{ width: 22, height: 22 }} />
@@ -76,8 +75,8 @@ const noOne = (stage: TaskStage): Option<string | undefined> => ({
 });
 
 const priorityOptions: Option<Priority | undefined>[] = [
-  { key: 'none', value: undefined, text: 'No priority', node: <><PriorityIcon priority={undefined} /><span className="tb-opt-name"><b>No priority</b></span></> },
-  ...PRIORITIES.map((p) => ({ key: p, value: p as Priority | undefined, text: PRIORITY_LABEL[p], node: <><PriorityIcon priority={p} /><span className="tb-opt-name"><b>{PRIORITY_LABEL[p]}</b></span></> })),
+  { key: 'none', value: undefined, node: <><PriorityIcon priority={undefined} /><span className="tb-opt-name"><b>No priority</b></span></> },
+  ...PRIORITIES.map((p) => ({ key: p, value: p as Priority | undefined, node: <><PriorityIcon priority={p} /><span className="tb-opt-name"><b>{PRIORITY_LABEL[p]}</b></span></> })),
 ];
 
 type Props = { board: Board; stage: TaskStage; team: readonly Employee[]; onDone: () => void };
@@ -118,7 +117,7 @@ export function Composer({ board, stage, team, onDone }: Props) {
     pills.current[id]?.focus();
   };
 
-  const pill = (id: PickerId, label: string, body: ReactNode) => (
+  const pill = (id: PickerId, label: string, value: string, body: ReactNode) => (
     <button
       type="button"
       ref={(el) => void (pills.current[id] = el)}
@@ -126,7 +125,7 @@ export function Composer({ board, stage, team, onDone }: Props) {
       data-testid={`pill-${id}`}
       aria-haspopup="listbox"
       aria-expanded={open === id}
-      aria-label={label}
+      aria-label={`${label}: ${value}`}
       onClick={() => setOpen(open === id ? null : id)}
       onKeyDown={(e) => {
         if (e.key === 'ArrowDown' && open !== id) {
@@ -202,6 +201,7 @@ export function Composer({ board, stage, team, onDone }: Props) {
         {pill(
           'assignee',
           'Assignee',
+          who?.name ?? 'no one',
           who ? (
             <>
               <Avatar person={who} size={18} />
@@ -217,6 +217,7 @@ export function Composer({ board, stage, team, onDone }: Props) {
         {pill(
           'priority',
           'Priority',
+          draft.priority ? PRIORITY_LABEL[draft.priority] : 'none',
           <>
             <PriorityIcon priority={draft.priority} />
             <span className={`tb-pill-text ${draft.priority ? '' : 'dim'}`}>{draft.priority ? PRIORITY_LABEL[draft.priority] : 'Priority'}</span>
@@ -237,7 +238,7 @@ export function Composer({ board, stage, team, onDone }: Props) {
           <Menu
             label="Assignee"
             current={who?.id}
-            options={[noOne(stage), ...team.map((p) => ({ key: p.id, value: p.id as string | undefined, text: p.name, node: <PersonOption person={p} /> }))]}
+            options={[noOne(stage), ...team.map((p) => ({ key: p.id, value: p.id as string | undefined, node: <PersonOption person={p} /> }))]}
             onPick={(id) => pick({ assignee: id as Draft['assignee'] })}
             onShut={shut('assignee')}
           >
