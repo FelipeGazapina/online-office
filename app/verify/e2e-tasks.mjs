@@ -195,21 +195,40 @@ export default async (s, { launch }) => {
     await s.eval(`window.office.send({ type: 'update_task', taskId: ${JSON.stringify(card.id)}, notes: ${JSON.stringify(deliverable('crono.txt', 'hello from crono'))} })`);
     await s.eval(`window.office.send({ type: 'assign_task', taskId: ${JSON.stringify(card.id)}, employeeId: ${JSON.stringify(pia)} })`);
     await waitForStage(s, card.id, 'review', 'crono.txt');
-    const callsFor = (n) => fake.calls.length >= n;
+    // The reply that moves the task to review can come in the middle of the PO's last turn. That turn's end then adds time to a
+    // person-day that was already sent, and that time is due as a follow-up. So wait until every turn on the task has ended and the
+    // fake server has what mail.jsonl says, and judge the sums, not how many calls it took to get there.
+    const sums = () => {
+      const by = {};
+      for (const c of fake.calls) by[`${c.description}|${c.date}`] = (by[`${c.description}|${c.date}`] ?? 0) + c.hours;
+      return by;
+    };
+    const keyOf = (who, date) => `${nameOf[who]} (AI employee, Online Office)|${date}`;
+    const caughtUp = async () => {
+      const t = await s.eval(`(() => { const t = ${taskExpr(card.id)}; return { running: ${state}.taskTime[t.id]?.running.length ?? 0, inflight: !!t.hours?.inflight }; })()`);
+      if (t.running || t.inflight) return false;
+      const { byDay } = wallTime((await s.eval(`${taskExpr(card.id)}.runs`)));
+      const got = sums();
+      return Object.keys(byDay).length >= 2 && Object.entries(byDay).every(([key, ms]) => Math.abs((got[keyOf(...key.split('|'))] ?? 0) - ms / MS_PER_HOUR) <= TOLERANCE_MS / MS_PER_HOUR + 0.0001);
+    };
     const t0 = Date.now();
-    while (!callsFor(2) && Date.now() - t0 < 30_000) await s.sleep(500);
+    while (!(await caughtUp()) && Date.now() - t0 < 60_000) await s.sleep(500);
     await s.sleep(4000);
     const cardNow = await s.eval(`${taskExpr(card.id)}`);
     const expected = wallTime(cardNow.runs);
     console.log('fake CronoSpark got:', JSON.stringify(fake.calls));
+    const got = sums();
     const pairs = Object.keys(expected.byDay);
-    assert(fake.calls.length === pairs.length && pairs.length >= 2, `one registrar_horas call per person and day (${fake.calls.length} calls for ${pairs.length} person-days)`);
+    assert(pairs.length >= 2, `the PO and the employee each worked on at least one day (${pairs.length} person-days in mail.jsonl)`);
     for (const key of pairs) {
       const [who, date] = key.split('|');
-      const call = fake.calls.find((c) => c.description === `${nameOf[who]} (AI employee, Online Office)` && c.date === date);
       const want = expected.byDay[key] / MS_PER_HOUR;
-      assert(!!call && call.taskId === 'fake-task-501' && Math.abs(call.hours - want) <= TOLERANCE_MS / MS_PER_HOUR + 0.0001, `${nameOf[who]} on ${date}: ${call?.hours} h sent, mail.jsonl says ${want.toFixed(4)} h`);
+      const sum = got[keyOf(who, date)] ?? 0;
+      const calls = fake.calls.filter((c) => c.description === `${nameOf[who]} (AI employee, Online Office)` && c.date === date);
+      assert(calls.length >= 1 && calls.every((c) => c.taskId === 'fake-task-501' && c.hours > 0) && Math.abs(sum - want) <= TOLERANCE_MS / MS_PER_HOUR + 0.0001, `${nameOf[who]} on ${date}: ${calls.length} call(s) add up to ${sum.toFixed(4)} h, mail.jsonl says ${want.toFixed(4)} h`);
     }
+    assert(fake.calls.every((c) => pairs.includes(`${Object.keys(nameOf).find((id) => c.description.startsWith(nameOf[id]))}|${c.date}`)), 'nothing was sent for a person-day that has no time in mail.jsonl');
+    assert(new Set(fake.calls.map((c) => JSON.stringify([c.description, c.date, c.hours]))).size === fake.calls.length, 'no call repeats an earlier one: time that was sent is never sent again');
     const sent = fake.calls.length;
     await s.eval(`window.office.send({ type: 'update_task', taskId: ${JSON.stringify(card.id)}, stage: 'done' })`);
     await s.sleep(4000);

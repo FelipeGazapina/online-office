@@ -365,6 +365,9 @@ const HOURS_DECIMALS = 1e4;
 // One hours entry to send: `ms` is exactly what the mark moves by, so the rounding left over goes out with the next one.
 export type HoursEntry = { employeeId: EmployeeId; date: LocalDate; hours: number; ms: number };
 
+// What is due is each person-day's closed time minus what its mark says was sent. A person-day is sent again only for time
+// that closed after the last push, such as the end of a turn that outlived the reply which moved the task to review, and
+// never for time already sent.
 export function hoursDue(task: Task, work: readonly DayWork[]): HoursEntry[] {
   const out: HoursEntry[] = [];
   for (const w of work) {
