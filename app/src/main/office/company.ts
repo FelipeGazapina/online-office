@@ -1,3 +1,4 @@
+import { createAcknowledger, type Acknowledger } from './ack.ts';
 import { boardPage } from './board.ts';
 import { folderArtifacts } from './mail-artifacts.ts';
 import { commitsAhead, createWorkspace, integrate, isGitRepo, removeWorkspace, syncWorkspace, workspaceArtifacts } from './workspace.ts';
@@ -82,7 +83,7 @@ export type OfficeEvents = {
 };
 
 // The things every session leans on, started before the first employee so a session can connect the moment it is built.
-export type OfficeServices = { mcp: OfficeMcp; memory: MemoryStore; taskBoards?: TaskBoardService };
+export type OfficeServices = { mcp: OfficeMcp; memory: MemoryStore; taskBoards?: TaskBoardService; acker?: Pick<Acknowledger, 'warm' | 'ack' | 'stop'> };
 
 // Where a blocked employee goes when the last question is answered. The adapter keeps reporting while the card is up
 // (a subagent finishes, the turn ends), and those reports land here so the card stays put.
@@ -308,6 +309,7 @@ export class Office {
   private readonly taskBoards = new Map<BlockId, TaskBoardState>();
   private readonly ledgerFile: string;
   private mail!: Mailroom;
+  private readonly acker: Pick<Acknowledger, 'warm' | 'ack' | 'stop'>;
   // The last thing each employee said in the turn they are on. It is the reply when the harness gives no final text.
   private lastSaid = new Map<EmployeeId, string>();
 
@@ -315,6 +317,7 @@ export class Office {
     this.dataFile = dataFile;
     this.harnesses = harnesses;
     this.events = events;
+    this.acker = services.acker ?? createAcknowledger();
     this.services = { ...services, taskBoards: services.taskBoards ?? new TaskBoardService() };
     this.services.taskBoards.setOnChange(() => {
       this.events.changed();
@@ -334,6 +337,7 @@ export class Office {
       }
       this.startSession(e);
       if (e.role === 'orchestrator') this.sessionOf(e).warm?.();
+      if (e.provider === 'claude-code') this.acker.warm();
     }
     save(dataFile, this.company, this.building);
     for (const block of this.company.blocks) if (block.taskBoard?.sources.length) void this.refreshTaskBoard(block.id);
@@ -381,6 +385,13 @@ export class Office {
           this.events.changed();
         },
         stream: (employeeId, replyingTo, delta, done) => this.events.stream?.(employeeId, replyingTo, delta, done),
+        acknowledge: (to, request, onDelta) => {
+          const e = this.company.employees.find((x) => x.id === to);
+          const block = e && this.company.blocks.find((b) => b.id === e.blockId);
+          if (!e || !block || request.kind !== 'request') return undefined;
+          const teammates = this.company.employees.filter((x) => x.blockId === e.blockId && x.id !== e.id).map((x) => `${x.name} (${x.role ?? 'employee'})`);
+          return this.acker.ack({ who: e.id, name: e.name, role: e.role ?? 'employee', company: this.company.name, block: block.name, teammates, request: request.text }, onDelta);
+        },
         now: () => Date.now(),
         newId: defaultIds,
       },
@@ -474,6 +485,7 @@ export class Office {
 
   shutdown() {
     for (const id of [...this.sessions.keys()]) this.stopSession(id);
+    this.acker.stop();
     void this.services.taskBoards.close();
   }
 
@@ -777,6 +789,8 @@ export class Office {
     const s = this.sessions.get(id);
     this.sessions.delete(id);
     s?.stop();
+    // A bubble the session left half written would hang on the owner's screen for ever.
+    this.mail.closeStream(id);
     // Cancels whatever the harness still has in flight over MCP, then releases everyone waiting on the owner.
     this.services.mcp.detach(id);
     this.inbox.clear(id);
@@ -862,6 +876,7 @@ export class Office {
     company.employees.push(employee);
     this.startSession(employee);
     this.sessions.get(employee.id)?.warm?.();
+    if (provider === 'claude-code') this.acker.warm();
     this.commit();
     return employee;
   }
