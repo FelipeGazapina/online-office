@@ -130,8 +130,6 @@ export type TaskCard = {
   sourceLabel: string;
 };
 
-export type TaskBoardColumn<T extends { status: string }> = { id: string; label: string; cards: T[] };
-
 const TASK_BOARD_STATUS_ORDER = ['Open', 'In Design', 'In Dev', 'In Progress', 'Ready to Review', 'Done', 'Deferred'] as const;
 const TASK_BOARD_STATUS_ALIASES: Record<string, (typeof TASK_BOARD_STATUS_ORDER)[number]> = {
   backlog: 'Open',
@@ -169,29 +167,6 @@ const taskBoardStatusKey = (status: string) => status.trim().toLowerCase().repla
 export function taskBoardStatusLabel(status: string): string {
   const trimmed = status.trim();
   return TASK_BOARD_STATUS_ALIASES[taskBoardStatusKey(trimmed)] ?? (trimmed || 'Open');
-}
-
-function taskBoardStatusId(label: string): string {
-  const slug = label.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
-  return `status:${slug || 'unknown'}`;
-}
-
-export function taskBoardColumns<T extends { status: string }>(cards: readonly T[]): TaskBoardColumn<T>[] {
-  const grouped = new Map<string, TaskBoardColumn<T>>();
-  for (const label of TASK_BOARD_STATUS_ORDER) grouped.set(label, { id: taskBoardStatusId(label), label, cards: [] });
-  for (const card of cards) {
-    const label = taskBoardStatusLabel(card.status);
-    const existing = grouped.get(label);
-    if (existing) {
-      existing.cards.push(card);
-      continue;
-    }
-    const id = taskBoardStatusId(label);
-    const column = grouped.get(id) ?? { id, label, cards: [] };
-    column.cards.push(card);
-    grouped.set(id, column);
-  }
-  return [...grouped.values()].filter((column) => column.cards.length > 0);
 }
 
 // The user id is safe to show back in the settings UI. The API key never crosses the main-process boundary in a snapshot.

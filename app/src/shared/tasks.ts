@@ -58,15 +58,9 @@ export type BoardSync =
 
 // ───────────────────────────── Stages ─────────────────────────────
 
-// The label a stage shows under, where a board lays out provider-style columns.
-export const STAGE_STATUS: Record<TaskStage, string> = { todo: 'Open', doing: 'In Progress', review: 'Ready to Review', done: 'Done' };
-
 const STAGE_OF_LABEL: Record<string, TaskStage> = { 'In Design': 'doing', 'In Dev': 'doing', 'In Progress': 'doing', 'Ready to Review': 'review', Done: 'done' };
 
 export const stageOfStatus = (status: string): TaskStage => STAGE_OF_LABEL[taskBoardStatusLabel(status)] ?? 'todo';
-
-// The column a task sits in. Once the office has worked on it, the office's stage is the truth, not the provider's.
-export const displayStatus = (task: Task): string => (task.origin.kind === 'manual' || task.runs.length > 0 ? STAGE_STATUS[task.stage] : task.origin.providerStatus);
 
 const OUTCOME_TEXT_CAP = 2000;
 
