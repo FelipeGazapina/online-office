@@ -1,5 +1,5 @@
 import { createServer, type Server } from 'node:http';
-import { chmodSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { appendFileSync, chmodSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { auth, type OAuthClientProvider } from '@modelcontextprotocol/sdk/client/auth.js';
@@ -8,6 +8,8 @@ import { OAuthClientInformationFullSchema, OAuthClientInformationSchema, OAuthTo
 import type { TaskBoardSource, TaskCard, TaskConnectionState, TaskProvider } from '../../shared/protocol.ts';
 
 type JsonRecord = Record<string, unknown>;
+// The arguments of CronoSpark's registrar_horas.
+export type HoursCall = { taskId: string; hours: number; date: string; description: string };
 type CredentialsCodec = { encode(value: string): string; decode(value: string): string };
 type LinearCredentials = { client?: OAuthClientInformationMixed; tokens?: OAuthTokens; callbackUrl?: string };
 type StoredCredentials = { cronospark?: { encrypted?: unknown; apiKey?: unknown; userId?: unknown; url?: unknown }; linear?: { encrypted?: unknown; client?: unknown; tokens?: unknown; callbackUrl?: unknown } };
@@ -55,6 +57,7 @@ export function normalizeTaskPayload(provider: TaskProvider, payload: unknown, s
     return [{
       id: `${provider}:${rawId}`,
       provider,
+      externalId: rawId,
       identifier,
       title,
       status: state,
@@ -370,6 +373,28 @@ export class TaskBoardService {
     chmodSync(temp, 0o600);
     renameSync(temp, this.credentialsFile);
     chmodSync(this.credentialsFile, 0o600);
+  }
+
+  // Sends one person's hours on one task for one day. Throws when CronoSpark says no, so the caller can try again later.
+  // A fixture run has no server to send to, so the entry goes to the file named by OFFICE_TASK_BOARD_HOURS_LOG, or nowhere.
+  async logHours(entry: HoursCall): Promise<void> {
+    if (process.env.OFFICE_TASK_BOARD_FIXTURE) {
+      if (process.env.OFFICE_TASK_BOARD_HOURS_LOG) appendFileSync(process.env.OFFICE_TASK_BOARD_HOURS_LOG, `${JSON.stringify(entry)}\n`);
+      return;
+    }
+    const config = this.cronoConfig();
+    if (!config) throw new Error(this.connections.get('cronospark')?.message || 'CronoSpark is not connected.');
+    const client = new Client({ name: 'online-office-task-board', version: '0.1.0' });
+    const transport = new StreamableHTTPClientTransport(new URL(config.url), { requestInit: { headers: config.headers } });
+    try {
+      await client.connect(transport);
+      const result = await client.callTool({ name: 'registrar_horas', arguments: { ...entry } });
+      const body = fromMcpResult(result);
+      const failed = asRecord(result)?.isError === true || asRecord(body)?.ok === false;
+      if (failed) throw new Error(text(asRecord(body)?.error) || text(asRecord(body)?.message) || (typeof body === 'string' ? body : '') || 'CronoSpark refused the hours.');
+    } finally {
+      await client.close().catch(() => undefined);
+    }
   }
 
   private async fetchSource(source: TaskBoardSource): Promise<{ cards: TaskCard[]; error?: string }> {

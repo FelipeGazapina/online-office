@@ -1,6 +1,6 @@
 // Helpers the end-to-end scripts share. They drive the built app through the CDP driver in cdp.mjs.
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, realpathSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -15,6 +15,59 @@ export const assert = (cond, msg) => {
   if (!cond) throw new Error(`assertion failed: ${msg}`);
   console.log('ok:', msg);
 };
+
+// The first seconds of a page hold main-thread stalls of up to two seconds while the scene builds. A stall holds input back,
+// and a screenshot taken inside one moves the pointer to twice its place for as long as it lasts, so a script that
+// checks hover or timing starts after the last one. The owner stands at the origin until the first frame places them.
+export async function sceneReady(s, quietMs = 2500) {
+  await s.eval(`(() => {
+    if (window.__lastStall !== undefined) return;
+    window.__lastStall = 0;
+    const seen = (list) => list.forEach((e) => (window.__lastStall = Math.max(window.__lastStall, e.startTime + e.duration)));
+    const observer = new PerformanceObserver((list) => seen(list.getEntries()));
+    observer.observe({ type: 'longtask', buffered: true });
+    seen(observer.takeRecords());
+  })()`);
+  await s.waitFor(`performance.now() - window.__lastStall > ${quietMs} && (__office.state().owner.x !== 0 || __office.state().owner.z !== 0)`, 30000);
+}
+
+// A click acts on the first clickable thing at its pixel (a desk top, the new-project lot, a sign), so a hard-coded world
+// point can sit under one and start no walk. This returns the floor point nearest the screen center whose pixel and the four
+// pixels half a meter around it all raycast to bare floor, so a small camera shift keeps it floor. `min` and `max` bound the
+// distance from the owner, `bends` the waypoints of the route to it, `margin` how far inside the viewport the pixel is.
+export async function findFloorClick(s, { min = 0, max = 10, bends = 1, margin = 60 } = {}) {
+  const found = await s.eval(`(() => {
+    const { owner } = __office.state();
+    const y = owner.floor * 3.2;
+    const w = innerWidth;
+    const h = innerHeight;
+    const floorAt = (x, z) => {
+      const at = __office.project(x, y, z);
+      if (at.x < ${margin} || at.y < ${margin} || at.x > w - ${margin} || at.y > h - ${margin}) return null;
+      if (document.elementFromPoint(at.x, at.y)?.tagName !== 'CANVAS') return null;
+      const hit = __office.pick(at.x, at.y);
+      if (hit.kind !== 'floor' || Math.hypot(hit.point.x - x, hit.point.z - z) > 0.25 || !hit.walk) return null;
+      return { at, hit };
+    };
+    let best = null;
+    for (let dx = -${max}; dx <= ${max}; dx += 0.5) {
+      for (let dz = -${max}; dz <= ${max}; dz += 0.5) {
+        const away = Math.hypot(dx, dz);
+        if (away < ${min} || away > ${max}) continue;
+        const x = owner.x + dx;
+        const z = owner.z + dz;
+        const here = floorAt(x, z);
+        if (!here || here.hit.walk.waypoints < ${bends}) continue;
+        if (![[0.5, 0], [-0.5, 0], [0, 0.5], [0, -0.5]].every(([ax, az]) => floorAt(x + ax, z + az))) continue;
+        const off = Math.hypot(here.at.x - w / 2, here.at.y - h / 2);
+        if (!best || off < best.off) best = { x, z, off, away, waypoints: here.hit.walk.waypoints };
+      }
+    }
+    return best;
+  })()`);
+  if (!found) throw new Error(`no floor point to click: none within ${min} to ${max} m of the owner is clear floor in the viewport with a route of ${bends} waypoints or more`);
+  return found;
+}
 
 // A data dir for the app and a git repo for the block. realpath so the path equals the canonical one the app stores
 // (macOS tmp is a symlink).
@@ -70,4 +123,35 @@ export async function diagnoseClaude(s, shotName) {
   const state = await s.eval(`JSON.stringify({ status: ${status}, activity: ${claude}.activity, logs: (__office.store.getState().logs[${claude}.id] ?? []).slice(-8).map(l => l.line) }, null, 1)`);
   console.log('employee at failure:', state);
   await s.shot(shotName);
+}
+
+// What a person reading company.mail.jsonl would work out, with no code of the app: for every turn that was handed a message
+// of these request chains, the time from its first delivery to its turn_end, per person. An open turn counts to now.
+export function wallTime(ledgerFile, rootIds, now = Date.now()) {
+  const lines = existsSync(ledgerFile) ? readFileSync(ledgerFile, 'utf8').split('\n').filter(Boolean) : [];
+  const rootOf = new Map();
+  const turns = new Map();
+  for (const line of lines) {
+    let e;
+    try {
+      e = JSON.parse(line);
+    } catch {
+      continue;
+    }
+    if (e.t === 'post') rootOf.set(e.msg.id, e.msg.rootId);
+    else if (e.t === 'deliver') {
+      const turn = turns.get(e.turn) ?? { to: e.to, start: e.at, end: null, roots: new Set() };
+      turns.set(e.turn, turn);
+      for (const id of e.ids) turn.roots.add(rootOf.get(id));
+    } else if (e.t === 'turn_end') {
+      const turn = turns.get(e.turn);
+      if (turn && turn.end === null) turn.end = e.at;
+    }
+  }
+  const total = {};
+  for (const turn of turns.values()) {
+    if (![...turn.roots].some((r) => rootIds.includes(r))) continue;
+    total[turn.to] = (total[turn.to] ?? 0) + ((turn.end ?? now) - turn.start);
+  }
+  return total;
 }

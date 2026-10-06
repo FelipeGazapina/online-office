@@ -4,7 +4,7 @@
 import { useThree } from '@react-three/fiber';
 import { useEffect } from 'react';
 import { Vector3 } from 'three';
-import { checkOps, FLOOR_PAINTS, ITEM_DEFS, rectWalls, STORY_H, WALL_STYLES, type Building, type BuildOp, type Item, type ItemId, type Vec2 } from '../../../../shared/space/index.ts';
+import { blockAt, blockItems, blockPose, CELL, checkOps, FLOOR_PAINTS, ITEM_DEFS, moveBlockOp, placeBlock, rectWalls, STORY_H, WALL_STYLES, type Building, type BuildOp, type Item, type ItemId, type Vec2 } from '../../../../shared/space/index.ts';
 import {
   floodRoom,
   itemAt,
@@ -23,7 +23,7 @@ import {
   wallsToDelete,
   wallsToPut,
 } from '../../../../shared/space/buildersGesture.ts';
-import { rotate, sendOps, setTool, toolItem } from '../../hud/build/actions.ts';
+import { pickUpBlock, rotate, sendOps, setTool, stepBack, toolItem } from '../../hud/build/actions.ts';
 import { buildView, draft, modifiers, setGhost, spaceContext, VIOLATION_TEXT, type Ghost } from '../../hud/build/state.ts';
 import { get, set, useStore, type BuildCursor, type BuildState, type BuildTool } from '../../store.ts';
 import { groundPoint, tileOf, vertexOf } from './Picking.ts';
@@ -114,7 +114,36 @@ function plan(b: Building, build: BuildState, p: Vec2, drag: Drag | null, shift:
       const item = toolItem(tool, at, storyItem(b, level, tool.carry));
       return { ops: [putItemOp(level, item)], ghost: (ok) => ({ kind: 'item', item, ok }), readout: null };
     }
+    case 'block': {
+      if (tool.kind !== 'block') return null;
+      const carry = tool.carry;
+      if (!carry) {
+        const id = blockAt(story, p);
+        const items = id ? blockItems(story, id) : [];
+        return { ops: [], ghost: () => (items.length ? { kind: 'blockSelect', items } : null), readout: null };
+      }
+      const items = blockItems(story, carry.blockId);
+      if (!items.length) return null;
+      const pose = blockPose(items, carry.quarter, { x: p.x / CELL - carry.grab.x, z: p.z / CELL - carry.grab.z });
+      const op = moveBlockOp(story, level, carry.blockId, pose);
+      const placed = placeBlock(items, pose);
+      const name = get().company?.blocks.find((x) => x.id === carry.blockId)?.name ?? 'Block';
+      return { ops: op ? [op] : [], ghost: (ok) => ({ kind: 'block', items: placed, ok }), readout: `${name} · ${items.length} pieces` };
+    }
   }
+}
+
+function pickAt(b: Building, build: BuildState, p: Vec2, whole: boolean): boolean {
+  const story = b.stories[build.level];
+  if (build.tool.kind === 'block') {
+    const id = blockAt(story, p);
+    return !!id && pickUpBlock(id, p);
+  }
+  const item = itemAt(story, p);
+  if (!item || !ITEM_DEFS[item.def]) return false;
+  if (whole && item.blockId) return pickUpBlock(item.blockId, p);
+  setTool({ kind: 'item', def: item.def, rot: item.rot, carry: item.id, blockId: item.blockId ?? null });
+  return true;
 }
 
 export function BuildInput() {
@@ -129,6 +158,8 @@ export function BuildInput() {
     let seen: { x: number; y: number } | null = null;
     let drag: Drag | null = null;
     let down: { x: number; y: number; button: number } | null = null;
+    // The press that picked something up. Released where it started it keeps the piece in hand; dragged away, it drops it.
+    let grabbed = false;
     let verdictKey = '';
     let verdictValue: Verdict = { ok: true, text: '' };
 
@@ -198,7 +229,9 @@ export function BuildInput() {
       }
       if (!ghost && build.tool.kind === 'select' && hover && story) {
         const item = story.items.find((i) => i.id === hover);
-        if (item) ghost = { kind: 'outline', item };
+        const whole = item?.blockId && modifiers.shift ? blockItems(story, item.blockId) : [];
+        if (whole.length) ghost = { kind: 'blockSelect', items: whole };
+        else if (item) ghost = { kind: 'outline', item };
       }
       setGhost(ghost, build.level);
       publish({ readout, verdict, hover });
@@ -214,12 +247,16 @@ export function BuildInput() {
 
     const onDown = (e: PointerEvent) => {
       track(e);
+      grabbed = false;
       down = { x: e.clientX, y: e.clientY, button: e.button };
       if (e.button !== 0) return;
       const c = current();
       if (!c) return;
-      const kind = c.build.tool.kind === 'room' && modifiers.shift ? 'wall' : c.build.tool.kind;
-      if (kind === 'wall' || kind === 'room') {
+      const tool = c.build.tool;
+      const kind = tool.kind === 'room' && modifiers.shift ? 'wall' : tool.kind;
+      if (kind === 'select' || (tool.kind === 'block' && !tool.carry)) {
+        grabbed = pickAt(c.b, c.build, c.p, modifiers.shift);
+      } else if (kind === 'wall' || kind === 'room') {
         drag = { tool: kind, a: vertexOf(c.p), erase: modifiers.ctrl, tiles: new Map(), flood: false, lastTile: null };
       } else if (kind === 'floor') {
         const t = tileOf(c.p);
@@ -244,10 +281,12 @@ export function BuildInput() {
     const onUp = (e: PointerEvent) => {
       const start = down;
       down = null;
+      const wasGrab = grabbed;
+      grabbed = false;
       if (!start) return;
       const moved = Math.hypot(e.clientX - start.x, e.clientY - start.y) >= CLICK_PX;
       if (start.button === 2) {
-        if (!moved && get().build?.tool.kind !== 'select') setTool({ kind: 'select' });
+        if (!moved) stepBack();
         return;
       }
       if (start.button !== 0) return;
@@ -258,23 +297,23 @@ export function BuildInput() {
       if (!c) return;
       const { build, b, p } = c;
       const tool = build.tool;
-      if (tool.kind === 'select') {
-        if (moved) return;
-        const item = itemAt(b.stories[build.level], p);
-        const def = item && ITEM_DEFS[item.def];
-        if (item && def) setTool({ kind: 'item', def: item.def, rot: item.rot, carry: item.id, blockId: item.blockId ?? null });
+      if (wasGrab && !moved) {
         refresh();
         return;
       }
+      if (tool.kind === 'select' || (tool.kind === 'block' && !tool.carry)) return;
       if ((tool.kind === 'wall' || tool.kind === 'room' || tool.kind === 'floor') && !finished) return;
       if (finished && finished.tool !== 'floor' && !moved) {
         refresh();
         return;
       }
       const pl = plan(b, build, p, finished, modifiers.shift, modifiers.ctrl);
-      if (pl && pl.ops.length && verdictOf(b, pl.ops).ok) {
-        sendOps(pl.ops);
-        if (tool.kind === 'item' && tool.carry) setTool({ kind: 'select' });
+      const fits = !!pl && verdictOf(b, pl.ops).ok;
+      if (pl && fits && pl.ops.length) sendOps(pl.ops);
+      // A piece or block that is dropped lets go, whether or not it moved. A drag that ends somewhere it does not fit puts it back.
+      if ((tool.kind === 'item' || tool.kind === 'block') && tool.carry && (fits || wasGrab)) {
+        if (tool.kind === 'block') setTool({ kind: 'block', carry: null });
+        else setTool({ kind: 'select' });
       }
       refresh();
     };
@@ -282,7 +321,7 @@ export function BuildInput() {
     const onWheel = (e: WheelEvent) => {
       if (!e.shiftKey && !modifiers.shift) return;
       const tool = get().build?.tool;
-      if (tool?.kind !== 'item') return;
+      if (tool?.kind !== 'item' && !(tool?.kind === 'block' && tool.carry)) return;
       e.preventDefault();
       e.stopImmediatePropagation();
       rotate((e.deltaY || e.deltaX) > 0 ? 1 : -1);

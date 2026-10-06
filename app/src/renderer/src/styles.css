@@ -56,6 +56,8 @@ code {
 .stage {
   position: fixed;
   inset: 0;
+  /* The sky colour the scene clears to, so the window is not dark while the first draw waits for the GPU. */
+  background: #f1d9bd;
 }
 .stage canvas {
   display: block;
@@ -1641,50 +1643,10 @@ h3 {
 .task-credentials p { margin: 4px 0 0; font-size: 12px; }
 .task-credentials label { display: grid; gap: 4px; font-size: 11px; font-weight: 700; color: #6f7184; }
 .task-credentials input { min-width: 0; padding: 8px 10px; border: 1px solid rgba(48,50,71,.18); border-radius: 8px; background: #fff; color: inherit; font: inherit; font-weight: 400; }
-.task-source-list { display: grid; gap: 8px; }
-.task-source-row { display: grid; grid-template-columns: 125px 1fr 1fr auto; gap: 8px; align-items: center; }
-.task-source-row input, .task-source-row select, .task-config-head select { min-width: 0; padding: 8px 10px; border: 1px solid rgba(48,50,71,.18); border-radius: 8px; background: #fff; color: inherit; }
-.task-config-actions { justify-content: flex-end; margin-top: 14px; flex-wrap: wrap; }
 .task-config-note { margin: 12px 0 0; font-size: 12px; }
-.task-board-modal { width: min(1400px, 94vw); min-width: min(920px, 92vw); max-height: 92vh; overflow: hidden; }
-.task-board-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 22px; padding-bottom: 14px; border-bottom: 1px solid rgba(48,50,71,.12); }
-.task-board-header h2 { margin: 2px 0 3px; }
-.task-board-eyebrow { margin: 0; color: #676b85; font-size: 11px; font-weight: 800; letter-spacing: .09em; text-transform: uppercase; }
-.task-board-header-actions { display: flex; align-items: center; gap: 7px; }
-.task-board-filter { padding: 7px 11px; border: 1px solid rgba(48,50,71,.15); border-radius: 8px; color: #5e6279; background: #fff; font: inherit; font-size: 12px; cursor: pointer; }
-.task-board-filter.active { color: #2f3554; background: #eef0f7; border-color: rgba(48,50,71,.22); font-weight: 700; }
-.task-board-toolbar { display: flex; align-items: center; gap: 8px; padding: 13px 0; color: #6f7184; font-size: 12px; }
-.task-board-filter-label { font-weight: 750; }
-.task-board-filter-chip { padding: 5px 9px; border: 1px solid rgba(48,50,71,.12); border-radius: 999px; background: rgba(255,255,255,.55); }
-.task-board-syncing { margin-left: auto; color: #5b45c7; font-weight: 700; }
-.task-board-kanban-shell { display: grid; grid-template-columns: minmax(0, 1fr) minmax(245px, .32fr); gap: 14px; min-height: 470px; overflow: hidden; }
-.task-board-kanban { display: grid; grid-template-columns: repeat(7, minmax(142px, 1fr)); gap: 9px; min-width: 0; overflow-x: auto; padding: 1px 1px 10px; }
-.task-board-column { min-width: 142px; padding: 10px; border: 1px solid rgba(48,50,71,.1); border-radius: 10px; background: #f3f3f6; }
-.task-board-column-head { display: flex; align-items: center; justify-content: space-between; gap: 6px; margin-bottom: 10px; }
-.task-board-column-head h3 { margin: 0; color: #393d55; font-size: 13px; }
-.task-board-column-head span { display: inline-flex; min-width: 22px; justify-content: center; padding: 2px 5px; border-radius: 999px; color: #70748b; background: #e7e8ed; font-size: 11px; font-weight: 800; }
-.task-board-column-cards { display: grid; align-content: start; gap: 7px; }
-.task-card { display: grid; grid-template-columns: auto 1fr; gap: 8px; width: 100%; padding: 9px; text-align: left; border: 1px solid rgba(48,50,71,.12); border-radius: 8px; background: #fff; color: inherit; box-shadow: 0 1px 2px rgba(48,50,71,.04); cursor: pointer; }
-.task-card:hover { border-color: rgba(91,141,239,.6); }
-.task-card.selected { border-color: #5b8def; box-shadow: 0 0 0 2px rgba(91,141,239,.18); }
-.task-card-copy { display: grid; min-width: 0; gap: 3px; }
-.task-card strong { overflow: hidden; font-weight: 650; text-overflow: ellipsis; }
-.task-card small { overflow: hidden; color: #7b7e93; text-overflow: ellipsis; white-space: nowrap; }
-.task-provider { display: inline-flex; align-items: center; justify-content: center; height: 24px; min-width: 34px; padding: 0 5px; border-radius: 6px; background: #e8ebf3; color: #4c5270; font-size: 11px; font-weight: 800; }
-.task-provider.linear { background: #ece6ff; color: #6944b1; }
-.task-provider.cronospark { background: #dcf7ed; color: #12744b; }
-.task-card-detail { min-width: 0; padding: 18px; border: 1px solid rgba(48,50,71,.1); border-radius: 12px; background: #f4f4f8; }
-.task-detail-topline { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-.task-detail-status { color: #6f7184; font-size: 11px; font-weight: 700; }
-.task-board-empty { display: grid; justify-items: start; gap: 10px; padding: 18px; border: 1px solid rgba(48,50,71,.14); border-radius: 12px; background: #f4f4f8; }
-.task-board-kanban > .task-board-empty { grid-column: 1 / -1; }
-.task-board-empty .err-text { margin: 0; }
-.task-card-detail h3 { margin: 16px 0 4px; }
-.task-card-detail h4 { margin: 14px 0 6px; }
-.task-assign { display: block; width: 100%; margin-top: 7px; }
 @media (max-width: 900px) { .task-credentials { grid-template-columns: 1fr 1fr; } .task-credentials > div { grid-column: 1 / -1; } }
-@media (max-width: 1000px) { .task-board-kanban-shell { grid-template-columns: 1fr; overflow-y: auto; } .task-card-detail { min-height: 170px; } }
-@media (max-width: 760px) { .task-config-head { align-items: stretch; flex-direction: column; } .task-block-picker { min-width: 0; } .task-board-modal { min-width: 0; } .task-board-header { flex-direction: column; } .task-board-header-actions { flex-wrap: wrap; } .task-board-kanban { grid-template-columns: repeat(7, minmax(160px, 1fr)); } .task-source-row { grid-template-columns: 1fr 1fr; } .task-source-row .link { grid-column: 2; } .task-credentials { grid-template-columns: 1fr; } .task-credentials > div { grid-column: auto; } }
+@media (max-width: 760px) { .task-config-head { align-items: stretch; flex-direction: column; } .task-block-picker { min-width: 0; } .task-credentials { grid-template-columns: 1fr; } .task-credentials > div { grid-column: auto; } }
+.task-config-open { margin: 0 0 14px; }
 
 /* A portal window is a click-through, always-on-top mirror of the real desktop. The main process
    removes this window from capture and sends the pointer and keyboard events to macOS underneath it. */

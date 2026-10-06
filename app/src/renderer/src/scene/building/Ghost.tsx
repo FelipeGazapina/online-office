@@ -1,11 +1,12 @@
 // The translucent preview of what the current tool would build: a wall with a handle at its free end, a whole room, the
 // tiles about to be painted, the wall about to get a door, or the furniture with its footprint and a front arrow.
 // Green means the building's own rules accept it, red means they do not. Nothing here decides; BuildInput does.
-import { useFrame } from '@react-three/fiber';
+import { useFrame, useThree } from '@react-three/fiber';
 import { Edges, Html } from '@react-three/drei';
-import { useMemo, useState } from 'react';
-import { BufferGeometry, CircleGeometry, DoubleSide, Float32BufferAttribute, MeshBasicMaterial, MeshStandardMaterial, RingGeometry, Shape } from 'three';
-import { ITEM_DEFS, STORY_H, WALL_HALF, YAW, footprint, rotateLocal, stairsInfo, type Item, type Vec2 } from '../../../../shared/space/index.ts';
+import { useEffect, useMemo, useState } from 'react';
+import { BackSide, BufferGeometry, CircleGeometry, Color, DoubleSide, Float32BufferAttribute, MeshBasicMaterial, MeshStandardMaterial, RingGeometry, ShaderMaterial, Shape, Vector2 } from 'three';
+import { mergeVertices } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
+import { cellBounds, ITEM_DEFS, STORY_H, WALL_HALF, YAW, footprint, rotateLocal, stairsInfo, type Item, type Vec2 } from '../../../../shared/space/index.ts';
 import { draft, type Ghost } from '../../hud/build/state.ts';
 import { useStore } from '../../store.ts';
 import { modelOf } from './models.ts';
@@ -36,17 +37,54 @@ const MATERIALS = {
   hole: basic('#ffb347', 0.6, false),
   landing: basic(GREEN, 0.35, false),
   turnDisc: basic('#232640', 0.85, false),
+  keyline: basic('#232640', 0.7, false),
   turnArrow: basic(WHITE, 1, false),
   post: basic(WHITE, 0.95),
   arrowGreen: basic(GREEN, 0.95, false),
   arrowRed: basic(RED, 0.95, false),
 };
+// The piece is tinted to the verdict's colour, not just lit by it: a pale piece over pale floor reads as glass.
 const ghostModel = (ok: boolean, depthTest: boolean) =>
-  new MeshStandardMaterial({ vertexColors: true, transparent: true, opacity: depthTest ? 0.85 : 0.28, emissive: ok ? GREEN : RED, emissiveIntensity: 0.35, depthWrite: false, depthTest });
+  new MeshStandardMaterial({ vertexColors: true, color: ok ? '#3fd97e' : '#ff5c5c', transparent: true, opacity: depthTest ? 0.92 : 0.28, emissive: ok ? GREEN : RED, emissiveIntensity: 0.22, depthWrite: false, depthTest });
 const MODEL_OK = ghostModel(true, true);
 const MODEL_BAD = ghostModel(false, true);
 const XRAY_OK = ghostModel(true, false);
 const XRAY_BAD = ghostModel(false, false);
+
+// The piece's silhouette in a band of fixed screen width: a dark outer line and a light inner one in the verdict's colour,
+// so the outline holds against pale floors, dark floors and busy ones. The back faces are pushed outward on screen.
+const RESOLUTION = { value: new Vector2(1440, 900) };
+const RIM_INK = 4;
+const RIM_TONE = 2;
+const rim = (color: string, px: number) =>
+  new ShaderMaterial({
+    uniforms: { uColor: { value: new Color(color) }, uPx: { value: px }, uRes: RESOLUTION },
+    vertexShader: `uniform float uPx; uniform vec2 uRes;
+      void main() {
+        vec4 p = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+        vec2 away = (projectionMatrix * vec4(normalize(normalMatrix * normal), 0.0)).xy;
+        p.xy += normalize(away + 1e-6) * (2.0 * uPx / uRes) * p.w;
+        gl_Position = p;
+      }`,
+    fragmentShader: `uniform vec3 uColor; void main() { gl_FragColor = vec4(uColor, 1.0); }`,
+    side: BackSide,
+    depthWrite: false,
+  });
+const RIM = { ink: rim('#232640', RIM_INK), ok: rim('#a6ffc4', RIM_TONE), bad: rim('#ffb0b0', RIM_TONE) };
+const hulls = new Map<string, BufferGeometry>();
+/** The model's shape with its vertices welded and smoothly shaded, so pushing it outward does not tear it at the corners. */
+function hullOf(def: string): BufferGeometry {
+  let g = hulls.get(def);
+  if (!g) {
+    const src = modelOf(def);
+    const bare = new BufferGeometry().setAttribute('position', src.getAttribute('position').clone());
+    if (src.index) bare.setIndex(src.index.clone());
+    g = mergeVertices(bare, 1e-4);
+    g.computeVertexNormals();
+    hulls.set(def, g);
+  }
+  return g;
+}
 
 const T = WALL_HALF * 2 + 0.04;
 
@@ -166,14 +204,23 @@ function Tiles({ tiles, material, probe }: { tiles: readonly Vec2[]; material: M
 const BORDER = 0.06;
 const ITEM_BORDER = 0.15;
 
-function Rect({ x0, z0, x1, z1, color, fill, border = BORDER, probe }: { x0: number; z0: number; x1: number; z1: number; color: string; fill: MeshBasicMaterial | null; border?: number; probe?: Record<string, unknown> }) {
+// `ink` adds a dark stroke just outside the border: the coloured border then shows on pale floors as well as dark ones.
+function Rect({ x0, z0, x1, z1, color, fill, border = BORDER, ink = false, probe }: { x0: number; z0: number; x1: number; z1: number; color: string; fill: MeshBasicMaterial | null; border?: number; ink?: boolean; probe?: Record<string, unknown> }) {
   const edge = useMemo(() => new MeshBasicMaterial({ color, transparent: true, opacity: 0.95, depthWrite: false, depthTest: false }), [color]);
   const w = x1 - x0;
   const d = z1 - z0;
-  const bar = (x: number, z: number, bw: number, bd: number) => (
-    <mesh position={[x, 0.07, z]} rotation-x={-Math.PI / 2} material={edge} renderOrder={10}>
+  const bar = (x: number, z: number, bw: number, bd: number, material = edge, y = 0.07, order = 10) => (
+    <mesh position={[x, y, z]} rotation-x={-Math.PI / 2} material={material} renderOrder={order}>
       <planeGeometry args={[bw, bd]} />
     </mesh>
+  );
+  const outline = (grow: number, material: MeshBasicMaterial, y: number, order: number) => (
+    <>
+      {bar((x0 + x1) / 2, z0, w + border + 2 * grow, border + 2 * grow, material, y, order)}
+      {bar((x0 + x1) / 2, z1, w + border + 2 * grow, border + 2 * grow, material, y, order)}
+      {bar(x0, (z0 + z1) / 2, border + 2 * grow, d + 2 * grow, material, y, order)}
+      {bar(x1, (z0 + z1) / 2, border + 2 * grow, d + 2 * grow, material, y, order)}
+    </>
   );
   return (
     <group>
@@ -182,10 +229,8 @@ function Rect({ x0, z0, x1, z1, color, fill, border = BORDER, probe }: { x0: num
           <planeGeometry args={[w, d]} />
         </mesh>
       )}
-      {bar((x0 + x1) / 2, z0, w + border, border)}
-      {bar((x0 + x1) / 2, z1, w + border, border)}
-      {bar(x0, (z0 + z1) / 2, border, d)}
-      {bar(x1, (z0 + z1) / 2, border, d)}
+      {ink && outline(0.07, MATERIALS.keyline, 0.065, 9)}
+      {outline(0, edge, 0.07, 10)}
     </group>
   );
 }
@@ -225,10 +270,16 @@ const turnHead = (() => {
   return t;
 })();
 
-// The curved arrow that says this piece turns: the keys , and . and the Turn button do it.
-function TurnMark({ at }: { at: Vec2 }) {
+const discRim = new RingGeometry(0.46, 0.55, 28);
+
+// The curved arrow that says this piece turns: the keys , and . and the Turn button do it. It sits on the ghost's back
+// right corner, half on the footprint, in the verdict's colour, and grows with the piece: a plant gets a small one.
+function TurnMark({ box, ok }: { box: { x0: number; z0: number; x1: number; z1: number }; ok: boolean }) {
+  const radius = Math.min(0.9, Math.max(0.26, Math.min(box.x1 - box.x0, box.z1 - box.z0) * 0.3));
+  const at = { x: box.x1, z: box.z0 };
   return (
-    <group position={[at.x, 0.09, at.z]} rotation-x={-Math.PI / 2} scale={1.35}>
+    <group position={[at.x, 0.09, at.z]} rotation-x={-Math.PI / 2} scale={radius / 0.46} userData={{ probe: 'turn-mark', ...at, r: radius, ok }}>
+      <mesh geometry={discRim} material={ok ? MATERIALS.arrowGreen : MATERIALS.arrowRed} renderOrder={10} />
       <mesh material={MATERIALS.turnDisc} renderOrder={11}>
         <circleGeometry args={[0.46, 24]} />
       </mesh>
@@ -237,6 +288,77 @@ function TurnMark({ at }: { at: Vec2 }) {
         <shapeGeometry args={[turnHead]} />
       </mesh>
     </group>
+  );
+}
+
+// The piece itself, tinted by the verdict, outlined, and again through whatever stands in front of it.
+function ItemModel({ item, ok }: { item: Item; ok: boolean }) {
+  const f = footprint(ITEM_DEFS[item.def], item.rot);
+  const at: [number, number, number] = [item.x / 2 + f.w / 4, 0, item.z / 2 + f.d / 4];
+  const hull = hullOf(item.def);
+  return (
+    <>
+      <mesh geometry={hull} material={RIM.ink} position={at} rotation-y={YAW[item.rot]} renderOrder={6} />
+      <mesh geometry={hull} material={ok ? RIM.ok : RIM.bad} position={at} rotation-y={YAW[item.rot]} renderOrder={7} userData={{ probe: 'ghost-rim', ok }} />
+      <mesh geometry={modelOf(item.def)} material={ok ? XRAY_OK : XRAY_BAD} position={at} rotation-y={YAW[item.rot]} renderOrder={8} />
+      <mesh geometry={modelOf(item.def)} material={ok ? MODEL_OK : MODEL_BAD} position={at} rotation-y={YAW[item.rot]} renderOrder={9} />
+    </>
+  );
+}
+
+const CAGE_HEIGHT = 2.4;
+const CAGE_EDGE = 0.07;
+function Cage({ x0, z0, x1, z1, color }: { x0: number; z0: number; x1: number; z1: number; color: string }) {
+  const material = useMemo(() => new MeshBasicMaterial({ color, transparent: true, opacity: 0.95, depthWrite: false, depthTest: false }), [color]);
+  const w = x1 - x0;
+  const d = z1 - z0;
+  const edge = (key: string, at: [number, number, number], size: [number, number, number]) => (
+    <mesh key={key} position={at} material={material} renderOrder={10}>
+      <boxGeometry args={size} />
+    </mesh>
+  );
+  return (
+    <group>
+      {[0, CAGE_HEIGHT].flatMap((y) => [
+        edge(`n${y}`, [(x0 + x1) / 2, y, z0], [w + CAGE_EDGE, CAGE_EDGE, CAGE_EDGE]),
+        edge(`s${y}`, [(x0 + x1) / 2, y, z1], [w + CAGE_EDGE, CAGE_EDGE, CAGE_EDGE]),
+        edge(`w${y}`, [x0, y, (z0 + z1) / 2], [CAGE_EDGE, CAGE_EDGE, d + CAGE_EDGE]),
+        edge(`e${y}`, [x1, y, (z0 + z1) / 2], [CAGE_EDGE, CAGE_EDGE, d + CAGE_EDGE]),
+      ])}
+      {[[x0, z0], [x1, z0], [x0, z1], [x1, z1]].map(([x, z]) => edge(`p${x},${z}`, [x, CAGE_HEIGHT / 2, z], [CAGE_EDGE, CAGE_HEIGHT, CAGE_EDGE]))}
+    </group>
+  );
+}
+
+function BlockGhost({ items, ok }: { items: readonly Item[]; ok: boolean }) {
+  const box = cellBounds(items);
+  if (!box) return null;
+  const [x0, z0, x1, z1] = [box.x0 / 2, box.z0 / 2, box.x1 / 2, box.z1 / 2];
+  return (
+    <>
+      <Rect x0={x0} z0={z0} x1={x1} z1={z1} color={tone(ok)} fill={ok ? MATERIALS.padGreen : MATERIALS.padRed} border={ITEM_BORDER} ink probe={{ probe: 'block-footprint', ok, x0, z0, w: x1 - x0, d: z1 - z0, pieces: items.length }} />
+      <Cage x0={x0} z0={z0} x1={x1} z1={z1} color={tone(ok)} />
+      <TurnMark box={{ x0, z0, x1, z1 }} ok={ok} />
+      {items.map((item) => (
+        <ItemModel key={item.id} item={item} ok={ok} />
+      ))}
+    </>
+  );
+}
+
+function BlockSelect({ items }: { items: readonly Item[] }) {
+  const box = cellBounds(items);
+  if (!box) return null;
+  return (
+    <>
+      <Cage x0={box.x0 / 2} z0={box.z0 / 2} x1={box.x1 / 2} z1={box.z1 / 2} color={WHITE} />
+      <mesh position={[(box.x0 + box.x1) / 4, 0.05, (box.z0 + box.z1) / 4]} rotation-x={-Math.PI / 2} material={MATERIALS.fillWhite} renderOrder={5} userData={{ probe: 'block-select', pieces: items.length, w: (box.x1 - box.x0) / 2, d: (box.z1 - box.z0) / 2 }}>
+        <planeGeometry args={[(box.x1 - box.x0) / 2, (box.z1 - box.z0) / 2]} />
+      </mesh>
+      {items.map((item) => (
+        <ItemGhost key={item.id} item={item} ok outline />
+      ))}
+    </>
   );
 }
 
@@ -251,12 +373,11 @@ function ItemGhost({ item, ok, outline }: { item: Item; ok: boolean; outline: bo
   const color = outline ? WHITE : tone(ok);
   return (
     <>
-      <Rect x0={x0} z0={z0} x1={x1} z1={z1} color={color} fill={outline ? null : ok ? MATERIALS.padGreen : MATERIALS.padRed} border={ITEM_BORDER} probe={{ probe: 'footprint', ok, w: x1 - x0, d: z1 - z0 }} />
+      <Rect x0={x0} z0={z0} x1={x1} z1={z1} color={color} fill={outline ? null : ok ? MATERIALS.padGreen : MATERIALS.padRed} border={ITEM_BORDER} ink={!outline} probe={{ probe: 'footprint', ok, x0, z0, w: x1 - x0, d: z1 - z0 }} />
       {!outline && (
         <>
-          {ITEM_DEFS[item.def].kind !== 'stairs' && <TurnMark at={{ x: x1 + 0.45, z: z0 - 0.45 }} />}
-          <mesh geometry={modelOf(item.def)} material={ok ? XRAY_OK : XRAY_BAD} position={[(x0 + x1) / 2, 0, (z0 + z1) / 2]} rotation-y={YAW[item.rot]} renderOrder={8} />
-          <mesh geometry={modelOf(item.def)} material={ok ? MODEL_OK : MODEL_BAD} position={[(x0 + x1) / 2, 0, (z0 + z1) / 2]} rotation-y={YAW[item.rot]} renderOrder={9} />
+          {ITEM_DEFS[item.def].kind !== 'stairs' && <TurnMark box={{ x0, z0, x1, z1 }} ok={ok} />}
+          <ItemModel item={item} ok={ok} />
           <mesh position={[front.at.x, 0.07, front.at.z]} rotation={[-Math.PI / 2, 0, front.yaw]} material={ok ? MATERIALS.arrowGreen : MATERIALS.arrowRed} renderOrder={7}>
             <shapeGeometry args={[arrowShape]} />
           </mesh>
@@ -359,10 +480,18 @@ function Shown({ g, level, stories }: { g: Ghost; level: number; stories: number
       );
     case 'outline':
       return <ItemGhost item={g.item} ok outline />;
+    case 'block':
+      return <BlockGhost items={g.items} ok={g.ok} />;
+    case 'blockSelect':
+      return <BlockSelect items={g.items} />;
   }
 }
 
 export function GhostLayer() {
+  const size = useThree((t) => t.size);
+  useEffect(() => {
+    RESOLUTION.value.set(size.width, size.height);
+  }, [size]);
   const level = useStore((s) => s.build?.level ?? 0);
   const stories = useStore((s) => s.building?.stories.length ?? 1);
   const [ghost, setGhost] = useState<Ghost | null>(null);

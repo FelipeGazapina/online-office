@@ -5,17 +5,20 @@ import type {
   Company,
   Employee,
   EmployeeId,
+  EmployeeRole,
   HarnessStatus,
   InterruptStyle,
   MeetingDoor,
   ModelCatalog,
   Provider,
-  TaskBoardState,
   TaskConnectionState,
   UpdateState,
 } from '../../shared/protocol.ts';
+import type { Board, BoardId, BoardSync, Task, TaskId, TaskTime } from '../../shared/tasks.ts';
+import type { StageHolds } from './boardView.ts';
+import type { Aim } from './deskDrop.ts';
 import { emptyMailView, type MailView, type Message, type MessageId } from '../../shared/mail.ts';
-import type { Building, ItemId, PaintId, Rot } from '../../shared/space/index.ts';
+import type { Building, ItemId, PaintId, Rot, Vec2 } from '../../shared/space/index.ts';
 import type { Language, VoiceQuality } from '../../shared/voice.ts';
 import { initialVoice, type VoiceState } from './voice/chip.ts';
 
@@ -30,8 +33,18 @@ export const LANGS: Record<Lang, { stt: Language; tts: 'en-US' | 'pt-BR' }> = {
   // Whisper's json answer does not say which language it heard, so the employees keep an English voice.
   auto: { stt: 'auto', tts: 'en-US' },
 };
-export type Modal = null | { kind: 'hire'; bypassLimit?: boolean } | { kind: 'block' } | { kind: 'whiteboard'; blockId: BlockId } | { kind: 'github'; blockId: BlockId } | { kind: 'github_setup'; blockId: BlockId } | { kind: 'task_board'; blockId: BlockId; taskId?: string } | { kind: 'linear_board'; blockId: BlockId };
+// A hire opened by dropping a task on an empty desk: the block and the desk are the owner's choice already, the desk says the
+// role, and the new hire starts the task.
+export type HireFor = { taskId: TaskId; blockId: BlockId; deskId: ItemId; role: EmployeeRole };
+export type Modal = null | { kind: 'hire'; bypassLimit?: boolean; for?: HireFor } | { kind: 'block' } | { kind: 'whiteboard'; blockId: BlockId } | { kind: 'github'; blockId: BlockId } | { kind: 'github_setup'; blockId: BlockId } | { kind: 'task_board'; blockId: BlockId; taskId?: TaskId; settings?: boolean; tray?: true } | { kind: 'linear_board'; blockId: BlockId };
 
+// Where dismissing a dialog goes: out of the way, except a hire that a dropped card opened, which goes back to the board the
+// card came from.
+export const dismissed = (m: Modal): Modal => (m?.kind === 'hire' && m.for ? { kind: 'task_board', blockId: m.for.blockId } : null);
+
+// A whole block in hand: turned `quarter` quarter turns since it was picked up. `grab` is where the pointer holds it, in
+// cells from the middle of its bounding box, turned along with it so the block keeps hanging off the same point.
+export type BlockCarry = { blockId: string; quarter: Rot; grab: Vec2 };
 // What the owner is doing in build mode. `carry` is the placed item being moved, null for a new one.
 export type BuildTool =
   | { kind: 'select' }
@@ -40,7 +53,8 @@ export type BuildTool =
   | { kind: 'floor' }
   | { kind: 'wallpaint' }
   | { kind: 'opening'; open: 'door' | 'window' | 'arch' }
-  | { kind: 'item'; def: string; rot: Rot; carry: ItemId | null; blockId: string | null };
+  | { kind: 'item'; def: string; rot: Rot; carry: ItemId | null; blockId: string | null }
+  | { kind: 'block'; carry: BlockCarry | null };
 export type WallsMode = 'up' | 'cutaway' | 'down';
 // `searching` is the search box having focus: the catalog lists everything. `peek` is the furniture card under the pointer, drawn as the cursor ghost.
 export type BuildState = { tool: BuildTool; tab: string; search: string; searching: boolean; peek: string | null; fill: boolean; paint: PaintId; style: number; wallsMode: WallsMode; level: number };
@@ -82,8 +96,16 @@ type State = Settings & {
   harnesses: Record<Provider, HarnessStatus> | null;
   meetingDoor: MeetingDoor;
   catalogs: Record<Provider, ModelCatalog> | null;
-  taskBoards: Record<string, TaskBoardState>;
+  boards: Board[];
+  tasks: Task[];
+  boardSync: Record<BoardId, BoardSync>;
+  taskTime: Record<TaskId, TaskTime>;
   taskConnections: Record<'linear' | 'cronospark', TaskConnectionState>;
+  // Task screens only: the board each block shows, and stages the owner just chose that the snapshot has not confirmed yet.
+  boardPick: Record<string, BoardId>;
+  stageHold: StageHolds;
+  // The desk a task card in hand is over, and what dropping it there would do. Null when it is over anything else.
+  aim: Aim | null;
   logs: Record<string, LogLine[]>;
   // Chat panel: the request whose chain is open (null is the person's own thread), whether the composer targets the PO, and the details view.
   chatSub: MessageId | null;
@@ -131,8 +153,14 @@ export const useStore = create<State>()(() => ({
   harnesses: null,
   meetingDoor: 'open',
   catalogs: null,
-  taskBoards: {},
+  boards: [],
+  tasks: [],
+  boardSync: {},
+  taskTime: {},
   taskConnections: { linear: { kind: 'needs_auth' }, cronospark: { kind: 'needs_auth' } },
+  boardPick: {},
+  stageHold: {},
+  aim: null,
   logs: {},
   chatSub: null,
   chatToPo: false,

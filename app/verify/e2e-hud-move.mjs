@@ -3,7 +3,7 @@
 import { mkdtempSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { assert } from './lib.mjs';
+import { assert, sceneReady } from './lib.mjs';
 
 const dataDir = mkdtempSync(join(tmpdir(), 'online-office-hud-move-'));
 
@@ -28,6 +28,12 @@ const settle = (s) => s.waitFor(`!document.querySelector('.hud-moving-target, .h
 const gripState = (s, label) => s.eval(`document.querySelector('[aria-label="Move ${label}"]')?.dataset.moveState`);
 const waitGrip = (s, label, state) => s.waitFor(`document.querySelector('[aria-label="Move ${label}"]')?.dataset.moveState === ${JSON.stringify(state)}`, 4000);
 
+// Page.captureScreenshot sends the pointer off to twice its place for about 160 ms, and a grip lets go of a pointer that is gone for 150, so a shot is followed by a wait.
+const shoot = async (s, name) => {
+  await s.shot(name);
+  await s.sleep(500);
+};
+
 // Reveals the grip the way a person does: pointer over the panel, then onto the grip.
 async function reach(s, label, panel) {
   const box = await rect(s, panel);
@@ -50,6 +56,7 @@ async function dragBy(s, from, dx, dy, steps = 12) {
 
 export default async (s, { launch }) => {
   await s.waitFor('__office.store.getState().company !== null');
+  await sceneReady(s);
   await s.waitFor('document.querySelector(".clock-bar") !== null');
   await s.waitFor(`document.querySelector('[aria-label="Move World clock"]') !== null`);
   const before = await world(s);
@@ -68,19 +75,19 @@ export default async (s, { launch }) => {
   const hover = await gripInfo(s, 'World clock');
   assert(hover.opacity === '1' && hover.cursor === 'grab' && hover.pointerEvents === 'auto', 'hovering the panel shows the grip with a grab cursor');
   assert(hover.w >= 24 && hover.h >= 24, `the grip hit area is at least 24px (${hover.w.toFixed(0)}x${hover.h.toFixed(0)})`);
-  await s.shot('hud-move-hover');
+  await shoot(s, 'hud-move-hover');
 
   // The grip sits in the gutter, entirely off the panel, and leaves its text clickable.
   const gripBox = await rect(s, '[aria-label="Move World clock"]');
   assert(!overlaps(gripBox, home), `the grip overlaps no panel pixel (grip ${gripBox.left.toFixed(0)},${gripBox.top.toFixed(0)} panel ${home.left.toFixed(0)},${home.top.toFixed(0)})`);
   assert(await s.eval(`document.elementFromPoint(${home.left + 4}, ${home.top + 4})?.closest('.clock-bar') !== null`), 'the panel corner is still clickable while the grip shows');
   assert((await s.eval(`document.querySelector('[aria-label="Move World clock"]').dataset.side`)) !== 'inside', 'the grip finds a gutter beside the clock');
-  // An instant tooltip, not the slow native title.
-  const tip = await s.eval(`(() => { const e = document.querySelector('[aria-label="Move World clock"]'); const a = getComputedStyle(e, '::after'); return { title: e.hasAttribute('title'), content: a.content, opacity: a.opacity }; })()`);
-  await s.sleep(150);
-  const tip2 = await s.eval(`(() => { const a = getComputedStyle(document.querySelector('[aria-label="Move World clock"]'), '::after'); return { content: a.content, opacity: a.opacity }; })()`);
-  assert(!tip.title && tip2.content === '"Drag to move · double-click to reset"' && tip2.opacity === '1', `hovering the grip shows the short tooltip (${tip2.content}, ${tip2.opacity})`);
-  await s.shot('hud-move-tooltip');
+  // An instant tooltip, not the slow native title: no title attribute, and a fade of under 100 ms with no delay. The fade
+  // runs on the page clock, so the script waits for it to end instead of reading it a fixed time after the hover.
+  const tip = await s.eval(`(() => { const e = document.querySelector('[aria-label="Move World clock"]'); const a = getComputedStyle(e, '::after'); return { title: e.hasAttribute('title'), content: a.content, fade: parseFloat(a.transitionDuration), delay: parseFloat(a.transitionDelay) }; })()`);
+  await s.waitFor(`getComputedStyle(document.querySelector('[aria-label="Move World clock"]'), '::after').opacity === '1'`, 4000);
+  assert(!tip.title && tip.content === '"Drag to move · double-click to reset"' && tip.fade <= 0.1 && tip.delay === 0, `hovering the grip shows the short tooltip at once (${tip.content}, fade ${tip.fade}s, delay ${tip.delay}s)`);
+  await shoot(s, 'hud-move-tooltip');
 
   // The gap between panel and grip is bridged, and the grip waits a moment before hiding, so overshooting is safe.
   const side = await s.eval(`document.querySelector('[aria-label="Move World clock"]').dataset.side`);
@@ -89,10 +96,18 @@ export default async (s, { launch }) => {
   await s.mouse('mouseMoved', gapPoint.x, gapPoint.y);
   await s.sleep(250);
   assert((await gripState(s, 'World clock')) === 'peek', 'crossing the gap between panel and grip keeps the grip');
+  // The grace is a page timer, so it is read on the page clock: a call over the DevTools socket that a busy machine holds up
+  // for more than 150 ms would see the grip hidden even though the page waited the full grace.
+  await s.eval(`(() => {
+    const grip = document.querySelector('[aria-label="Move World clock"]');
+    window.__grace = { leftAt: 0, hiddenAt: 0 };
+    document.addEventListener('pointermove', () => { window.__grace.leftAt = performance.now(); window.__grace.hiddenAt = 0; }, { capture: true });
+    new MutationObserver(() => { if (grip.dataset.moveState === 'idle' && !window.__grace.hiddenAt) window.__grace.hiddenAt = performance.now(); }).observe(grip, { attributes: true, attributeFilter: ['data-move-state'] });
+  })()`);
   await s.mouse('mouseMoved', 640, 560);
-  await s.sleep(60);
-  assert((await gripState(s, 'World clock')) === 'peek', 'the grip waits a moment after the pointer leaves');
   await waitGrip(s, 'World clock', 'idle');
+  const grace = await s.eval('window.__grace');
+  assert(grace.hiddenAt - grace.leftAt >= 145, `the grip waits a moment after the pointer leaves (${(grace.hiddenAt - grace.leftAt).toFixed(0)} ms on the page clock, grace 150)`);
   // Hovering the resize corner shows the move grip too: they read as one family.
   const corner = await grip(s, 'Resize', 'World clock');
   await s.mouse('mouseMoved', home.left + home.width / 2, home.top + home.height / 2);
@@ -120,7 +135,7 @@ export default async (s, { launch }) => {
   assert(lift.scale > 1.01 && lift.scale <= 1.05, `the lifted panel scales up a little (${lift.scale})`);
   assert(lift.opacity === 1, `the lifted panel stays opaque so nothing beneath bleeds through (${lift.opacity})`);
   assert(!/translate|all/.test(lift.transition), `the live drag translate is never transitioned (${lift.transition})`);
-  await s.shot('hud-move-active');
+  await shoot(s, 'hud-move-active');
   await s.mouse('mouseReleased', at.x + 320, at.y + 210);
   await waitGrip(s, 'World clock', 'peek');
   await settle(s);
@@ -193,7 +208,7 @@ export default async (s, { launch }) => {
   const grown = await rect(s, CLOCK);
   assert(grown.width > bottomRight.width * 1.2, `the moved panel resizes (${bottomRight.width.toFixed(0)}px to ${grown.width.toFixed(0)}px)`);
   assert(inside(grown, vw, vh), 'a moved and resized panel stays inside the window');
-  await s.shot('hud-move-resized-corner');
+  await shoot(s, 'hud-move-resized-corner');
 
   // Persistence: restart and the panel is where it was left.
   const savedFinal = await stored(s, 'clock');
@@ -203,12 +218,13 @@ export default async (s, { launch }) => {
   await s.close();
   const reopened = await launch({ env });
   await reopened.waitFor('__office.store.getState().company !== null');
+  await sceneReady(reopened);
   await reopened.waitFor('document.querySelector(".clock-bar") !== null');
   await reopened.waitFor(`document.querySelector('[aria-label="Move World clock"]') !== null`);
   await reopened.sleep(400);
   const back = await rect(reopened, CLOCK);
   assert(near(back.left, placed.left, 2) && near(back.top, placed.top, 2) && near(back.width, placed.width, 2), `the position and size survive an app restart (${back.left.toFixed(0)}, ${back.top.toFixed(0)})`);
-  await reopened.shot('hud-move-restart');
+  await shoot(reopened, 'hud-move-restart');
 
   // Window shrink: the panel is pulled back inside, live.
   await reopened.resize(640, 420);
@@ -216,7 +232,7 @@ export default async (s, { launch }) => {
   await reopened.sleep(300);
   const small = await rect(reopened, CLOCK);
   assert(inside(small, 640, 420), `shrinking the window pulls the panel back inside (${small.right.toFixed(0)}x${small.bottom.toFixed(0)} of 640x420)`);
-  await reopened.shot('hud-move-shrunk');
+  await shoot(reopened, 'hud-move-shrunk');
   await reopened.resize(1280, 800);
   await reopened.sleep(300);
   const regrown = await rect(reopened, CLOCK);
@@ -243,17 +259,21 @@ export default async (s, { launch }) => {
   // A dialog on top of the scrim: its grip is reachable and the drag does not dismiss it.
   await reopened.eval(`__office.store.setState({ helpOpen: true })`);
   await reopened.waitFor(`document.querySelector('[aria-label="Move Help dialog"]') !== null`);
-  await reopened.sleep(600);
+  // The dialog slips in over 0.3 s of page time, and a busy page starts that late, so its home is read once no animation runs.
+  await reopened.waitFor(`document.querySelector('.modal.help').getAnimations().length === 0`, 8000);
   const dialogHome = await rect(reopened, '.modal.help');
   const dialogAt = await reach(reopened, 'Help dialog', '.modal.help');
   const onTop = await reopened.eval(`document.elementFromPoint(${dialogAt.x}, ${dialogAt.y})?.closest('[aria-label="Move Help dialog"]') !== null`);
   assert(onTop, 'the dialog grip sits above the scrim');
-  await dragBy(reopened, dialogAt, 180, 90);
+  // The clamp keeps a dialog inside the window, so a drag asks only for the room the dialog has left under it.
+  const dialogDy = Math.floor(Math.min(90, 800 - MARGIN - dialogHome.bottom));
+  assert(dialogDy >= 40, `the help dialog leaves room to drag it (${dialogDy}px below it)`);
+  await dragBy(reopened, dialogAt, 180, dialogDy);
   await settle(reopened);
   const dialogMoved = await rect(reopened, '.modal.help');
-  assert(near(dialogMoved.left, dialogHome.left + 180) && near(dialogMoved.top, dialogHome.top + 90), `the dialog moves with its grip (${(dialogMoved.left - dialogHome.left).toFixed(1)}, ${(dialogMoved.top - dialogHome.top).toFixed(1)})`);
+  assert(near(dialogMoved.left, dialogHome.left + 180) && near(dialogMoved.top, dialogHome.top + dialogDy), `the dialog moves with its grip (${(dialogMoved.left - dialogHome.left).toFixed(1)}, ${(dialogMoved.top - dialogHome.top).toFixed(1)} of 180, ${dialogDy})`);
   assert(await reopened.eval(`__office.store.getState().helpOpen === true`), 'dragging the dialog grip does not dismiss it');
-  await reopened.shot('hud-move-dialog');
+  await shoot(reopened, 'hud-move-dialog');
   await reopened.eval(`__office.store.setState({ helpOpen: false })`);
 
   // Other panels move too, including the ones whose container ignores the pointer (waiting meter, conversation bar).
@@ -279,14 +299,14 @@ export default async (s, { launch }) => {
     await reopened.sleep(300);
     const bar = await rect(reopened, '.bottom');
     assert(inside(bar, w, h), `the conversation bar at its largest scale fits ${w}x${h} (${bar.left.toFixed(0)}..${bar.right.toFixed(0)} x ${bar.top.toFixed(0)}..${bar.bottom.toFixed(0)})`);
-    if (w === 800) await reopened.shot('hud-move-fit-800x500');
+    if (w === 800) await shoot(reopened, 'hud-move-fit-800x500');
   }
   await reopened.resize(1280, 800);
   await reopened.sleep(300);
 
   // Every dialog is a movable panel with its own remembered place.
   const blockId = 'b-test';
-  await reopened.eval(`(() => { const c = __office.store.getState().company; __office.store.setState({ company: { ...c, blocks: [{ id: 'b-test', name: 'Test block', cwd: '/tmp', color: '#7aa2ff', slot: 0, githubRepo: 'o/r', linearBoardUrl: 'about:blank', taskBoard: { sources: [] } }] } }); })()`);
+  await reopened.eval(`(() => { const c = __office.store.getState().company; __office.store.setState({ company: { ...c, blocks: [{ id: 'b-test', name: 'Test block', cwd: '/tmp', color: '#7aa2ff', slot: 0, githubRepo: 'o/r', linearBoardUrl: 'about:blank' }] } }); })()`);
   for (const kind of ['whiteboard', 'github', 'task_board', 'linear_board']) {
     await reopened.eval(`__office.store.setState({ modal: { kind: ${JSON.stringify(kind)}, blockId: ${JSON.stringify(blockId)} } })`);
     await reopened.waitFor(`document.querySelector('[data-hud-resize-target="modal-${kind}"]') !== null`, 4000);
@@ -316,7 +336,7 @@ export default async (s, { launch }) => {
   assert(near(center(hireBack).x, center(hireMoved).x, 2) && near(center(hireBack).y, center(hireMoved).y, 2), `the hire dialog reopens where it was left (moved ${hireMoved.left.toFixed(1)},${hireMoved.top.toFixed(1)} back ${hireBack.left.toFixed(1)},${hireBack.top.toFixed(1)} h ${hireHome.top.toFixed(1)} size ${hireMoved.height.toFixed(0)}/${hireBack.height.toFixed(0)})`);
   await reopened.eval(`__office.store.setState({ modal: null })`);
 
-  await reopened.shot('hud-move-final');
+  await shoot(reopened, 'hud-move-final');
 };
 
 export const diagnose = async (s) => {

@@ -4,6 +4,7 @@
 
 import type { Building, BuildOp, ItemId, Violation } from './space/types.ts';
 import type { MailClientMessage, MailServerMessage, MailView } from './mail.ts';
+import type { Board, BoardId, BoardPatch, BoardSpec, BoardSync, Priority, Task, TaskId, TaskStage, TaskTime } from './tasks.ts';
 import type { VoiceApi } from './voice.ts';
 
 export type EmployeeId = string & { readonly __brand: 'EmployeeId' };
@@ -116,10 +117,11 @@ export type TaskBoardSource = {
   projectId: string;
   label?: string;
 };
-export type TaskBoardConfig = { sources: TaskBoardSource[] };
+// A card as a provider lists it. A board turns each card into a task (shared/tasks.ts), keyed by `externalId`.
 export type TaskCard = {
   id: string;
   provider: TaskProvider;
+  externalId: string;
   identifier: string;
   title: string;
   status: string;
@@ -128,13 +130,13 @@ export type TaskCard = {
   sourceLabel: string;
 };
 
-export type TaskBoardColumn = { id: string; label: string; cards: TaskCard[] };
-
 const TASK_BOARD_STATUS_ORDER = ['Open', 'In Design', 'In Dev', 'In Progress', 'Ready to Review', 'Done', 'Deferred'] as const;
 const TASK_BOARD_STATUS_ALIASES: Record<string, (typeof TASK_BOARD_STATUS_ORDER)[number]> = {
   backlog: 'Open',
   canceled: 'Done',
   cancelled: 'Done',
+  implementedelsewhere: 'Done',
+  inapproval: 'Ready to Review',
   closed: 'Done',
   complete: 'Done',
   completed: 'Done',
@@ -162,39 +164,11 @@ const TASK_BOARD_STATUS_ALIASES: Record<string, (typeof TASK_BOARD_STATUS_ORDER)
 
 const taskBoardStatusKey = (status: string) => status.trim().toLowerCase().replace(/[^a-z0-9]+/g, '');
 
-function taskBoardStatusLabel(status: string): string {
+export function taskBoardStatusLabel(status: string): string {
   const trimmed = status.trim();
   return TASK_BOARD_STATUS_ALIASES[taskBoardStatusKey(trimmed)] ?? (trimmed || 'Open');
 }
 
-function taskBoardStatusId(label: string): string {
-  const slug = label.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
-  return `status:${slug || 'unknown'}`;
-}
-
-export function taskBoardColumns(cards: readonly TaskCard[]): TaskBoardColumn[] {
-  const grouped = new Map<string, TaskBoardColumn>();
-  for (const label of TASK_BOARD_STATUS_ORDER) grouped.set(label, { id: taskBoardStatusId(label), label, cards: [] });
-  for (const card of cards) {
-    const label = taskBoardStatusLabel(card.status);
-    const existing = grouped.get(label);
-    if (existing) {
-      existing.cards.push(card);
-      continue;
-    }
-    const id = taskBoardStatusId(label);
-    const column = grouped.get(id) ?? { id, label, cards: [] };
-    column.cards.push(card);
-    grouped.set(id, column);
-  }
-  return [...grouped.values()].filter((column) => column.cards.length > 0);
-}
-
-export type TaskBoardState =
-  | { kind: 'idle'; cards: TaskCard[]; lastFetchedAt?: number }
-  | { kind: 'loading'; cards: TaskCard[]; lastFetchedAt?: number }
-  | { kind: 'ready'; cards: TaskCard[]; lastFetchedAt: number }
-  | { kind: 'error'; cards: TaskCard[]; message: string; lastFetchedAt?: number };
 // The user id is safe to show back in the settings UI. The API key never crosses the main-process boundary in a snapshot.
 export type TaskConnectionState = { kind: 'ready' | 'connecting' | 'needs_auth' | 'missing' | 'error'; message?: string; userId?: string; hasApiKey?: boolean };
 
@@ -206,7 +180,6 @@ export type ProjectBlock = {
   slot: number;
   githubRepo?: string;
   whiteboard?: Whiteboard;
-  taskBoard?: TaskBoardConfig;
   linearBoardUrl?: string;
 };
 
@@ -252,17 +225,38 @@ export type CompanySettings = {
 export type InterruptStyle = 'next' | 'now';
 
 export type ClientMessage =
-  | { type: 'hire'; provider: Provider; blockId: BlockId; name?: string; model?: ModelId; role?: EmployeeRole; bypassLimit?: boolean }
+  // `deskId` is the desk the new hire sits at, when it is free and of the right kind. `taskId` assigns them that task
+  // the moment they are hired, exactly as `assign_task` would.
+  | { type: 'hire'; provider: Provider; blockId: BlockId; name?: string; model?: ModelId; role?: EmployeeRole; bypassLimit?: boolean; deskId?: ItemId; taskId?: TaskId }
   | { type: 'fire'; employeeId: EmployeeId }
   | { type: 'create_block'; cwd: string; name?: string; githubRepo?: string }
   | { type: 'update_block'; blockId: BlockId; name?: string; cwd?: string; githubRepo?: string }
   // Fires everyone in the block, then drops it. The folder on disk is never touched.
   | { type: 'remove_block'; blockId: BlockId }
-  | { type: 'configure_task_board'; blockId: BlockId; config: TaskBoardConfig }
   | { type: 'configure_linear_board'; blockId: BlockId; url: string }
-  | { type: 'refresh_task_board'; blockId: BlockId }
   | { type: 'connect_task_provider'; provider: TaskProvider }
   | { type: 'configure_task_provider'; provider: 'cronospark'; apiKey: string; userId: string }
+  // Boards and tasks. A block always keeps at least one board. A quick board takes no sources, so `spec` and `update_board`
+  // refuse them on one.
+  | { type: 'create_board'; blockId: BlockId; name: string; spec: BoardSpec }
+  | ({ type: 'update_board'; boardId: BoardId } & BoardPatch)
+  // Refused while a task on it is in `doing`, and for the last board of a block. Takes the board's tasks with it.
+  | { type: 'delete_board'; boardId: BoardId }
+  // Pulls the board's sources again. A quick board has none.
+  | { type: 'refresh_board'; boardId: BoardId }
+  // `stage` is the column the task starts in, todo when absent. `assignee` is the block's PO or one of its employees: the task
+  // is made and handed to them in one step, so they start at once and it begins in doing, whatever `stage` says.
+  | { type: 'create_task'; boardId: BoardId; title: string; notes?: string; stage?: TaskStage; assignee?: EmployeeId; priority?: Priority }
+  // `notes: ''` clears the notes and `priority: null` the priority, which only a task made by hand has. The owner may set any
+  // stage, and done is only ever the owner's call.
+  | { type: 'update_task'; taskId: TaskId; title?: string; notes?: string; stage?: TaskStage; priority?: Priority | null }
+  // Cancels the runs still open, then drops the task.
+  | { type: 'delete_task'; taskId: TaskId }
+  // `employeeId` is the block's PO or any employee of the block. Posts one root request to them, so they start at once.
+  | { type: 'assign_task'; taskId: TaskId; employeeId: EmployeeId }
+  // Sends the time a CronoSpark task has worked and not sent yet: closed time only, one hours entry per person and day, and the
+  // same time never twice. This is the only way hours leave the app.
+  | { type: 'send_hours'; taskId: TaskId }
   // `always` counts only on a permission card, and only when `text` allows it. The office then adds a rule for that
   // employee that covers the same command or tool from now on.
   | { type: 'answer'; employeeId: EmployeeId; questionId: QuestionId; text: string; always?: boolean }
@@ -290,7 +284,14 @@ export type Snapshot = {
   meetingDoor: MeetingDoor;
   // Changes whenever the building does. The building itself arrives on its own channel.
   buildingRev: number;
-  taskBoards: Record<string, TaskBoardState>;
+  // Every block has at least one board, in the order the owner sees them.
+  boards: Board[];
+  tasks: Task[];
+  // How the last pull of a board's sources went. A quick board has no entry.
+  boardSync: Record<BoardId, BoardSync>;
+  // Time worked per task with at least one run, derived from the mailroom's ledger. A person in `running` keeps counting
+  // after `at`, at `share` of wall time.
+  taskTime: Record<TaskId, TaskTime>;
   taskConnections: Record<TaskProvider, TaskConnectionState>;
   mail: MailView;
 };

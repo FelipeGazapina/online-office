@@ -1,4 +1,4 @@
-import { get, set, setSetting, toggleCamera } from './store.ts';
+import { dismissed, get, set, setSetting, toggleCamera } from './store.ts';
 import { KEYS_INTENT, runtime, STEER_KEYS } from './runtime.ts';
 import { setPtt } from './talk.ts';
 import { toggleMeetingDoor } from './meeting.ts';
@@ -73,7 +73,7 @@ export function installInput() {
       case 'Escape':
         if (s.menu) return set({ menu: null });
         if (s.helpOpen) return set({ helpOpen: false });
-        if (s.modal) return set({ modal: null });
+        if (s.modal) return set({ modal: dismissed(s.modal) });
         return set({ selectedId: null });
     }
 

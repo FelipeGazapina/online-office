@@ -7,23 +7,24 @@ import {
   type HarnessStatus,
   type ModelId,
   type Provider,
-  taskBoardColumns,
 } from '../../../shared/protocol.ts';
 import { useDiagram } from '../scene/whiteboard.ts';
-import { send, set, useStore } from '../store.ts';
+import { dismissed, send, set, useStore } from '../store.ts';
 import { tailPath } from './hooks.ts';
+import { TaskBoardModal } from './tasks/TaskBoard.tsx';
 
 const close = () => set({ modal: null });
+const leave = () => set((s) => ({ modal: dismissed(s.modal) }));
 
 function Modal({ kind, title, children }: { kind: string; title: string; children: ReactNode }) {
   return (
-    <div className="scrim" onMouseDown={close}>
+    <div className="scrim" onMouseDown={leave}>
       <div
         className="modal"
         data-hud-resize-target={`modal-${kind}`}
         onMouseDown={(e) => e.stopPropagation()}
         onKeyDown={(e) => {
-          if (e.key === 'Escape') close();
+          if (e.key === 'Escape') leave();
         }}
       >
         <h2>{title}</h2>
@@ -47,14 +48,19 @@ function harnessNote(h: HarnessStatus): string {
   }
 }
 
+// A desk's name for the owner: bench desks count from 1 in the order they were put down.
+const deskName = (id: string, role: 'employee' | 'orchestrator') => (role === 'orchestrator' ? 'PO desk' : `Desk ${Number(id.slice(id.lastIndexOf(':') + 1)) + 1}`);
+
 function HireModal() {
   const company = useStore((s) => s.company);
   const bypassLimit = useStore((s) => s.modal?.kind === 'hire' && s.modal.bypassLimit === true);
+  const dropped = useStore((s) => (s.modal?.kind === 'hire' ? s.modal.for : undefined));
+  const droppedTask = useStore((s) => s.tasks.find((t) => t.id === dropped?.taskId));
   const harnesses = useStore((s) => s.harnesses);
   const [provider, setProvider] = useState<Provider>(() => PROVIDER_LIST.find((p) => harnesses?.[p].kind === 'ready') ?? 'claude-code');
-  const [blockId, setBlockId] = useState<BlockId | ''>(company?.blocks[0]?.id ?? '');
+  const [blockId, setBlockId] = useState<BlockId | ''>(dropped?.blockId ?? company?.blocks[0]?.id ?? '');
   const [name, setName] = useState('');
-  const [role, setRole] = useState<'employee' | 'orchestrator'>('employee');
+  const [role, setRole] = useState<'employee' | 'orchestrator'>(dropped?.role ?? 'employee');
   const [model, setModel] = useState<ModelId | ''>('');
   const catalogs = useStore((s) => s.catalogs);
   const catalog = catalogs?.[provider];
@@ -73,9 +79,25 @@ function HireModal() {
   const used = (id: BlockId) => company.employees.filter((e) => e.blockId === id).length;
   const ready = harnesses[provider].kind === 'ready';
   const unlimited = bypassLimit || !Number.isFinite(headcountCap(company.level));
+  const droppedBlock = dropped && company.blocks.find((b) => b.id === dropped.blockId);
 
   return (
-    <Modal kind="hire" title="Hire someone">
+    <Modal kind="hire" title={dropped ? 'Hire for this desk' : 'Hire someone'}>
+      {dropped && (
+        <div className="hire-for" data-testid="hire-for">
+          <p>
+            Starts <b>{droppedTask ? `"${droppedTask.title}"` : 'the task'}</b> as soon as they sit down.
+          </p>
+          <dl>
+            <dt>Block</dt>
+            <dd data-testid="hire-for-block">{droppedBlock?.name ?? 'This block'}</dd>
+            <dt>Desk</dt>
+            <dd data-testid="hire-for-desk">{deskName(dropped.deskId, dropped.role)}</dd>
+            <dt>Role</dt>
+            <dd>{dropped.role === 'orchestrator' ? 'Block orchestrator / PO' : 'Employee'}</dd>
+          </dl>
+        </div>
+      )}
       <div className="providers">
         {PROVIDER_LIST.map((p) => {
           const h = harnesses[p];
@@ -94,7 +116,7 @@ function HireModal() {
           );
         })}
       </div>
-      {company.blocks.length === 0 ? (
+      {dropped ? null : company.blocks.length === 0 ? (
         <p className="muted">
           There is no block to sit in yet.{' '}
           <button type="button" className="link" onClick={() => set({ modal: { kind: 'block' } })}>
@@ -131,13 +153,15 @@ function HireModal() {
           <span className="muted">Using the provider default model</span>
         )}
       </label>
-      <label className="field">
-        <span>Role</span>
-        <select value={role} onChange={(e) => setRole(e.target.value as 'employee' | 'orchestrator')}>
-          <option value="employee">Employee</option>
-          <option value="orchestrator">Block orchestrator / PO</option>
-        </select>
-      </label>
+      {!dropped && (
+        <label className="field">
+          <span>Role</span>
+          <select value={role} onChange={(e) => setRole(e.target.value as 'employee' | 'orchestrator')}>
+            <option value="employee">Employee</option>
+            <option value="orchestrator">Block orchestrator / PO</option>
+          </select>
+        </label>
+      )}
       <label className="field">
         <span>
           Name <span className="muted">optional</span>
@@ -145,7 +169,7 @@ function HireModal() {
         <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Leave empty for a fresh name" />
       </label>
       <div className="actions">
-        <button className="btn ghost" onClick={close}>
+        <button className="btn ghost" onClick={leave}>
           Cancel
         </button>
         <button
@@ -153,7 +177,16 @@ function HireModal() {
           disabled={!blockId || !ready}
           onClick={() => {
             if (!blockId) return;
-            send({ type: 'hire', provider, blockId, role, ...(bypassLimit && { bypassLimit: true }), ...(name.trim() && { name: name.trim() }), ...(model && { model }) });
+            send({
+              type: 'hire',
+              provider,
+              blockId,
+              role,
+              ...(bypassLimit && { bypassLimit: true }),
+              ...(name.trim() && { name: name.trim() }),
+              ...(model && { model }),
+              ...(dropped && { deskId: dropped.deskId, taskId: dropped.taskId }),
+            });
             close();
           }}
         >
@@ -377,87 +410,6 @@ function WhiteboardModal({ blockId }: { blockId: BlockId }) {
             </div>
           )}
           {wb && !source && d.state === 'ok' && <div className="svg" dangerouslySetInnerHTML={{ __html: d.svg }} />}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function TaskBoardModal({ blockId }: { blockId: BlockId }) {
-  const block = useStore((s) => s.company?.blocks.find((candidate) => candidate.id === blockId));
-  const company = useStore((s) => s.company);
-  const board = useStore((s) => s.taskBoards[blockId]);
-  const linearConnection = useStore((s) => s.taskConnections.linear);
-  const modal = useStore((s) => s.modal);
-  const employees = company?.employees.filter((employee) => employee.blockId === blockId && employee.status.kind === 'idle') ?? [];
-  const selected = board?.cards.find((card) => card.id === (modal?.kind === 'task_board' ? modal.taskId : undefined));
-  const columns = taskBoardColumns(board?.cards ?? []);
-  const hasLinearSource = block?.taskBoard?.sources.some((source) => source.provider === 'linear') ?? false;
-  const providerSummary = [...new Set((block?.taskBoard?.sources ?? []).map((source) => source.provider === 'linear' ? 'Linear' : 'CronoSpark'))].join(' and ') || 'configured sources';
-  const refresh = () => send({ type: 'refresh_task_board', blockId });
-  const emptyState = board?.kind === 'error'
-    ? <div className="task-board-empty"><p className="err-text">{board.message}</p>{hasLinearSource && linearConnection.kind !== 'ready' && <button className="btn primary" onClick={() => send({ type: 'connect_task_provider', provider: 'linear' })}>Connect Linear</button>}<button className="btn ghost" onClick={refresh}>Refresh</button></div>
-    : board?.kind === 'loading'
-      ? <p className="muted">Refreshing tickets…</p>
-      : board
-        ? <p className="muted">No tickets matched this board source.</p>
-        : <p className="muted">This board has not loaded yet. Configure a source in the PO computer, then refresh.</p>;
-  return (
-    <div className="scrim" onMouseDown={close}>
-      <div className="modal wide task-board-modal" data-hud-resize-target="modal-task_board" onMouseDown={(event) => event.stopPropagation()} onKeyDown={(event) => event.key === 'Escape' && close()}>
-        <div className="task-board-header">
-          <div>
-            <p className="task-board-eyebrow">{providerSummary}</p>
-            <h2>{block?.name ?? 'Task board'}</h2>
-            <p className="muted">{board?.kind === 'error' ? board.message : board?.kind === 'loading' ? 'Refreshing tickets…' : `${board?.cards.length ?? 0} issues synced from your workspace`}</p>
-          </div>
-          <div className="task-board-header-actions">
-            <button className="task-board-filter active" type="button">All issues</button>
-            <button className="task-board-filter" type="button" onClick={refresh}>Refresh</button>
-            <button className="btn ink" onClick={close}>Close</button>
-          </div>
-        </div>
-        <div className="task-board-toolbar" aria-label="Task board filters">
-          <span className="task-board-filter-label">Board view</span>
-          <span className="task-board-filter-chip">{board?.cards.length ?? 0} issues</span>
-          <span className="task-board-filter-chip">{employees.length} idle employees</span>
-          {board?.kind === 'loading' && <span className="task-board-syncing">Syncing…</span>}
-        </div>
-        <div className="task-board-kanban-shell">
-          <div className="task-board-kanban" data-testid="task-board-kanban">
-            {columns.map((column) => (
-              <section className="task-board-column" key={column.id} data-column-id={column.id}>
-                <div className="task-board-column-head"><h3>{column.label}</h3><span>{column.cards.length}</span></div>
-                <div className="task-board-column-cards">
-                  {column.cards.map((card) => (
-                    <button
-                      key={card.id}
-                      type="button"
-                      className={`task-card ${selected?.id === card.id ? 'selected' : ''}`}
-                      data-task-id={card.id}
-                      aria-pressed={selected?.id === card.id}
-                      onClick={() => set({ modal: { kind: 'task_board', blockId, taskId: card.id } })}
-                    >
-                      <span className={`task-provider ${card.provider}`}>{card.provider === 'linear' ? 'LIN' : 'CS'}</span>
-                      <span className="task-card-copy"><b>{card.identifier}</b><strong>{card.title}</strong><small>{card.priority ? `${card.priority} · ` : ''}{card.sourceLabel}</small></span>
-                    </button>
-                  ))}
-                </div>
-              </section>
-            ))}
-            {!(board?.cards.length ?? 0) && <div className="task-board-empty">{emptyState}</div>}
-          </div>
-          <aside className="task-card-detail" aria-live="polite" data-testid="task-card-details">
-            {selected ? <>
-              <div className="task-detail-topline"><span className={`task-provider ${selected.provider}`}>{selected.sourceLabel}</span><span className="task-detail-status">{selected.status}</span></div>
-              <h3>{selected.identifier}</h3>
-              <h4>{selected.title}</h4>
-              <p className="muted">{selected.priority ? `Priority ${selected.priority}` : 'No priority set'}</p>
-              {selected.url && <a href={selected.url} target="_blank" rel="noreferrer">Open in {selected.sourceLabel}</a>}
-              <h4>Assign to an AI employee</h4>
-              {employees.length ? employees.map((employee) => <button className="btn primary task-assign" key={employee.id} onClick={() => { send({ type: 'post', to: employee.id, clientId: crypto.randomUUID(), as: 'request', text: `Work on ${selected.identifier}: ${selected.title} [${selected.sourceLabel}]${selected.url ? ` ${selected.url}` : ''}` }); close(); }}>{employee.name}</button>) : <p className="muted">Every AI employee in this block is busy. Wait for one to become idle.</p>}
-            </> : <p className="muted">Select an issue to see its details and assign it to an idle AI employee.</p>}
-          </aside>
         </div>
       </div>
     </div>

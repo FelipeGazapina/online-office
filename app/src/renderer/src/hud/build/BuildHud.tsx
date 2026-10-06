@@ -1,27 +1,50 @@
 import { useEffect, useRef } from 'react';
 import { ITEM_DEFS } from '../../../../shared/space/index.ts';
 import { get, useStore, type BuildTool } from '../../store.ts';
-import { addFloor, chooseEntry, exitBuild, isActive, patchBuild, peek, redo, rotate, selectTab, setLevel, undo } from './actions.ts';
+import { addFloor, canTurn, chooseEntry, enterBuild, exitBuild, isActive, patchBuild, peek, redo, rotate, selectTab, setLevel, setTool, undo } from './actions.ts';
 import { footprintText, TABS, visibleEntries, type Entry } from './catalog.ts';
-import { FillIcon, FloorIcon, Redo, Search, TabIcon, ToolIcon, Turn, Undo, WALL_MODES, WallsIcon } from './icons.tsx';
+import { BlockIcon, BuildIcon, FillIcon, FloorIcon, PieceIcon, Redo, Search, TabIcon, ToolIcon, Turn, Undo, WALL_MODES, WallsIcon } from './icons.tsx';
 import { floorSwatch, wallSwatch } from './swatches.ts';
 import { useThumbs } from './thumbs.ts';
 import './build.css';
 
-const HINTS: Record<BuildTool['kind'], (t: BuildTool) => string[][]> = {
-  select: () => [['Click', 'pick up furniture'], ['E', 'copy it'], ['Delete', 'remove it']],
+// A key, what it does, and `danger` for the one that destroys something. Esc puts a piece back; only Delete deletes it.
+type Hint = [key: string, does: string, danger?: true];
+const HINTS: Record<BuildTool['kind'], (t: BuildTool) => Hint[]> = {
+  select: () => [['Click or drag', 'move furniture'], ['Shift-click', 'move its whole block'], ['E', 'copy it'], ['Delete', 'delete the piece under the pointer', true]],
+  block: (t) => (t.kind === 'block' && t.carry ? [['Click', 'drop the block here'], [', .', 'turn'], ['Esc', 'put it back']] : [['Click or drag', 'pick up a block'], ['Esc', 'back to furniture']]),
   wall: () => [['Drag', 'draw a wall'], ['Ctrl-drag', 'delete walls']],
   room: () => [['Drag', 'draw a room'], ['Ctrl-drag', 'delete its walls'], ['Shift', 'wall tool']],
   floor: () => [['Click or drag', 'paint'], ['Shift', 'fill the room']],
   wallpaint: () => [['Click', 'paint a wall'], ['Shift', 'paint the room']],
   opening: (t) => [['Click', `put a ${t.kind === 'opening' ? t.open : ''} on a wall`]],
-  item: (t) => (t.kind === 'item' && t.carry ? [['Click', 'drop it here'], [', .', 'turn'], ['Delete', 'remove']] : [['Click', 'place'], [', .', 'turn'], ['Esc', 'stop']]),
+  item: (t) => (t.kind === 'item' && t.carry ? [['Click', 'drop it here'], [', .', 'turn'], ['Esc', 'put it back'], ['Delete', 'delete the piece', true]] : [['Click', 'place'], [', .', 'turn'], ['Esc', 'stop']]),
 };
+
+function Mover() {
+  // Neither switch lights while a wall, floor or catalog tool is in hand: they say what a click on a placed piece picks up.
+  const mode = useStore((s) => {
+    const t = s.build?.tool;
+    return t?.kind === 'block' ? 'block' : t?.kind === 'select' || (t?.kind === 'item' && t.carry) ? 'piece' : null;
+  });
+  return (
+    <div className="bh-mover" role="group" aria-label="What a click picks up">
+      <button className="bh-mode" aria-pressed={mode === 'piece'} onClick={(e) => { setTool({ kind: 'select' }); e.currentTarget.blur(); }} title="Pick up one piece of furniture" data-testid="mode-piece">
+        <PieceIcon /> Furniture
+      </button>
+      <button className="bh-mode" aria-pressed={mode === 'block'} onClick={(e) => { setTool({ kind: 'block', carry: null }); e.currentTarget.blur(); }} title="Pick up a whole block, desks and board together (Shift-click does the same)" data-testid="mode-block">
+        <BlockIcon /> Block
+      </button>
+    </div>
+  );
+}
 
 function TopBar() {
   return (
     <div className="bh-top" role="toolbar" aria-label="Build mode">
       <span className="bh-title">Build</span>
+      <span className="bh-sep" />
+      <Mover />
       <span className="bh-sep" />
       <button className="bh-ico" onClick={undo} title="Undo (Ctrl+Z)" aria-label="Undo"><Undo /></button>
       <button className="bh-ico" onClick={redo} title="Redo (Ctrl+Shift+Z)" aria-label="Redo"><Redo /></button>
@@ -134,12 +157,12 @@ function Dock() {
   return (
     <div className="bh-dock" data-testid="build-catalog">
       <div className="bh-hint" aria-live="polite">
-        {hint.map(([k, v]) => (
-          <span key={k}><kbd>{k}</kbd> {v}</span>
+        {hint.map(([k, v, danger]) => (
+          <span key={k}><kbd className={danger ? 'danger' : undefined}>{k}</kbd> {v}</span>
         ))}
         <TeamPick />
         {(tool.kind === 'floor' || tool.kind === 'wallpaint') && <FillToggle />}
-        {tool.kind === 'item' && ITEM_DEFS[tool.def]?.kind !== 'stairs' && (
+        {canTurn(tool) && (
           <button type="button" className="bh-turn" data-testid="rotate-handle" onClick={() => rotate(1)} title="Turn it a quarter (. key)" aria-label="Turn it">
             <Turn /> Turn
           </button>
@@ -183,13 +206,25 @@ function Readout() {
   );
 }
 
+// In first person the pointer is locked to the view, so the key is the way in; Esc or C frees the pointer to click instead.
+function EnterButton() {
+  const ready = useStore((s) => !!s.building);
+  const first = useStore((s) => s.camera === 'first');
+  return (
+    <button className={`bh-enter${first ? ' key-first' : ''}`} onClick={(e) => { enterBuild(); e.currentTarget.blur(); }} disabled={!ready} title={first ? 'Press B to build. Esc or C frees the pointer to click this button' : 'Build mode: move furniture and whole blocks (B)'} data-testid="build-enter">
+      <BuildIcon />
+      Build <kbd>B</kbd>
+    </button>
+  );
+}
+
 export function BuildHud() {
   const on = useStore((s) => !!s.build);
   useEffect(() => {
     if (on) document.documentElement.dataset.building = '1';
     return () => void delete document.documentElement.dataset.building;
   }, [on]);
-  if (!on) return null;
+  if (!on) return <EnterButton />;
   return (
     <>
       <TopBar />

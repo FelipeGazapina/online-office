@@ -1,7 +1,7 @@
 import { removeItemOp } from '../../../../shared/space/buildersGesture.ts';
 import { runtime } from '../../runtime.ts';
 import { get } from '../../store.ts';
-import { enterBuild, exitBuild, redo, rotate, sendOps, setLevel, setTool, undo } from './actions.ts';
+import { enterBuild, exitBuild, redo, rotate, sendOps, setLevel, setTool, stepBack, undo } from './actions.ts';
 import { buildView, modifiers } from './state.ts';
 
 export const PAN_KEYS: readonly string[] = ['KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'];
@@ -40,7 +40,7 @@ export function buildKey(e: KeyboardEvent): boolean {
       return taken();
     case 'Escape':
       if (s.helpOpen || s.menu) return false;
-      if (build.tool.kind !== 'select') setTool({ kind: 'select' });
+      stepBack();
       return taken();
     case 'PageUp':
       setLevel(level + 1);
@@ -60,6 +60,8 @@ export function buildKey(e: KeyboardEvent): boolean {
       return taken();
     case 'Delete':
     case 'Backspace': {
+      // A block in hand is never deleted by a key: its pieces are many and one slip would take the team's office with it.
+      if (build.tool.kind === 'block') return taken();
       const id = build.tool.kind === 'item' ? build.tool.carry : s.buildCursor.hover;
       if (id) {
         sendOps([removeItemOp(level, id)]);

@@ -11,12 +11,13 @@ import {
   type Provider,
   type QuestionId,
   type ServerMessage,
-  type TaskBoardConfig,
   type TaskProvider,
 } from '../shared/protocol.ts';
+import { PRIORITIES, type BoardId, type BoardSpec, type Priority, type TaskId, type TaskStage } from '../shared/tasks.ts';
 import type { BuildOp, Item, ItemId, WallSeg } from '../shared/space/types.ts';
 import type { ConvoKey, MessageId } from '../shared/mail.ts';
-import { Office, OfficeError, type OfficeServices } from './office/company.ts';
+import { Office, type OfficeServices } from './office/company.ts';
+import { OfficeError } from './office/error.ts';
 
 // The one place untrusted input becomes a ClientMessage. Ids are opaque strings to the renderer.
 const employeeId = z.string().min(1).transform((s) => s as EmployeeId);
@@ -32,9 +33,16 @@ const allowRule = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('tool'), name: z.string().min(1) }),
 ]);
 const taskProvider = z.enum(['linear', 'cronospark']) satisfies z.ZodType<TaskProvider>;
-const taskBoardConfig = z.object({
-  sources: z.array(z.object({ provider: taskProvider, projectId: z.string().min(1).max(200), label: z.string().max(120).optional() })).max(8),
-}) satisfies z.ZodType<TaskBoardConfig>;
+const boardId = z.string().min(1).transform((s) => s as BoardId);
+const taskId = z.string().min(1).transform((s) => s as TaskId);
+const taskStage = z.enum(['todo', 'doing', 'review', 'done']) satisfies z.ZodType<TaskStage>;
+const priority = z.enum(PRIORITIES) satisfies z.ZodType<Priority>;
+const taskSources = z.array(z.object({ provider: taskProvider, projectId: z.string().min(1).max(200), label: z.string().max(120).optional() })).max(8);
+// A quick board is strict: a source sent along with one is refused here instead of dropped.
+const boardSpec = z.discriminatedUnion('kind', [
+  z.strictObject({ kind: z.literal('quick') }),
+  z.object({ kind: z.enum(['feature', 'bug']), sources: taskSources }),
+]) satisfies z.ZodType<BoardSpec>;
 
 const tile = z.number().int().min(-4096).max(4096);
 const rot = z.union([z.literal(0), z.literal(1), z.literal(2), z.literal(3)]);
@@ -66,7 +74,17 @@ const buildOp: z.ZodType<BuildOp> = z.discriminatedUnion('t', [
 ]);
 
 const clientMessage = z.discriminatedUnion('type', [
-  z.object({ type: z.literal('hire'), provider, blockId, name: z.string().optional(), model: modelId.optional(), role: z.enum(['employee', 'orchestrator']).optional(), bypassLimit: z.boolean().optional() }),
+  z.object({
+    type: z.literal('hire'),
+    provider,
+    blockId,
+    name: z.string().optional(),
+    model: modelId.optional(),
+    role: z.enum(['employee', 'orchestrator']).optional(),
+    bypassLimit: z.boolean().optional(),
+    deskId: itemIdSchema.optional(),
+    taskId: taskId.optional(),
+  }),
   z.object({ type: z.literal('fire'), employeeId }),
   z.object({ type: z.literal('create_block'), cwd: z.string().min(1), name: z.string().min(1).optional(), githubRepo: z.string().url().optional() }),
   z.object({
@@ -77,9 +95,16 @@ const clientMessage = z.discriminatedUnion('type', [
     githubRepo: z.string().url().optional(),
   }),
   z.object({ type: z.literal('remove_block'), blockId }),
-  z.object({ type: z.literal('configure_task_board'), blockId, config: taskBoardConfig }),
   z.object({ type: z.literal('configure_linear_board'), blockId, url: z.string().url().max(1000) }),
-  z.object({ type: z.literal('refresh_task_board'), blockId }),
+  z.object({ type: z.literal('create_board'), blockId, name: z.string().min(1).max(120), spec: boardSpec }),
+  z.object({ type: z.literal('update_board'), boardId, name: z.string().min(1).max(120).optional(), sources: taskSources.optional() }),
+  z.object({ type: z.literal('delete_board'), boardId }),
+  z.object({ type: z.literal('refresh_board'), boardId }),
+  z.object({ type: z.literal('create_task'), boardId, title: z.string().min(1).max(500), notes: z.string().max(20_000).optional(), stage: taskStage.optional(), assignee: employeeId.optional(), priority: priority.optional() }),
+  z.object({ type: z.literal('update_task'), taskId, title: z.string().min(1).max(500).optional(), notes: z.string().max(20_000).optional(), stage: taskStage.optional(), priority: priority.nullable().optional() }),
+  z.object({ type: z.literal('delete_task'), taskId }),
+  z.object({ type: z.literal('assign_task'), taskId, employeeId }),
+  z.object({ type: z.literal('send_hours'), taskId }),
   z.object({ type: z.literal('connect_task_provider'), provider: taskProvider }),
   z.object({ type: z.literal('configure_task_provider'), provider: z.literal('cronospark'), apiKey: z.string().max(2000), userId: z.string().max(200) }),
   z.object({

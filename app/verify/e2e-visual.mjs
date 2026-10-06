@@ -62,6 +62,9 @@ const firstPerson = async (s, name, pose) => {
 export default async (s) => {
   await s.resize(1440, 900);
   await s.waitFor(`!!${store}.company && !!${store}.building`);
+  // The overview eases its yaw to the first iso step over the first frames, and which way first person faces depends on where
+  // that ease has got to when Tab is pressed. The shot used to wait that out by luck, behind the startup stalls.
+  await s.waitFor('Math.abs(__office.state().view.yaw - __office.state().view.isoYawTarget) < 0.01');
   await s.eval('__office.step(8)');
 
   // Where a new owner stands: first person, no teleport.

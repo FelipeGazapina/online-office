@@ -4,6 +4,8 @@
 // routes planned on the nav grid, so the walls of the meeting room are in the way of employees as much as of the owner.
 import { Vector3 } from 'three';
 import type { BlockId, Company, Employee, EmployeeId } from '../../shared/protocol.ts';
+import type { Board, Task } from '../../shared/tasks.ts';
+import { blocksWithTasks } from './boardView.ts';
 import { announceArrival, cancelSpeech, LISTEN_RADIUS } from './audio.ts';
 import { KEYS_INTENT, runtime, STEER_KEYS, type AvatarRT, type OwnerIntent, type WalkGoal } from './runtime.ts';
 import { get, set, toast, waitingQueue } from './store.ts';
@@ -47,6 +49,8 @@ const REROUTE = 0.5;
 const TASK_BOARD_RADIUS = 1.75;
 // A climb ends this close to the top of the stairs.
 const CLIMB_DONE = 0.2;
+// A seated avatar further than this from its chair has had the desk moved from under it.
+const SEATED_DRIFT = 0.05;
 
 const dist2 = (a: Vec2, b: Vec2) => Math.hypot(a.x - b.x, a.z - b.z);
 const ease = (dt: number, rate: number) => 1 - Math.exp(-dt * rate);
@@ -76,10 +80,11 @@ function fallbackSeat(world: World): SeatPose {
   };
 }
 
-export function taskBoardTarget(company: Company, world: World, pos: Vector3, floor: number): BlockId | null {
+export function taskBoardTarget(company: Company, boards: readonly Board[], tasks: readonly Task[], world: World, pos: Vector3, floor: number): BlockId | null {
   let nearest: { id: BlockId; distance: number } | undefined;
+  const withTasks = blocksWithTasks(boards, tasks);
   for (const block of company.blocks) {
-    if (!block.taskBoard?.sources.length && !block.linearBoardUrl) continue;
+    if (!withTasks.has(block.id) && !block.linearBoardUrl) continue;
     const board = whiteboardAt(world, block.id);
     if (!board || board.floor !== floor) continue;
     const distance = dist2(pos, board.at);
@@ -387,6 +392,13 @@ function stepAvatar(
     target = (av.seated || (av.floor === seat.floor && dist2(av.pos, seat.chair) < 1.4)) ? at(seat.floor, seat.chair) : at(seat.floor, seat.exit);
   }
 
+  // A seated avatar never walks, so a desk that moves (or a floor that changes) takes its sitter along here.
+  if (av.seated && (av.floor !== seat.floor || dist2(av.pos, seat.chair) > SEATED_DRIFT)) {
+    av.floor = seat.floor;
+    av.climb = av.route = null;
+    av.pos.set(seat.chair.x, floorBase(seat.floor), seat.chair.z);
+  }
+
   const level = av.floor === target.floor && !av.climb;
   const dist = level ? dist2(av.pos, target) : 1e3;
   let moved = 0;
@@ -495,7 +507,7 @@ export function stepSim(rawDt: number) {
       const stand = terminalStand(world, block.id);
       return !!stand && stand.floor === runtime.owner.floor && dist2(runtime.owner.pos, stand.at) < 1.75;
     })?.id ?? null;
-  const nearTaskBoard = taskBoardTarget(company, world, runtime.owner.pos, runtime.owner.floor);
+  const nearTaskBoard = taskBoardTarget(company, state.boards, state.tasks, world, runtime.owner.pos, runtime.owner.floor);
   const talkingTo = nearestInRange(company, state.talkingTo, nearbyIds);
   const story = runtime.owner.climb ? Math.min(runtime.owner.climb.from.floor, runtime.owner.climb.to.floor) : runtime.owner.floor;
 
