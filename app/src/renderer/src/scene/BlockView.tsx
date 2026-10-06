@@ -1,5 +1,5 @@
 import { memo, useEffect, useMemo, useState, type ReactNode } from 'react';
-import { Color } from 'three';
+import { Color, DoubleSide, MeshStandardMaterial } from 'three';
 import { taskBoardColumns, type Employee, type ProjectBlock } from '../../../shared/protocol.ts';
 import { BLOCK_D, BLOCK_W, STORY_H, YAW, blockCenter, type Building, type Item } from '../../../shared/space/index.ts';
 import { enterProjectComputer } from '../computer.ts';
@@ -8,6 +8,7 @@ import { itemCenter } from '../world.ts';
 import { PodDecor } from './Decor.tsx';
 import { Chair, RoundedPlane } from './Furniture.tsx';
 import { fitText, FONT_BODY, FONT_DISPLAY, ownerComputerTexture, roundRect, useCanvasTexture } from './textures.ts';
+import { carpetSurface } from './surfaceTextures.ts';
 import { useDiagram } from './whiteboard.ts';
 
 // The block presentation is intentionally a light prototype: neutral pods, a visible PO desk, and a small DAILY huddle spot.
@@ -72,6 +73,20 @@ function DailyHuddle({ color }: { color: string }) {
   );
 }
 
+// The pod's front edge: a pane of clear glass between a thin sill and a thin top rail, so the team's desks read through it.
+const railMaterial = new MeshStandardMaterial({ color: '#c9ced4', roughness: 0.4, metalness: 0.5 });
+const paneMaterial = new MeshStandardMaterial({ color: '#dcefff', roughness: 0.06, transparent: true, opacity: 0.16, depthWrite: false, side: DoubleSide });
+function GlassRail({ x, z, w }: { x: number; z: number; w: number }) {
+  return (
+    <group position={[x, 0, z]}>
+      <mesh receiveShadow material={railMaterial} position={[0, 0.02, 0]}><boxGeometry args={[w, 0.04, 0.06]} /></mesh>
+      <mesh material={railMaterial} position={[0, 0.76, 0]}><boxGeometry args={[w, 0.03, 0.05]} /></mesh>
+      {[-w / 2, w / 2].map((px) => <mesh key={px} material={railMaterial} position={[px, 0.39, 0]}><boxGeometry args={[0.04, 0.78, 0.05]} /></mesh>)}
+      <mesh material={paneMaterial} position={[0, 0.4, 0]}><planeGeometry args={[w, 0.72]} /></mesh>
+    </group>
+  );
+}
+
 function PodBoundary({ color }: { color: string }) {
   const edge = '#d2d8dd';
   return (
@@ -79,7 +94,7 @@ function PodBoundary({ color }: { color: string }) {
       {[[0, -3.72, 9.6, 0.08], [-4.72, 0, 0.08, 7.4], [4.72, 0, 0.08, 7.4]].map(([x, z, w, d], i) => (
         <mesh key={i} receiveShadow position={[x, 0.28, z]}><boxGeometry args={[w, 0.56, d]} /><meshStandardMaterial color={i === 0 ? color : edge} roughness={0.85} transparent opacity={0.82} /></mesh>
       ))}
-      <mesh receiveShadow position={[0, 0.22, 3.72]}><boxGeometry args={[3.1, 0.44, 0.18]} /><meshStandardMaterial color={edge} roughness={0.9} /></mesh>
+      <GlassRail x={0} z={3.72} w={3.1} />
     </group>
   );
 }
@@ -324,15 +339,16 @@ export const BlockView = memo(function BlockView({ block, employees }: { block: 
   const sign = useMemo(() => find(building, 'team_sign', block.id), [building, block.id]);
   const board = useMemo(() => find(building, 'whiteboard', block.id), [building, block.id]);
   const terminal = useMemo(() => find(building, 'board_terminal', block.id), [building, block.id]);
-  const rug = useMemo(() => new Color(block.color).lerp(new Color('#d7dde2'), 0.62).getStyle(), [block.color]);
+  const carpet = useMemo(() => carpetSurface(), []);
+  const rug = useMemo(() => new Color(block.color).lerp(new Color('#f1cd8e'), 0.9).getStyle(), [block.color]);
   const trim = useMemo(() => new Color(block.color).lerp(new Color('#738195'), 0.5).getStyle(), [block.color]);
   const author = block.whiteboard ? employees.find((e) => e.id === block.whiteboard!.by)?.name : undefined;
 
   return (
     <group>
       <group position={[c.x, 0, c.z]}>
-        <RoundedPlane w={RUG_W + 0.5} d={RUG_D + 0.5} r={0.5} color="#d6dbe0" y={0.008} />
-        <RoundedPlane w={RUG_W} d={RUG_D} r={0.35} color={rug} y={0.014} />
+        <RoundedPlane w={RUG_W + 0.5} d={RUG_D + 0.5} r={0.5} color="#d9c9a8" y={0.008} surface={carpet} />
+        <RoundedPlane w={RUG_W} d={RUG_D} r={0.35} color={rug} y={0.014} surface={carpet} />
         <PodBoundary color={trim} />
         <PodDecor />
       </group>

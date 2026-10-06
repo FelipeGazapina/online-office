@@ -7,6 +7,9 @@ export const VARIANTS: readonly Variant[] = ['solid', 'door', 'window', 'arch'];
 
 const T = WALL_HALF * 2;
 const CURB = 0.4;
+// A window opens from the sill to the head: low and tall, so a standing eye sees sky above the hedge line.
+const SILL = 0.6;
+const HEAD = 2.85;
 const WHITE: [number, number, number] = [1, 1, 1];
 const CAP: [number, number, number] = [1.18, 1.18, 1.18];
 
@@ -33,7 +36,7 @@ const geometries: Record<Variant, () => BufferGeometry> = {
   solid: () => merge([part(1, STORY_H, T, STORY_H / 2, WHITE), ...cornice(), footing()]),
   door: () => merge([part(1, 1, T, STORY_H - 0.5, WHITE), ...cornice()]),
   arch: () => merge([part(1, 0.6, T, STORY_H - 0.3, WHITE), ...cornice()]),
-  window: () => merge([part(1, 0.9, T, 0.45, WHITE), part(1, 1.1, T, STORY_H - 0.55, WHITE), ...cornice(), footing(), cap(0.94)]),
+  window: () => merge([part(1, SILL, T, SILL / 2, WHITE), part(1, STORY_H - HEAD, T, (STORY_H + HEAD) / 2, WHITE), ...cornice(), footing(), cap(SILL + 0.04)]),
 };
 const built = new Map<string, BufferGeometry>();
 export const wallModel = (v: Variant): BufferGeometry => {
@@ -56,20 +59,20 @@ const frameBar = (w: number, h: number, d: number, x: number, y: number, color: 
 export const frameModel = (): BufferGeometry => {
   let g = built.get('frame');
   if (!g) {
-    const dark: [number, number, number] = [0.2, 0.17, 0.17];
+    const dark: [number, number, number] = [0.74, 0.75, 0.77];
     const lit: [number, number, number] = [0.93, 0.91, 0.86];
     const t = T + 0.08;
+    const h = HEAD - SILL;
+    const mid = (HEAD + SILL) / 2;
     built.set(
       'frame',
       (g = merge([
-        frameBar(1, 0.07, t, 0, 2.08, dark),
-        frameBar(1, 0.05, t + 0.1, 0, 0.92, dark),
-        frameBar(1, 0.1, T + 0.3, 0, 0.87, lit),
-        frameBar(0.05, 1.2, t, -0.475, 1.5, dark),
-        frameBar(0.05, 1.2, t, 0.475, 1.5, dark),
-        frameBar(0.035, 1.2, t - 0.02, -0.16, 1.5, dark),
-        frameBar(0.035, 1.2, t - 0.02, 0.16, 1.5, dark),
-        frameBar(1, 0.035, t - 0.02, 0, 1.78, dark),
+        frameBar(1, 0.06, t, 0, HEAD - 0.03, dark),
+        frameBar(1, 0.05, t + 0.1, 0, SILL + 0.03, dark),
+        frameBar(1, 0.1, T + 0.3, 0, SILL - 0.03, lit),
+        frameBar(0.04, h, t, -0.48, mid, dark),
+        frameBar(0.04, h, t, 0.48, mid, dark),
+        frameBar(0.03, h, t - 0.02, 0, mid, dark),
       ])),
     );
   }
@@ -78,8 +81,8 @@ export const frameModel = (): BufferGeometry => {
 export const glassModel = (): BufferGeometry => {
   let g = built.get('glass');
   if (!g) {
-    g = new PlaneGeometry(1, 1.2);
-    g.translate(0, 1.5, 0);
+    g = new PlaneGeometry(1, HEAD - SILL);
+    g.translate(0, (HEAD + SILL) / 2, 0);
     built.set('glass', g);
   }
   return g;

@@ -56,7 +56,7 @@ const fixtureGeometry = merge([
 ]);
 const poolMaterial = new MeshBasicMaterial({ map: poolTexture(), color: '#ffb865', transparent: true, depthWrite: false, blending: AdditiveBlending, opacity: 0.14, fog: false, polygonOffset: true, polygonOffsetFactor: -3 });
 const poolGeometry = new PlaneGeometry(4.6, 4.6).rotateX(-Math.PI / 2);
-const blobMaterial = new MeshBasicMaterial({ map: blobShadowTexture(), transparent: true, depthWrite: false, opacity: 0.55, polygonOffset: true, polygonOffsetFactor: -2 });
+const blobMaterial = new MeshBasicMaterial({ map: blobShadowTexture(), transparent: true, depthWrite: false, opacity: 0.95, polygonOffset: true, polygonOffsetFactor: -4 });
 const blobGeometry = new PlaneGeometry(1, 1).rotateX(-Math.PI / 2);
 const aoMaterial = new MeshBasicMaterial({ map: wallAoTexture(), transparent: true, depthWrite: false, opacity: 0.9, polygonOffset: true, polygonOffsetFactor: -1 });
 const aoGeometry = new PlaneGeometry(1, 1.1).rotateX(-Math.PI / 2);
@@ -290,13 +290,13 @@ function ContactShadows({ geom }: { geom: FloorGeometry }) {
       const dims = ITEM_DEFS[def];
       if (!dims || NO_BLOB.has(def)) continue;
       for (let i = 0; i < data.ids.length; i++) {
-        out.push({ x: data.matrices[i * 5], z: data.matrices[i * 5 + 2], yaw: data.matrices[i * 5 + 3], w: dims.w / 2 + 0.55, d: dims.d / 2 + 0.55 });
+        out.push({ x: data.matrices[i * 5], z: data.matrices[i * 5 + 2], yaw: data.matrices[i * 5 + 3], w: dims.w / 2 + 0.3, d: dims.d / 2 + 0.3 });
       }
     }
     for (const d of geom.story.items) {
       if (!ITEM_DEFS[d.def]?.seat) continue;
       const c = chairOf(d);
-      if (c) out.push({ x: c.x, z: c.z, yaw: 0, w: 1.0, d: 1.0 });
+      if (c) out.push({ x: c.x, z: c.z, yaw: 0, w: 0.7, d: 0.7 });
     }
     return out;
   }, [geom]);
@@ -305,7 +305,7 @@ function ContactShadows({ geom }: { geom: FloorGeometry }) {
       const m = new Matrix4();
       spots.forEach((sp, i) => {
         q.setFromAxisAngle(up, sp.yaw);
-        mesh.setMatrixAt(i, m.compose(p3.set(sp.x, 0.012, sp.z), q, s3.set(sp.w, 1, sp.d)));
+        mesh.setMatrixAt(i, m.compose(p3.set(sp.x, 0.02, sp.z), q, s3.set(sp.w, 1, sp.d)));
       });
     },
     [spots],

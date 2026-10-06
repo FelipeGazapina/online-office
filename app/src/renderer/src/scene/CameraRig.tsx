@@ -12,8 +12,8 @@ import { STORY_H } from '../../../shared/space/index.ts';
 const ISO_PITCH = 0.58;
 const FOV_ISO = 26;
 const FOV_FIRST = 65;
-// Where the head points on entering first person: a little below level, so the ceiling does not take a third of the frame.
-const FP_PITCH = -0.1;
+// Where the head points on entering first person: level, so the horizon outside the windows sits mid-frame and the sky shows above it.
+const FP_PITCH = -0.05;
 // The live camera opens at a Sims-like mid zoom: the owner's room and its neighbors fill the frame. The wheel still zooms out to the whole plan.
 const ISO_START = 27;
 const EYE = 1.6;

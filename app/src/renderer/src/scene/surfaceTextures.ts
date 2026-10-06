@@ -82,7 +82,7 @@ export function carpetSurface(): Surface {
   const half = n / 2;
   for (let ty = 0; ty < 2; ty++) {
     for (let tx = 0; tx < 2; tx++) {
-      const l = 214 + r() * 26;
+      const l = 198 + r() * 50;
       g.fillStyle = `rgb(${l},${l},${l})`;
       g.fillRect(tx * half, ty * half, half, half);
     }
@@ -102,7 +102,7 @@ export function carpetSurface(): Surface {
     g.strokeStyle = r() < 0.5 ? 'rgba(70,70,70,0.34)' : 'rgba(255,255,255,0.5)';
     wrapped(n, x, y, 9, (px, py) => { g.beginPath(); g.moveTo(px, py); g.lineTo(px + Math.cos(a) * len, py + Math.sin(a) * len); g.stroke(); });
   }
-  g.fillStyle = 'rgba(30,30,30,0.7)';
+  g.fillStyle = 'rgba(30,30,30,0.5)';
   for (let k = 0; k < 2; k++) {
     g.fillRect(k * half - 3, 0, 6, n);
     g.fillRect(0, k * half - 3, n, 6);

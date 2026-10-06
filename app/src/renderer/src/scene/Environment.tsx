@@ -22,7 +22,7 @@ export function terrainHeight(x: number, z: number, b: Bounds): number {
   const dz = Math.max(Math.abs(z - (b.z0 + b.z1) / 2) - (b.z1 - b.z0) / 2, 0);
   const r = Math.hypot(dx, dz);
   const swell = Math.sin(x * 0.085 + 1.3) * Math.cos(z * 0.07) * 0.5 + 0.5;
-  const ridge = smooth01(34, 120, r) * (3.2 + swell * 5.5);
+  const ridge = smooth01(34, 120, r) * (0.3 + swell * 1.1);
   // Gentle berms and dips start close to the building, so the lawn is a landscape and not a table.
   const roll = smooth01(15, 46, r) * (Math.sin(x * 0.21) * Math.cos(z * 0.17) * 0.55 + Math.sin(x * 0.07 + z * 0.09 + 1) * 0.45 + 0.9);
   return ridge + roll;
@@ -132,7 +132,7 @@ function garden(b: Bounds) {
       const z = gz + (rand() - 0.5) * spread * 2;
       if (!free(x, z)) continue;
       const tall = k === 0 ? 1.5 : 0.55 + rand() * 0.8;
-      tree(x, z, (3 + rand() * 3.2) * tall + 1, rand() < (conifer ? 0.8 : 0.2));
+      tree(x, z, ((3 + rand() * 3.2) * tall + 1) * 0.7, rand() < (conifer ? 0.8 : 0.2));
     }
     for (let k = 0; k < 3 + Math.floor(rand() * 4); k++) {
       const x = gx + (rand() - 0.5) * spread * 3;
