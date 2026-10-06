@@ -1,12 +1,14 @@
 import { useFrame } from '@react-three/fiber';
 import { useEffect, useMemo, useRef } from 'react';
-import { Color, Shape, ShapeGeometry, type MeshStandardMaterial } from 'three';
+import { Color, Shape, ShapeGeometry, Vector2, type MeshStandardMaterial } from 'three';
 import type { Employee } from '../../../shared/protocol.ts';
+import type { Surface } from './surfaceTextures.ts';
 import { codeTexture, FONT_DISPLAY, fitText, ownerComputerTexture, roundRect, useCanvasTexture } from './textures.ts';
 
 export type ScreenKind = Employee['status']['kind'] | 'none';
 
 const WHITE = new Color('#ffffff');
+const RUG_NORMAL = new Vector2(0.7, 0.7);
 
 function Screen({ kind, color, owner = false }: { kind: ScreenKind; color: string; owner?: boolean }) {
   const tex = useMemo(() => {
@@ -217,7 +219,7 @@ export function Plant({ position, scale = 1 }: { position: [number, number, numb
   );
 }
 
-export function RoundedPlane({ w, d, r, color, y, opacity = 1 }: { w: number; d: number; r: number; color: string; y: number; opacity?: number }) {
+export function RoundedPlane({ w, d, r, color, y, opacity = 1, surface }: { w: number; d: number; r: number; color: string; y: number; opacity?: number; surface?: Surface }) {
   const geo = useMemo(() => {
     const s = new Shape();
     const x = -w / 2;
@@ -233,9 +235,11 @@ export function RoundedPlane({ w, d, r, color, y, opacity = 1 }: { w: number; d:
     s.quadraticCurveTo(x, z, x + r, z);
     return new ShapeGeometry(s, 6);
   }, [w, d, r]);
+  // A photographed carpet is darker than the flat colour it replaces; lift it so a rug keeps its colour.
+  const tint = useMemo(() => new Color(color).multiplyScalar(surface ? 1.3 : 1), [color, surface]);
   return (
     <mesh geometry={geo} rotation-x={-Math.PI / 2} position={[0, y, 0]} receiveShadow>
-      <meshStandardMaterial color={color} roughness={1} transparent={opacity < 1} opacity={opacity} />
+      <meshStandardMaterial color={tint} roughness={1} transparent={opacity < 1} opacity={opacity} map={surface?.map} normalMap={surface?.normalMap} normalScale={RUG_NORMAL} roughnessMap={surface?.armMap} aoMap={surface?.armMap} />
     </mesh>
   );
 }

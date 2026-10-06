@@ -7,6 +7,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { query, type McpHttpServerConfig } from '@anthropic-ai/claude-agent-sdk';
 import type { BlockId, EmployeeId } from '../src/shared/protocol.ts';
+import { Mailroom } from '../src/main/office/mail.ts';
+import { mailTools } from '../src/main/office/mail-tools.ts';
 import { startOfficeMcp } from '../src/main/office/mcp.ts';
 import { MemoryStore } from '../src/main/office/memory.ts';
 
@@ -53,7 +55,7 @@ const url = mcp.attach(employeeId, {
     return 'PINEAPPLE';
   },
   openBoard: async () => {},
-  delegateToTeammate: async () => 'not available in this check',
+  mail: mailTools(new Mailroom({ members: () => [], nameOf: () => '', deliver() {}, steer() {}, hire: () => ({ ok: false, reason: 'probe' }), artifacts: { check: () => [], changed: () => [] }, persist() {}, changed() {}, stream() {}, now: Date.now, newId: () => '0' }), employeeId, () => '', false),
   drawDiagram: () => {},
   memory: MemoryStore.open(join(dir, 'memory')).notebook({ employeeId, blockId: 'probe-block' as BlockId, provider: 'claude-code' }),
 });

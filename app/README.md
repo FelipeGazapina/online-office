@@ -35,7 +35,7 @@ Download `Online-Office-<version>-arm64.dmg` from the [latest release](https://g
 
 The build is signed ad hoc and not notarized, because the repo has no Apple Developer identity, so macOS blocks the first open. Open System Settings > Privacy & Security, scroll to Security, and click **Open Anyway** next to Online Office. You do this once.
 
-After that, updates arrive in the app. It checks for a newer release when it starts and every hour. When one exists, a button appears at the top right of the office. Click it to download the update, quit, and reopen on the new version. Employees' sessions stop when the app restarts. In the follow and first-person cameras the mouse is captured, so press **C** to free it before you click. A failed update turns the button red. Click it to check again, which reads the release from scratch. The Settings window on the office computer has an **Updates** row that checks by hand. `pnpm dev` and `pnpm start` never show any of this, because only an installed Mac build can update itself.
+After that, updates arrive in the app. It checks for a newer release when it starts and every hour. When one exists, a button appears at the top right of the office. Click it to download the update, quit, and reopen on the new version. Employees' sessions stop when the app restarts. In first person the mouse is captured, so press **C** or **Esc** to free it before you click. A failed update turns the button red. Click it to check again, which reads the release from scratch. The Settings window on the office computer has an **Updates** row that checks by hand. `pnpm dev` and `pnpm start` never show any of this, because only an installed Mac build can update itself.
 
 **Releases.** Every push to `main` that touches `app/` or `.github/workflows/release.yml` publishes a release, and CI is the only thing that writes to GitHub Releases. The version is the `major.minor` in `app/package.json` plus the number of commits on `main`, so it follows the commit and a re-run of the same commit never makes a second release. Change `major.minor` to start a new line. The `version` in `package.json` is only the placeholder for local builds. The workflow unzips the build before it publishes and checks the signature, the bundle version, and that `latest-mac.yml` names the same version and the zip's sha512. `pnpm package` builds into `dist/` and never publishes.
 
@@ -46,7 +46,10 @@ To prove the whole path on this machine, run `pnpm build` and then `node verify/
 | Key | Action |
 | --- | --- |
 | WASD / arrows, Shift | Walk, run |
-| 1 / 2 / 3 | Camera: follow, overview, first person |
+| Tab, or the camera button at the top left | Switch between the isometric camera and first person. The camera flies between them |
+| Q / E | Isometric: turn the view in 90 degree steps. First person: turn your head |
+| Mouse, wheel | Isometric: drag to turn, wheel to zoom. First person: the mouse looks around |
+| C or Esc | In first person, free the mouse (C again captures it). Click the office to capture it again |
 | Enter | Type to the nearest employee |
 | V (hold) | Push-to-talk, in either mic mode. Releasing sends what you said, and pressing it stops an employee who is talking |
 | H | Key help |
@@ -55,7 +58,7 @@ When you sit at the owner's desk and press **F**, Online Office becomes a live, 
 
 The project computer's **Task boards** app has a CronoSpark credentials section. Enter `CRONOSPARK_MCP_API_KEY` as the API key and `CRONOSPARK_MCP_USER_ID` as the MCP user ID, then click **Save CronoSpark**. The key is kept in the app's private credentials file (encrypted with the macOS keychain when available), never in `company.json` or renderer storage. A key already supplied in the app's environment can be kept by leaving the API key field blank.
 
-Click an employee, on the avatar or the name tag, for a menu with **Open chat** and **Go to**. In the Overview camera, click the floor to walk there and drag to turn the view. Press **F** near a task board or click its whiteboard to enlarge it. Click **Reveal** on a block to open its folder in Finder.
+Click an employee, on the avatar or the name tag, for a menu with **Open chat** and **Go to**. In the isometric camera, click the floor to walk there and drag to turn the view. Press **F** near a task board or click its whiteboard to enlarge it. Click **Reveal** on a block to open its folder in Finder.
 
 The project computer's **Task boards** app has a CronoSpark credentials section. Enter `CRONOSPARK_MCP_API_KEY` as the API key and `CRONOSPARK_MCP_USER_ID` as the MCP user ID, then click **Save CronoSpark**. The key is kept in the app's private credentials file (encrypted with the macOS keychain when available), never in `company.json` or renderer storage. A key already supplied in the app's environment can be kept by leaving the API key field blank.
 
@@ -69,6 +72,21 @@ The project computer's **Task boards** app has a CronoSpark credentials section.
 - `src/main/office/adapters/types.ts` is the contract for a harness (`Harness`, `SessionHost`, `EmployeeSession`). Its comments say what each call must do, so an adapter can be written from that file alone.
 - ChatGPT (Codex) and Hermes show in the hire menu when installed, but cannot be hired until their adapters land.
 - Your voice is transcribed on this Mac by whisper.cpp, and it reaches an employee the way typed text does. The employees' voices use `speechSynthesis`. See Voice below.
+
+## How the company works
+
+Give the block's PO (the employee with the PO badge) one goal and it leads the rest.
+
+1. The PO answers first with a short bubble, then looks at the team with `team`.
+2. It splits the goal into pieces, one per deliverable, each with a checkable bar and the files its owner may change. The PO does not write code or docs itself.
+3. A piece with a concrete bar runs as `requestGauntlet`: a builder makes it, then a different critic sees only the artifact and the bar and returns a pass or fail verdict. If the block has fewer than two employees besides the PO, the PO calls `hireTeammate` first, within the seat cap.
+4. Other pieces go out with `request`. Teammates can ask each other for help the same way. A busy teammate queues the request.
+5. The PO checks each result against its bar. It cannot reply `done` to you while a request it made is still open, and the office refuses that reply with the list of open pieces.
+6. Then the PO replies to you with what shipped and the evidence.
+
+You can also give a task straight to any employee. It settles between the two of you and the PO is not involved.
+
+`verify/e2e-company.mjs` runs this with real Claude agents on a scratch git repo (fixture in `verify/fixtures/company-project`) and checks the ledger, the repo and the chat. Employees run in yolo mode in that script because nobody is at the keyboard.
 
 ## The office MCP server
 
@@ -158,8 +176,9 @@ Install whisper.cpp once with `brew install whisper-cpp`.
 ```sh
 pnpm typecheck
 pnpm build
-node verify/nav-check.ts
-node --no-warnings verify/walk-check.mjs
+node verify/space-check.ts
+node verify/building-check.ts
+node --no-warnings verify/world-check.mjs
 node --no-warnings verify/chat-check.mjs
 node verify/voice-check.ts
 node verify/voice-logic-check.ts
@@ -176,8 +195,8 @@ node verify/cdp.mjs verify/e2e-long-wait.mjs
 node verify/cdp.mjs verify/e2e-voice.mjs
 ```
 
-- `verify/nav-check.ts` needs no model or Electron. It builds the walkable grid for one, two and three blocks and checks every path against an independent oracle that samples the segments: a route from the owner's seat to a talk spot at every bench seat and at the head desk, a route to every exit, no segment inside an obstacle grown by the owner's radius, everything inside the walls, a goal in the middle of a desk snapping outside it, and a sealed pocket having no route. It also checks the bench itself: each person faces their own desk, the two seats of a pair face each other, the six desks are flush with no overlap, the head desk closes the east end, every desk and chair is on the rug, and no level's per-block seat ceiling exceeds the bench.
-- `verify/walk-check.mjs` needs no model or Electron. It runs the real sim and store. It checks click walks that detour around desks, employees sitting facing their own desk whichever way it faces, steering keys winning over a walk, going to an employee and re-planning when they move, and employees routing around the meeting room: a new hire sits, a blocked employee arrives with the owner outside or inside, and a closed door keeps everyone at their desk until it opens.
+- `verify/building-check.ts` needs no model or Electron. It opens the real Office on a company.json from before the building and checks the migration (every employee on a desk item, the orchestrator at the PO desk), that a second launch leaves the file byte-identical, hire and fire seating, and build, reject, undo and redo.
+- `verify/world-check.mjs` needs no model or Electron. It runs the real sim and store on a building: click walks that detour around desks, a walk up the stairs to another story, steering keys winning over a walk, going to an employee, and employees routing around the meeting room whose door opens and closes.
 - `verify/chat-check.mjs` needs no model or Electron. It checks that what the owner says and what an employee says land in that employee's transcript, in order, capped at 200 lines.
 - `verify/voice-check.ts` runs the real whisper service against the real `whisper-server` and models, with clips made by `say`. It checks English and Portuguese, that requests wait their turn, downloads that resume, and that no server outlives the service. It needs macOS and whisper-cpp. `--offline` skips the one download from Hugging Face.
 - `verify/voice-logic-check.ts` needs neither. It checks the ring buffer, the half-duplex gate, and the line the HUD chip shows for every state.

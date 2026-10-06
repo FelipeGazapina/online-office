@@ -14,10 +14,12 @@ import type {
   TaskConnectionState,
   UpdateState,
 } from '../../shared/protocol.ts';
+import { emptyMailView, type MailView, type Message, type MessageId } from '../../shared/mail.ts';
+import type { Building, ItemId, PaintId, Rot } from '../../shared/space/index.ts';
 import type { Language, VoiceQuality } from '../../shared/voice.ts';
 import { initialVoice, type VoiceState } from './voice/chip.ts';
 
-export type CameraMode = 'iso';
+export type CameraMode = 'iso' | 'first';
 export type MicMode = 'proximity' | 'push';
 export type Lang = 'en-US' | 'pt-BR' | 'auto';
 export type ComputerView = 'office' | 'mirror';
@@ -30,8 +32,24 @@ export const LANGS: Record<Lang, { stt: Language; tts: 'en-US' | 'pt-BR' }> = {
 };
 export type Modal = null | { kind: 'hire'; bypassLimit?: boolean } | { kind: 'block' } | { kind: 'whiteboard'; blockId: BlockId } | { kind: 'github'; blockId: BlockId } | { kind: 'github_setup'; blockId: BlockId } | { kind: 'task_board'; blockId: BlockId; taskId?: string } | { kind: 'linear_board'; blockId: BlockId };
 
+// What the owner is doing in build mode. `carry` is the placed item being moved, null for a new one.
+export type BuildTool =
+  | { kind: 'select' }
+  | { kind: 'wall' }
+  | { kind: 'room' }
+  | { kind: 'floor' }
+  | { kind: 'wallpaint' }
+  | { kind: 'opening'; open: 'door' | 'window' | 'arch' }
+  | { kind: 'item'; def: string; rot: Rot; carry: ItemId | null; blockId: string | null };
+export type WallsMode = 'up' | 'cutaway' | 'down';
+// `searching` is the search box having focus: the catalog lists everything. `peek` is the furniture card under the pointer, drawn as the cursor ghost.
+export type BuildState = { tool: BuildTool; tab: string; search: string; searching: boolean; peek: string | null; fill: boolean; paint: PaintId; style: number; wallsMode: WallsMode; level: number };
+// What the pointer is over, for the tooltip next to it. `verdict` is the rule check of the ghost, null when there is no ghost.
+export type BuildCursor = { readout: { text: string; x: number; y: number; bad: boolean; anchored?: boolean } | null; verdict: { ok: boolean; text: string } | null; hover: ItemId | null };
+
 export type LogLine = { line: string; at: number };
-export type ChatLine = { from: 'owner' | 'employee'; text: string; at: number; image?: string; imageName?: string };
+// A post the owner just sent, shown at once. The mail view takes over when it carries the same `clientId` as its key.
+export type PendingPost = { clientId: string; to: string; text: string; as: 'request' | 'say'; at: number };
 export type Toast = { id: number; text: string; tone: 'info' | 'warn' | 'ok' };
 
 // Settings the user is tuning while deciding how this should feel; kept across reloads.
@@ -49,13 +67,34 @@ function loadSettings(): Settings {
 
 type State = Settings & {
   company: Company | null;
+  // The building and the rev main last gave it. The scene draws it and the sim walks it.
+  building: Building | null;
+  buildingRev: number;
+  // The story the owner is on. It and the ones below are drawn.
+  story: number;
+  // The story each employee is on, published by the sim when one changes.
+  avatarFloors: Record<string, number>;
+  // The last furniture clicked, for the build tools.
+  pickedItem: ItemId | null;
+  // Null in live mode. The build tools and the story the owner builds on, which the scene draws while it is set.
+  build: BuildState | null;
+  buildCursor: BuildCursor;
   harnesses: Record<Provider, HarnessStatus> | null;
   meetingDoor: MeetingDoor;
   catalogs: Record<Provider, ModelCatalog> | null;
   taskBoards: Record<string, TaskBoardState>;
   taskConnections: Record<'linear' | 'cronospark', TaskConnectionState>;
   logs: Record<string, LogLine[]>;
-  chat: Record<EmployeeId, ChatLine[]>;
+  // Chat panel: the request whose chain is open (null is the person's own thread), whether the composer targets the PO, and the details view.
+  chatSub: MessageId | null;
+  chatToPo: boolean;
+  chatDetails: boolean;
+  pending: PendingPost[];
+  // Older messages loaded by `load_history`, per conversation.
+  history: Record<string, { messages: Message[]; hasMore: boolean }>;
+  // The mailroom's live state, and the bubble each employee is writing right now.
+  mail: MailView;
+  streams: Record<string, { text: string; replyingTo: string | null; at: number }>;
   bubbles: Record<string, { text: string; until: number }>;
   selectedId: EmployeeId | null;
   menu: { employeeId: EmployeeId; x: number; y: number } | null;
@@ -82,13 +121,26 @@ type State = Settings & {
 export const useStore = create<State>()(() => ({
   ...loadSettings(),
   company: null,
+  building: null,
+  buildingRev: 0,
+  story: 0,
+  avatarFloors: {},
+  pickedItem: null,
+  build: null,
+  buildCursor: { readout: null, verdict: null, hover: null },
   harnesses: null,
   meetingDoor: 'open',
   catalogs: null,
   taskBoards: {},
   taskConnections: { linear: { kind: 'needs_auth' }, cronospark: { kind: 'needs_auth' } },
   logs: {},
-  chat: {},
+  chatSub: null,
+  chatToPo: false,
+  chatDetails: false,
+  pending: [],
+  history: {},
+  mail: emptyMailView(),
+  streams: {},
   bubbles: {},
   selectedId: null,
   menu: null,
@@ -123,6 +175,8 @@ export function setSetting<K extends keyof Settings>(key: K, value: Settings[K])
   );
 }
 
+export const toggleCamera = () => setSetting('camera', get().camera === 'iso' ? 'first' : 'iso');
+
 let toastId = 0;
 export function toast(text: string, tone: Toast['tone'] = 'info') {
   const id = ++toastId;
@@ -147,26 +201,16 @@ export function askedAt(e: Employee) {
   return e.status.kind === 'blocked_on_owner' ? e.status.question.askedAt : Infinity;
 }
 
-const CHAT_CAP = 200;
-
-export function addChat(employeeId: EmployeeId, from: ChatLine['from'], text: string, image?: string, imageName?: string) {
-  set((s) => ({ chat: { ...s.chat, [employeeId]: [...(s.chat[employeeId] ?? []).slice(-(CHAT_CAP - 1)), { from, text, at: Date.now(), ...(image ? { image, imageName } : {}) }] } }));
-}
-
-export function attachChatImage(employeeId: EmployeeId, text: string, image: string, imageName: string) {
-  set((s) => { const lines = [...(s.chat[employeeId] ?? [])]; const index = lines.findLastIndex((line) => line.from === 'owner' && line.text === text); if (index < 0) return s; lines[index] = { ...lines[index], image, imageName }; return { chat: { ...s.chat, [employeeId]: lines } }; });
-}
+// Test-only: window.office is frozen by the context bridge, so a test that must read what the UI sends taps it here.
+export const sendTap: { fn: ((m: ClientMessage) => void) | null } = { fn: null };
 
 export function send(m: ClientMessage) {
-  // Only these messages carry words the owner said, so only they join the transcript.
-  switch (m.type) {
-    case 'answer':
-    case 'interject':
-      addChat(m.employeeId, 'owner', m.text);
-      break;
-    case 'assign':
-      addChat(m.employeeId, 'owner', m.task);
-      break;
-  }
-  window.office.send(m);
+  if (m.type === 'post') set((s) => ({ pending: [...s.pending, { clientId: m.clientId, to: m.to, text: m.text, as: m.as, at: Date.now() }] }));
+  if (sendTap.fn) sendTap.fn(m);
+  else window.office.send(m);
 }
+
+// A new conversation starts from the person's own thread, aimed at them.
+useStore.subscribe((s, prev) => {
+  if (s.selectedId !== prev.selectedId && (s.chatSub || s.chatToPo || s.chatDetails)) set({ chatSub: null, chatToPo: false, chatDetails: false });
+});

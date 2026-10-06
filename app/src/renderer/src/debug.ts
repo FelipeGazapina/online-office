@@ -1,15 +1,169 @@
 // Verification hooks: the render loop can be throttled in background tabs, so tests advance the sim by hand.
 import { _roots } from '@react-three/fiber';
 import { Vector3 } from 'three';
+import type { Building } from '../../shared/space/index.ts';
+import type { BlockId, Employee, EmployeeId, ModelId, ProjectBlock } from '../../shared/protocol.ts';
+import { DESKS_PER_BLOCK } from '../../shared/protocol.ts';
+import { applyOps, legacyBuilding, rectWalls, type BuildOp, type Item, type ItemId, type SpaceContext, type WallSeg } from '../../shared/space/index.ts';
+import { benchItem } from '../../shared/space/kit.ts';
 import { applyServerMessage } from './office.ts';
+import { loadMailFixture } from './hud/chat/fixture.ts';
+import { renders } from './hud/chat/renders.ts';
 import { KEYS_INTENT, runtime } from './runtime.ts';
-import { stepSim } from './sim.ts';
-import { get, set, setSetting, useStore } from './store.ts';
+import { floorBase } from './world.ts';
+import { stepSim, tripEnd, walkTo } from './sim.ts';
+import { get, sendTap, set, setSetting, useStore } from './store.ts';
 
 const intentState = () => {
   const i = runtime.owner.intent;
-  return i.kind === 'walk' ? { kind: i.kind, goal: i.goal, dest: i.path[i.path.length - 1], left: i.path.length } : { kind: i.kind };
+  if (i.kind !== 'walk') return { kind: i.kind };
+  const end = tripEnd(i.trip);
+  return { kind: i.kind, goal: i.goal, dest: end.at, floor: end.floor, left: end.waypoints, legs: end.legs };
 };
+
+// Test-only: replaces the company in the renderer store with `count` fake employees spread over as many blocks as they
+// need, two thirds of them working so their avatars animate. Main never hears about them, so no snapshot may arrive after.
+function injectFake(count: number, floors = 1) {
+  const company = get().company;
+  if (!company) throw new Error('no company yet');
+  const colors = ['#e07a5f', '#3d85c6', '#81b29a', '#f2cc8f'];
+  const blocks: ProjectBlock[] = Array.from({ length: Math.max(1, Math.ceil(count / DESKS_PER_BLOCK)) }, (_, slot) => ({
+    id: `fake-block-${slot}` as BlockId,
+    name: `Fake ${slot}`,
+    cwd: `/tmp/fake-${slot}`,
+    color: colors[slot % colors.length],
+    slot,
+  }));
+  const desks = Array.from({ length: count }, (_, i) => ({ id: `fake-emp-${i}`, blockId: blocks[Math.floor(i / DESKS_PER_BLOCK)].id, desk: i % DESKS_PER_BLOCK, orchestrator: false }));
+  const legacy = legacyBuilding(blocks.map((b) => ({ id: b.id, slot: b.slot })), desks);
+  const { building, seats } = floors > 1 ? stackStories(legacy.building, legacy.seats, desks, blocks, floors) : legacy;
+  const employees: Employee[] = Array.from({ length: count }, (_, i) => ({
+    id: `fake-emp-${i}` as EmployeeId,
+    name: `Fake ${i}`,
+    provider: 'claude-code',
+    blockId: blocks[Math.floor(i / DESKS_PER_BLOCK)].id,
+    seat: seats.get(`fake-emp-${i}`) ?? null,
+    status: i % 3 === 2 ? { kind: 'idle' } : { kind: 'working', task: 'fake task', startedAt: Date.now() },
+    activity: 'typing',
+    model: 'fake' as ModelId,
+    permissions: { mode: company.settings.defaultPermissions, alwaysAllow: [] },
+    subagents: [],
+    hiredAt: Date.now(),
+  }));
+  set({ company: { ...company, blocks, employees }, building });
+}
+
+// Test-only: the legacy office with `floors - 1` stories on top, each lot-wide with its own windows, an inner wall, stairs
+// up from the story below, decor, and bench desks that take an even share of the employees off the ground floor.
+function stackStories(ground: Building, groundSeats: Map<string, ItemId>, desks: { id: string; blockId: string }[], blocks: ProjectBlock[], floors: number) {
+  const lot = ground.lot;
+  const seats = new Map(groundSeats);
+  const ops: BuildOp[] = [{ t: 'stories', count: floors }, { t: 'items', story: 0, put: [{ id: 'stairs:00' as ItemId, def: 'stairs', x: 16, z: 4, rot: 0 }], del: [] }];
+  const share = Math.ceil(desks.length / floors);
+  for (let story = 1; story < floors; story++) {
+    const cells = Array.from({ length: lot.w * lot.h }, (_, i) => ({ x: lot.x0 + (i % lot.w), z: lot.z0 + Math.floor(i / lot.w), half: 0 as const, paint: story + 1 }));
+    const walls: WallSeg[] = rectWalls({ x: lot.x0, z: lot.z0, w: lot.w, h: lot.h }, 2).map((w, i) => (i % 6 >= 1 && i % 6 <= 4 ? { ...w, open: 'window' as const } : w));
+    for (let i = 0; i < 12; i++) walls.push({ x: -6 + i, z: -2, d: 'e', style: 2, ...(i === 5 ? { open: 'door' as const } : {}) });
+    const items: Item[] = desks.slice(story * share, (story + 1) * share).map((d, n) => {
+      const slot = blocks.findIndex((b) => b.id === d.blockId);
+      const item = { ...benchItem(d.blockId, slot, n), id: `${d.blockId}:bench_desk:${story}${n}` as ItemId };
+      seats.set(d.id, item.id);
+      return item;
+    });
+    const put = (def: string, x: number, z: number): Item => ({ id: `${def}:${story}0` as ItemId, def, x, z, rot: 0 });
+    items.push(put('plant', -30, -30), put('sofa', 20, 10), put('bookshelf', -34, -38), put('meeting_table', 20, -20));
+    if (story < floors - 1) items.push({ id: `stairs:0${story}` as ItemId, def: 'stairs', x: 30, z: 4, rot: 0 });
+    ops.push({ t: 'floor', story, cells }, { t: 'walls', story, put: walls, del: [] }, { t: 'items', story, put: items, del: [] });
+  }
+  const ctx: SpaceContext = {
+    blocks: new Set(blocks.map((b) => b.id)),
+    employees: new Map(desks.map((d) => [d.id, { blockId: d.blockId, orchestrator: false }])),
+    seats,
+  };
+  const built = applyOps(ground, ops, ctx);
+  if (!built.ok) throw new Error(`the ${floors}-story fixture is illegal: ${JSON.stringify(built.violations)}`);
+  return { building: built.building, seats };
+}
+
+// Test-only: real frame times over `ms` of requestAnimationFrame, plus the renderer's draw-call counters and the frame
+// budget, which holds still when the machine is busy: CPU ms spent inside gl.render per frame, and GPU ms per frame from
+// timer queries where the driver offers them (the mean of the resolved frames, null when it does not).
+function measureFrames(ms: number) {
+  const root = _roots.values().next().value;
+  if (!root) throw new Error('no canvas');
+  const { gl } = root.store.getState();
+  const info = gl.info;
+  const ctx = gl.getContext() as WebGL2RenderingContext;
+  const ext = ctx.getExtension('EXT_disjoint_timer_query_webgl2');
+  const queries: WebGLQuery[] = [];
+  let cpu = 0;
+  let renders = 0;
+  const render = gl.render.bind(gl);
+  gl.render = (scene, camera) => {
+    const q = ext ? ctx.createQuery() : null;
+    if (q) ctx.beginQuery(ext!.TIME_ELAPSED_EXT, q);
+    const t0 = performance.now();
+    render(scene, camera);
+    cpu += performance.now() - t0;
+    renders++;
+    if (q) {
+      ctx.endQuery(ext!.TIME_ELAPSED_EXT);
+      queries.push(q);
+    }
+  };
+  return new Promise((resolve) => {
+    const deltas: number[] = [];
+    let drawCalls = 0;
+    let triangles = 0;
+    let last = 0;
+    let start = 0;
+    const tick = (t: number) => {
+      if (!start) start = t;
+      if (last) deltas.push(t - last);
+      last = t;
+      drawCalls = Math.max(drawCalls, info.render.calls);
+      triangles = Math.max(triangles, info.render.triangles);
+      if (t - start < ms) return void requestAnimationFrame(tick);
+      gl.render = render;
+      setTimeout(() => {
+        const gpu = queries.filter((q) => ctx.getQueryParameter(q, ctx.QUERY_RESULT_AVAILABLE)).map((q) => ctx.getQueryParameter(q, ctx.QUERY_RESULT) / 1e6);
+        const disjoint = ext ? ctx.getParameter(ext.GPU_DISJOINT_EXT) : true;
+        resolve({ deltas, drawCalls, triangles, cpuMs: cpu / Math.max(1, renders), gpuMs: gpu.length && !disjoint ? gpu.reduce((a, b) => a + b, 0) / gpu.length : null });
+      }, 300);
+    };
+    requestAnimationFrame(tick);
+  });
+}
+
+// Test-only: how many wall pieces stand at full height, and how many curbs stand where the cutaway dropped a wall.
+function wallStats() {
+  const root = _roots.values().next().value;
+  if (!root) throw new Error('no canvas');
+  const stats = { full: 0, curbs: 0, hidden: 0 };
+  root.store.getState().scene.traverse((o) => {
+    const tag = o.userData?.wall as string | undefined;
+    const mesh = o as import('three').InstancedMesh;
+    if (!tag || !mesh.isInstancedMesh) return;
+    if (tag === 'curb') return void (stats.curbs += mesh.count);
+    if (tag !== 'solid') return;
+    for (let i = 0; i < mesh.count; i++) (mesh.instanceMatrix.array[i * 16] === 0 ? stats.hidden++ : stats.full++);
+  });
+  return stats;
+}
+
+// Test-only: the scene meshes a build-mode piece tagged `userData.probe`, with their data and the color they draw in.
+function probe(name: string) {
+  const root = _roots.values().next().value;
+  if (!root) return [];
+  const found: Record<string, unknown>[] = [];
+  root.store.getState().scene.traverse((o) => {
+    const data = o.userData as Record<string, unknown> | undefined;
+    if (data?.probe !== name) return;
+    const m = (o as import('three').Mesh).material as import('three').MeshBasicMaterial | undefined;
+    found.push({ ...data, color: m?.color ? `#${m.color.getHexString()}` : null, opacity: m?.opacity ?? null });
+  });
+  return found;
+}
 
 export function installDebug() {
   (window as unknown as { __office: unknown }).__office = {
@@ -17,7 +171,7 @@ export function installDebug() {
       for (let i = 0; i < seconds * fps; i++) stepSim(1 / fps);
     },
     teleport(x: number, z: number, yaw = runtime.owner.yaw) {
-      runtime.owner.pos.set(x, 0, z);
+      runtime.owner.pos.set(x, runtime.owner.pos.y, z);
       runtime.owner.yaw = yaw;
       runtime.owner.intent = KEYS_INTENT;
       runtime.queueYaw = yaw;
@@ -28,8 +182,8 @@ export function installDebug() {
       else runtime.keys.delete(code);
     },
     state: () => ({
-      owner: { x: runtime.owner.pos.x, z: runtime.owner.pos.z, yaw: runtime.owner.yaw },
-      avatars: [...runtime.avatars.values()].map((a) => ({ id: a.id, x: +a.pos.x.toFixed(2), z: +a.pos.z.toFixed(2), seated: a.seated, speed: +a.speed.toFixed(2) })),
+      owner: { x: runtime.owner.pos.x, y: runtime.owner.pos.y, z: runtime.owner.pos.z, floor: runtime.owner.floor, yaw: runtime.owner.yaw },
+      avatars: [...runtime.avatars.values()].map((a) => ({ id: a.id, x: +a.pos.x.toFixed(2), z: +a.pos.z.toFixed(2), floor: a.floor, seated: a.seated, speed: +a.speed.toFixed(2) })),
       talkingTo: get().talkingTo,
       askerId: get().askerId,
       intent: intentState(),
@@ -45,6 +199,29 @@ export function installDebug() {
       const p = new Vector3(x, y, z).project(camera);
       return { x: size.left + ((p.x + 1) / 2) * size.width, y: size.top + ((1 - p.y) / 2) * size.height };
     },
+    // Test-only: stands the owner on another story at once, so the overview draws every story up to it.
+    ownerTo(floor: number, x: number, z: number) {
+      runtime.owner.floor = floor;
+      runtime.owner.pos.set(x, floorBase(floor), z);
+      runtime.owner.intent = KEYS_INTENT;
+    },
+    wallStats,
+    probe,
+    // The same walk a floor click starts, aimed at any story. The overview draws only the stories up to the owner's, so a click cannot reach a higher one yet.
+    walkTo: (floor: number, x: number, z: number) => walkTo({ kind: 'point', at: { x, z }, floor }),
+    injectFake,
+    // Test-only: the chat with a whole conversation in it. Main never hears about these people.
+    loadMailFixture() {
+      const company = get().company;
+      if (!company) throw new Error('no company yet');
+      return loadMailFixture(company);
+    },
+    renders,
+    // Test-only: hand every message the UI would send to `fn` instead of main.
+    tapSend(fn: (m: unknown) => void) {
+      sendTap.fn = fn;
+    },
+    measureFrames,
     setCamera: () => setSetting('camera', 'iso'),
     apply: applyServerMessage,
     store: useStore,

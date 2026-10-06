@@ -11,16 +11,16 @@ const { get, send, set } = await import('../src/renderer/src/store.ts');
 const { applyServerMessage } = await import('../src/renderer/src/office.ts');
 const { check, finish } = await import('./check.ts');
 
-const person = (id, name) => ({ id, name, provider: 'claude-code', blockId: 'b1', desk: 0, status: { kind: 'idle' }, activity: '', hiredAt: 0 });
+const person = (id, name) => ({ id, name, provider: 'claude-code', blockId: 'b1', seat: null, status: { kind: 'idle' }, activity: '', hiredAt: 0 });
 set({ company: { name: 'Test', level: 3, xp: 0, blocks: [], employees: [person('ann', 'Ann'), person('bob', 'Bob')] } });
 
 const lines = (id) => get().chat[id] ?? [];
 const texts = (id) => lines(id).map((l) => l.text).join(' | ');
 
 const owned = [
-  [{ type: 'interject', employeeId: 'ann', text: 'stop and rebase', style: 'now' }, 'stop and rebase'],
+  [{ type: 'post', to: 'ann', clientId: 'c1', as: 'say', text: 'stop and rebase', urgency: 'now' }, 'stop and rebase'],
   [{ type: 'answer', employeeId: 'ann', questionId: 'q1', text: 'use sqlite' }, 'use sqlite'],
-  [{ type: 'assign', employeeId: 'ann', task: 'write the docs' }, 'write the docs'],
+  [{ type: 'post', to: 'ann', clientId: 'c2', as: 'request', text: 'write the docs' }, 'write the docs'],
 ];
 for (const [message, words] of owned) {
   send(message);
@@ -39,8 +39,8 @@ applyServerMessage({ type: 'said', employeeId: 'bob', text: 'the build is green'
 check(lines('bob').at(-1)?.from === 'employee' && lines('bob').at(-1).text === 'the build is green', 'a said message adds an employee line');
 
 set({ chat: {} });
-send({ type: 'assign', employeeId: 'ann', task: 'a1' });
-send({ type: 'assign', employeeId: 'bob', task: 'b1' });
+send({ type: 'post', to: 'ann', clientId: 'c3', as: 'request', text: 'a1' });
+send({ type: 'post', to: 'bob', clientId: 'c4', as: 'request', text: 'b1' });
 applyServerMessage({ type: 'said', employeeId: 'ann', text: 'a2' });
 applyServerMessage({ type: 'said', employeeId: 'bob', text: 'b2' });
 send({ type: 'answer', employeeId: 'ann', questionId: 'q2', text: 'a3' });

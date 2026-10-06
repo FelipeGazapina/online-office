@@ -1,0 +1,146 @@
+import { BoxGeometry, BufferGeometry, Float32BufferAttribute, Matrix4, PlaneGeometry, Quaternion, Vector3 } from 'three';
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
+import { STORY_H, WALL_HALF, type FloorGeometry } from '../../../../shared/space/index.ts';
+
+export type Variant = 'solid' | 'door' | 'window' | 'arch';
+export const VARIANTS: readonly Variant[] = ['solid', 'door', 'window', 'arch'];
+
+const T = WALL_HALF * 2;
+const CURB = 0.28;
+// A window opens from the sill to the head: low and tall, so a standing eye sees sky above the hedge line.
+const SILL = 0.6;
+const HEAD = 2.85;
+const WHITE: [number, number, number] = [1, 1, 1];
+const CAP: [number, number, number] = [1.18, 1.18, 1.18];
+
+const part = (w: number, h: number, d: number, y: number, color: [number, number, number], depth = d) => {
+  const g = new BoxGeometry(w, h, depth).toNonIndexed();
+  g.translate(0, y, 0);
+  g.setAttribute('color', new Float32BufferAttribute(Array.from({ length: g.getAttribute('position').count }, () => color).flat(), 3));
+  return g;
+};
+const merge = (parts: BufferGeometry[]) => {
+  const g = mergeGeometries(parts, false);
+  if (!g) throw new Error('A wall model failed to merge');
+  return g;
+};
+const cap = (y: number) => part(1, 0.05, T + 0.04, y, CAP);
+const SHADE: [number, number, number] = [0.8, 0.78, 0.74];
+// Crown molding: a coping that overhangs the wall and a shadow band under it, so the roofline reads from far away.
+const cornice = (): BufferGeometry[] => [part(1, 0.1, T + 0.22, STORY_H + 0.05, CAP), part(1, 0.1, T + 0.12, STORY_H - 0.05, SHADE)];
+// A footing the wall stands on, a little wider than the wall.
+const footing = (): BufferGeometry => part(1, 0.26, T + 0.1, 0.13, SHADE);
+
+// Each model is one unit long along x, centered on its segment, standing on the floor.
+const geometries: Record<Variant, () => BufferGeometry> = {
+  solid: () => merge([part(1, STORY_H, T, STORY_H / 2, WHITE), ...cornice(), footing()]),
+  door: () => merge([part(1, 1, T, STORY_H - 0.5, WHITE), ...cornice()]),
+  arch: () => merge([part(1, 0.6, T, STORY_H - 0.3, WHITE), ...cornice()]),
+  window: () => merge([part(1, SILL, T, SILL / 2, WHITE), part(1, STORY_H - HEAD, T, (STORY_H + HEAD) / 2, WHITE), ...cornice(), footing(), cap(SILL + 0.04)]),
+};
+const built = new Map<string, BufferGeometry>();
+export const wallModel = (v: Variant): BufferGeometry => {
+  let g = built.get(v);
+  if (!g) built.set(v, (g = geometries[v]()));
+  return g;
+};
+export const curbModel = (): BufferGeometry => {
+  let g = built.get('curb');
+  if (!g) built.set('curb', (g = merge([part(1, CURB, T, CURB / 2, WHITE), cap(CURB + 0.04)])));
+  return g;
+};
+// The window's frame: a header, a deep sill that sticks out on both faces, jambs and two mullions. It takes no instance color,
+// so every window is the same dark bronze whatever the wall's paint.
+const frameBar = (w: number, h: number, d: number, x: number, y: number, color: [number, number, number]) => {
+  const g = part(w, h, d, y, color);
+  g.translate(x, 0, 0);
+  return g;
+};
+export const frameModel = (): BufferGeometry => {
+  let g = built.get('frame');
+  if (!g) {
+    const dark: [number, number, number] = [0.74, 0.75, 0.77];
+    const lit: [number, number, number] = [0.93, 0.91, 0.86];
+    const t = T + 0.08;
+    const h = HEAD - SILL;
+    const mid = (HEAD + SILL) / 2;
+    built.set(
+      'frame',
+      (g = merge([
+        frameBar(1, 0.06, t, 0, HEAD - 0.03, dark),
+        frameBar(1, 0.05, t + 0.1, 0, SILL + 0.03, dark),
+        frameBar(1, 0.1, T + 0.3, 0, SILL - 0.03, lit),
+        frameBar(0.04, h, t, -0.48, mid, dark),
+        frameBar(0.04, h, t, 0.48, mid, dark),
+        frameBar(0.03, h, t - 0.02, 0, mid, dark),
+      ])),
+    );
+  }
+  return g;
+};
+export const glassModel = (): BufferGeometry => {
+  let g = built.get('glass');
+  if (!g) {
+    g = new PlaneGeometry(1, HEAD - SILL);
+    g.translate(0, (HEAD + SILL) / 2, 0);
+    built.set('glass', g);
+  }
+  return g;
+};
+
+export type WallRecord = { variant: Variant; x: number; z: number; angle: number; len: number; style: number; nx: number; nz: number };
+
+export function wallRecords(g: FloorGeometry): Record<Variant, WallRecord[]> {
+  const out: Record<Variant, WallRecord[]> = { solid: [], door: [], window: [], arch: [] };
+  for (const variant of VARIANTS) {
+    const m = g.render.walls[variant];
+    const n = g.render.wallNormals[variant];
+    for (let i = 0; i < m.length / 5; i++) {
+      out[variant].push({ variant, x: m[i * 5], z: m[i * 5 + 1], angle: m[i * 5 + 2], len: m[i * 5 + 3], style: m[i * 5 + 4], nx: n[i * 2], nz: n[i * 2 + 1] });
+    }
+  }
+  return out;
+}
+
+const q = new Quaternion();
+const up = new Vector3(0, 1, 0);
+const pos = new Vector3();
+const scl = new Vector3();
+export const ZERO = new Matrix4().makeScale(0, 0, 0);
+
+export function wallMatrix(r: WallRecord, out = new Matrix4()): Matrix4 {
+  q.setFromAxisAngle(up, r.angle);
+  // A straight segment is lengthened by a wall's thickness so two walls meet in a corner without a notch.
+  scl.set(r.len + (r.angle === 0 || r.angle === -Math.PI / 2 ? T : 0), 1, 1);
+  return out.compose(pos.set(r.x, 0, r.z), q, scl);
+}
+
+/** The wall faces the camera when its outward normal points at it. `yaw` is the camera's heading, the way view.yaw runs. */
+export const facesCamera = (r: WallRecord, yaw: number): boolean => -Math.sin(yaw) * r.nx - Math.cos(yaw) * r.nz > 0.35;
+
+/**
+ * An interior wall has a room on both sides, so it has no outward normal. It still hides the room behind it from a camera
+ * looking across it, so it steps down when its line is across the view and it stands between the camera and `focus`.
+ */
+export function crossesView(r: WallRecord, yaw: number, focus: { x: number; z: number }): boolean {
+  if (r.nx !== 0 || r.nz !== 0) return false;
+  if (r.angle !== 0 && r.angle !== -Math.PI / 2) return false;
+  const tx = -Math.sin(yaw);
+  const tz = -Math.cos(yaw);
+  const across = r.angle === 0 ? Math.abs(tz) : Math.abs(tx);
+  return across > 0.35 && (r.x - focus.x) * tx + (r.z - focus.z) * tz > -0.5;
+}
+
+/** The camera's heading snapped to one of eight directions, so the cutaway only changes when the view turns far enough. */
+export const octantOf = (yaw: number): number => ((Math.round(yaw / (Math.PI / 4)) % 8) + 8) % 8;
+
+/** The wall stands between the camera and a point on its floor: on the camera's side of it and within a body's width of the line of sight. */
+export function occludes(r: WallRecord, yaw: number, at: { x: number; z: number }): boolean {
+  const tx = -Math.sin(yaw);
+  const tz = -Math.cos(yaw);
+  const dx = r.x - at.x;
+  const dz = r.z - at.z;
+  const along = dx * tx + dz * tz;
+  const across = Math.abs(dx * tz - dz * tx);
+  return along > 0.2 && along < 7 && across < 2.4;
+}

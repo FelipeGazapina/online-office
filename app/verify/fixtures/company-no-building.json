@@ -1,0 +1,72 @@
+{
+  "name": "Gazapina Labs",
+  "level": 5,
+  "xp": 300,
+  "blocks": [
+    {
+      "id": "blk-a",
+      "name": "Billing",
+      "cwd": "__REPO__",
+      "color": "#5b8def",
+      "slot": 0
+    },
+    {
+      "id": "blk-b",
+      "name": "Search",
+      "cwd": "__REPO__/b",
+      "color": "#e0876a",
+      "slot": 1
+    }
+  ],
+  "employees": [
+    {
+      "id": "e1",
+      "name": "Ana",
+      "provider": "claude-code",
+      "blockId": "blk-a",
+      "desk": 0,
+      "status": {
+        "kind": "idle"
+      },
+      "activity": "Idle",
+      "hiredAt": 1790000000001,
+      "role": "orchestrator"
+    },
+    {
+      "id": "e2",
+      "name": "Ben",
+      "provider": "claude-code",
+      "blockId": "blk-a",
+      "desk": 1,
+      "status": {
+        "kind": "idle"
+      },
+      "activity": "Idle",
+      "hiredAt": 1790000000002
+    },
+    {
+      "id": "e3",
+      "name": "Cleo",
+      "provider": "claude-code",
+      "blockId": "blk-a",
+      "desk": 3,
+      "status": {
+        "kind": "idle"
+      },
+      "activity": "Idle",
+      "hiredAt": 1790000000003
+    },
+    {
+      "id": "e4",
+      "name": "Dana",
+      "provider": "claude-code",
+      "blockId": "blk-b",
+      "desk": 0,
+      "status": {
+        "kind": "idle"
+      },
+      "activity": "Idle",
+      "hiredAt": 1790000000004
+    }
+  ]
+}

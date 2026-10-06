@@ -1,3 +1,4 @@
+import { BuildHud } from './hud/build/BuildHud.tsx';
 import { Drawer } from './hud/Drawer.tsx';
 import { EmployeeMenu } from './hud/EmployeeMenu.tsx';
 import { Modals } from './hud/Modals.tsx';
@@ -5,6 +6,7 @@ import { ComputerPrompt, HelpOverlay, Toasts, WaitingMeter } from './hud/Panels.
 import { Bottom } from './hud/Talk.tsx';
 import { UpdateChip } from './hud/UpdateControl.tsx';
 import { ComputerMenu, MacPortal } from './hud/MacPortal.tsx';
+import { CameraToggle } from './hud/CameraToggle.tsx';
 import { Clock } from './hud/Clock.tsx';
 import { ResizableHud } from './hud/ResizableHud.tsx';
 import { Scene } from './scene/Scene.tsx';
@@ -26,6 +28,8 @@ export function App() {
         <Scene />
       </div>
       <div className="hud" style={{ display: portalMode ? 'none' : undefined }}>
+        <CameraToggle />
+        <BuildHud />
         <ResizableHud itemKey="clock"><Clock /></ResizableHud>
         <ResizableHud itemKey="waiting-meter"><WaitingMeter /></ResizableHud>
         <ResizableHud itemKey="update-chip"><UpdateChip /></ResizableHud>

@@ -1,11 +1,14 @@
-import { memo, useEffect, useMemo, useState } from 'react';
-import { Color } from 'three';
-import { PROVIDERS, taskBoardColumns, type Employee, type ProjectBlock } from '../../../shared/protocol.ts';
-import { BENCH, blockCenter, deskPose, projectComputerPose, RUG_D, RUG_W, signPose, whiteboardPose, type DeskPose } from '../layout.ts';
+import { memo, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { Color, DoubleSide, MeshStandardMaterial } from 'three';
+import { taskBoardColumns, type Employee, type ProjectBlock } from '../../../shared/protocol.ts';
+import { BLOCK_D, BLOCK_W, STORY_H, YAW, blockCenter, type Building, type Item } from '../../../shared/space/index.ts';
 import { enterProjectComputer } from '../computer.ts';
 import { set, useStore } from '../store.ts';
-import { Chair, Desk, RoundedPlane } from './Furniture.tsx';
-import { fitText, FONT_BODY, FONT_DISPLAY, roundRect, useCanvasTexture } from './textures.ts';
+import { itemCenter } from '../world.ts';
+import { PodDecor } from './Decor.tsx';
+import { Chair, RoundedPlane } from './Furniture.tsx';
+import { fitText, FONT_BODY, FONT_DISPLAY, ownerComputerTexture, roundRect, useCanvasTexture } from './textures.ts';
+import { carpetSurface } from './surfaceTextures.ts';
 import { useDiagram } from './whiteboard.ts';
 
 // The block presentation is intentionally a light prototype: neutral pods, a visible PO desk, and a small DAILY huddle spot.
@@ -37,7 +40,7 @@ function Sign({ name, cwd, color }: { name: string; cwd: string; color: string }
     g.fillText('Project lead · ' + (cwd.length > 32 ? `…${cwd.slice(-31)}` : cwd), 214, 236);
   }, [name, cwd, color]);
   return (
-    <group>
+    <group scale={0.46}>
       <mesh castShadow position={[0, 0.35, -0.05]}>
         <boxGeometry args={[0.12, 0.7, 0.12]} />
         <meshStandardMaterial color="#3a3f4e" />
@@ -62,10 +65,27 @@ function DailyHuddle({ color }: { color: string }) {
   }, []);
   return (
     <group>
-      <mesh receiveShadow position={[0, 0.035, 0]}><cylinderGeometry args={[1.25, 1.25, 0.06, 20]} /><meshStandardMaterial color={color} roughness={0.9} /></mesh>
-      <mesh castShadow position={[0, 0.62, 0]}><cylinderGeometry args={[0.75, 0.82, 0.1, 16]} /><meshStandardMaterial color="#eadfc9" roughness={0.75} /></mesh>
+      <mesh receiveShadow position={[0, 0.035, 0]}><cylinderGeometry args={[1.25, 1.25, 0.06, 56]} /><meshStandardMaterial color={color} roughness={0.9} /></mesh>
+      <mesh castShadow position={[0, 0.7, 0]}><cylinderGeometry args={[0.8, 0.8, 0.05, 56]} /><meshStandardMaterial color="#eadfc9" roughness={0.45} /></mesh>
+      <mesh castShadow position={[0, 0.665, 0]}><cylinderGeometry args={[0.76, 0.76, 0.03, 56]} /><meshStandardMaterial color="#8c6a4a" roughness={0.6} /></mesh>
+      <mesh castShadow position={[0, 0.35, 0]}><cylinderGeometry args={[0.07, 0.1, 0.65, 16]} /><meshStandardMaterial color="#3a3f4e" roughness={0.5} /></mesh>
+      <mesh castShadow position={[0, 0.03, 0]}><cylinderGeometry args={[0.38, 0.4, 0.04, 40]} /><meshStandardMaterial color="#3a3f4e" roughness={0.5} /></mesh>
       {[-1, 1].map((x) => <Chair key={x} position={[x * 0.95, 0, 0]} color={color} rotationY={x < 0 ? -Math.PI / 2 : Math.PI / 2} />)}
-      <mesh position={[0, 1.4, -0.82]}><planeGeometry args={[2.3, 0.98]} /><meshBasicMaterial map={tex} transparent /></mesh>
+      <mesh position={[0, 1.05, -0.82]}><planeGeometry args={[1.5, 0.64]} /><meshBasicMaterial map={tex} transparent /></mesh>
+    </group>
+  );
+}
+
+// The pod's front edge: a pane of clear glass between a thin sill and a thin top rail, so the team's desks read through it.
+const railMaterial = new MeshStandardMaterial({ color: '#c9ced4', roughness: 0.4, metalness: 0.5 });
+const paneMaterial = new MeshStandardMaterial({ color: '#dcefff', roughness: 0.06, transparent: true, opacity: 0.16, depthWrite: false, side: DoubleSide });
+function GlassRail({ x, z, w }: { x: number; z: number; w: number }) {
+  return (
+    <group position={[x, 0, z]}>
+      <mesh receiveShadow material={railMaterial} position={[0, 0.02, 0]}><boxGeometry args={[w, 0.04, 0.06]} /></mesh>
+      <mesh material={railMaterial} position={[0, 0.76, 0]}><boxGeometry args={[w, 0.03, 0.05]} /></mesh>
+      {[-w / 2, w / 2].map((px) => <mesh key={px} material={railMaterial} position={[px, 0.39, 0]}><boxGeometry args={[0.04, 0.78, 0.05]} /></mesh>)}
+      <mesh material={paneMaterial} position={[0, 0.4, 0]}><planeGeometry args={[w, 0.72]} /></mesh>
     </group>
   );
 }
@@ -77,7 +97,7 @@ function PodBoundary({ color }: { color: string }) {
       {[[0, -3.72, 9.6, 0.08], [-4.72, 0, 0.08, 7.4], [4.72, 0, 0.08, 7.4]].map(([x, z, w, d], i) => (
         <mesh key={i} receiveShadow position={[x, 0.28, z]}><boxGeometry args={[w, 0.56, d]} /><meshStandardMaterial color={i === 0 ? color : edge} roughness={0.85} transparent opacity={0.82} /></mesh>
       ))}
-      <mesh receiveShadow position={[0, 0.22, 3.72]}><boxGeometry args={[3.1, 0.44, 0.18]} /><meshStandardMaterial color={edge} roughness={0.9} /></mesh>
+      <GlassRail x={0} z={3.72} w={3.1} />
     </group>
   );
 }
@@ -253,53 +273,104 @@ function LinearBoardWhiteboard({ block }: { block: ProjectBlock }) {
   return <group onClick={(e) => { e.stopPropagation(); if (e.delta < 6) set({ modal: { kind: 'linear_board', blockId: block.id } }); }} onPointerOver={() => void (document.body.style.cursor = 'pointer')} onPointerOut={() => void (document.body.style.cursor = '')}><mesh castShadow position={[0, 1.85, 0]}><boxGeometry args={[4.4, 2.4, 0.1]} /><meshStandardMaterial color="#d8d0f0" /></mesh><mesh position={[0, 1.85, 0.056]}><planeGeometry args={[4.24, 2.32]} /><meshStandardMaterial map={tex} emissive="#fff" emissiveMap={tex} emissiveIntensity={0.3} /></mesh></group>;
 }
 
-// The Desk and Chair models have the chair on their +z side, so their rotationY is the seat's yaw turned half a turn.
-function Workstation({ pose, employee, chairColor, plate, blockId }: { pose: DeskPose; employee?: Employee; chairColor: string; plate?: string; blockId?: ProjectBlock['id'] }) {
-  const rotationY = pose.yaw - Math.PI;
+const RUG_W = BLOCK_W - 1;
+const RUG_D = BLOCK_D - 1;
+
+type Placed = { item: Item; story: number };
+const find = (b: Building | null, def: string, blockId: string): Placed | undefined => {
+  if (!b) return undefined;
+  for (let story = 0; story < b.stories.length; story++) {
+    const item = b.stories[story].items.find((i) => i.def === def && i.blockId === blockId);
+    if (item) return { item, story };
+  }
+  return undefined;
+};
+
+// Items that are drawn one by one carry the story's height and the turn of their item.
+function AtItem({ at, children }: { at: Placed; children: ReactNode }) {
+  const shown = useStore((s) => at.story <= s.story);
+  const c = itemCenter(at.item);
+  if (!shown) return null;
   return (
-    <group onClick={plate === 'PO' && blockId ? (e) => { e.stopPropagation(); if (e.delta < 6) enterProjectComputer(blockId); } : undefined} onPointerOver={plate === 'PO' ? () => void (document.body.style.cursor = 'pointer') : undefined} onPointerOut={plate === 'PO' ? () => void (document.body.style.cursor = '') : undefined}>
-      <Desk
-        position={[pose.desk.x, 0, pose.desk.z]}
-        rotationY={rotationY}
-        screen={employee ? employee.status.kind : 'none'}
-        color={employee ? PROVIDERS[employee.provider].color : '#888'}
-        plate={plate}
-      />
-      <Chair position={[pose.chair.x, 0, pose.chair.z]} rotationY={rotationY} color={chairColor} />
+    <group position={[c.x, at.story * STORY_H, c.z]} rotation-y={YAW[at.item.rot]}>
+      {children}
+    </group>
+  );
+}
+
+// The block's project computer: a standing console beside the whiteboard. The owner uses it to configure the board.
+function Terminal({ blockId }: { blockId: ProjectBlock['id'] }) {
+  const tex = ownerComputerTexture();
+  return (
+    <group
+      onClick={(e) => {
+        e.stopPropagation();
+        if (e.delta < 6) enterProjectComputer(blockId);
+      }}
+      onPointerOver={() => void (document.body.style.cursor = 'pointer')}
+      onPointerOut={() => void (document.body.style.cursor = '')}
+    >
+      <mesh castShadow receiveShadow position={[0, 0.55, 0]}>
+        <boxGeometry args={[0.96, 0.08, 0.46]} />
+        <meshStandardMaterial color="#efe0c6" roughness={0.7} />
+      </mesh>
+      {[-0.42, 0.42].map((x) => (
+        <mesh key={x} castShadow position={[x, 0.27, 0]}>
+          <boxGeometry args={[0.06, 0.54, 0.4]} />
+          <meshStandardMaterial color="#3a3f4e" roughness={0.6} />
+        </mesh>
+      ))}
+      <mesh castShadow position={[0, 0.98, -0.1]}>
+        <boxGeometry args={[0.8, 0.5, 0.04]} />
+        <meshStandardMaterial color="#111a2a" roughness={0.5} />
+      </mesh>
+      <mesh position={[0, 0.98, -0.077]}>
+        <planeGeometry args={[0.72, 0.42]} />
+        <meshStandardMaterial map={tex} emissiveMap={tex} emissive="#ffffff" emissiveIntensity={0.4} />
+      </mesh>
+      <mesh castShadow position={[0, 0.7, -0.1]}>
+        <boxGeometry args={[0.08, 0.28, 0.06]} />
+        <meshStandardMaterial color="#2b2e38" />
+      </mesh>
     </group>
   );
 }
 
 export const BlockView = memo(function BlockView({ block, employees }: { block: ProjectBlock; employees: Employee[] }) {
+  const building = useStore((s) => s.building);
   const c = blockCenter(block.slot);
-  const s = signPose(block.slot);
-  const w = whiteboardPose(block.slot);
-  const rug = useMemo(() => new Color(block.color).lerp(new Color('#d7dde2'), 0.62).getStyle(), [block.color]);
-  const chairColor = useMemo(() => shade(block.color, 0.75), [block.color]);
+  const sign = useMemo(() => find(building, 'team_sign', block.id), [building, block.id]);
+  const board = useMemo(() => find(building, 'whiteboard', block.id), [building, block.id]);
+  const terminal = useMemo(() => find(building, 'board_terminal', block.id), [building, block.id]);
+  const carpet = useMemo(() => carpetSurface(), []);
+  const rug = useMemo(() => new Color(block.color).lerp(new Color('#f1cd8e'), 0.9).getStyle(), [block.color]);
   const trim = useMemo(() => new Color(block.color).lerp(new Color('#738195'), 0.5).getStyle(), [block.color]);
   const author = block.whiteboard ? employees.find((e) => e.id === block.whiteboard!.by)?.name : undefined;
 
   return (
     <group>
       <group position={[c.x, 0, c.z]}>
-        <RoundedPlane w={RUG_W + 0.5} d={RUG_D + 0.5} r={0.5} color="#d6dbe0" y={0.008} />
-        <RoundedPlane w={RUG_W} d={RUG_D} r={0.35} color={rug} y={0.014} />
+        <RoundedPlane w={RUG_W + 0.5} d={RUG_D + 0.5} r={0.5} color="#d9c9a8" y={0.008} surface={carpet} />
+        <RoundedPlane w={RUG_W} d={RUG_D} r={0.35} color={rug} y={0.014} surface={carpet} />
         <PodBoundary color={trim} />
+        <PodDecor />
       </group>
-      {BENCH.map((_, i) => (
-        <Workstation key={i} pose={deskPose(block.slot, i)} employee={employees.find((e) => e.desk === i)} chairColor={chairColor} />
-      ))}
-      <Workstation pose={projectComputerPose(block.slot)} chairColor={chairColor} plate="PO" blockId={block.id} />
-      {employees.filter((employee) => employee.desk >= BENCH.length).map((employee) => (
-        <Workstation key={employee.id} pose={deskPose(block.slot, employee.desk)} employee={employee} chairColor={chairColor} />
-      ))}
-      <group position={[s.x, 0, s.z]}>
-        <Sign name={block.name} cwd={block.cwd} color={block.color} />
-      </group>
-      <group position={[w.x, 0, w.z]}>
-        {block.linearBoardUrl ? <LinearBoardWhiteboard block={block} /> : block.taskBoard?.sources.length ? <TaskBoardWhiteboard block={block} /> : block.githubRepo ? <GithubWhiteboard block={block} /> : <Whiteboard block={block} authorName={author} />}
-      </group>
-      <group position={[c.x + 2.65, 0, c.z - 2.15]}><DailyHuddle color={trim} /></group>
+      {sign && (
+        <AtItem at={sign}>
+          <Sign name={block.name} cwd={block.cwd} color={block.color} />
+        </AtItem>
+      )}
+      {board && (
+        <AtItem at={board}>
+          {block.linearBoardUrl ? <LinearBoardWhiteboard block={block} /> : block.taskBoard?.sources.length ? <TaskBoardWhiteboard block={block} /> : block.githubRepo ? <GithubWhiteboard block={block} /> : <Whiteboard block={block} authorName={author} />}
+        </AtItem>
+      )}
+      {terminal && (
+        <AtItem at={terminal}>
+          <Terminal blockId={block.id} />
+        </AtItem>
+      )}
+      <group position={[c.x + 3.3, 0, c.z + 2.5]}><DailyHuddle color={trim} /></group>
     </group>
   );
 });

@@ -1,7 +1,9 @@
 import { useFrame } from '@react-three/fiber';
 import { useRef } from 'react';
 import type { Group } from 'three';
+import { STORY_H } from '../../../shared/space/index.ts';
 import { runtime } from '../runtime.ts';
+import { tripEnd } from '../sim.ts';
 
 // Marks where a click walk ends, until the owner gets there.
 export function WalkMarker() {
@@ -13,8 +15,8 @@ export function WalkMarker() {
     const { intent } = runtime.owner;
     m.visible = intent.kind === 'walk';
     if (intent.kind !== 'walk') return;
-    const end = intent.path[intent.path.length - 1];
-    m.position.set(end.x, 0.03, end.z);
+    const end = tripEnd(intent.trip);
+    m.position.set(end.at.x, end.floor * STORY_H + 0.03, end.at.z);
     m.scale.setScalar(1 + Math.sin(state.clock.elapsedTime * 5) * 0.08);
   });
 

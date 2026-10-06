@@ -1,6 +1,6 @@
 // Overview navigation and the employee menu with real pointer events and a real Claude employee.
 // Run: pnpm build && OFFICE_CDP_PORT=9335 node verify/screen-watch.mjs node verify/cdp.mjs verify/e2e-nav.mjs
-import { HAIKU, assert, claude, diagnoseClaude, hireClaudeInBlock, logLines, scratch, stepUntil } from './lib.mjs';
+import { HAIKU, assert, claude, diagnoseClaude, hireClaudeInBlock, scratch, stepUntil } from './lib.mjs';
 
 const { dataDir, repo } = scratch();
 
@@ -68,7 +68,7 @@ export default async (s) => {
   assert((await state(s)).camera === 'iso', 'key 2 switched to the Overview camera');
   await settle(s);
 
-  const target = { x: -11, z: -6.9 };
+  const target = { x: -11, z: -7.1 };
   await floorClick(s, target.x, target.z);
   await s.waitFor(`__office.state().intent.kind === 'walk'`);
   const walk = (await state(s)).intent;
@@ -149,7 +149,15 @@ export default async (s) => {
   assert((await s.eval(`document.getElementById('drawer-input').value`)) === '', 'and the input is empty again');
   await s.waitFor(`[...document.querySelectorAll('.thread .msg.employee')].some((m) => /pineapple/i.test(m.innerText))`, 120000);
   assert((await thread(s, 'employee')).some((t) => /pineapple/i.test(t)), `${name}'s reply shows in the transcript`);
-  assert((await logLines(s)).some((l) => l.startsWith('Boss said:') && l.includes('pineapple')), 'the message reached the real employee as something the boss said');
+  // Talk goes through the mailroom (work-final.md, "talk through the mailroom"). The boss's chat line to an idle employee
+  // is a work request in the ledger, delivered as the turn prompt, and settled by the employee's reply. "Boss said:" is
+  // only logged when steering a busy employee.
+  const claudeId = await s.eval(`${claude}.id`);
+  const mail = await s.eval(`JSON.stringify(__office.store.getState().mail.tail)`);
+  const tail = JSON.parse(mail);
+  const sent = tail.find((m) => m.kind === 'request' && m.from === 'owner' && m.to === claudeId && m.text === message);
+  assert(sent, 'the message reached the real employee through the mailroom as a request from the owner');
+  assert(tail.some((m) => m.kind === 'reply' && m.requestId === sent.id && m.outcome === 'done' && /pineapple/i.test(m.text)), 'and the employee settled it with a done reply');
   await s.shot('n1-chat');
 };
 
