@@ -1,6 +1,6 @@
 // Overview navigation and the employee menu with real pointer events and a real Claude employee.
 // Run: pnpm build && OFFICE_CDP_PORT=9335 node verify/screen-watch.mjs node verify/cdp.mjs verify/e2e-nav.mjs
-import { HAIKU, assert, claude, diagnoseClaude, hireClaudeInBlock, scratch, stepUntil } from './lib.mjs';
+import { HAIKU, assert, claude, diagnoseClaude, findFloorClick, hireClaudeInBlock, scratch, stepUntil } from './lib.mjs';
 
 const { dataDir, repo } = scratch();
 
@@ -17,13 +17,15 @@ const menuOpen = `!!document.querySelector('.emp-menu')`;
 const thread = (s, who) => s.eval(`[...document.querySelectorAll('.thread .msg.${who}')].map((m) => m.innerText)`);
 
 async function overCanvas(s, at, what) {
-  const top = await s.eval(`document.elementFromPoint(${at.x}, ${at.y})?.tagName`);
-  assert(top === 'CANVAS', `${what} at ${at.x.toFixed(0)},${at.y.toFixed(0)} is not covered by the HUD (${top})`);
+  const top = await s.eval(`(() => { const e = document.elementFromPoint(${at.x}, ${at.y}); return e && { tag: e.tagName, cls: String(e.className).slice(0, 60), text: e.innerText?.slice(0, 40) }; })()`);
+  assert(top?.tag === 'CANVAS', `${what} at ${at.x.toFixed(0)},${at.y.toFixed(0)} is not covered by the HUD (${JSON.stringify(top)})`);
 }
 
-async function floorClick(s, x, z) {
+async function floorClick(s, { x, z }) {
   const at = await project(s, x, 0, z);
   await overCanvas(s, at, `the floor point (${x}, ${z})`);
+  const hit = await s.eval(`__office.pick(${at.x}, ${at.y})`);
+  assert(hit.kind === 'floor', `a click at ${at.x.toFixed(0)},${at.y.toFixed(0)} reaches the floor (${JSON.stringify(hit)})`);
   await s.click(at.x, at.y);
   return at;
 }
@@ -68,10 +70,12 @@ export default async (s) => {
   assert((await state(s)).camera === 'iso', 'key 2 switched to the Overview camera');
   await settle(s);
 
-  // A click walks to the first thing it hits. Behind the bench desks the floor is hidden from the camera, so a click on
-  // (-11, -7.1) lands on a desk top and walks to the desk. This lane is open to the camera and the route to it still bends.
-  const target = { x: -7, z: -7.1 };
-  await floorClick(s, target.x, target.z);
+  // A click acts on the first clickable thing the camera sees at that pixel: a desk top walks to the desk, the Expand site
+  // opens the new-project dialog, and only bare floor walks to the point. The probe picks bare floor, far enough that the
+  // route has to bend around the furniture in between.
+  const target = await findFloorClick(s, { min: 8, bends: 2 });
+  console.log(`floor target (${target.x}, ${target.z}), ${target.away.toFixed(1)} m away, ${target.waypoints} waypoints`);
+  await floorClick(s, target);
   await s.waitFor(`__office.state().intent.kind === 'walk'`);
   const walk = (await state(s)).intent;
   assert(walk.goal.kind === 'point' && gap(walk.dest, target) < 0.5, `an Overview floor click starts a walk to that point (ends at ${walk.dest.x.toFixed(2)}, ${walk.dest.z.toFixed(2)})`);
@@ -94,8 +98,9 @@ export default async (s) => {
   assert(after.intent.kind === 'keys' && gap(after.owner, before.owner) < 0.02, 'the drag did not walk the owner');
   await settle(s);
 
-  const far = { x: -4, z: 1 };
-  await floorClick(s, far.x, far.z);
+  const far = await findFloorClick(s, { min: 8 });
+  console.log(`far floor target (${far.x}, ${far.z}), ${far.away.toFixed(1)} m away`);
+  await floorClick(s, far);
   await s.waitFor(`__office.state().intent.kind === 'walk'`);
   await s.press('KeyW', 'w');
   assert((await state(s)).intent.kind === 'keys', 'a W key press cancels the walk at once');
@@ -113,7 +118,7 @@ export default async (s) => {
   assert((await s.eval('__office.store.getState().selectedId')) === null, 'Esc closed the menu and nothing else');
 
   await menuAt(s, chest, `${name}'s avatar again`);
-  await floorClick(s, far.x, far.z);
+  await floorClick(s, far);
   await s.waitFor(`!${menuOpen}`);
   assert((await state(s)).intent.kind === 'keys', 'a click anywhere else closes the menu and does not start a walk');
 
@@ -134,6 +139,10 @@ export default async (s) => {
   const facing = Math.atan2(there.x - now.owner.x, there.z - now.owner.z);
   const off = Math.abs(((now.owner.yaw - facing + Math.PI * 3) % (Math.PI * 2)) - Math.PI);
   assert(off < 0.6, `and the owner faces ${name} (${off.toFixed(2)} rad off)`);
+  // Proximity opens the chat drawer, and on a 1280 px window the drawer covers the avatar the camera now centers on.
+  assert((await s.eval('__office.store.getState().selectedId')) === id, `walking up to ${name} opened the chat drawer by proximity`);
+  await s.clickOn('.drawer button.x');
+  await s.waitFor(`!document.querySelector('.drawer')`);
   await settle(s);
 
   const chest2 = await chestOf(s);
@@ -155,12 +164,19 @@ export default async (s) => {
   // is a work request in the ledger, delivered as the turn prompt, and settled by the employee's reply. "Boss said:" is
   // only logged when steering a busy employee.
   const claudeId = await s.eval(`${claude}.id`);
-  const mail = await s.eval(`JSON.stringify(__office.store.getState().mail.tail)`);
-  const tail = JSON.parse(mail);
+  const tail = JSON.parse(await s.eval(`JSON.stringify(__office.store.getState().mail.tail)`));
   const sent = tail.find((m) => m.kind === 'request' && m.from === 'owner' && m.to === claudeId && m.text === message);
   assert(sent, 'the message reached the real employee through the mailroom as a request from the owner');
-  assert(tail.some((m) => m.kind === 'reply' && m.requestId === sent.id && m.outcome === 'done' && /pineapple/i.test(m.text)), 'and the employee settled it with a done reply');
+  // The reply shows in the thread while the turn is still running. The ledger settles the request later, and a work request
+  // that left no file changed cannot settle done (mail-check.ts, 76ce7f9): it settles blocked with the answer, either by the
+  // turn end or by the employee's own blocked reply, whichever the model does.
+  const settled = `__office.store.getState().mail.tail.some((m) => m.kind === 'reply' && m.requestId === ${JSON.stringify(sent.id)} && m.outcome === 'blocked' && /pineapple/i.test(m.text))`;
+  await s.waitFor(settled, 60000);
+  assert(await s.eval(settled), 'and the ledger settled it with the answer, blocked because no file changed');
   await s.shot('n1-chat');
 };
 
-export const diagnose = (s) => diagnoseClaude(s, 'n1-failure');
+export const diagnose = async (s) => {
+  await diagnoseClaude(s, 'n1-failure');
+  console.log('mail tail:', await s.eval(`JSON.stringify(__office.store.getState().mail.tail.slice(-6))`));
+};
