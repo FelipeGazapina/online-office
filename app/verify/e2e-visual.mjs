@@ -41,7 +41,8 @@ export default async (s) => {
   await s.resize(1440, 900);
   await s.waitFor(`!!${store}.company && !!${store}.building`);
   await s.eval('__office.step(8)');
-  await s.sleep(1500);
+  await s.eval('__office.teleport(-10.4, 4.6, Math.PI)');
+  await s.sleep(2500);
   await save(s, 'iso');
 
   await s.eval('__office.teleport(-5, 7, Math.PI)');

@@ -18,7 +18,7 @@ export function OwnerView() {
       hidden={hidden}
       read={() => ({ pos: runtime.owner.pos, yaw: runtime.owner.yaw, speed: runtime.owner.speed, seated: false })}
     >
-      {!hidden && <Html position={[0, 2.0, 0]} portal={labelLayer} pointerEvents="auto">
+      {!hidden && <Html position={[0, 1.85, 0]} portal={labelLayer} pointerEvents="auto">
         <ResizableHud itemKey="owner-label"><div className="emp-label" data-hud-resize-target="owner-label">
           <div className="tag you">
             <b>You</b>
