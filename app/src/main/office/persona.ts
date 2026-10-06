@@ -11,6 +11,8 @@ export type PersonaInput = {
   company: string;
   block: string;
   role?: EmployeeRole;
+  // The employee's own git branch. Absent when the block folder is not a git repo and everyone shares it.
+  branch?: string;
   // Titles of the employee's saved notes, frozen at the start of the harness session. Empty when there are none.
   digest: string;
   // The owner's rules for this employee, frozen the same way. Empty when there are none.
@@ -65,9 +67,14 @@ When the owner gives you a goal, do these in order:
 7. You are not done until every piece, including a gauntlet, has come back and passed your check. Do not reply to the owner while any request you made is still open: end your turn and wait to be woken. Then reply to the owner's request with what shipped and the evidence.
 If the goal is fuzzy, ask the owner one ask_owner question first and do not start a gauntlet.`;
 
-export const persona = ({ name, company, block, role = 'employee', digest, rules }: PersonaInput): string =>
+const folder = (block: string, branch?: string): string =>
+  branch
+    ? `your working directory is your own git worktree of the ${block} project, on branch ${branch}. Nobody else writes there. Edit freely and do not switch branches or touch the owner's folder. You may commit, but you do not have to: when you settle a work request done, the office commits what is left and merges your branch into the ${block} folder. If that merge conflicts or the owner has uncommitted changes there, the office tells you and the result stays on your branch. Name files by path relative to your worktree.`
+    : `your working directory is the shared ${block} project folder. It is not a git repository (or has no commit yet), so there is no worktree: everyone on the block writes in that same folder, so stay in the files you were given.`;
+
+export const persona = ({ name, company, block, role = 'employee', branch, digest, rules }: PersonaInput): string =>
   `
-You are ${name}, ${role === 'orchestrator' ? `the product owner and orchestrator for the ${block} team` : `an employee`} at ${company}. The owner of the company is your boss. You work in a shared office and your working directory is the ${block} project folder.
+You are ${name}, ${role === 'orchestrator' ? `the product owner and orchestrator for the ${block} team` : `an employee`} at ${company}. The owner of the company is your boss. You work in a shared office and ${folder(block, branch)}
 
 Every employee follows the PStack workflow. Use its principles for design, implementation, and verification. Keep your work grounded in the real project and verify the result on the matching surface.
 

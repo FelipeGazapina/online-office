@@ -33,6 +33,7 @@ import {
   WAITING_TEXT,
 } from '../../shared/mail.ts';
 import type { ArtifactPort } from './mail-artifacts.ts';
+import type { Integration } from './workspace.ts';
 
 // ───────────────────────────── Pure core ─────────────────────────────
 
@@ -331,6 +332,12 @@ export type MailPorts = {
   steer(to: EmployeeId, text: string, style: 'next' | 'now'): void;
   hire(from: EmployeeId, spec: HireSpec): Hired;
   artifacts: ArtifactPort;
+  // Lands a done work request's branch in the block folder. Absent for a person with no worktree.
+  integrate?(who: EmployeeId, title: string): Integration | undefined;
+  // A request reached someone in the middle of a turn, so what teammates integrated meanwhile has to reach their worktree too.
+  arrived?(who: EmployeeId): void;
+  // Where a person's own branch stands against the block, for the team view.
+  branchOf?(who: EmployeeId): { branch: string; ahead: number } | undefined;
   persist(entry: LedgerEntry): void;
   changed(view: MailView): void;
   stream(employeeId: EmployeeId, replyingTo: MessageId | null, delta: string, done: boolean): void;
@@ -495,7 +502,7 @@ export class Mailroom {
     if (r.outcome === 'done' && this.state.unsettled.has(req.id) && needsArtifacts(req)) {
       const proof = this.proveWork(req, from, r.artifact ?? [], r.text);
       if (!proof.ok) return proof;
-      settle = { ...r, artifact: proof.artifact };
+      settle = { ...r, artifact: proof.artifact, ...this.land(req, from, r.text) };
     }
     if (this.state.unsettled.has(req.id)) this.settleWith(req, from, settle);
     this.pump(from);
@@ -518,6 +525,30 @@ export class Mailroom {
       return { ok: false, reason: 'no_artifacts', detail: 'A done reply to a work request must name what you made: paths relative to the block folder that you wrote or edited, or a commit sha. If nothing was made, reply blocked and say why.' };
     }
     return { ok: true, artifact };
+  }
+
+  // A done work request is not finished until its branch is in the block folder. A conflict settles it blocked and sends
+  // the same person a follow-up, from whoever asked, under the same parent so the asker's own request stays open.
+  private land(req: Message, who: EmployeeId, text: string): { outcome?: Outcome; text: string } {
+    const landed = req.kind === 'request' ? this.ports.integrate?.(who, req.title) : undefined;
+    if (!landed || req.kind !== 'request') return { text };
+    switch (landed.kind) {
+      case 'merged':
+        return { text: `${text}\n\nIntegrated: ${landed.branch} is merged into the block folder.` };
+      case 'already':
+        return { text };
+      case 'held':
+        return { text: `${text}\n\nNot integrated: ${landed.reason}. The result stays on branch ${landed.branch}.` };
+      case 'conflict': {
+        const files = landed.paths.join(', ');
+        const parent = req.parentId ? this.state.messages.get(req.parentId) : undefined;
+        const b = this.base(req.from, req.to as ActorId, parent, undefined, `merge:${req.id}`);
+        if (!this.state.keys.has(`merge:${req.id}`)) {
+          this.put({ ...b, kind: 'request', intent: 'work', title: `Resolve the merge for "${req.title}"`, text: `Your work on "${req.title}" conflicts with what the block folder has now, in: ${files}. The office has started merging the block's latest code into your branch ${landed.branch} in your worktree. Resolve the conflicts so both sides' intent survives, commit, then reply done naming the files you resolved.` });
+        }
+        return { outcome: 'blocked', text: `${text}\n\nNot integrated: it conflicts with the block folder in ${files}. ${this.ports.nameOf(req.to as ActorId)} has a new request to merge the block's latest code into ${landed.branch} and resolve it.` };
+      }
+    }
   }
 
   // What the requests this one handed out proved when they settled done.
@@ -650,7 +681,7 @@ export class Mailroom {
         // Nobody named files, so the folder decides: a turn that left changes behind did work, one that did not is blocked.
         const made = [...new Set([...this.ports.artifacts.changed(who, req.at), ...this.childArtifacts(req.id)])];
         const waiting = WAITING_TEXT.test(text);
-        if (made.length && !waiting) this.settleWith(req, who, { outcome: 'done', text, artifact: made, auto: true });
+        if (made.length && !waiting) this.settleWith(req, who, { outcome: 'done', artifact: made, auto: true, ...this.land(req, who, text) });
         else this.settleWith(req, who, { outcome: 'blocked', text, auto: true });
       }
     }
@@ -667,7 +698,10 @@ export class Mailroom {
   inbox(who: EmployeeId, peek: boolean): Message[] {
     const queued = (this.state.queue.get(who) ?? []).map((id) => this.state.messages.get(id)!);
     const turn = this.state.active.get(who);
-    if (!peek && turn && queued.length) this.append({ t: 'deliver', ids: queued.map((m) => m.id), to: who, turn, at: this.ports.now() });
+    if (!peek && turn && queued.length) {
+      this.ports.arrived?.(who);
+      this.append({ t: 'deliver', ids: queued.map((m) => m.id), to: who, turn, at: this.ports.now() });
+    }
     return queued;
   }
 
@@ -748,7 +782,7 @@ export class Mailroom {
       .map((m) => {
         const request = serving(this.state, m.id)[0];
         const doing = request?.kind === 'request' ? request.title : m.doing;
-        return { name: m.name, role: m.role, state: m.status, queued: this.state.queue.get(m.id)?.length ?? 0, ...(doing ? { doing } : {}), you: m.id === who };
+        return { name: m.name, role: m.role, state: m.status, queued: this.state.queue.get(m.id)?.length ?? 0, ...(doing ? { doing } : {}), ...this.ports.branchOf?.(m.id), you: m.id === who };
       });
   }
 
