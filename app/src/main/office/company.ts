@@ -1,4 +1,5 @@
 import { createAcknowledger, type Acknowledger } from './ack.ts';
+import { isPlainOrder, type OwnerIntent } from './owner-intent.ts';
 import { boardPage } from './board.ts';
 import { folderArtifacts } from './mail-artifacts.ts';
 import { commitsAhead, createWorkspace, integrate, isGitRepo, removeWorkspace, syncWorkspace, workspaceArtifacts } from './workspace.ts';
@@ -82,7 +83,7 @@ export type OfficeEvents = {
 };
 
 // The things every session leans on, started before the first employee so a session can connect the moment it is built.
-export type OfficeServices = { mcp: OfficeMcp; memory: MemoryStore; taskBoards?: TaskBoardService; acker?: Pick<Acknowledger, 'warm' | 'ack' | 'stop'> };
+export type OfficeServices = { mcp: OfficeMcp; memory: MemoryStore; taskBoards?: TaskBoardService; acker?: Pick<Acknowledger, 'warm' | 'ack' | 'stop'> & Partial<Pick<Acknowledger, 'triage'>> };
 
 // Where a blocked employee goes when the last question is answered. The adapter keeps reporting while the card is up
 // (a subagent finishes, the turn ends), and those reports land here so the card stays put.
@@ -313,7 +314,9 @@ export class Office {
   private readonly tasks: Tasks;
   private readonly ledgerFile: string;
   private mail!: Mailroom;
-  private readonly acker: Pick<Acknowledger, 'warm' | 'ack' | 'stop'>;
+  private readonly acker: Pick<Acknowledger, 'warm' | 'ack' | 'stop'> & Partial<Pick<Acknowledger, 'triage'>>;
+  // Owner posts that wait for a triage answer, and the end of the line they keep their order in.
+  private ownerPosts = { waiting: 0, tail: Promise.resolve() };
   // The last thing each employee said in the turn they are on. It is the reply when the harness gives no final text.
   private lastSaid = new Map<EmployeeId, string>();
 
@@ -612,11 +615,33 @@ export class Office {
     const e = this.employee(target.id);
     // A boss speaking to someone who is waiting on a decision is the decision.
     if (msg.as === 'say' && e.status.kind === 'blocked_on_owner') return this.answer(e.id, e.status.question.id, msg.text);
+    // A plain order is work at once. Anything else asks the model whether it is a question, which settles done with its
+    // answer where work has to show files. No model, a late answer or an unclear one counts as work.
+    const triage = msg.as === 'request' && !isPlainOrder(msg.text) ? this.acker.triage?.(msg.text)?.catch(() => undefined) : undefined;
+    if (!triage && this.ownerPosts.waiting === 0) return this.postOwner(e.id, msg, 'work');
+    // Posts keep the order the owner sent them in, even when an earlier one is still waiting for its answer.
+    const before = this.ownerPosts.tail;
+    this.ownerPosts.waiting++;
+    this.ownerPosts.tail = (async () => {
+      const asked = await triage;
+      await before;
+      trace(msg.clientId, 'triaged');
+      try {
+        this.postOwner(e.id, msg, asked ?? 'work');
+      } catch (err) {
+        this.events.error?.(err instanceof Error ? err.message : String(err));
+      } finally {
+        this.ownerPosts.waiting--;
+      }
+    })();
+  }
+
+  private postOwner(to: EmployeeId, msg: Extract<ClientMessage, { type: 'post' }>, intent: OwnerIntent) {
     const posted = this.mail.post({
       from: 'owner',
-      to: e.id,
+      to,
       key: msg.clientId,
-      body: msg.as === 'say' ? { kind: 'say', text: msg.text, ...(msg.urgency ? { urgency: msg.urgency } : {}) } : { kind: 'request', text: msg.text },
+      body: msg.as === 'say' ? { kind: 'say', text: msg.text, ...(msg.urgency ? { urgency: msg.urgency } : {}) } : { kind: 'request', intent, text: msg.text },
     });
     if (!posted.ok) throw new OfficeError(posted.detail);
   }
