@@ -249,6 +249,22 @@ console.log('\n# done means done');
   const h1 = ids(help.room.post({ from: 'owner', to: 'ana', blockId: B1, body: { kind: 'request', intent: 'help', text: 'where is the router?' } }));
   check(help.room.reply(ANA, requestIn(lastPrompt(help, ANA)), { outcome: 'done', text: 'src/router.ts' }).ok && replyTo(help, h1)?.outcome === 'done', 'a help request is answered without artifacts');
 
+  const asked = world();
+  asked.setDirty([]);
+  const ownerAsk = (text: string) => ({ from: 'owner' as const, to: 'ana', blockId: B1, body: { kind: 'request' as const, intent: 'help' as const, text } });
+  const k1 = ids(asked.room.post(ownerAsk('which file handles login?')));
+  check(!/must name the files/.test(lastPrompt(asked, ANA)) && /, help\]/.test(lastPrompt(asked, ANA)), 'an owner question reaches the employee as help, with no demand for files');
+  asked.room.turnEnded(ANA, 'src/login.ts handles it.', true);
+  check(replyTo(asked, k1)?.outcome === 'done' && replyTo(asked, k1)?.text === 'src/login.ts handles it.' && replyTo(asked, k1)?.auto === true && !replyTo(asked, k1)?.artifact, 'an owner question that changed no file settles done with the answer when the turn ends');
+  const k2 = ids(asked.room.post(ownerAsk('and the logout?')));
+  check(asked.room.reply(ANA, requestIn(lastPrompt(asked, ANA)), { outcome: 'done', text: 'src/logout.ts' }).ok && replyTo(asked, k2)?.outcome === 'done' && replyTo(asked, k2)?.text === 'src/logout.ts', 'and the employee can answer it with a done reply that names no file');
+  const orderNoFiles = world();
+  orderNoFiles.setDirty([]);
+  const k3 = ids(orderNoFiles.room.post(owner('ana', 'add a logout button')));
+  check(/must name the files/.test(lastPrompt(orderNoFiles, ANA)), 'an owner work order still tells the employee that a done reply must name files');
+  orderNoFiles.room.turnEnded(ANA, 'You can add it in src/ui.ts.', true);
+  check(replyTo(orderNoFiles, k3)?.outcome === 'blocked', 'and an owner work order whose turn changed no file still settles blocked');
+
   const wait = world();
   wait.fresh.add('a.txt');
   const w1 = ids(wait.room.post(owner('ana', 'write it')));
