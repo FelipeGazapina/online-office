@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import type { Employee } from '../../../../shared/protocol.ts';
-import { send, set, useStore } from '../../store.ts';
+import { get, send, set, useStore } from '../../store.ts';
 import { isPo } from './model.ts';
 
 const MAX_ROWS = 6;
@@ -20,9 +20,9 @@ export function Composer({ who, po, assignee }: { who: Employee; po: Employee | 
   const canSwitch = Boolean(po) && !isPo(base);
   const busy = target.status.kind === 'working';
 
-  // A thread opens ready to type in.
+  // A thread opens ready to type in, unless a dialog is open: walking past someone must not take the cursor out of it.
   useEffect(() => {
-    field.current?.focus();
+    if (!get().modal) field.current?.focus();
   }, [who.id, sub]);
   useEffect(() => {
     setSteer(false);

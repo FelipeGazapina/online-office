@@ -33,6 +33,8 @@
 .tb-running { display: inline-flex; align-items: center; gap: 6px; color: #1c6b49; font-weight: 700; }
 .tb-head-actions { display: flex; align-items: center; gap: 8px; flex: none; }
 
+.tb-tip { color: #9a9bb0; font-size: 12px; font-weight: 500; white-space: nowrap; }
+@media (max-width: 1180px) { .tb-tip { display: none; } }
 .tb-sync { display: inline-flex; align-items: center; gap: 5px; margin-right: 4px; color: var(--muted); font-size: 12px; font-weight: 600; white-space: nowrap; }
 .tb-sync.error { color: #a5262b; }
 .tb-sync.loading { color: var(--brand); }
@@ -139,6 +141,27 @@
 
 .tb-ghost { position: fixed; z-index: 1000; left: 0; top: 0; pointer-events: none; will-change: transform; filter: drop-shadow(0 16px 24px rgba(35, 38, 64, 0.32)); }
 .tb-ghost .tb-card { cursor: grabbing; border-color: var(--brand); }
+/* Out in the office the card shrinks to hang off the pointer, so the desk under it stays in view. */
+.tb-ghost-in { transform-origin: 0 0; transition: scale 0.16s ease, translate 0.16s ease; }
+.tb-ghost.away .tb-ghost-in { scale: 0.58; translate: calc(var(--gx) + 12px) calc(var(--gy) + 12px); }
+.tb-ghost-aim { position: absolute; max-width: 300px; padding: 5px 12px; border-radius: 999px; background: rgba(24, 27, 45, 0.95); color: #fff; font: 700 12.5px/1.25 var(--body); white-space: nowrap; box-shadow: 0 8px 20px rgba(10, 8, 24, 0.4), 0 0 0 2px var(--aim); --aim: #8f93b8; }
+.tb-ghost-aim.go { --aim: #2fe06a; }
+.tb-ghost-aim.same { --aim: #ffb340; }
+.tb-ghost-aim.stop { --aim: #ff4d4d; white-space: normal; border-radius: 14px; }
+
+/* The board folded away while a card is out in the office */
+.modal.tb { transition: opacity 0.16s ease, transform 0.2s ease; }
+.scrim.tb-away { background: transparent; backdrop-filter: none; pointer-events: none; }
+.scrim.tb-away .modal.tb { opacity: 0; transform: translateY(18px) scale(0.985); pointer-events: none; }
+body.tb-carrying-away .hud-resize-handle, body.tb-carrying-away .hud-move-handle { visibility: hidden; pointer-events: none; }
+.tb-tray { position: fixed; z-index: 1000; left: 50%; bottom: 22px; translate: -50% 0; display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-radius: 16px; background: rgba(251, 249, 245, 0.97); box-shadow: 0 14px 40px rgba(20, 15, 40, 0.35); animation: tb-tray-in 0.2s ease-out; }
+@keyframes tb-tray-in { from { opacity: 0; translate: -50% 14px; } }
+.tb-tray-hint { max-width: 230px; margin: 0 6px 0 4px; color: var(--muted); font-size: 12.5px; line-height: 1.35; }
+.tb-tray-hint kbd { font-size: 10px; padding: 0 4px; }
+.tb-tray-chip { display: inline-flex; align-items: center; gap: 7px; height: 38px; padding: 0 12px; border: 1.5px dashed rgba(35, 38, 64, 0.25); border-radius: 10px; background: #fff; color: var(--ink); font: 700 13px var(--body); white-space: nowrap; transition: background 0.12s, border-color 0.12s, box-shadow 0.12s; }
+.tb-tray-chip b { color: var(--muted); font-size: 11.5px; font-variant-numeric: tabular-nums; }
+.tb-tray-chip.here { opacity: 0.55; }
+.tb-tray-chip.over { border-style: solid; border-color: var(--brand); background: rgba(84, 87, 224, 0.1); box-shadow: 0 0 0 3px rgba(84, 87, 224, 0.18); }
 .tb-pop { position: fixed; z-index: 1001; display: grid; gap: 5px; min-width: 150px; padding: 8px 10px; border-radius: 10px; background: var(--ink); color: var(--paper); font-size: 12px; box-shadow: 0 12px 28px rgba(20, 15, 40, 0.4); pointer-events: none; }
 .tb-pop > div { display: flex; align-items: center; gap: 8px; }
 .tb-pop span { flex: 1; }
@@ -206,3 +229,16 @@
 .btn.tasks-chip:hover { background: #fff; }
 .tasks-chip .tb-count { background: rgba(35, 38, 64, 0.1); }
 .tasks-chip .tb-live { margin-left: 2px; }
+
+/* A task card held over the office: the label above the desk it is over, and the line under the card in hand */
+.desk-aim { display: inline-flex; align-items: center; gap: 7px; max-width: 280px; padding: 6px 12px 6px 10px; border-radius: 999px; background: rgba(24, 27, 45, 0.94); color: #fff; font: 700 13px/1.2 var(--body); white-space: nowrap; box-shadow: 0 8px 22px rgba(10, 8, 24, 0.4), 0 0 0 2px var(--aim); --aim: #2fe06a; }
+.desk-aim.stop { --aim: #ff4d4d; white-space: normal; text-align: left; }
+.desk-aim.same { --aim: #ffb340; }
+.desk-aim i { flex: none; width: 9px; height: 9px; border-radius: 50%; background: var(--aim); box-shadow: 0 0 0 3px color-mix(in srgb, var(--aim) 30%, transparent); }
+
+/* The hire panel opened by a card dropped on an empty desk */
+.hire-for { margin: 0 0 4px; padding: 12px 14px; border: 1px solid rgba(47, 158, 110, 0.35); border-radius: 12px; background: #eaf7f0; }
+.hire-for p { margin: 0 0 8px; color: var(--ink); font-size: 13.5px; line-height: 1.4; overflow-wrap: anywhere; }
+.hire-for dl { display: grid; grid-template-columns: 54px 1fr; gap: 4px 8px; margin: 0; font-size: 13px; }
+.hire-for dt { color: var(--muted); font-weight: 600; }
+.hire-for dd { margin: 0; font-weight: 700; }

@@ -279,11 +279,11 @@ export class Tasks {
 
   // ── tasks ──
 
-  createTask(boardId: BoardId, title: string, notes?: string): Task {
+  createTask(boardId: BoardId, title: string, notes?: string, stage: TaskStage = 'todo'): Task {
     this.board(boardId);
     const clean = title.trim();
     if (!clean) throw new OfficeError('A task needs a title.');
-    const task = newTask({ id: this.taskId(), boardId, title: clean, ...(notes?.trim() ? { notes: notes.trim() } : {}), origin: { kind: 'manual' }, stage: 'todo', now: this.host.now() });
+    const task = newTask({ id: this.taskId(), boardId, title: clean, ...(notes?.trim() ? { notes: notes.trim() } : {}), origin: { kind: 'manual' }, stage, now: this.host.now() });
     this.tasks = [...this.tasks, task];
     this.save();
     return task;
@@ -295,7 +295,9 @@ export class Tasks {
     if (!title) throw new OfficeError('A task needs a title.');
     const { notes: _, ...rest } = task;
     const notes = patch.notes === undefined ? task.notes : patch.notes.trim() || undefined;
-    this.replace({ ...rest, ...(notes ? { notes } : {}), title, stage: patch.stage ?? task.stage, updatedAt: this.host.now() });
+    // A provider task the owner moves stays where the owner put it, whatever the provider says on the next sync.
+    const pin = patch.stage !== undefined && task.origin.kind !== 'manual';
+    this.replace({ ...rest, ...(notes ? { notes } : {}), title, stage: patch.stage ?? task.stage, ...(pin ? { stagePinned: true as const } : {}), updatedAt: this.host.now() });
     if (patch.stage && patch.stage !== task.stage) this.pushHours();
   }
 

@@ -121,6 +121,17 @@ async function waitForStage(s, taskId, stage, label) {
   throw new Error(`${label}: still not ${stage} after ${Math.round(WAIT_MS / 1000)} s`);
 }
 
+// A task reaches review while the PO's last turn can still be open, and the snapshot only carries a closed turn once it ends.
+// Time is compared with mail.jsonl only when nobody is running any of these tasks.
+async function quiet(s, ids) {
+  const t0 = Date.now();
+  while (Date.now() - t0 < 90_000) {
+    if (!(await s.eval(`${JSON.stringify(ids)}.some((id) => ${state}.taskTime[id]?.running.length)`))) return;
+    await s.sleep(1000);
+  }
+  throw new Error(`a turn on ${ids.length} task(s) never ended`);
+}
+
 const deliverable = (file, line) =>
   `One deliverable and no acceptance bar. Send it to Ana as one plain request, not a gauntlet, and do not hire anyone. The deliverable is a file named ${file} in the project folder whose only line is: ${line}. When Ana replies done, check the file exists and reply done to the owner naming ${file}.`;
 
@@ -173,7 +184,8 @@ export default async (s, { launch }) => {
     assert(t2.at > t1.at || t2.total >= t1.total, 'the snapshot carries time and the PO is running, so a screen can keep counting');
 
     await waitForStage(s, hello.id, 'review', 'hello.txt');
-    await s.sleep(3000);
+    await quiet(s, [hello.id]);
+    await s.sleep(1500);
     const done = await s.eval(`(() => { const t = ${taskExpr(hello.id)}; return { assignees: t.assignees, runs: t.runs, last: t.lastOutcome?.outcome, time: ${state}.taskTime[t.id] }; })()`);
     assert(done.last === 'done', 'the work settled done and the task moved doing to review');
     assert(existsSync(join(repo, 'hello.txt')), 'hello.txt reached the block folder');
@@ -195,21 +207,40 @@ export default async (s, { launch }) => {
     await s.eval(`window.office.send({ type: 'update_task', taskId: ${JSON.stringify(card.id)}, notes: ${JSON.stringify(deliverable('crono.txt', 'hello from crono'))} })`);
     await s.eval(`window.office.send({ type: 'assign_task', taskId: ${JSON.stringify(card.id)}, employeeId: ${JSON.stringify(pia)} })`);
     await waitForStage(s, card.id, 'review', 'crono.txt');
-    const callsFor = (n) => fake.calls.length >= n;
+    // The reply that moves the task to review can come in the middle of the PO's last turn. That turn's end then adds time to a
+    // person-day that was already sent, and that time is due as a follow-up. So wait until every turn on the task has ended and the
+    // fake server has what mail.jsonl says, and judge the sums, not how many calls it took to get there.
+    const sums = () => {
+      const by = {};
+      for (const c of fake.calls) by[`${c.description}|${c.date}`] = (by[`${c.description}|${c.date}`] ?? 0) + c.hours;
+      return by;
+    };
+    const keyOf = (who, date) => `${nameOf[who]} (AI employee, Online Office)|${date}`;
+    const caughtUp = async () => {
+      const t = await s.eval(`(() => { const t = ${taskExpr(card.id)}; return { running: ${state}.taskTime[t.id]?.running.length ?? 0, inflight: !!t.hours?.inflight }; })()`);
+      if (t.running || t.inflight) return false;
+      const { byDay } = wallTime((await s.eval(`${taskExpr(card.id)}.runs`)));
+      const got = sums();
+      return Object.keys(byDay).length >= 2 && Object.entries(byDay).every(([key, ms]) => Math.abs((got[keyOf(...key.split('|'))] ?? 0) - ms / MS_PER_HOUR) <= TOLERANCE_MS / MS_PER_HOUR + 0.0001);
+    };
     const t0 = Date.now();
-    while (!callsFor(2) && Date.now() - t0 < 30_000) await s.sleep(500);
+    while (!(await caughtUp()) && Date.now() - t0 < 60_000) await s.sleep(500);
     await s.sleep(4000);
     const cardNow = await s.eval(`${taskExpr(card.id)}`);
     const expected = wallTime(cardNow.runs);
     console.log('fake CronoSpark got:', JSON.stringify(fake.calls));
+    const got = sums();
     const pairs = Object.keys(expected.byDay);
-    assert(fake.calls.length === pairs.length && pairs.length >= 2, `one registrar_horas call per person and day (${fake.calls.length} calls for ${pairs.length} person-days)`);
+    assert(pairs.length >= 2, `the PO and the employee each worked on at least one day (${pairs.length} person-days in mail.jsonl)`);
     for (const key of pairs) {
       const [who, date] = key.split('|');
-      const call = fake.calls.find((c) => c.description === `${nameOf[who]} (AI employee, Online Office)` && c.date === date);
       const want = expected.byDay[key] / MS_PER_HOUR;
-      assert(!!call && call.taskId === 'fake-task-501' && Math.abs(call.hours - want) <= TOLERANCE_MS / MS_PER_HOUR + 0.0001, `${nameOf[who]} on ${date}: ${call?.hours} h sent, mail.jsonl says ${want.toFixed(4)} h`);
+      const sum = got[keyOf(who, date)] ?? 0;
+      const calls = fake.calls.filter((c) => c.description === `${nameOf[who]} (AI employee, Online Office)` && c.date === date);
+      assert(calls.length >= 1 && calls.every((c) => c.taskId === 'fake-task-501' && c.hours > 0) && Math.abs(sum - want) <= TOLERANCE_MS / MS_PER_HOUR + 0.0001, `${nameOf[who]} on ${date}: ${calls.length} call(s) add up to ${sum.toFixed(4)} h, mail.jsonl says ${want.toFixed(4)} h`);
     }
+    assert(fake.calls.every((c) => pairs.includes(`${Object.keys(nameOf).find((id) => c.description.startsWith(nameOf[id]))}|${c.date}`)), 'nothing was sent for a person-day that has no time in mail.jsonl');
+    assert(new Set(fake.calls.map((c) => JSON.stringify([c.description, c.date, c.hours]))).size === fake.calls.length, 'no call repeats an earlier one: time that was sent is never sent again');
     const sent = fake.calls.length;
     await s.eval(`window.office.send({ type: 'update_task', taskId: ${JSON.stringify(card.id)}, stage: 'done' })`);
     await s.sleep(4000);
@@ -237,6 +268,8 @@ export default async (s, { launch }) => {
     assert(existsSync(join(repo, 'hire.txt')), 'the new hire did the task without any further owner action');
 
     // ── restart ──
+    await quiet(s, [hello.id, card.id, hireTask.id]);
+    await s.sleep(1500);
     const before = await s.eval(`(() => { const st = ${state}; return { tasks: st.tasks.map((t) => ({ id: t.id, stage: t.stage, runs: t.runs.length })), time: st.taskTime, boards: st.boards.length }; })()`);
     const callsBefore = fake.calls.length;
     await s.close();

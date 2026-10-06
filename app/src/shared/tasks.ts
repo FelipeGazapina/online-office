@@ -41,6 +41,8 @@ export type Task = {
   notes?: string;
   origin: TaskOrigin;
   stage: TaskStage;
+  // Set once the owner has chosen the stage of a provider task. From then on the provider's status never moves it.
+  stagePinned?: true;
   assignees: EmployeeId[];
   // The root request of every run this task started. A message belongs to the task when its rootId is one of these.
   runs: MessageId[];
@@ -58,15 +60,9 @@ export type BoardSync =
 
 // ───────────────────────────── Stages ─────────────────────────────
 
-// The label a stage shows under, where a board lays out provider-style columns.
-export const STAGE_STATUS: Record<TaskStage, string> = { todo: 'Open', doing: 'In Progress', review: 'Ready to Review', done: 'Done' };
-
 const STAGE_OF_LABEL: Record<string, TaskStage> = { 'In Design': 'doing', 'In Dev': 'doing', 'In Progress': 'doing', 'Ready to Review': 'review', Done: 'done' };
 
 export const stageOfStatus = (status: string): TaskStage => STAGE_OF_LABEL[taskBoardStatusLabel(status)] ?? 'todo';
-
-// The column a task sits in. Once the office has worked on it, the office's stage is the truth, not the provider's.
-export const displayStatus = (task: Task): string => (task.origin.kind === 'manual' || task.runs.length > 0 ? STAGE_STATUS[task.stage] : task.origin.providerStatus);
 
 const OUTCOME_TEXT_CAP = 2000;
 
@@ -173,9 +169,10 @@ export function runRequest(task: Task, board: Board): { title: string; text: str
 
 const sourceKey = (o: ProviderOrigin) => `${o.kind}:${o.externalId}`;
 
-// Provider cards become tasks, keyed by (board, provider, externalId). A card's status sets the stage only while the task
-// has no runs: after that the office knows better. A card that is gone upstream takes its task with it unless the task
-// has runs, and only when every source answered, so a source that failed cannot empty the board.
+// Provider cards become tasks, keyed by (board, provider, externalId). A card's status sets the stage only while the office
+// has no say: once the task has runs or the owner pinned its stage, the office knows better. A card that is gone upstream
+// takes its task with it unless the task has runs, and only when every source answered, so a source that failed cannot
+// empty the board.
 export function syncCards(board: Board, tasks: readonly Task[], cards: readonly TaskCard[], opt: { now: number; complete: boolean; newId: () => TaskId }): { tasks: Task[]; changed: boolean } {
   const mine = new Map<string, Task>();
   for (const t of tasks) if (t.boardId === board.id && t.origin.kind !== 'manual') mine.set(sourceKey(t.origin), t);
@@ -202,7 +199,7 @@ export function syncCards(board: Board, tasks: readonly Task[], cards: readonly 
       changed = true;
       continue;
     }
-    const stage = had.runs.length === 0 ? stageOfStatus(card.status) : had.stage;
+    const stage = had.runs.length === 0 && !had.stagePinned ? stageOfStatus(card.status) : had.stage;
     if (JSON.stringify([had.title, had.origin, had.stage]) !== JSON.stringify([card.title, origin, stage])) {
       next.set(had.id, { ...had, title: card.title, origin, stage, updatedAt: opt.now });
       changed = true;
@@ -368,6 +365,9 @@ const HOURS_DECIMALS = 1e4;
 // One hours entry to send: `ms` is exactly what the mark moves by, so the rounding left over goes out with the next one.
 export type HoursEntry = { employeeId: EmployeeId; date: LocalDate; hours: number; ms: number };
 
+// What is due is each person-day's closed time minus what its mark says was sent. A person-day is sent again only for time
+// that closed after the last push, such as the end of a turn that outlived the reply which moved the task to review, and
+// never for time already sent.
 export function hoursDue(task: Task, work: readonly DayWork[]): HoursEntry[] {
   const out: HoursEntry[] = [];
   for (const w of work) {

@@ -1,9 +1,10 @@
-// What the owner does on the task screens. Each one sends the message main already knows. Two things have to wait for the
-// snapshot because the protocol answers a create with nothing: a task made in a column other than todo, and a board made
-// by name. They are matched against the next snapshot that brings something new.
+// What the owner does on the task screens. Each one sends the message main already knows. A board made by name has to wait
+// for the snapshot because the protocol answers a create with nothing: it is matched against the next snapshot that brings
+// a board it has not seen.
 import type { BlockId } from '../../../../shared/protocol.ts';
 import type { Board, BoardId, Task, TaskId, TaskStage } from '../../../../shared/tasks.ts';
-import { get, send, set, useStore } from '../../store.ts';
+import type { Aim } from '../../deskDrop.ts';
+import { get, send, set, toast, useStore } from '../../store.ts';
 
 const HOLD_MS = 4000;
 const PENDING_MS = 10_000;
@@ -23,16 +24,33 @@ export function moveTask(task: Task, stage: TaskStage) {
   send({ type: 'update_task', taskId: task.id, stage });
 }
 
-type PendingTask = { boardId: BoardId; title: string; stage: TaskStage; before: Set<TaskId>; until: number };
+// A card dropped on a desk. Someone sits there: the task goes to them and the owner is back in the office to see them start.
+// Nobody does: the hire panel opens for that desk with the task in it. Anything else is refused and the board comes back.
+export function dropOnDesk(task: Task, aim: Aim) {
+  const v = aim.verdict;
+  switch (v.kind) {
+    case 'assign':
+      if (v.already) return void toast(`${v.to.name} is already on "${task.title}".`);
+      send({ type: 'assign_task', taskId: task.id, employeeId: v.to.id });
+      set({ modal: null });
+      toast(`"${task.title}" goes to ${v.to.name}.`, 'ok');
+      return;
+    case 'hire':
+      set({ modal: { kind: 'hire', for: { taskId: task.id, blockId: v.blockId, deskId: aim.deskId, role: v.role } } });
+      return;
+    case 'refuse':
+      toast(v.message, 'warn');
+      return;
+  }
+}
+
 type PendingBoard = { blockId: BlockId; name: string; before: Set<BoardId>; until: number };
-let pendingTasks: PendingTask[] = [];
 let pendingBoard: PendingBoard | undefined;
 
 export function createTaskIn(board: Board, stage: TaskStage, title: string) {
   const text = title.trim();
   if (!text) return;
-  if (stage !== 'todo') pendingTasks.push({ boardId: board.id, title: text, stage, before: new Set(get().tasks.map((t) => t.id)), until: Date.now() + PENDING_MS });
-  send({ type: 'create_task', boardId: board.id, title: text });
+  send({ type: 'create_task', boardId: board.id, title: text, stage });
 }
 
 export function createBoard(blockId: BlockId, name: string, kind: Board['kind']) {
@@ -41,16 +59,6 @@ export function createBoard(blockId: BlockId, name: string, kind: Board['kind'])
 }
 
 useStore.subscribe((s, prev) => {
-  if (s.tasks !== prev.tasks && pendingTasks.length) {
-    const now = Date.now();
-    const still: PendingTask[] = [];
-    for (const p of pendingTasks) {
-      const made = s.tasks.find((t) => !p.before.has(t.id) && t.boardId === p.boardId && t.origin.kind === 'manual' && t.title === p.title);
-      if (made) moveTask(made, p.stage);
-      else if (p.until > now) still.push(p);
-    }
-    pendingTasks = still;
-  }
   if (s.boards !== prev.boards && pendingBoard) {
     const want = pendingBoard;
     const made = s.boards.find((b) => !want.before.has(b.id) && b.blockId === want.blockId && b.name === want.name);

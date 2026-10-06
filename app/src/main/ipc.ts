@@ -99,7 +99,7 @@ const clientMessage = z.discriminatedUnion('type', [
   z.object({ type: z.literal('update_board'), boardId, name: z.string().min(1).max(120).optional(), sources: taskSources.optional(), logHours: z.boolean().optional() }),
   z.object({ type: z.literal('delete_board'), boardId }),
   z.object({ type: z.literal('refresh_board'), boardId }),
-  z.object({ type: z.literal('create_task'), boardId, title: z.string().min(1).max(500), notes: z.string().max(20_000).optional() }),
+  z.object({ type: z.literal('create_task'), boardId, title: z.string().min(1).max(500), notes: z.string().max(20_000).optional(), stage: taskStage.optional() }),
   z.object({ type: z.literal('update_task'), taskId, title: z.string().min(1).max(500).optional(), notes: z.string().max(20_000).optional(), stage: taskStage.optional() }),
   z.object({ type: z.literal('delete_task'), taskId }),
   z.object({ type: z.literal('assign_task'), taskId, employeeId }),

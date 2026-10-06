@@ -227,6 +227,10 @@ console.log('\n# provider cards become tasks');
   const next = syncCards(b, [worked, first.tasks[1]!, manual], [card(1, 'completed', 'Card 1 renamed'), card(2, 'Done')], { now: 7, complete: true, newId });
   check(next.tasks.find((x) => x.id === worked.id)!.stage === 'doing' && next.tasks.find((x) => x.id === worked.id)!.title === 'Card 1 renamed', 'a card\'s status maps to stage only while the task has no runs; its title still follows');
   check(next.tasks.find((x) => x.id === first.tasks[1]!.id)!.stage === 'done', 'a task with no runs follows its card to done');
+  const pinned: Task = { ...first.tasks[0]!, stage: 'review', stagePinned: true };
+  const kept = syncCards(b, [pinned, first.tasks[1]!], [card(1, 'pending'), card(2, 'Done')], { now: 7, complete: true, newId });
+  check(kept.tasks.find((x) => x.id === pinned.id)!.stage === 'review', 'a stage the owner pinned is not overridden by the card, though the task has no runs');
+  check(kept.tasks.find((x) => x.id === first.tasks[1]!.id)!.stage === 'done', 'and a card the owner never moved keeps following its status');
   const vanished = syncCards(b, [worked, first.tasks[1]!, manual], [], { now: 8, complete: true, newId });
   check(vanished.tasks.length === 2 && vanished.tasks.some((x) => x.id === worked.id) && vanished.tasks.some((x) => x.id === manual.id), 'a card gone upstream drops its task unless it has runs; manual tasks stay');
   const partial = syncCards(b, [worked, first.tasks[1]!], [], { now: 8, complete: false, newId });
@@ -259,6 +263,21 @@ console.log('\n# hours are sent once');
   const tiny = hoursDue(fresh, closedDayWork([slice('ana', day(10), day(10) + 5)]));
   check(tiny.length === 0, 'less than a tenth of a second is not worth a call');
   check(hoursDue(fresh, closedDayWork([slice('ana', day(0), day(23, 59))]))[0]!.hours <= 24, 'an entry never exceeds the 24 hours CronoSpark takes');
+
+  // The PO replies done in the middle of a turn, so the task is in review before that turn ends. The turn's end adds time to
+  // a person-day that was already sent. That time, and only that time, is due again.
+  const stretches = [slice('po', day(10), day(10, 20)), slice('po', day(10, 20), day(10, 41)), slice('po', day(11), day(11, 7)), slice('po', day(11, 7), day(11, 7) + 1234)];
+  let acc: Task = fresh;
+  let posted = 0;
+  for (let n = 1; n <= stretches.length; n++) {
+    const accrued = closedDayWork(stretches.slice(0, n)).reduce((sum, w) => sum + w.ms, 0);
+    for (const due of hoursDue(acc, closedDayWork(stretches.slice(0, n)))) {
+      acc = { ...acc, hours: moveMark(acc.hours, due, 1) };
+      posted += due.ms;
+    }
+    check(posted <= accrued && accrued - posted < 200, `after stretch ${n} what went out (${posted} ms) never exceeds what accrued (${accrued} ms) and trails it by under 0.2 s`);
+  }
+  check(hoursDue(acc, closedDayWork(stretches)).length === 0, 'with every stretch closed and sent, nothing is due and nothing is sent twice');
 }
 
 // ───────────────────────────── the store on a real mailroom ─────────────────────────────
@@ -318,6 +337,9 @@ console.log('\n# a task worked by the PO and a delegate');
   check(!!quick && x.tasks.boardsOf(B2).length === 1, 'every block starts with a quick board');
   const made = x.tasks.createTask(quick.id, '  Add CSV export ', 'with tests');
   check(made.title === 'Add CSV export' && made.notes === 'with tests' && made.stage === 'todo' && made.origin.kind === 'manual', 'a manual task on a quick board');
+  const inReview = x.tasks.createTask(quick.id, 'Born in review', undefined, 'review');
+  check(inReview.stage === 'review' && x.tasks.view(x.now()).tasks.find((y) => y.id === inReview.id)!.stage === 'review', 'a task can be created straight into another column, in one step');
+  x.tasks.deleteTask(inReview.id);
 
   x.tasks.assign(made.id, PO);
   x.sync();
@@ -490,6 +512,18 @@ console.log('\n# CronoSpark hours');
 
   const idle = x.tasks.view(x.now()).tasks.find((y) => y.id === synced[1]!.id)!;
   check(idle.stage === 'todo' && idle.runs.length === 0, 'a synced card nobody worked on stays where its status put it');
+
+  const dragged = synced[1]!;
+  x.tasks.updateTask(dragged.id, { stage: 'doing' });
+  x.provider.cards = [crono(1), crono(2)];
+  await x.tasks.refresh(created.id);
+  const stays = x.tasks.view(x.now()).tasks.find((y) => y.id === dragged.id)!;
+  check(stays.stage === 'doing' && stays.stagePinned === true && stays.runs.length === 0, 'a card the owner moved without any run stays there after the next sync, though its provider still says pending');
+  x.tasks.updateTask(dragged.id, { title: 'Renamed by the owner' });
+  check(x.tasks.view(x.now()).tasks.find((y) => y.id === dragged.id)!.stagePinned === true, 'editing the title keeps the stage pinned');
+  const byHand = x.tasks.createTask(x.tasks.boardsOf(B1).find((b) => b.kind === 'quick')!.id, 'by hand');
+  x.tasks.updateTask(byHand.id, { stage: 'review' });
+  check(!('stagePinned' in x.tasks.view(x.now()).tasks.find((y) => y.id === byHand.id)!), 'a manual task has no provider to pin against');
 }
 
 console.log('\n# the CronoSpark client against a local server');
