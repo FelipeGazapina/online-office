@@ -361,7 +361,6 @@ export class Office {
     this.tasks.refreshWhere((board) => board.sources.length > 0);
     // Sessions exist now, so whatever a crash left half delivered can go out again.
     this.mail.recoverOnStart();
-    this.tasks.pushHours();
   }
 
   private openMail(ledger: LedgerEntry[]): Mailroom {
@@ -558,6 +557,8 @@ export class Office {
       case 'assign_task':
         this.tasks.assign(msg.taskId, msg.employeeId);
         return this.events.changed();
+      case 'send_hours':
+        return void this.tasks.sendHours(msg.taskId);
       case 'connect_task_provider':
         this.services.taskBoards.connect(msg.provider);
         this.events.changed();

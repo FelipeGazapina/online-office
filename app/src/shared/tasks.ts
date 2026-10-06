@@ -12,10 +12,10 @@ export type TaskId = string & { readonly __brand: 'TaskId' };
 export type LocalDate = `${number}-${number}-${number}`;
 
 // A quick board is for tasks that came off the top of the owner's head. It cannot be linked to Linear or CronoSpark, so
-// it has no sources to hold, and nothing to log hours into.
-export type BoardSpec = { kind: 'quick' } | { kind: 'feature' | 'bug'; sources: TaskBoardSource[]; logHours: boolean };
+// it has no sources to hold.
+export type BoardSpec = { kind: 'quick' } | { kind: 'feature' | 'bug'; sources: TaskBoardSource[] };
 export type Board = { id: BoardId; blockId: BlockId; name: string } & BoardSpec;
-export type BoardPatch = { name?: string; sources?: TaskBoardSource[]; logHours?: boolean };
+export type BoardPatch = { name?: string; sources?: TaskBoardSource[] };
 
 export type ProviderOrigin = { kind: TaskProvider; externalId: string; identifier: string; url?: string; priority?: string; providerStatus: string; sourceLabel: string };
 // A task made by hand has its own priority. A provider's task keeps the provider's text in `origin.priority`.
@@ -114,19 +114,19 @@ export function makeBoard(id: BoardId, blockId: BlockId, name: string, spec: Boa
   if (spec.kind === 'quick') return { ok: true, board: { id, blockId, name: trimmed, kind: 'quick' } };
   const sources = cleanSources(spec.sources);
   if (refusedSources(sources)) return sources;
-  return { ok: true, board: { id, blockId, name: trimmed, kind: spec.kind, sources, logHours: spec.logHours } };
+  return { ok: true, board: { id, blockId, name: trimmed, kind: spec.kind, sources } };
 }
 
 export function patchBoard(board: Board, patch: BoardPatch): BoardResult {
   const name = patch.name === undefined ? board.name : patch.name.trim();
   if (!name) return { ok: false, reason: 'A board needs a name.' };
   if (board.kind === 'quick') {
-    if (patch.sources !== undefined || patch.logHours !== undefined) return { ok: false, reason: 'A quick board holds tasks from your head. It takes no sources and logs no hours.' };
+    if (patch.sources !== undefined) return { ok: false, reason: 'A quick board holds tasks from your head. It takes no sources.' };
     return { ok: true, board: { ...board, name } };
   }
   const sources = patch.sources === undefined ? board.sources : cleanSources(patch.sources);
   if (refusedSources(sources)) return sources;
-  return { ok: true, board: { ...board, name, sources, logHours: patch.logHours ?? board.logHours } };
+  return { ok: true, board: { ...board, name, sources } };
 }
 
 // The board a block's task screens show: the first one that pulls from a provider, else the first one it has.
@@ -149,7 +149,7 @@ export function ensureBoards(blocks: readonly BlockId[], boards: readonly Board[
   for (const blockId of blocks) {
     const old = legacy.find((l) => l.blockId === blockId);
     if (old?.sources.length && !out.some((b) => b.blockId === blockId && b.kind !== 'quick')) {
-      const made = makeBoard(newId(), blockId, LEGACY_BOARD_NAME, { kind: 'feature', sources: old.sources, logHours: true });
+      const made = makeBoard(newId(), blockId, LEGACY_BOARD_NAME, { kind: 'feature', sources: old.sources });
       if (made.ok) out.push(made.board);
     }
     if (!out.some((b) => b.blockId === blockId && b.kind === 'quick')) out.push({ id: newId(), blockId, name: QUICK_BOARD_NAME, kind: 'quick' });
@@ -303,7 +303,8 @@ export function sliceTasks(log: TurnLog, tasks: readonly Pick<Task, 'id' | 'runs
 
 // What the owner sees of a task's time. `at` is when it was measured: a person in `running` keeps counting from there,
 // at `share` of wall time while their turn is split across tasks.
-export type TaskTime = { at: number; totalMs: number; byEmployee: Record<EmployeeId, number>; running: { employeeId: EmployeeId; share: number }[] };
+// `unsent` is the closed time of a CronoSpark task that no hours entry covers yet, per person. It is absent when there is none.
+export type TaskTime = { at: number; totalMs: number; byEmployee: Record<EmployeeId, number>; running: { employeeId: EmployeeId; share: number }[]; unsent?: Partial<Record<EmployeeId, number>> };
 
 export function timeFromSlices(slices: readonly Slice[], at: number): TaskTime {
   const ms = new Map<EmployeeId, number>();
@@ -379,6 +380,13 @@ export function hoursDue(task: Task, work: readonly DayWork[]): HoursEntry[] {
     if (hours > 0) out.push({ employeeId: w.employeeId, date: w.date, hours, ms: Math.round(hours * MS_PER_HOUR) });
   }
   return out;
+}
+
+// What `hoursDue` adds up to per person, or undefined when nothing is due.
+export function unsentOf(task: Task, slices: readonly Slice[]): Partial<Record<EmployeeId, number>> | undefined {
+  const out: Partial<Record<EmployeeId, number>> = {};
+  for (const e of hoursDue(task, closedDayWork(slices))) out[e.employeeId] = (out[e.employeeId] ?? 0) + e.ms;
+  return Object.keys(out).length ? out : undefined;
 }
 
 // The hours log with one entry's time added to its mark (sign 1) or taken back off it (sign -1). Nothing is mutated.

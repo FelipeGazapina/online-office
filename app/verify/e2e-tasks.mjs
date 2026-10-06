@@ -1,6 +1,6 @@
 // Tasks end to end with real Claude agents and a fake CronoSpark. A manual task on a quick board goes to the PO, who delegates
-// a piece to the one employee. A CronoSpark card does the same and its hours reach the fake server. A hire starts a task on
-// its own. Then the app restarts. Time is checked against numbers computed here from mail.jsonl, not read from the app.
+// a piece to the one employee. A CronoSpark card does the same and posts no hours until the owner sends them, then exactly the
+// time worked, once. A hire starts a task on its own. Then the app restarts. Time is checked against numbers computed here from mail.jsonl, not read from the app.
 // Run: pnpm build:verify && OFFICE_OUT_DIR=out/verify OFFICE_CDP_PORT=9342 node verify/cdp.mjs verify/e2e-tasks.mjs
 // OFFICE_TASKS_WAIT_MIN caps each run of an agent (default 8).
 import { execFileSync } from 'node:child_process';
@@ -163,9 +163,9 @@ export default async (s, { launch }) => {
     await s.eval(`window.office.send({ type: 'create_board', blockId: ${JSON.stringify(blockId)}, name: 'Ideas', spec: { kind: 'quick', sources: [{ provider: 'linear', projectId: 'x' }] } })`);
     await s.waitFor(`[...document.querySelectorAll('.toast')].some((t) => t.innerText.includes('Bad message'))`);
     assert((await s.eval(`${state}.boards.length`)) === 1, 'a quick board sent with sources is refused at the door');
-    await s.eval(`window.office.send({ type: 'update_board', boardId: ${JSON.stringify(quickId)}, logHours: true })`);
-    await s.waitFor(`[...document.querySelectorAll('.toast')].some((t) => t.innerText.includes('no sources and logs no hours') || t.innerText.includes('takes no sources'))`);
-    assert(await s.eval(`${state}.boards[0].kind === 'quick' && !('logHours' in ${state}.boards[0])`), 'an existing quick board refuses an hours switch');
+    await s.eval(`window.office.send({ type: 'update_board', boardId: ${JSON.stringify(quickId)}, sources: [{ provider: 'linear', projectId: 'x' }] })`);
+    await s.waitFor(`[...document.querySelectorAll('.toast')].some((t) => t.innerText.includes('takes no sources'))`);
+    assert(await s.eval(`${state}.boards[0].kind === 'quick' && !('sources' in ${state}.boards[0])`), 'an existing quick board refuses sources');
 
     // ── a manual task, the PO delegates ──
     await s.eval(`window.office.send({ type: 'create_task', boardId: ${JSON.stringify(quickId)}, title: 'Add hello.txt', notes: ${JSON.stringify(deliverable('hello.txt', 'hello from tasks'))} })`);
@@ -196,8 +196,8 @@ export default async (s, { launch }) => {
     assert(Object.keys(done.time.byEmployee).every((k) => k in mine.total) && done.time.totalMs === Object.values(done.time.byEmployee).reduce((a, b) => a + b, 0), 'nobody else is billed and the total is the sum');
     assert(done.time.running.length === 0, 'nobody is running once it is in review');
 
-    // ── a CronoSpark card, the PO delegates, hours go out ──
-    await s.eval(`window.office.send({ type: 'create_board', blockId: ${JSON.stringify(blockId)}, name: 'Sprint', spec: { kind: 'feature', sources: [{ provider: 'cronospark', projectId: 'fake-project' }], logHours: true } })`);
+    // ── a CronoSpark card, the PO delegates, hours wait for the owner ──
+    await s.eval(`window.office.send({ type: 'create_board', blockId: ${JSON.stringify(blockId)}, name: 'Sprint', spec: { kind: 'feature', sources: [{ provider: 'cronospark', projectId: 'fake-project' }] } })`);
     await s.waitFor(`${state}.tasks.some((t) => t.origin.identifier === 'CS-501') && ${state}.tasks.some((t) => t.origin.identifier === 'CS-502')`, 30000);
     const sprint = await s.eval(`${state}.boards.find((b) => b.name === 'Sprint')`);
     const card = await s.eval(`${state}.tasks.find((t) => t.origin.identifier === 'CS-501')`);
@@ -207,48 +207,74 @@ export default async (s, { launch }) => {
     await s.eval(`window.office.send({ type: 'update_task', taskId: ${JSON.stringify(card.id)}, notes: ${JSON.stringify(deliverable('crono.txt', 'hello from crono'))} })`);
     await s.eval(`window.office.send({ type: 'assign_task', taskId: ${JSON.stringify(card.id)}, employeeId: ${JSON.stringify(pia)} })`);
     await waitForStage(s, card.id, 'review', 'crono.txt');
-    // The reply that moves the task to review can come in the middle of the PO's last turn. That turn's end then adds time to a
-    // person-day that was already sent, and that time is due as a follow-up. So wait until every turn on the task has ended and the
-    // fake server has what mail.jsonl says, and judge the sums, not how many calls it took to get there.
+    // The reply that moves the task to review can come in the middle of the PO's last turn, so wait until nobody is running it.
+    await quiet(s, [card.id]);
+    await s.sleep(4000);
+    assert(fake.calls.length === 0, 'the CronoSpark task reached review and posted no hours');
     const sums = () => {
       const by = {};
       for (const c of fake.calls) by[`${c.description}|${c.date}`] = (by[`${c.description}|${c.date}`] ?? 0) + c.hours;
       return by;
     };
     const keyOf = (who, date) => `${nameOf[who]} (AI employee, Online Office)|${date}`;
-    const caughtUp = async () => {
-      const t = await s.eval(`(() => { const t = ${taskExpr(card.id)}; return { running: ${state}.taskTime[t.id]?.running.length ?? 0, inflight: !!t.hours?.inflight }; })()`);
-      if (t.running || t.inflight) return false;
-      const { byDay } = wallTime((await s.eval(`${taskExpr(card.id)}.runs`)));
-      const got = sums();
-      return Object.keys(byDay).length >= 2 && Object.entries(byDay).every(([key, ms]) => Math.abs((got[keyOf(...key.split('|'))] ?? 0) - ms / MS_PER_HOUR) <= TOLERANCE_MS / MS_PER_HOUR + 0.0001);
-    };
-    const t0 = Date.now();
-    while (!(await caughtUp()) && Date.now() - t0 < 60_000) await s.sleep(500);
-    await s.sleep(4000);
-    const cardNow = await s.eval(`${taskExpr(card.id)}`);
-    const expected = wallTime(cardNow.runs);
-    console.log('fake CronoSpark got:', JSON.stringify(fake.calls));
-    const got = sums();
-    const pairs = Object.keys(expected.byDay);
-    assert(pairs.length >= 2, `the PO and the employee each worked on at least one day (${pairs.length} person-days in mail.jsonl)`);
-    for (const key of pairs) {
-      const [who, date] = key.split('|');
-      const want = expected.byDay[key] / MS_PER_HOUR;
-      const sum = got[keyOf(who, date)] ?? 0;
-      const calls = fake.calls.filter((c) => c.description === `${nameOf[who]} (AI employee, Online Office)` && c.date === date);
-      assert(calls.length >= 1 && calls.every((c) => c.taskId === 'fake-task-501' && c.hours > 0) && Math.abs(sum - want) <= TOLERANCE_MS / MS_PER_HOUR + 0.0001, `${nameOf[who]} on ${date}: ${calls.length} call(s) add up to ${sum.toFixed(4)} h, mail.jsonl says ${want.toFixed(4)} h`);
-    }
-    assert(fake.calls.every((c) => pairs.includes(`${Object.keys(nameOf).find((id) => c.description.startsWith(nameOf[id]))}|${c.date}`)), 'nothing was sent for a person-day that has no time in mail.jsonl');
-    assert(new Set(fake.calls.map((c) => JSON.stringify([c.description, c.date, c.hours]))).size === fake.calls.length, 'no call repeats an earlier one: time that was sent is never sent again');
-    const sent = fake.calls.length;
+    const unsentNow = (id) => s.eval(`${state}.taskTime[${JSON.stringify(id)}]?.unsent ?? {}`);
+    const worked = wallTime(await s.eval(`${taskExpr(card.id)}.runs`));
+    const owed = await unsentNow(card.id);
+    for (const who of [pia, ana]) assert(Math.abs((owed[who] ?? 0) - (worked.total[who] ?? 0)) <= TOLERANCE_MS, `${nameOf[who]}: the task reports ${owed[who] ?? 0} ms not sent, mail.jsonl says ${worked.total[who] ?? 0} ms`);
     await s.eval(`window.office.send({ type: 'update_task', taskId: ${JSON.stringify(card.id)}, stage: 'done' })`);
-    await s.sleep(4000);
+    await s.sleep(2000);
     await s.eval(`window.office.send({ type: 'refresh_board', boardId: ${JSON.stringify(sprint.id)} })`);
     await s.sleep(4000);
-    assert(fake.calls.length === sent, 'a second transition and a refresh send nothing new');
+    assert(fake.calls.length === 0, 'moving it to done and refreshing the board post nothing either');
     assert(!fake.calls.some((c) => c.taskId === 'fake-task-502'), 'the card nobody worked on has no hours');
-    assert((await s.eval(`${taskExpr(card.id)}.hours?.error === undefined`)), 'the task shows no push error');
+
+    // Sends what mail.jsonl says is not sent yet: waits for the fake server to have it, then judges the sums.
+    const sendAndCheck = async (label, already) => {
+      await s.eval(`window.office.send({ type: 'send_hours', taskId: ${JSON.stringify(card.id)} })`);
+      const expected = wallTime(await s.eval(`${taskExpr(card.id)}.runs`));
+      const t0 = Date.now();
+      const caughtUp = () => {
+        const got = sums();
+        return Object.keys(expected.byDay).length >= 1 && Object.entries(expected.byDay).every(([key, ms]) => Math.abs((got[keyOf(...key.split('|'))] ?? 0) - ms / MS_PER_HOUR) <= TOLERANCE_MS / MS_PER_HOUR + 0.0001);
+      };
+      while (!caughtUp() && Date.now() - t0 < 60_000) await s.sleep(500);
+      await s.sleep(3000);
+      console.log(`fake CronoSpark got (${label}):`, JSON.stringify(fake.calls));
+      const got = sums();
+      for (const key of Object.keys(expected.byDay)) {
+        const [who, date] = key.split('|');
+        const want = expected.byDay[key] / MS_PER_HOUR;
+        const sum = got[keyOf(who, date)] ?? 0;
+        assert(Math.abs(sum - want) <= TOLERANCE_MS / MS_PER_HOUR + 0.0001, `${label}: ${nameOf[who]} on ${date} adds up to ${sum.toFixed(4)} h, mail.jsonl says ${want.toFixed(4)} h`);
+      }
+      assert(fake.calls.slice(already).every((c) => c.taskId === 'fake-task-501' && c.hours > 0), `${label}: every call is for the task's provider id`);
+      assert(new Set(fake.calls.map((c) => JSON.stringify([c.description, c.date, c.hours]))).size === fake.calls.length, `${label}: no call repeats an earlier one`);
+      assert(fake.calls.every((c) => `${Object.keys(nameOf).find((id) => c.description.startsWith(nameOf[id]))}|${c.date}` in expected.byDay), `${label}: nothing was sent for a person-day that has no time in mail.jsonl`);
+      assert(Object.keys(await unsentNow(card.id)).length === 0, `${label}: nothing is reported as not sent any more`);
+      return expected;
+    };
+    const first = await sendAndCheck('first send', 0);
+    assert(Object.keys(first.byDay).length >= 2 && fake.calls.length >= 2, `the PO and the employee each have a person-day sent (${fake.calls.length} calls)`);
+    assert((await s.eval(`${taskExpr(card.id)}.hours?.error === undefined`)), 'the task shows no send error');
+    const afterFirst = fake.calls.length;
+    await s.eval(`window.office.send({ type: 'send_hours', taskId: ${JSON.stringify(card.id)} })`);
+    await s.sleep(4000);
+    assert(fake.calls.length === afterFirst, 'a second send posts nothing');
+
+    // More work on the same task, and the next send carries only that.
+    await s.eval(`window.office.send({ type: 'update_task', taskId: ${JSON.stringify(card.id)}, notes: 'Write a file named crono2.txt in the project folder whose only line is: more from crono. Reply done naming it.' })`);
+    await s.eval(`window.office.send({ type: 'assign_task', taskId: ${JSON.stringify(card.id)}, employeeId: ${JSON.stringify(ana)} })`);
+    await waitForStage(s, card.id, 'review', 'crono2.txt');
+    await quiet(s, [card.id]);
+    await s.sleep(3000);
+    assert(fake.calls.length === afterFirst, 'more work posts nothing by itself');
+    const sentBefore = sums();
+    const more = await unsentNow(card.id);
+    assert((more[ana] ?? 0) > 0 && !(more[pia] > TOLERANCE_MS), `the new time is reported as not sent: Ana ${more[ana] ?? 0} ms`);
+    await sendAndCheck('second send', afterFirst);
+    const added = fake.calls.slice(afterFirst);
+    assert(added.length >= 1 && added.every((c) => c.description.startsWith('Ana')), 'only the person who worked again has new calls');
+    for (const key of Object.keys(sentBefore)) if (key.startsWith(nameOf[pia])) assert(sums()[key] === sentBefore[key], `the PO's ${key.split('|')[1]} is untouched by the second send`);
 
     // ── a hire that starts a task ──
     await s.eval(`window.office.send({ type: 'create_task', boardId: ${JSON.stringify(quickId)}, title: 'Add hire.txt', notes: 'Write a file named hire.txt in the project folder whose only line is: hello from the new hire. Reply done naming it.' })`);
@@ -283,6 +309,10 @@ export default async (s, { launch }) => {
       for (const [who, ms] of Object.entries(before.time[id].byEmployee)) assert(Math.abs((after.time[id].byEmployee[who] ?? 0) - ms) <= TOLERANCE_MS, `${nameOf[who] ?? 'Cleo'}'s time on a task survives the restart (${ms} ms before, ${after.time[id].byEmployee[who]} ms after)`);
     }
     assert(fake.calls.length === callsBefore, 'a restart sends no hours again');
+    assert(Object.keys(await again.eval(`${state}.taskTime[${JSON.stringify(card.id)}]?.unsent ?? {}`)).length === 0, 'and it remembers everything was sent');
+    await again.eval(`window.office.send({ type: 'send_hours', taskId: ${JSON.stringify(card.id)} })`);
+    await again.sleep(3000);
+    assert(fake.calls.length === callsBefore, 'sending after the restart posts nothing: the marks survived');
     console.log(`harness interventions: ${JSON.stringify(interventions)}`);
   } finally {
     await fake.close();

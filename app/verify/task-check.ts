@@ -170,7 +170,7 @@ console.log('\n# boards');
   const made = ensureBoards([B1, B2], [], [{ blockId: B1, sources: src }], (() => { let n = 0; return () => board(`b${++n}`); })());
   const mine = made.boards.filter((b) => b.blockId === B1);
   check(mine.length === 2 && mine[0]!.kind === 'feature' && mine[0]!.name === 'Tasks' && mine[1]!.kind === 'quick' && mine[1]!.name === 'Quick tasks', 'a block with old sources gets a Tasks feature board, then a quick board', JSON.stringify(mine));
-  check(mine[0]!.kind === 'feature' && JSON.stringify(mine[0]!.sources) === JSON.stringify(src) && mine[0]!.logHours, 'the migrated board keeps the old sources and logs hours');
+  check(mine[0]!.kind === 'feature' && JSON.stringify(mine[0]!.sources) === JSON.stringify(src), 'the migrated board keeps the old sources');
   const plain = made.boards.filter((b) => b.blockId === B2);
   check(plain.length === 1 && plain[0]!.kind === 'quick', 'a block without sources gets just a quick board');
   const again = ensureBoards([B1, B2], made.boards, [{ blockId: B1, sources: src }], () => board('x'));
@@ -181,14 +181,13 @@ console.log('\n# boards');
   check(quick.ok && quick.board.name === 'Ideas' && quick.board.kind === 'quick' && !('sources' in quick.board) && !('logHours' in quick.board), 'a quick board is built without sources even when handed some');
   const q = quick.ok ? quick.board : undefined!;
   const refusedSources = patchBoard(q, { sources: src });
-  const refusedHours = patchBoard(q, { logHours: true });
-  check(!refusedSources.ok && !refusedHours.ok, 'a quick board refuses sources and hours when updated', JSON.stringify([refusedSources, refusedHours]));
+  check(!refusedSources.ok, 'a quick board refuses sources when updated', JSON.stringify(refusedSources));
   const renamed = patchBoard(q, { name: 'Head' });
   check(renamed.ok && renamed.board.name === 'Head', 'a quick board still renames');
-  const feat = makeBoard(board('f'), B1, 'Sprint', { kind: 'bug', sources: src, logHours: false });
-  check(feat.ok && feat.board.kind === 'bug' && patchBoard(feat.board, { logHours: true }).ok, 'feature and bug boards take sources and the hours switch');
-  check(!makeBoard(board('f'), B1, 'x', { kind: 'feature', sources: [{ provider: 'linear', projectId: ' ' }], logHours: true }).ok, 'a source needs a project id');
-  check(!makeBoard(board('f'), B1, 'x', { kind: 'feature', sources: [src[0]!, src[0]!], logHours: true }).ok, 'a source cannot be listed twice');
+  const feat = makeBoard(board('f'), B1, 'Sprint', { kind: 'bug', sources: src });
+  check(feat.ok && feat.board.kind === 'bug' && !('logHours' in feat.board) && patchBoard(feat.board, { sources: [] }).ok, 'feature and bug boards take sources and carry no hours switch');
+  check(!makeBoard(board('f'), B1, 'x', { kind: 'feature', sources: [{ provider: 'linear', projectId: ' ' }] }).ok, 'a source needs a project id');
+  check(!makeBoard(board('f'), B1, 'x', { kind: 'feature', sources: [src[0]!, src[0]!] }).ok, 'a source cannot be listed twice');
   check(!makeBoard(board('f'), B1, '  ', { kind: 'quick' }).ok, 'a board needs a name');
 }
 
@@ -213,7 +212,7 @@ console.log('\n# the mail moves the stage');
 
 console.log('\n# provider cards become tasks');
 {
-  const b: Board = { id: board('b'), blockId: B1, name: 'Sprint', kind: 'feature', sources: [{ provider: 'cronospark', projectId: 'p' }], logHours: true };
+  const b: Board = { id: board('b'), blockId: B1, name: 'Sprint', kind: 'feature', sources: [{ provider: 'cronospark', projectId: 'p' }] };
   const card = (n: number, status: string, title = `Card ${n}`): TaskCard => ({ id: `cronospark:x${n}`, provider: 'cronospark', externalId: `x${n}`, identifier: `CS-${n}`, title, status, sourceLabel: 'CronoSpark' });
   let n = 0;
   const newId = () => task(`t${++n}`);
@@ -462,21 +461,32 @@ console.log('\n# a task made with its assignee and priority');
   x.tasks.updateTask(alone.id, { notes: 'edited' });
   check(view().tasks.find((y) => y.id === alone.id)!.origin.kind === 'manual', 'an edit that leaves the priority alone leaves the origin alone');
 
-  const board = x.tasks.createBoard(B1, 'Sprint', { kind: 'feature', sources: [{ provider: 'cronospark', projectId: 'p' }], logHours: true });
+  const board = x.tasks.createBoard(B1, 'Sprint', { kind: 'feature', sources: [{ provider: 'cronospark', projectId: 'p' }] });
   x.provider.cards = [crono(1)];
   await x.tasks.refresh(board.id);
   const card = view().tasks.find((y) => y.origin.kind === 'cronospark')!;
   check(/set in CronoSpark/.test(refusal(() => x.tasks.updateTask(card.id, { priority: 'high' }))) && !('priority' in card.origin), 'a provider task keeps the provider\'s priority: the owner\'s is refused');
 }
 
-console.log('\n# CronoSpark hours');
+console.log('\n# CronoSpark hours go out only when the owner sends them');
 {
   const x = taskWorld();
-  const created = x.tasks.createBoard(B1, 'Sprint', { kind: 'feature', sources: [{ provider: 'cronospark', projectId: 'p1' }], logHours: true });
+  const settle = () => new Promise((resolve) => setTimeout(resolve, 20));
+  const refuse = async (f: () => unknown) => {
+    try {
+      await f();
+    } catch (error) {
+      return error instanceof OfficeError ? error.message : String(error);
+    }
+    return '';
+  };
+  const created = x.tasks.createBoard(B1, 'Sprint', { kind: 'feature', sources: [{ provider: 'cronospark', projectId: 'p1' }] });
   x.provider.cards = [crono(1), crono(2)];
   await x.tasks.refresh(created.id);
   const synced = x.tasks.view(x.now()).tasks.filter((y) => y.boardId === created.id);
   check(synced.length === 2 && x.tasks.view(x.now()).boardSync[created.id]!.kind === 'ready', 'a synced card becomes a task and the board says it is ready');
+  const view = () => x.tasks.view(x.now());
+  const taskOf = (id: string) => view().tasks.find((y) => y.id === id)!;
 
   const target = synced[0]!;
   x.tasks.assign(target.id, PO);
@@ -494,70 +504,81 @@ console.log('\n# CronoSpark hours');
   x.advance(15_000);
   x.w.room.turnEnded(PO, 'all done', true);
   x.sync();
-  await x.tasks.idle();
-  const rows = x.provider.calls.map((c) => `${c.description}|${c.hours}|${c.date}|${c.taskId}`);
-  check(x.tasks.view(x.now()).tasks.find((y) => y.id === target.id)!.stage === 'review', 'the work finishing moves the task to review');
-  check(rows.length === 2 && rows[0] === 'Ana (AI employee, Online Office)|0.0417|2026-10-06|ext1' && rows[1] === 'Pia (AI employee, Online Office)|0.0292|2026-10-06|ext1', 'one call per person and day with their hours, under the task\'s provider id', rows.join(' ; '));
+  await settle();
+  check(taskOf(target.id).stage === 'review', 'the work finishing moves the task to review');
+  check(x.provider.calls.length === 0, 'and posts nothing: a turn ending and a stage change send no hours');
+  const unsent = view().taskTime[target.id]!.unsent;
+  check(!!unsent && Math.abs((unsent[ANA] ?? 0) - 150_000) < 200 && Math.abs((unsent[PO] ?? 0) - 105_000) < 200, 'the task reports each person\'s closed time as not sent yet', JSON.stringify(unsent));
 
   x.tasks.updateTask(target.id, { stage: 'done' });
-  await x.tasks.idle();
-  x.tasks.pushHours();
-  await x.tasks.idle();
-  check(x.provider.calls.length === 2, 'a second transition sends nothing new');
+  x.tasks.updateBoard(created.id, { name: 'Sprint 1' });
   await x.tasks.refresh(created.id);
-  await x.tasks.idle();
-  check(x.provider.calls.length === 2, 'a refresh sends nothing new');
+  await settle();
+  const restartedBefore = new Tasks(x.file, x.host, x.w.persisted);
+  restartedBefore.recover([B1, B2], []);
+  await settle();
+  check(x.provider.calls.length === 0, 'done, a board edit, a refresh and a restart post nothing either');
+  check(JSON.stringify(restartedBefore.view(x.now()).taskTime[target.id]!.unsent) === JSON.stringify(unsent), 'and the restart still knows what is not sent');
+
+  await x.tasks.sendHours(target.id);
+  const rows = x.provider.calls.map((c) => `${c.description}|${c.hours}|${c.date}|${c.taskId}`);
+  check(rows.length === 2 && rows[0] === 'Ana (AI employee, Online Office)|0.0417|2026-10-06|ext1' && rows[1] === 'Pia (AI employee, Online Office)|0.0292|2026-10-06|ext1', 'sending posts one call per person and day with their hours, under the task\'s provider id', rows.join(' ; '));
+  check(taskOf(target.id).stage === 'done' && view().taskTime[target.id]!.unsent === undefined, 'it works in any stage, and nothing is left to send');
+  await x.tasks.sendHours(target.id);
+  check(x.provider.calls.length === 2, 'a second send posts nothing');
 
   const restarted = new Tasks(x.file, x.host, x.w.persisted);
   restarted.recover([B1, B2], []);
-  restarted.pushHours();
-  await restarted.idle();
-  check(x.provider.calls.length === 2, 'a restart sends nothing new: the marks were saved with the task');
+  await restarted.sendHours(target.id);
+  check(x.provider.calls.length === 2 && restarted.view(x.now()).taskTime[target.id]!.unsent === undefined, 'a restart keeps the marks: sending again posts nothing');
 
-  // More work, and CronoSpark is down for the first try.
+  // More work in the open turn is not closed time, so it cannot go out yet.
   x.tasks.assign(target.id, ANA);
   x.sync();
   x.advance(60_000);
+  check(taskOf(target.id).stage === 'doing', 'giving the task to someone again puts it back in doing');
+  await x.tasks.sendHours(target.id);
+  check(x.provider.calls.length === 2 && view().taskTime[target.id]!.unsent === undefined, 'a send while the turn is still open posts nothing');
+
+  // The turn ends and CronoSpark is down for the first try.
   x.provider.failing = 1;
   x.w.room.turnEnded(ANA, 'a bit more', true);
   x.sync();
-  await x.tasks.idle();
-  const failed = x.tasks.view(x.now()).tasks.find((y) => y.id === target.id)!;
-  check(x.provider.calls.length === 2 && /CronoSpark is down/.test(failed.hours?.error?.message ?? '') && failed.hours?.inflight === undefined, 'a failed push stays visible on the task and leaves the mark where it was', failed.hours?.error?.message);
-  x.tasks.pushHours();
-  await x.tasks.idle();
-  const healed = x.tasks.view(x.now()).tasks.find((y) => y.id === target.id)!;
+  await settle();
+  check(x.provider.calls.length === 2 && Math.abs((view().taskTime[target.id]!.unsent?.[ANA] ?? 0) - 60_000) < 500, 'only the new time is due once the turn ends, and still nothing went out by itself');
+  await x.tasks.sendHours(target.id);
+  const failed = taskOf(target.id);
+  check(x.provider.calls.length === 2 && /CronoSpark is down/.test(failed.hours?.error?.message ?? '') && failed.hours?.inflight === undefined, 'a failed send stays visible on the task and leaves the mark where it was', failed.hours?.error?.message);
+  check(Math.abs((view().taskTime[target.id]!.unsent?.[ANA] ?? 0) - 60_000) < 500, 'and the time is still reported as not sent');
+  const first = x.tasks.sendHours(target.id);
+  const second = x.tasks.sendHours(target.id);
+  await Promise.all([first, second]);
+  const healed = taskOf(target.id);
   const anaHours = x.provider.calls.filter((c) => c.description.startsWith('Ana')).reduce((sum, c) => sum + c.hours, 0);
-  check(x.provider.calls.length === 3 && x.provider.calls[2]!.description.startsWith('Ana') && healed.hours?.error === undefined, 'the next ask retries it once and clears the error', JSON.stringify(x.provider.calls[2]));
+  check(first === second && x.provider.calls.length === 3 && x.provider.calls[2]!.description.startsWith('Ana') && healed.hours?.error === undefined, 'two sends at once post it once, and the error clears', JSON.stringify(x.provider.calls[2]));
+  check(Math.abs(x.provider.calls[2]!.hours - 60 / 3600) < 0.0002, 'the call carries only the new time', JSON.stringify(x.provider.calls[2]));
   check(Math.abs(anaHours - 210 / 3600) < 0.0001, `Ana's 210 s went out as ${anaHours} h in all, the rounding of the first call carried into the second`);
-  x.tasks.pushHours();
-  await x.tasks.idle();
+  await x.tasks.sendHours(target.id);
   check(x.provider.calls.length === 3, 'and then it is sent for good');
 
-  // Switches that keep hours at home.
-  const quiet = x.tasks.createBoard(B1, 'Quiet', { kind: 'bug', sources: [{ provider: 'cronospark', projectId: 'p2' }], logHours: false });
-  x.provider.cards = [crono(3)];
-  await x.tasks.refresh(quiet.id);
-  const quietTask = x.tasks.view(x.now()).tasks.find((y) => y.boardId === quiet.id)!;
-  x.tasks.assign(quietTask.id, ANA);
-  x.sync();
-  x.advance(60_000);
-  x.w.room.turnEnded(ANA, 'done', true);
-  x.sync();
-  await x.tasks.idle();
-  check(x.tasks.view(x.now()).tasks.find((y) => y.id === quietTask.id)!.stage === 'review' && x.provider.calls.length === 3, 'a board that does not log hours sends nothing');
-
-  const linear = x.tasks.createBoard(B1, 'Linear', { kind: 'feature', sources: [{ provider: 'linear', projectId: 'team:ENG' }], logHours: true });
+  // Only a CronoSpark task has hours.
+  const linear = x.tasks.createBoard(B1, 'Linear', { kind: 'feature', sources: [{ provider: 'linear', projectId: 'team:ENG' }] });
   x.provider.cards = [{ ...crono(4), id: 'linear:l4', provider: 'linear', externalId: 'l4' }];
   await x.tasks.refresh(linear.id);
-  const linearTask = x.tasks.view(x.now()).tasks.find((y) => y.boardId === linear.id)!;
+  const linearTask = view().tasks.find((y) => y.boardId === linear.id)!;
   x.tasks.assign(linearTask.id, ANA);
   x.sync();
   x.advance(60_000);
   x.w.room.turnEnded(ANA, 'done', true);
   x.sync();
-  await x.tasks.idle();
-  check(x.provider.calls.length === 3, 'Linear has no hours, so nothing is sent for its cards');
+  const handmade = x.tasks.createTask(x.tasks.boardsOf(B1).find((b) => b.kind === 'quick')!.id, 'by hand', { assignee: ANA });
+  x.sync();
+  x.advance(60_000);
+  x.w.room.turnEnded(ANA, 'done', true);
+  x.sync();
+  check(/Only a CronoSpark task/.test(await refuse(() => x.tasks.sendHours(linearTask.id))) && /Only a CronoSpark task/.test(await refuse(() => x.tasks.sendHours(handmade.id))), 'a Linear task and a task made by hand have no hours to send');
+  check(view().taskTime[linearTask.id]!.unsent === undefined && view().taskTime[handmade.id]!.unsent === undefined && x.provider.calls.length === 3, 'they report nothing unsent and post nothing');
+  check(/No such task/.test(await refuse(() => x.tasks.sendHours('nope' as never))), 'a task that does not exist is refused');
 
   const idle = x.tasks.view(x.now()).tasks.find((y) => y.id === synced[1]!.id)!;
   check(idle.stage === 'todo' && idle.runs.length === 0, 'a synced card nobody worked on stays where its status put it');
@@ -613,7 +634,7 @@ console.log('\n# board and task rules');
     return '';
   };
   check(/at least one board/.test(refusal(() => x.tasks.deleteBoard(only!.id))), 'a block keeps at least one board');
-  const extra = x.tasks.createBoard(B1, 'Bugs', { kind: 'bug', sources: [], logHours: true });
+  const extra = x.tasks.createBoard(B1, 'Bugs', { kind: 'bug', sources: [] });
   const made = x.tasks.createTask(extra.id, 'Crash on save');
   x.tasks.assign(made.id, ANA);
   x.sync();

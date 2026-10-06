@@ -2,7 +2,7 @@ import { memo, useState, type KeyboardEvent, type PointerEvent } from 'react';
 import { createPortal } from 'react-dom';
 import type { Employee, EmployeeId } from '../../../../shared/protocol.ts';
 import type { Task, TaskStage, TaskTime } from '../../../../shared/tasks.ts';
-import { fmtClock, isRunning, originOf, providerNote, sharesOf, taskMs } from '../../boardView.ts';
+import { fmtClock, fmtHours, isRunning, originOf, providerNote, sharesOf, taskMs } from '../../boardView.ts';
 import { avatarColor, isPo } from '../chat/model.ts';
 import { Alert, Check, Clock, External, OriginTile } from './icons.tsx';
 
@@ -86,6 +86,7 @@ export const Card = memo(function Card({ task, stage, time, now, people, selecte
   const running = isRunning(time);
   const outcome = task.lastOutcome && !running ? task.lastOutcome.outcome : undefined;
   const hoursError = task.hours?.error;
+  const unsent = Object.values(time?.unsent ?? {}).reduce<number>((sum, ms) => sum + (ms ?? 0), 0);
   const providerStatus = providerNote(task, stage);
   return (
     <div
@@ -123,6 +124,7 @@ export const Card = memo(function Card({ task, stage, time, now, people, selecte
         {origin.priority && <span className="tb-chip">{origin.priority}</span>}
         {providerStatus && <span className="tb-chip ghost">{providerStatus}</span>}
         {hoursError && <span className="tb-chip bad" title={hoursError.message}><Alert size={11} />Hours not sent</span>}
+        {unsent > 0 && <span className="tb-chip" data-testid="unsent-chip" title="Worked, and not sent to CronoSpark yet">{fmtHours(unsent)} to send</span>}
       </div>
     </div>
   );

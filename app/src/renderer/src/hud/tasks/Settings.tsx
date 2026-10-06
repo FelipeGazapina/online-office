@@ -10,7 +10,7 @@ const PLACEHOLDER: Record<TaskProvider, string> = { linear: 'Team, project, work
 
 type Props = { board: Board; isLast: boolean; taskCount: number; onClose: () => void };
 
-// Everything about one board, on the board: its name, where its tasks come from, whether hours are sent, and removing it.
+// Everything about one board, on the board: its name, where its tasks come from, and removing it.
 export function Settings({ board, isLast, taskCount, onClose }: Props) {
   const [name, setName] = useState(board.name);
   useEffect(() => setName(board.name), [board.name]);
@@ -82,14 +82,6 @@ export function Settings({ board, isLast, taskCount, onClose }: Props) {
               </div>
               <p className="tb-hint">Linear takes a team, a project, a workspace id or a Linear URL. Prefix an unclear value with <code>team:</code>, <code>project:</code> or <code>workspace:</code>.</p>
             </section>
-
-            <label className="tb-check">
-              <input type="checkbox" checked={board.logHours} onChange={(e) => send({ type: 'update_board', boardId: board.id, logHours: e.target.checked })} />
-              <span>
-                <b>Send hours to CronoSpark</b>
-                <small>Each person's time on a CronoSpark task goes out once per day when the task reaches review or done.</small>
-              </span>
-            </label>
 
             <section className="tb-section">
               <h3>Connections</h3>
