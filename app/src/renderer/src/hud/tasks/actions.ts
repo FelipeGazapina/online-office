@@ -59,7 +59,7 @@ export function createTaskFrom(board: Board, column: TaskStage, draft: Draft, te
 
 export function createBoard(blockId: BlockId, name: string, kind: Board['kind']) {
   pendingBoard = { blockId, name: name.trim(), before: new Set(get().boards.map((b) => b.id)), until: Date.now() + PENDING_MS };
-  send({ type: 'create_board', blockId, name, spec: kind === 'quick' ? { kind } : { kind, sources: [], logHours: true } });
+  send({ type: 'create_board', blockId, name, spec: kind === 'quick' ? { kind } : { kind, sources: [] } });
 }
 
 useStore.subscribe((s, prev) => {

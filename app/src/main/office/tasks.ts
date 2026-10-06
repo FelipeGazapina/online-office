@@ -1,6 +1,7 @@
 // The owner's boards and tasks. State lives in tasks.json beside company.json. A task's time is not kept here: it is
 // folded from the mailroom's ledger every time it is asked for (shared/tasks.ts), so what this file stores about work is
-// the root requests a task started and, for CronoSpark, how much of that time was already sent.
+// the root requests a task started and, for CronoSpark, how much of that time the owner already sent. Hours leave only when
+// the owner asks (sendHours): nothing here sends them on its own.
 //
 // Plain Node: verify/task-check.ts imports it without Electron.
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
@@ -21,8 +22,9 @@ import {
   runRequest,
   sliceTasks,
   syncCards,
-  timesOf,
+  timeFromSlices,
   turnLogOf,
+  unsentOf,
   type Board,
   type BoardId,
   type BoardPatch,
@@ -88,9 +90,8 @@ export class Tasks {
   private readonly host: TasksHost;
   private refreshing = new Map<BoardId, Promise<void>>();
   private refreshAgain = new Set<BoardId>();
-  private pushing: Promise<void> | undefined;
-  private pushAgain = false;
-  private turnEnded = false;
+  // The tasks whose hours are going out right now, so a second ask joins the first instead of sending the same time twice.
+  private readonly sending = new Map<TaskId, Promise<void>>();
   private readonly existed: boolean;
 
   constructor(file: string, host: TasksHost, ledger: readonly LedgerEntry[]) {
@@ -103,7 +104,7 @@ export class Tasks {
   }
 
   // Run once the mailroom is open. Brings the stored state in line with the company: boards for every block (the old
-  // per-block sources become a board the first time), runs a crash left unlinked, and pushes a crash left unconfirmed.
+  // per-block sources become a board the first time), runs a crash left unlinked, and flags an hours entry a crash left unconfirmed.
   recover(blocks: readonly BlockId[], legacy: readonly LegacySources[]) {
     const made = ensureBoards(blocks, this.boards, legacy, () => this.boardId());
     this.boards = made.boards;
@@ -133,12 +134,16 @@ export class Tasks {
   // ── what the renderer sees ──
 
   view(now: number): TasksView {
-    return {
-      boards: this.boards,
-      tasks: this.tasks,
-      boardSync: Object.fromEntries(this.sync) as Record<BoardId, BoardSync>,
-      taskTime: timesOf(this.tasks.filter((t) => t.runs.length), this.log, now),
-    };
+    const worked = this.tasks.filter((t) => t.runs.length);
+    const slices = sliceTasks(this.log, worked, now);
+    const taskTime = {} as Record<TaskId, TaskTime>;
+    for (const t of worked) {
+      const mine = slices.get(t.id) ?? [];
+      const time = timeFromSlices(mine, now);
+      const unsent = t.origin.kind === 'cronospark' ? unsentOf(t, mine) : undefined;
+      taskTime[t.id] = unsent ? { ...time, unsent } : time;
+    }
+    return { boards: this.boards, tasks: this.tasks, boardSync: Object.fromEntries(this.sync) as Record<BoardId, BoardSync>, taskTime };
   }
 
   boardsOf(blockId: BlockId): Board[] {
@@ -180,10 +185,9 @@ export class Tasks {
   // Every ledger entry, in order, as the mailroom writes it.
   observe(entry: LedgerEntry) {
     foldTurn(this.log, entry);
-    if (entry.t === 'turn_end') this.turnEnded = true;
   }
 
-  // Takes in how runs ended, and sends hours a finished turn left behind for a task that is already in review or done.
+  // Takes in how runs ended.
   onMail() {
     const mail = this.host.mail().state;
     let moved = false;
@@ -194,11 +198,7 @@ export class Tasks {
       moved = true;
       return { ...t, ...outcome, updatedAt: this.host.now() };
     });
-    if (moved) {
-      this.save();
-      this.pushHours();
-    } else if (this.turnEnded) this.pushHours();
-    this.turnEnded = false;
+    if (moved) this.save();
   }
 
   // ── boards ──
@@ -220,7 +220,6 @@ export class Tasks {
     this.boards = this.boards.map((b) => (b === board ? made.board : b));
     this.save();
     if (made.board.kind !== 'quick' && board.kind !== 'quick' && JSON.stringify(made.board.sources) !== JSON.stringify(board.sources)) void this.refresh(boardId);
-    if (made.board.kind !== 'quick' && made.board.logHours) this.pushHours();
   }
 
   deleteBoard(boardId: BoardId) {
@@ -278,7 +277,6 @@ export class Tasks {
     if (synced.changed) this.save();
     this.sync.set(boardId, result.errors.length && !result.cards.length ? { kind: 'error', message: result.errors.join(' ') } : { kind: 'ready', lastFetchedAt: this.host.now() });
     this.host.changed();
-    this.pushHours();
   }
 
   // ── tasks ──
@@ -319,7 +317,6 @@ export class Tasks {
       origin = patch.priority === null ? { kind: 'manual' } : { kind: 'manual', priority: patch.priority };
     }
     this.replace({ ...rest, ...(notes ? { notes } : {}), origin, title, stage: patch.stage ?? task.stage, ...(pin ? { stagePinned: true as const } : {}), updatedAt: this.host.now() });
-    if (patch.stage && patch.stage !== task.stage) this.pushHours();
   }
 
   deleteTask(taskId: TaskId) {
@@ -368,44 +365,25 @@ export class Tasks {
 
   // ── hours ──
 
-  // Resolves when every push asked for so far has finished. For tests and shutdown.
-  async idle() {
-    while (this.pushing) await this.pushing;
+  // Sends the closed time of a CronoSpark task that was not sent yet, one call per person and day, whatever its stage. Only the
+  // owner's click gets here. Level-triggered: it looks at the marks, so asking twice sends once, asking while a send is out
+  // joins it, and a call that failed is simply sent by the next ask. Resolves when the send has ended.
+  sendHours(taskId: TaskId): Promise<void> {
+    const task = this.task(taskId);
+    if (task.origin.kind !== 'cronospark') throw new OfficeError('Only a CronoSpark task has hours to send.');
+    const running = this.sending.get(taskId);
+    if (running) return running;
+    const send = this.pushDue(task)
+      .catch((err: unknown) => console.error('Could not send task hours:', err))
+      .finally(() => this.sending.delete(taskId));
+    this.sending.set(taskId, send);
+    return send;
   }
 
-  // Sends what a CronoSpark task on a logging board has not sent yet, once it is in review or done. Level-triggered: it
-  // looks at the marks, not at what changed, so asking twice sends once and a failed push is simply asked again later.
-  pushHours() {
-    if (this.pushing) {
-      this.pushAgain = true;
-      return;
-    }
-    this.pushing = (async () => {
-      try {
-        do {
-          this.pushAgain = false;
-          await this.pushDue();
-        } while (this.pushAgain);
-      } catch (err) {
-        console.error('Could not send task hours:', err);
-      } finally {
-        this.pushing = undefined;
-      }
-    })();
-  }
-
-  private logsHours(t: Task): boolean {
-    const board = this.boards.find((b) => b.id === t.boardId);
-    return t.origin.kind === 'cronospark' && (t.stage === 'review' || t.stage === 'done') && board?.kind !== 'quick' && board?.logHours === true;
-  }
-
-  private async pushDue() {
-    const eligible = this.tasks.filter((t) => this.logsHours(t));
-    const slices = sliceTasks(this.log, eligible, this.host.now());
-    for (const t of eligible) {
-      for (const entry of hoursDue(t, closedDayWork(slices.get(t.id) ?? []))) {
-        if (!(await this.pushOne(t.id, entry))) break;
-      }
+  private async pushDue(task: Task) {
+    const slices = sliceTasks(this.log, [task], this.host.now()).get(task.id) ?? [];
+    for (const entry of hoursDue(task, closedDayWork(slices))) {
+      if (!(await this.pushOne(task.id, entry))) break;
     }
   }
 
@@ -414,7 +392,7 @@ export class Tasks {
     const task = this.tasks.find((t) => t.id === taskId);
     if (!task || task.origin.kind !== 'cronospark') return false;
     const externalId = task.origin.externalId;
-    this.replace({ ...task, hours: { ...moveMark(task.hours, e, 1), inflight: e } }, false);
+    this.replace({ ...task, hours: { ...moveMark(task.hours, e, 1), inflight: e } });
     let failure: string | undefined;
     try {
       await this.host.provider.logHours({ taskId: externalId, hours: e.hours, date: e.date, description: `${this.nameOf(e.employeeId)} (AI employee, Online Office)` });

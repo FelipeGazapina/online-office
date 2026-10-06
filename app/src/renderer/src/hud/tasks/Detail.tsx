@@ -2,7 +2,7 @@ import { useEffect, useState, type KeyboardEvent } from 'react';
 import type { Employee, EmployeeId } from '../../../../shared/protocol.ts';
 import { PRIORITIES, STAGES, type Board, type Priority, type Task, type TaskStage, type TaskTime } from '../../../../shared/tasks.ts';
 import { PRIORITY_LABEL, STAGE_LABEL, fmtAgo, fmtClock, fmtHours, originOf, presenceOf, sharesOf, taskMs } from '../../boardView.ts';
-import { send } from '../../store.ts';
+import { send, useStore } from '../../store.ts';
 import { isPo } from '../chat/model.ts';
 import { moveTask } from './actions.ts';
 import { Avatar } from './Card.tsx';
@@ -31,6 +31,36 @@ function useDraft(saved: string, commit: (value: string) => void, opt: { multili
   return { value: draft, onChange: (e: { target: { value: string } }) => setDraft(e.target.value), onBlur: flush, onKeyDown };
 }
 
+// The only place hours leave the app: what CronoSpark already has, what it does not, and the owner's button.
+function SendHours({ task, time, people }: { task: Task; time: TaskTime | undefined; people: ReadonlyMap<EmployeeId, Employee> }) {
+  const connected = useStore((s) => s.taskConnections.cronospark.kind === 'ready');
+  const sent = Object.entries(task.hours?.pushed ?? {})
+    .map(([who, days]) => [who as EmployeeId, Object.values(days ?? {}).reduce<number>((sum, ms) => sum + (ms ?? 0), 0)] as [EmployeeId, number])
+    .filter(([, ms]) => ms > 0);
+  const unsent = (Object.entries(time?.unsent ?? {}) as [EmployeeId, number][]).filter(([, ms]) => ms > 0);
+  const sending = !!task.hours?.inflight;
+  const reason = sending
+    ? undefined
+    : !connected
+      ? 'CronoSpark is not connected. Connect it in the board settings.'
+      : unsent.length
+        ? undefined
+        : time?.running.length
+          ? 'Time that is still running can be sent once the turn ends.'
+          : 'Nothing to send yet.';
+  const list = (rows: [EmployeeId, number][]) => rows.map(([who, ms]) => `${people.get(who)?.name ?? 'Former employee'} ${fmtHours(ms)}`).join(', ');
+  return (
+    <div className="tb-send" data-testid="task-send-hours">
+      <p className="tb-hint" data-testid="hours-sent">{sent.length ? `Sent to CronoSpark: ${list(sent)}.` : 'Nothing sent to CronoSpark yet.'}</p>
+      {unsent.length > 0 && <p className="tb-hint" data-testid="hours-unsent">Not sent yet: {list(unsent)}.</p>}
+      <button type="button" className={`tb-btn ${reason || sending ? '' : 'primary'}`} data-testid="send-hours" disabled={!!reason || sending} onClick={() => send({ type: 'send_hours', taskId: task.id })}>
+        {sending ? 'Sending…' : 'Send hours to CronoSpark'}
+      </button>
+      {reason && <p className="tb-hint" data-testid="send-hours-reason">{reason}</p>}
+    </div>
+  );
+}
+
 const RUN_WORD = { done: 'finished', blocked: 'is blocked', failed: 'failed', declined: 'was declined', cancelled: 'was cancelled' } as const;
 
 type Props = {
@@ -54,12 +84,6 @@ export function Detail({ task, board, blockPeople, people, time, stage, now, onC
   const shares = sharesOf(time, now);
   const total = taskMs(time, now);
   const top = shares[0]?.ms || 1;
-  const sentMs: [EmployeeId, number][] = [];
-  for (const [who, days] of Object.entries(task.hours?.pushed ?? {})) {
-    let ms = 0;
-    for (const v of Object.values(days ?? {})) ms += v ?? 0;
-    if (ms > 0) sentMs.push([who as EmployeeId, ms]);
-  }
   const outcome = task.lastOutcome;
 
   return (
@@ -174,13 +198,7 @@ export function Detail({ task, board, blockPeople, people, time, stage, now, onC
               ))}
             </ul>
           )}
-          {task.origin.kind === 'cronospark' && board.kind !== 'quick' && board.logHours && (
-            <p className="tb-hint">
-              {sentMs.length
-                ? `Sent to CronoSpark: ${sentMs.map(([who, ms]) => `${people.get(who)?.name ?? 'Former employee'} ${fmtHours(ms)}`).join(', ')}.`
-                : 'Each person\'s hours go to CronoSpark once per day when the task reaches review or done.'}
-            </p>
-          )}
+          {task.origin.kind === 'cronospark' && <SendHours task={task} time={time} people={people} />}
           {task.hours?.error && (
             <p className="tb-note bad">
               <Alert size={13} /> {task.hours.error.message}

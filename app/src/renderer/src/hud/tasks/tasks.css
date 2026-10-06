@@ -267,10 +267,7 @@ body.tb-carrying-away .hud-resize-handle, body.tb-carrying-away .hud-move-handle
 .tb-source { display: grid; grid-template-columns: 1fr auto; gap: 6px; padding: 10px; border: 1px solid var(--tb-line); border-radius: 11px; background: #fff; }
 .tb-source select { padding-left: 10px; width: 100%; }
 .tb-source .tb-input { grid-column: 1 / -1; height: 32px; }
-.tb-check { display: flex; gap: 10px; align-items: flex-start; padding: 10px 12px; border: 1px solid var(--tb-line); border-radius: 11px; background: #fff; cursor: pointer; }
-.tb-check input { margin-top: 3px; accent-color: var(--brand); }
-.tb-check span { display: grid; gap: 2px; }
-.tb-check small { color: var(--muted); font-size: 12px; line-height: 1.4; }
+.tb-send { display: grid; gap: 6px; justify-items: start; margin-top: 4px; }
 .tb-settings .task-connections { margin-bottom: 10px; }
 .tb-settings .task-connection { min-width: 0; width: 100%; grid-template-columns: auto auto 1fr auto; }
 .tb-settings .task-credentials { grid-template-columns: 1fr; margin: 0; }

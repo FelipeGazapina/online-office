@@ -254,6 +254,9 @@ export type ClientMessage =
   | { type: 'delete_task'; taskId: TaskId }
   // `employeeId` is the block's PO or any employee of the block. Posts one root request to them, so they start at once.
   | { type: 'assign_task'; taskId: TaskId; employeeId: EmployeeId }
+  // Sends the time a CronoSpark task has worked and not sent yet: closed time only, one hours entry per person and day, and the
+  // same time never twice. This is the only way hours leave the app.
+  | { type: 'send_hours'; taskId: TaskId }
   // `always` counts only on a permission card, and only when `text` allows it. The office then adds a rule for that
   // employee that covers the same command or tool from now on.
   | { type: 'answer'; employeeId: EmployeeId; questionId: QuestionId; text: string; always?: boolean }
