@@ -34,6 +34,7 @@
 .tb-head-actions { display: flex; align-items: center; gap: 8px; flex: none; }
 
 .tb-tip { color: #9a9bb0; font-size: 12px; font-weight: 500; white-space: nowrap; }
+@media (max-width: 1180px) { .tb-tip { display: none; } }
 .tb-sync { display: inline-flex; align-items: center; gap: 5px; margin-right: 4px; color: var(--muted); font-size: 12px; font-weight: 600; white-space: nowrap; }
 .tb-sync.error { color: #a5262b; }
 .tb-sync.loading { color: var(--brand); }

@@ -5,9 +5,9 @@ import { Edges, Html } from '@react-three/drei';
 import { useFrame } from '@react-three/fiber';
 import { useRef } from 'react';
 import { DoubleSide, type MeshBasicMaterial } from 'three';
-import { ITEM_DEFS, STORY_H, rotateLocal } from '../../../shared/space/index.ts';
+import { ITEM_DEFS, STORY_H, rotateLocal, type Item } from '../../../shared/space/index.ts';
 import { itemRect } from '../../../shared/space/geom.ts';
-import { labelOf, toneOf, type Tone } from '../deskDrop.ts';
+import { labelOf, toneOf, type Aim, type Tone } from '../deskDrop.ts';
 import { useStore } from '../store.ts';
 
 const COLOR: Record<Tone, string> = { go: '#2fe06a', stop: '#ff4d4d', same: '#ffb340' };
@@ -16,13 +16,16 @@ const MARGIN = 0.14;
 export function DeskAim() {
   const aim = useStore((s) => s.aim);
   const building = useStore((s) => s.building);
+  const item = aim && building?.stories[aim.story]?.items.find((i) => i.id === aim.deskId);
+  return aim && item ? <Lit aim={aim} item={item} /> : null;
+}
+
+function Lit({ aim, item }: { aim: Aim; item: Item }) {
   const plate = useRef<MeshBasicMaterial>(null);
   useFrame((state) => {
     if (plate.current) plate.current.opacity = 0.42 + Math.sin(state.clock.elapsedTime * 6) * 0.1;
   });
-  const item = aim && building?.stories[aim.story]?.items.find((i) => i.id === aim.deskId);
-  const def = item && ITEM_DEFS[item.def];
-  if (!aim || !item || !def) return null;
+  const def = ITEM_DEFS[item.def]!;
   const r = itemRect(item, def);
   const w = (r.x1 - r.x0) / 2 + MARGIN;
   const d = (r.z1 - r.z0) / 2 + MARGIN;
