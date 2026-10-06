@@ -161,18 +161,20 @@ export default async (s) => {
   await s.waitFor(`[...document.querySelectorAll('.thread .msg.employee')].some((m) => /pineapple/i.test(m.innerText))`, 120000);
   assert((await thread(s, 'employee')).some((t) => /pineapple/i.test(t)), `${name}'s reply shows in the transcript`);
   // Talk goes through the mailroom (work-final.md, "talk through the mailroom"). The boss's chat line to an idle employee
-  // is a work request in the ledger, delivered as the turn prompt, and settled by the employee's reply. "Boss said:" is
-  // only logged when steering a busy employee.
+  // is a request in the ledger, delivered as the turn prompt, and settled by the employee's reply. "Boss said:" is only
+  // logged when steering a busy employee. A line that asks for words and no file is a question: it is posted as help and
+  // settles done with the answer where a work order that changed no file settles blocked (mail-check.ts).
   const claudeId = await s.eval(`${claude}.id`);
   const tail = JSON.parse(await s.eval(`JSON.stringify(__office.store.getState().mail.tail)`));
   const sent = tail.find((m) => m.kind === 'request' && m.from === 'owner' && m.to === claudeId && m.text === message);
   assert(sent, 'the message reached the real employee through the mailroom as a request from the owner');
-  // The reply shows in the thread while the turn is still running. The ledger settles the request later, and a work request
-  // that left no file changed cannot settle done (mail-check.ts, 76ce7f9): it settles blocked with the answer, either by the
-  // turn end or by the employee's own blocked reply, whichever the model does.
-  const settled = `__office.store.getState().mail.tail.some((m) => m.kind === 'reply' && m.requestId === ${JSON.stringify(sent.id)} && m.outcome === 'blocked' && /pineapple/i.test(m.text))`;
+  // The model sorts the line as a question, or does not answer in time on a loaded machine and the line stays work. Either
+  // way the settle has to follow the rule for its kind, and the answer is the reply text.
+  const outcome = sent.intent === 'help' ? 'done' : 'blocked';
+  console.log(`posted as ${sent.intent}, so the ledger must settle it ${outcome}`);
+  const settled = `__office.store.getState().mail.tail.some((m) => m.kind === 'reply' && m.requestId === ${JSON.stringify(sent.id)} && m.outcome === '${outcome}' && /pineapple/i.test(m.text))`;
   await s.waitFor(settled, 60000);
-  assert(await s.eval(settled), 'and the ledger settled it with the answer, blocked because no file changed');
+  assert(await s.eval(settled), `and the ledger settled it ${outcome} with the answer, because it was posted as ${sent.intent} and no file changed`);
   await s.shot('n1-chat');
 };
 
