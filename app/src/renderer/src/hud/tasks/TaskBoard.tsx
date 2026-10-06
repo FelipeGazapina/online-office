@@ -5,7 +5,6 @@ import type { Board, BoardSync, Task, TaskId, TaskStage } from '../../../../shar
 import { STAGE_LABEL, boardFor, boardsOf, columnsOf, fmtAgo, fmtClock, isRunning, peopleOf, stageOf, stageStep, statsOf, type Column } from '../../boardView.ts';
 import { send, set, useStore } from '../../store.ts';
 import { useNow } from '../hooks.ts';
-import { actionOf, toneOf } from '../../deskDrop.ts';
 import { dropOnDesk, moveTask, openBoard, pickBoard } from './actions.ts';
 import { Card } from './Card.tsx';
 import { Composer } from './Composer.tsx';
@@ -14,7 +13,8 @@ import { useCardDrag } from './drag.ts';
 import { Alert, Close, Plus, Sliders, StageIcon, Sync, Whiteboard } from './icons.tsx';
 import { Settings } from './Settings.tsx';
 import { BoardTabs } from './Tabs.tsx';
-import { CarryTray } from './Tray.tsx';
+import { CarryTray, RestTray } from './Tray.tsx';
+import { barOf } from '../../carry.ts';
 import './tasks.css';
 
 const close = () => set({ modal: null });
@@ -98,6 +98,7 @@ export function TaskBoardModal({ blockId }: { blockId: BlockId }) {
   const connections = useStore((s) => s.taskConnections);
   const aim = useStore((s) => s.aim);
   const root = useRef<HTMLDivElement>(null);
+  const strip = useRef<HTMLDivElement>(null);
   const [composing, setComposing] = useState<TaskStage | null>(null);
 
   const block = company?.blocks.find((b) => b.id === blockId);
@@ -114,6 +115,9 @@ export function TaskBoardModal({ blockId }: { blockId: BlockId }) {
   const columns = useMemo(() => columnsOf(boardTasks, holds, Date.now()), [boardTasks, holds]);
   const sync = board ? syncs[board.id] : undefined;
 
+  // After a card goes to a desk the board stays folded as a tray of what is left to hand out, so the owner can take the next
+  // card without opening the board again. Opening the board from anywhere (the Tasks chip, the tray's button) unfolds it.
+  const tray = modal?.kind === 'task_board' && modal.tray === true;
   const selected = modal?.kind === 'task_board' ? boardTasks.find((t) => t.id === modal.taskId) : undefined;
   const settings = modal?.kind === 'task_board' && modal.settings === true && !!board;
   const stats = statsOf(boardTasks, times, now);
@@ -124,8 +128,8 @@ export function TaskBoardModal({ blockId }: { blockId: BlockId }) {
     if (wanted && wanted.boardId !== board?.id && blockTaskIds.has(wanted.boardId)) pickBoard(blockId, wanted.boardId);
   }, [wanted?.id, wanted?.boardId]);
   useEffect(() => {
-    root.current?.focus({ preventScroll: true });
-  }, []);
+    if (!tray) root.current?.focus({ preventScroll: true });
+  }, [tray]);
   useEffect(() => setComposing(null), [board?.id]);
   const docked = !!selected || settings;
   // Escape leaves the dock first, then the board, wherever focus is. A button that disables itself on click leaves focus on
@@ -145,16 +149,22 @@ export function TaskBoardModal({ blockId }: { blockId: BlockId }) {
   const open = useCallback((task: Task) => dock({ taskId: task.id }), [dock]);
   const { drag, press, ghostRef, wasDragged } = useCardDrag({
     blockId,
-    home: () => root.current?.querySelector('[data-testid=task-board-columns]'),
+    home: () => (tray ? strip.current : root.current?.querySelector('[data-testid=task-board-columns]')),
     onStage: moveTask,
     onDesk: dropOnDesk,
   });
   // A card taken out of the columns folds the board away so the office shows. The dialog's own grips go with it.
   const away = !!drag?.away;
+  const folded = away || tray;
   useEffect(() => {
-    document.body.classList.toggle('tb-carrying-away', away);
+    document.body.classList.toggle('tb-carrying-away', folded);
     return () => document.body.classList.remove('tb-carrying-away');
-  }, [away]);
+  }, [folded]);
+  const todo = useMemo(() => columns.find((c) => c.stage === 'todo')?.tasks ?? [], [columns]);
+  // Nothing left to hand out: the tray has done its job.
+  useEffect(() => {
+    if (tray && !drag && !todo.length) close();
+  }, [tray, drag, todo.length]);
 
   const focusCard = (id: string | undefined) => requestAnimationFrame(() => root.current?.querySelector<HTMLElement>(`[data-task-id="${id}"]`)?.focus());
   const onCardKey = useCallback(
@@ -206,7 +216,55 @@ export function TaskBoardModal({ blockId }: { blockId: BlockId }) {
     );
   const empty = board.kind !== 'quick' && board.sources.length === 0;
   const stageCounts = Object.fromEntries(columns.map((c) => [c.stage, c.tasks.length])) as Record<TaskStage, number>;
+  const bar = barOf(aim, drag?.over ?? null, drag?.from ?? 'todo');
   const linearWithoutLogin = board.kind !== 'quick' && board.sources.some((s) => s.provider === 'linear') && connections.linear.kind !== 'ready';
+
+  const carried = (
+    <>
+      {drag &&
+        createPortal(
+          <div className={`tb-ghost ${away ? 'away' : ''}`} ref={ghostRef} style={{ width: drag.width, ['--gx' as string]: `${drag.grabX}px`, ['--gy' as string]: `${drag.grabY}px` }} onMouseDown={(e) => e.stopPropagation()}>
+            <div className="tb-ghost-in">
+              <Card task={drag.task} stage={drag.from} time={times[drag.task.id]} now={now} people={people} selected={false} dragging={false} ghost onOpen={open} onPress={press} onKey={onCardKey} wasDragged={wasDragged} />
+            </div>
+            {away && (
+              <div className={`tb-ghost-aim ${bar.tone}`} data-testid="ghost-aim">
+                {bar.chip}
+              </div>
+            )}
+          </div>,
+          document.body,
+        )}
+      {drag?.away
+        ? createPortal(<CarryTray bar={bar} from={drag.from} over={drag.over} counts={stageCounts} />, document.body)
+        : tray &&
+          createPortal(
+            <RestTray
+              stripRef={strip}
+              board={board}
+              cards={todo}
+              times={times}
+              people={people}
+              now={now}
+              dragging={drag?.task.id ?? null}
+              press={press}
+              wasDragged={wasDragged}
+              onOpen={open}
+              onBoard={() => dock({})}
+              onClose={close}
+            />,
+            document.body,
+          )}
+    </>
+  );
+
+  // Folded as a tray, the board is not drawn at all: only the cards still waiting and the way back.
+  if (tray)
+    return (
+      <div className="scrim tb-away" onMouseDown={close}>
+        {carried}
+      </div>
+    );
 
   return (
     <div className={`scrim ${away ? 'tb-away' : ''}`} onMouseDown={close}>
@@ -310,21 +368,7 @@ export function TaskBoardModal({ blockId }: { blockId: BlockId }) {
           ) : null}
         </div>
       </div>
-      {drag &&
-        createPortal(
-          <div className={`tb-ghost ${away ? 'away' : ''}`} ref={ghostRef} style={{ width: drag.width, ['--gx' as string]: `${drag.grabX}px`, ['--gy' as string]: `${drag.grabY}px` }} onMouseDown={(e) => e.stopPropagation()}>
-            <div className="tb-ghost-in">
-              <Card task={drag.task} stage={drag.from} time={times[drag.task.id]} now={now} people={people} selected={false} dragging={false} ghost onOpen={open} onPress={press} onKey={onCardKey} wasDragged={wasDragged} />
-            </div>
-            {away && (
-              <div className={`tb-ghost-aim ${aim ? toneOf(aim.verdict) : 'idle'}`} data-testid="ghost-aim" style={{ left: drag.grabX + 12, top: drag.grabY + 12 + drag.height * 0.58 + 6 }}>
-                {aim ? actionOf(aim.verdict) : 'Hold it over a desk'}
-              </div>
-            )}
-          </div>,
-          document.body,
-        )}
-      {drag?.away && createPortal(<CarryTray from={drag.from} over={drag.over} counts={stageCounts} />, document.body)}
+      {carried}
     </div>
   );
 }

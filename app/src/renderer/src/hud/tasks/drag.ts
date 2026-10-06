@@ -4,18 +4,21 @@
 //
 // A card moves between the board's columns, or leaves them. Once it is outside the columns it is `away`: the board folds out
 // of the way, the office shows, and the desk the pointer is over is the drop target (`aim`, kept in the store for the scene).
-// The stage chips of the tray stay drop targets too, so a card taken out can still go to a column.
+// The stage chips of the tray stay drop targets too, so a card taken out can still go to a column. While it is away the card
+// hangs off the pointer wherever it covers no name tag (`hang.ts`).
 import { useCallback, useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
 import type { BlockId } from '../../../../shared/protocol.ts';
 import { STAGES, type Task, type TaskStage } from '../../../../shared/tasks.ts';
 import type { Aim } from '../../deskDrop.ts';
 import { get } from '../../store.ts';
+import type { Point } from '../../carry.ts';
 import { aimAt, setAim } from './aim.ts';
+import { hang } from './hang.ts';
 
 // A press that moves less than this is a click.
 const THRESHOLD_PX = 5;
 
-export type Drag = { task: Task; from: TaskStage; over: TaskStage | null; away: boolean; width: number; height: number; grabX: number; grabY: number; x: number; y: number };
+export type Drag = { task: Task; from: TaskStage; over: TaskStage | null; away: boolean; width: number; grabX: number; grabY: number; x: number; y: number };
 
 export type Drops = {
   // The block the task belongs to: a desk of any other block refuses it.
@@ -38,6 +41,21 @@ export function useCardDrag(drops: Drops) {
   // The click that follows a drag's release must not open the card.
   const dragged = useRef(false);
 
+  // Out in the office the tags can move under a still pointer (people walk, a label fades in), so this runs every frame.
+  const away = !!drag?.away;
+  useEffect(() => {
+    if (!away) return;
+    let raf = 0;
+    let hung: Point | null = null;
+    const tick = () => {
+      const { ghost, drag: d } = live.current;
+      if (ghost && d) hung = hang(ghost, { x: d.x, y: d.y }, hung);
+      raf = requestAnimationFrame(tick);
+    };
+    tick();
+    return () => cancelAnimationFrame(raf);
+  }, [away]);
+
   const stop = useCallback(() => {
     live.current.armed = null;
     live.current.drag = null;
@@ -52,7 +70,7 @@ export function useCardDrag(drops: Drops) {
       if (s.armed && !s.drag) {
         if (Math.hypot(e.clientX - s.armed.x, e.clientY - s.armed.y) < THRESHOLD_PX) return;
         const { rect, task, from } = s.armed;
-        s.drag = { task, from, over: from, away: false, width: rect.width, height: rect.height, grabX: s.armed.x - rect.left, grabY: s.armed.y - rect.top, x: e.clientX, y: e.clientY };
+        s.drag = { task, from, over: from, away: false, width: rect.width, grabX: s.armed.x - rect.left, grabY: s.armed.y - rect.top, x: e.clientX, y: e.clientY };
         document.body.style.cursor = 'grabbing';
         setDrag(s.drag);
       }

@@ -1,15 +1,18 @@
-// Pictures of a task card held over a desk, over an empty desk, and of the hire panel that dropping it there opens, at
-// 1440x900, for the Sims 4 placement comparison. Real hires and real mouse events, but no agent runs: nobody is assigned.
-// Writes carry.png, empty.png and hire.png to OFFICE_SHOTS_DIR (default: the game program's shots/t3 folder).
+// Pictures of a task card held over a desk, over an empty desk, of the hire panel that dropping it there opens, and of the
+// board folded to a tray after a card went to Ana, at 1440x900, for the Sims 4 placement comparison. Real hires and real mouse
+// events. Only the last drop starts an agent run (Ana, on haiku). Each picture of the card in hand is also checked: the card
+// and its line cover no name tag. Writes carry.png, empty.png, hire.png and tray.png to OFFICE_SHOTS_DIR (default: the
+// game program's shots/t5 folder).
 // Run: pnpm build:verify && OFFICE_OUT_DIR=out/verify OFFICE_CDP_PORT=9342 node verify/cdp.mjs verify/shots-drag-desk.mjs
 import { copyFileSync, mkdirSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import { assert, scratch } from './lib.mjs';
+import { carryClearance } from './carry-rects.mjs';
+import { HAIKU, assert, scratch } from './lib.mjs';
 
 const { dataDir, repo } = scratch();
-const OUT = process.env.OFFICE_SHOTS_DIR ?? join(homedir(), '.claude/orchestrate/online-office-game/shots/t3');
-export const env = { OFFICE_DATA_DIR: dataDir, OFFICE_START_LEVEL: '5' };
+const OUT = process.env.OFFICE_SHOTS_DIR ?? join(homedir(), '.claude/orchestrate/online-office-game/shots/t5');
+export const env = { OFFICE_DATA_DIR: dataDir, OFFICE_START_LEVEL: '5', OFFICE_CLAUDE_MODEL: HAIKU };
 const state = '__office.store.getState()';
 
 export default async (s) => {
@@ -60,13 +63,35 @@ export default async (s) => {
     await s.sleep(500);
     return p;
   };
-  await hover(ana, `${state}.aim?.verdict.kind === 'assign'`);
+  const clear = async (name, p) => {
+    const c = await carryClearance(s, p);
+    assert(c.covered.length === 0 && c.tags >= 3, `${name}: the card and its line cover none of ${c.tags} name tags, ${c.away} px from the pointer${c.covered.length ? ` (covers ${c.covered.join(' | ')})` : ''}`);
+  };
+  const onAna = await hover(ana, `${state}.aim?.verdict.kind === 'assign'`);
+  await clear('carry', onAna);
   await save('carry');
   const at = await hover(empty, `${state}.aim?.verdict.kind === 'hire'`);
+  await clear('empty', at);
   await save('empty');
   await s.mouse('mouseReleased', at.x, at.y);
   await s.waitFor("!!document.querySelector('[data-testid=hire-for]')");
   await s.sleep(600);
   await save('hire');
   assert(await s.eval("document.querySelector('[data-testid=hire-for-desk]').innerText === 'Desk 6'"), 'the hire panel is the one for the empty desk');
+  await s.clickOn('.modal .btn', 'Cancel');
+  await s.waitFor("!!document.querySelector('[data-testid=task-board]')");
+  await s.sleep(300);
+  const again = await s.center('.tb-card', 'Add CSV export');
+  await s.mouse('mouseMoved', again.x, again.y);
+  await s.mouse('mousePressed', again.x, again.y, 1);
+  await s.mouse('mouseMoved', again.x + 8, again.y - 12, 1);
+  for (let i = 1; i <= 8; i++) await s.mouse('mouseMoved', again.x + 8, again.y - 12 - (i * (again.y - 12 - 60)) / 8, 1);
+  await s.waitFor("!!document.querySelector('.scrim.tb-away')");
+  const home = await hover(ana, `${state}.aim?.verdict.kind === 'assign'`);
+  await s.mouse('mouseReleased', home.x, home.y);
+  await s.waitFor("!!document.querySelector('[data-testid=task-tray]') && !document.querySelector('[data-testid=carry-tray]')");
+  await s.mouse('mouseMoved', 720, 300);
+  await s.sleep(1200);
+  assert(await s.eval("document.querySelectorAll('[data-testid=task-tray] .tb-card').length === 2"), 'the tray holds the two cards still waiting');
+  await save('tray');
 };

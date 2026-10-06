@@ -36,7 +36,7 @@ export const LANGS: Record<Lang, { stt: Language; tts: 'en-US' | 'pt-BR' }> = {
 // A hire opened by dropping a task on an empty desk: the block and the desk are the owner's choice already, the desk says the
 // role, and the new hire starts the task.
 export type HireFor = { taskId: TaskId; blockId: BlockId; deskId: ItemId; role: EmployeeRole };
-export type Modal = null | { kind: 'hire'; bypassLimit?: boolean; for?: HireFor } | { kind: 'block' } | { kind: 'whiteboard'; blockId: BlockId } | { kind: 'github'; blockId: BlockId } | { kind: 'github_setup'; blockId: BlockId } | { kind: 'task_board'; blockId: BlockId; taskId?: TaskId; settings?: boolean } | { kind: 'linear_board'; blockId: BlockId };
+export type Modal = null | { kind: 'hire'; bypassLimit?: boolean; for?: HireFor } | { kind: 'block' } | { kind: 'whiteboard'; blockId: BlockId } | { kind: 'github'; blockId: BlockId } | { kind: 'github_setup'; blockId: BlockId } | { kind: 'task_board'; blockId: BlockId; taskId?: TaskId; settings?: boolean; tray?: true } | { kind: 'linear_board'; blockId: BlockId };
 
 // Where dismissing a dialog goes: out of the way, except a hire that a dropped card opened, which goes back to the board the
 // card came from.
