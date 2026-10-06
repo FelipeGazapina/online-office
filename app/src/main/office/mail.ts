@@ -267,6 +267,13 @@ export type GauntletStep =
   | { act: 'review'; artifact: string[] }
   | { act: 'settle'; outcome: Outcome; text: string; artifact?: string[] };
 
+// A critic whose turn ends without calling reply has only its final text. Read the verdict off it: a pass is the word PASS
+// with no FAIL beside it. Anything else is a fail with the text as the finding, as before.
+export const verdictFromText = (text: string): Verdict => {
+  const pass = /\bpass(ed|es)?\b/i.test(text) && !/\bfail(ed|s|ure)?\b/i.test(text);
+  return { pass, findings: pass ? [] : [text] };
+};
+
 export const gauntletNext = (s: MailState, gid: MessageId): GauntletStep | null => {
   const g = s.messages.get(gid);
   if (!g || g.kind !== 'request' || !g.gauntlet || !s.unsettled.has(gid)) return null;
@@ -591,7 +598,9 @@ export class Mailroom {
     this.append({ t: 'turn_end', turn, at: this.ports.now() });
     for (const id of settleAtTurnEnd(this.state, turn, ok)) {
       const req = this.state.messages.get(id)!;
-      this.settleWith(req, who, ok ? { outcome: 'done', text: finalText.trim() || 'Done.', auto: true } : { outcome: 'failed', text: finalText.trim() || 'The turn failed.', auto: true });
+      const text = finalText.trim() || 'Done.';
+      const verdict = req.kind === 'request' && req.intent === 'review' ? { verdict: verdictFromText(text) } : {};
+      this.settleWith(req, who, ok ? { outcome: 'done', text, ...verdict, auto: true } : { outcome: 'failed', text: finalText.trim() || 'The turn failed.', auto: true });
     }
     this.pump(who);
   }

@@ -125,6 +125,16 @@ console.log('\n# delegation and settling');
   check(!bare.ok && bare.reason === 'verdict_required' && life(rv, g1) === 'running', 'a review reply without a verdict is refused and the gauntlet keeps running');
   check(rv.room.reply(BRUNO, reviewId, { outcome: 'done', text: 'ok', verdict: { pass: true, findings: [] } }).ok && replyTo(rv, g1)?.outcome === 'done', 'the same review with a verdict passes the gauntlet');
 
+  const auto = world();
+  const ag = posted(auto.room.requestGauntlet(PO, { piece: 'build it', bar: ['it works'], builder: 'Ana', critic: 'Bruno' })).id;
+  auto.room.turnEnded(ANA, 'built', true);
+  auto.room.turnEnded(BRUNO, '**Verdict: PASS**', true);
+  check(replyTo(auto, ag)?.outcome === 'done', 'a critic whose turn ends with a bare PASS passes the gauntlet');
+  const af = posted(auto.room.requestGauntlet(PO, { piece: 'again', bar: ['it works'], builder: 'Ana', critic: 'Bruno' })).id;
+  auto.room.turnEnded(ANA, 'built', true);
+  auto.room.turnEnded(BRUNO, 'FAIL: the button does not download. Not a pass.', true);
+  check(!replyTo(auto, af) && /Round 2/.test(lastPrompt(auto, ANA)), 'a critic text with FAIL in it sends the builder round again');
+
   const e = world();
   const r = ids(e.room.post(owner('ana', 'crash')));
   e.room.turnEnded(ANA, 'boom', false);

@@ -101,7 +101,12 @@ async function chatShot(s, id, name) {
   await s.eval(`__office.set({ selectedId: ${JSON.stringify(id)} })`);
   await s.waitFor(`!!document.querySelector('aside.drawer .thread')`, 5000).catch(() => console.log(`no chat panel for ${name}`));
   await s.sleep(300);
-  copyShot(await s.shot(name), name);
+  // Other runs on this machine clear /tmp/office-shots, so recreate it and take the picture again if it vanished.
+  const take = () => {
+    mkdirSync('/tmp/office-shots', { recursive: true });
+    return s.shot(name).then((p) => (copyShot(p, name), true), () => false);
+  };
+  if (!(await take()) && !(await take())) console.log(`could not save ${name}`);
 }
 
 function copyShot(from, name) {
@@ -176,7 +181,9 @@ export default async (s) => {
   const reviewOk = reviews.length > 0 && reviews.every((r) => !builders.has(r.to) && (r.bar?.length ?? 0) > 0 && !msgs.some((b) => b.kind === 'reply' && b.text.length > 40 && r.text.includes(b.text)) && /^Judge the artifact against the bar\. You see no description/.test(r.text));
   const verdicts = msgs.filter((m) => m.kind === 'reply' && m.verdict && reviews.some((r) => r.id === m.requestId));
   console.log(`gauntlets ${gauntlets.length}, rounds (review requests) ${reviews.length}, verdicts: ${verdicts.map((v) => `${names(v.from)}:${v.verdict.pass ? 'pass' : 'fail'}`).join(', ') || 'none'}`);
-  check(gauntlets.length >= 1 && reviewOk, 'a requestGauntlet ran with a critic different from the builder, the review prompt carries the bar and no builder prose');
+  const gauntletOutcomes = gauntlets.map((g) => msgs.find((m) => m.kind === 'reply' && m.requestId === g.id)?.outcome);
+  console.log(`gauntlet outcomes: ${gauntletOutcomes.join(', ')}`);
+  check(gauntlets.length >= 1 && reviewOk && gauntletOutcomes.every((o) => o === 'done'), 'a requestGauntlet passed with a critic different from the builder, the review prompt carries the bar and no builder prose');
 
   const finalReply = msgs.filter((m) => m.kind === 'reply' && m.to === 'owner' && m.requestId === rootId).at(-1);
   const lastOther = Math.max(...msgs.filter((m) => m.kind === 'reply' && m !== finalReply).map((m) => m.at));
@@ -192,7 +199,9 @@ export default async (s) => {
   }
   const slugOk = existsSync(join(repo, 'src/slug.js')) && existsSync(join(repo, 'test/slug.test.js'));
   check(testsOk && slugOk, 'node --test passes in the repo with src/slug.js and test/slug.test.js');
-  check(/^#{1,6}\s.*slugify/im.test(readFileSync(join(repo, 'README.md'), 'utf8')), 'README.md has a slugify section');
+  const readme = readFileSync(join(repo, 'README.md'), 'utf8');
+  check(/^#{1,6}\s.*slugify/im.test(readme), 'README.md has a slugify section');
+  console.log(`README headings: ${readme.split('\n').filter((l) => l.startsWith('#')).join(' | ')}`);
   await chatShot(s, po.id, 'g1-chat-after');
   const thread1 = await s.eval(`[...document.querySelectorAll('.thread .msg')].map((m) => m.innerText.replace(/\\n+/g, ' ')).join('\\n')`);
 
