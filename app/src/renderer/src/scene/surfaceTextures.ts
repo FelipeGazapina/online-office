@@ -1,4 +1,5 @@
-import { LinearFilter, LinearMipmapLinearFilter, NoColorSpace, RepeatWrapping, SRGBColorSpace, TextureLoader, type Texture } from 'three';
+import { LinearFilter, LinearMipmapLinearFilter, RepeatWrapping, type Texture } from 'three';
+import { bitmapTexture } from './bitmapTexture.ts';
 import carpetDiff from '../assets/textures/carpet/diff.jpg';
 import carpetArm from '../assets/textures/carpet/arm.jpg';
 import carpetNor from '../assets/textures/carpet/nor.jpg';
@@ -19,11 +20,8 @@ import woodNor from '../assets/textures/wood/nor.jpg';
 // normal map and an "ARM" map: ambient occlusion in red, roughness in green. The same ARM texture feeds aoMap and roughnessMap.
 export type Surface = { map: Texture; normalMap: Texture; armMap: Texture };
 
-const loader = new TextureLoader();
-
 const load = (url: string, srgb: boolean, repeat: number): Texture => {
-  const t = loader.load(url);
-  t.colorSpace = srgb ? SRGBColorSpace : NoColorSpace;
+  const t = bitmapTexture(url, { srgb, flipY: true });
   t.wrapS = t.wrapT = RepeatWrapping;
   t.repeat.set(repeat, repeat);
   t.anisotropy = 8;

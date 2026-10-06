@@ -1,5 +1,6 @@
-import { MeshStandardMaterial, NoColorSpace, SRGBColorSpace, TextureLoader, type BufferGeometry, type Mesh, type Texture } from 'three';
+import { MeshStandardMaterial, type BufferGeometry, type Mesh, type Texture } from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+import { bitmapTexture, readFile } from './bitmapTexture.ts';
 import { showAo } from './shading.ts';
 
 // Hero props baked from CC0 models (see assets/bake/bake-props.mjs and app/assets-LICENSES.md): each is one mesh with one material,
@@ -19,18 +20,6 @@ const GAIN: Partial<Record<PropName, number>> = { desk: 1.6, sofa: 1.2, bookshel
 export type Prop = { geometry: BufferGeometry; material: MeshStandardMaterial };
 
 const loaded = new Map<PropName, Prop>();
-const textures = new TextureLoader();
-
-/** A packaged page loads from file://, where fetch refuses file URLs but XMLHttpRequest reads them. */
-const read = (url: string) =>
-  new Promise<ArrayBuffer>((resolve, reject) => {
-    const x = new XMLHttpRequest();
-    x.open('GET', url);
-    x.responseType = 'arraybuffer';
-    x.onload = () => (x.response ? resolve(x.response as ArrayBuffer) : reject(new Error(`Empty model ${url}`)));
-    x.onerror = () => reject(new Error(`Could not read model ${url}`));
-    x.send();
-  });
 
 const parse = (buffer: ArrayBuffer) =>
   new Promise<Mesh>((resolve, reject) =>
@@ -48,17 +37,15 @@ const parse = (buffer: ArrayBuffer) =>
     ),
   );
 
-// glTF UVs run from the top, so a texture read by TextureLoader must not be flipped.
+// glTF UVs run from the top, so these textures are not flipped.
 const map = (url: string, srgb: boolean): Texture => {
-  const t = textures.load(url);
-  t.flipY = false;
-  t.colorSpace = srgb ? SRGBColorSpace : NoColorSpace;
+  const t = bitmapTexture(url, { srgb, flipY: false });
   t.anisotropy = 8;
   return t;
 };
 
 async function load(name: PropName): Promise<Prop> {
-  const mesh = await parse(await read(fileOf(`${name}.glb`)));
+  const mesh = await parse(await readFile(fileOf(`${name}.glb`)));
   const side = (mesh.material as MeshStandardMaterial).side;
   const textured = `../assets/models/${name}-diff.jpg` in FILES;
   const arm = textured ? map(fileOf(`${name}-arm.jpg`), false) : undefined;
