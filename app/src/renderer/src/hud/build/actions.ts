@@ -4,7 +4,7 @@ import { get, send, set, setSetting, useStore, type BuildState, type BuildTool }
 import { ENTRIES, type Entry, type TabId } from './catalog.ts';
 import { BUILD_DIST, buildView, modifiers, setGhost } from './state.ts';
 
-const FRESH: Omit<BuildState, 'level'> = { tool: { kind: 'select' }, tab: 'desks', search: '', searching: false, peek: null, paint: 1, style: 0, wallsMode: 'cutaway' };
+const FRESH: Omit<BuildState, 'level'> = { tool: { kind: 'select' }, tab: 'desks', search: '', searching: false, peek: null, fill: false, paint: 1, style: 0, wallsMode: 'cutaway' };
 
 export function patchBuild(patch: Partial<BuildState>) {
   const build = get().build;

@@ -220,17 +220,25 @@ export default async function (s) {
   const doorRef = { d: 'e', x: room.x + 2, z: room.z + 4 };
   assert(wallAt(after, 0, 'e', room.x, room.z) && wallAt(after, 0, 's', room.x + 5, room.z + 3), 'with walls on its north and east sides');
 
-  // ---- paint the floor: Shift fills the whole room
+  // ---- paint the floor: hover previews the swatch, the Fill room toggle covers the whole room
   await clickSel('[data-tab="floors"]');
+  const chips = await s.eval(`[...document.querySelectorAll('.bh-chip:not(.none)')].map((c) => getComputedStyle(c).backgroundImage.startsWith('url('))`);
+  assert(chips.length >= 8 && chips.every(Boolean), `floor swatches show their material texture (${chips.length} swatches)`);
   await clickSel('[data-entry="floor:6"]');
   assert((await ui(s)).tool.kind === 'floor' && (await ui(s)).paint === 6, 'a floor swatch puts the paint tool in hand');
-  await hold('ShiftLeft', 'Shift');
+  await hover(room.x + 1.5, room.z + 1.5);
+  const livePreview = await s.eval(`__office.probe('paint-preview')`);
+  assert(livePreview.length === 1 && livePreview[0].surface === 'floor' && livePreview[0].color === '#a2474c', `hovering a tile previews the swatch on it in the swatch's color (${livePreview[0]?.color})`);
+  assert((await building(s)).stories[0].paint[paintIndex(b0, 0, room.x + 1, room.z + 1)] !== 6, 'and nothing is painted until the click');
+  await clickSel('[data-testid="fill-toggle"]');
+  assert(await s.eval(`document.querySelector('[data-testid="fill-toggle"]').getAttribute('aria-pressed') === 'true'`), 'the Fill room toggle lights up');
   await hover(room.x + 2.5, room.z + 2.5);
   const fill = await cursor(s);
-  assert(fill.readout?.text === '20 m²', `with Shift held the ghost covers the room (${fill.readout?.text})`);
+  assert(fill.readout?.text === '20 m²', `with Fill room on the ghost covers the room (${fill.readout?.text})`);
+  assert((await s.eval(`__office.probe('paint-preview')[0].tiles`)) === 20, 'and the preview paints all 20 tiles');
   await save(s, 's4-paint');
   await clickAt(room.x + 2.5, room.z + 2.5);
-  await release('ShiftLeft', 'Shift');
+  await clickSel('[data-testid="fill-toggle"]');
   await waitBuilding(`b.stories[0].paint[${paintIndex(b0, 0, room.x + 2, room.z + 2)}] === 6`, 'the floor paint did not arrive');
   const painted = await building(s);
   const inside = [];
@@ -252,6 +260,10 @@ export default async function (s) {
   await waitBuilding(`b.stories[0].walls.some((w) => w.d === 'e' && w.x === ${room.x + 2} && w.z === ${room.z} && w.open === 'window')`, 'the window did not arrive');
   assert(true, 'a window went into the north wall');
   await choose('walls', 'style:1');
+  await hover(room.x + 5, room.z + 1.5);
+  const wallPreview = await s.eval(`__office.probe('paint-preview')`);
+  assert(wallPreview.length === 1 && wallPreview[0].surface === 'wall' && wallPreview[0].color === '#a65b45', `hovering a wall previews the swatch on it (${wallPreview[0]?.color})`);
+  assert((await building(s)).stories[0].walls.filter((w) => w.style === 1).length === 0, 'without painting it');
   await clickAt(room.x + 5, room.z + 1.5);
   await waitBuilding(`b.stories[0].walls.find((w) => w.d === 's' && w.x === ${room.x + 5} && w.z === ${room.z + 1})?.style === 1`, 'the wall paint did not arrive');
   const styled = (await building(s)).stories[0].walls.filter((w) => w.style === 1);

@@ -50,19 +50,21 @@ const XRAY_BAD = ghostModel(false, false);
 
 const T = WALL_HALF * 2 + 0.04;
 
-function WallBox({ a, b, material, bad = false }: { a: Vec2; b: Vec2; material: MeshBasicMaterial; bad?: boolean }) {
+function WallBox({ a, b, material, bad = false, probe, capped = true }: { a: Vec2; b: Vec2; material: MeshBasicMaterial; bad?: boolean; probe?: Record<string, unknown>; capped?: boolean }) {
   const len = Math.hypot(b.x - a.x, b.z - a.z);
   const yaw = Math.atan2(-(b.z - a.z), b.x - a.x);
   const mid: [number, number, number] = [(a.x + b.x) / 2, STORY_H / 2, (a.z + b.z) / 2];
   return (
     <>
-      <mesh position={mid} rotation-y={yaw} material={material} renderOrder={6}>
+      <mesh position={mid} rotation-y={yaw} material={material} renderOrder={6} userData={probe}>
         <boxGeometry args={[len + T, STORY_H, T]} />
         <Edges color="#e8f4ff" threshold={20} />
       </mesh>
-      <mesh position={[mid[0], STORY_H + 0.04, mid[2]]} rotation-y={yaw} material={bad ? MATERIALS.capRed : MATERIALS.cap} renderOrder={9}>
-        <boxGeometry args={[len + T + 0.06, 0.1, T + 0.1]} />
-      </mesh>
+      {capped && (
+        <mesh position={[mid[0], STORY_H + 0.04, mid[2]]} rotation-y={yaw} material={bad ? MATERIALS.capRed : MATERIALS.cap} renderOrder={9}>
+          <boxGeometry args={[len + T + 0.06, 0.1, T + 0.1]} />
+        </mesh>
+      )}
     </>
   );
 }
@@ -100,6 +102,40 @@ function EdgeLabel({ a, b, meters, bad = false }: { a: Vec2; b: Vec2; meters: nu
   );
 }
 
+const paintMaterials = new Map<string, MeshBasicMaterial>();
+/** The swatch's own color, nearly solid so the surface reads as already painted. Flat floor previews draw through walls. */
+function swatchMaterial(color: string, ok: boolean, flat: boolean): MeshBasicMaterial {
+  const key = `${color}${ok}${flat}`;
+  let m = paintMaterials.get(key);
+  if (!m) paintMaterials.set(key, (m = new MeshBasicMaterial({ color: ok ? color : RED, transparent: true, opacity: 0.88, depthWrite: false, depthTest: !flat, side: DoubleSide })));
+  return m;
+}
+const OUTLINE_OK = basic(WHITE, 1, false);
+const OUTLINE_BAD = basic(RED, 1, false);
+
+// Floor tiles in the paint's color, ringed by an outline along the edges that face unpainted ground.
+function PaintTiles({ tiles, color, ok }: { tiles: readonly Vec2[]; color: string; ok: boolean }) {
+  const edge = useMemo(() => {
+    const has = new Set(tiles.map((t) => `${t.x},${t.z}`));
+    const pos: number[] = [];
+    const h = 0.04;
+    const bar = (x0: number, z0: number, x1: number, z1: number) => pos.push(x0, 0, z0, x0, 0, z1, x1, 0, z0, x1, 0, z0, x0, 0, z1, x1, 0, z1);
+    for (const t of tiles) {
+      if (!has.has(`${t.x},${t.z - 1}`)) bar(t.x - h, t.z - h, t.x + 1 + h, t.z + h);
+      if (!has.has(`${t.x},${t.z + 1}`)) bar(t.x - h, t.z + 1 - h, t.x + 1 + h, t.z + 1 + h);
+      if (!has.has(`${t.x - 1},${t.z}`)) bar(t.x - h, t.z - h, t.x + h, t.z + 1 + h);
+      if (!has.has(`${t.x + 1},${t.z}`)) bar(t.x + 1 - h, t.z - h, t.x + 1 + h, t.z + 1 + h);
+    }
+    return new BufferGeometry().setAttribute('position', new Float32BufferAttribute(pos, 3));
+  }, [tiles]);
+  return (
+    <>
+      <Tiles tiles={tiles} material={swatchMaterial(color, ok, true)} probe={{ probe: 'paint-preview', surface: 'floor', tiles: tiles.length }} />
+      <mesh geometry={edge} material={ok ? OUTLINE_OK : OUTLINE_BAD} position-y={0.03} renderOrder={11} />
+    </>
+  );
+}
+
 function Post({ at }: { at: Vec2 }) {
   return (
     <group position={[at.x, 0, at.z]}>
@@ -116,7 +152,7 @@ function Post({ at }: { at: Vec2 }) {
   );
 }
 
-function Tiles({ tiles, material }: { tiles: readonly Vec2[]; material: MeshBasicMaterial }) {
+function Tiles({ tiles, material, probe }: { tiles: readonly Vec2[]; material: MeshBasicMaterial; probe?: Record<string, unknown> }) {
   const geo = useMemo(() => {
     const g = new BufferGeometry();
     const pos: number[] = [];
@@ -124,7 +160,7 @@ function Tiles({ tiles, material }: { tiles: readonly Vec2[]; material: MeshBasi
     g.setAttribute('position', new Float32BufferAttribute(pos, 3));
     return g;
   }, [tiles]);
-  return <mesh geometry={geo} material={material} renderOrder={6} />;
+  return <mesh geometry={geo} material={material} renderOrder={6} userData={probe} />;
 }
 
 const BORDER = 0.06;
@@ -298,7 +334,7 @@ function Shown({ g, level, stories }: { g: Ghost; level: number; stories: number
       );
     }
     case 'tiles':
-      return <Tiles tiles={g.tiles} material={g.ok ? MATERIALS.fillGreen : MATERIALS.fillRed} />;
+      return g.color ? <PaintTiles tiles={g.tiles} color={g.color} ok={g.ok} /> : <Tiles tiles={g.tiles} material={g.ok ? MATERIALS.fillGreen : MATERIALS.fillRed} />;
     case 'walls':
       return (
         <>
@@ -307,7 +343,9 @@ function Shown({ g, level, stories }: { g: Ghost; level: number; stories: number
               key={`${w.d}${w.x},${w.z}`}
               a={{ x: w.x, z: w.z }}
               b={w.d === 'e' ? { x: w.x + 1, z: w.z } : { x: w.x, z: w.z + 1 }}
-              material={g.ok ? MATERIALS.wallGreen : MATERIALS.wallRed}
+              material={g.color ? swatchMaterial(g.color, g.ok, false) : g.ok ? MATERIALS.wallGreen : MATERIALS.wallRed}
+              probe={g.color ? { probe: 'paint-preview', surface: 'wall' } : undefined}
+              capped={false}
             />
           ))}
         </>

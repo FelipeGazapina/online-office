@@ -3,7 +3,8 @@ import { ITEM_DEFS } from '../../../../shared/space/index.ts';
 import { get, useStore, type BuildTool } from '../../store.ts';
 import { addFloor, chooseEntry, exitBuild, isActive, patchBuild, peek, redo, rotate, selectTab, setLevel, undo } from './actions.ts';
 import { footprintText, TABS, visibleEntries, type Entry } from './catalog.ts';
-import { FloorIcon, Redo, Search, TabIcon, ToolIcon, Turn, Undo, WALL_MODES, WallsIcon } from './icons.tsx';
+import { FillIcon, FloorIcon, Redo, Search, TabIcon, ToolIcon, Turn, Undo, WALL_MODES, WallsIcon } from './icons.tsx';
+import { floorSwatch, wallSwatch } from './swatches.ts';
 import { useThumbs } from './thumbs.ts';
 import './build.css';
 
@@ -75,12 +76,21 @@ function Card({ entry, thumb, search }: { entry: Entry; thumb: string | undefine
         {entry.kind === 'item' && (thumb ? <img src={thumb} alt="" draggable={false} /> : <i className="bh-thumb-wait" />)}
         {entry.kind === 'tool' && <ToolIcon icon={entry.icon} />}
         {swatch && (
-          <i className={`bh-chip${entry.kind === 'floor' && entry.paint === 0 ? ' none' : ''}`} style={{ background: entry.color }} />
+          <i className={`bh-chip${entry.kind === 'floor' && entry.paint === 0 ? ' none' : ''}`} data-material={entry.id} style={entry.kind === 'floor' ? floorSwatch(entry.paint) : wallSwatch(entry.style)} />
         )}
         {entry.kind === 'item' && <span className="bh-badge" data-testid="footprint-badge">{footprintText(entry.def)}</span>}
       </span>
       <span className="bh-name">{entry.name}</span>
       {search && <span className="bh-sub">{tab}</span>}
+    </button>
+  );
+}
+
+function FillToggle() {
+  const on = useStore((s) => s.build?.fill ?? false);
+  return (
+    <button type="button" className="bh-fill" data-testid="fill-toggle" aria-pressed={on} onClick={() => patchBuild({ fill: !on })} title="Paint the whole room in one click (Shift does the same while held)">
+      <FillIcon /> Fill room
     </button>
   );
 }
@@ -128,6 +138,7 @@ function Dock() {
           <span key={k}><kbd>{k}</kbd> {v}</span>
         ))}
         <TeamPick />
+        {(tool.kind === 'floor' || tool.kind === 'wallpaint') && <FillToggle />}
         {tool.kind === 'item' && ITEM_DEFS[tool.def]?.kind !== 'stairs' && (
           <button type="button" className="bh-turn" data-testid="rotate-handle" onClick={() => rotate(1)} title="Turn it a quarter (. key)" aria-label="Turn it">
             <Turn /> Turn

@@ -165,3 +165,9 @@ export const FloorIcon = () => (
     <path d="M3 8l9-4 9 4-9 4zM3 12l9 4 9-4M3 16l9 4 9-4" />
   </Svg>
 );
+
+export const FillIcon = () => (
+  <Svg size={15}>
+    <path d="M4 4h16v16H4zM4 12h16M12 4v16" />
+  </Svg>
+);

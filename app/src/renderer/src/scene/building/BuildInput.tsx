@@ -4,7 +4,7 @@
 import { useThree } from '@react-three/fiber';
 import { useEffect } from 'react';
 import { Vector3 } from 'three';
-import { checkOps, ITEM_DEFS, rectWalls, STORY_H, type Building, type BuildOp, type Item, type ItemId, type Vec2 } from '../../../../shared/space/index.ts';
+import { checkOps, FLOOR_PAINTS, ITEM_DEFS, rectWalls, STORY_H, WALL_STYLES, type Building, type BuildOp, type Item, type ItemId, type Vec2 } from '../../../../shared/space/index.ts';
 import {
   floodRoom,
   itemAt,
@@ -86,9 +86,9 @@ function plan(b: Building, build: BuildState, p: Vec2, drag: Drag | null, shift:
       const here = tileOf(p);
       let tiles: Vec2[];
       if (drag && !drag.flood) tiles = [...drag.tiles.values()];
-      else tiles = (shift ? floodRoom(b, story, here) : null) ?? [here];
+      else tiles = (shift || build.fill ? floodRoom(b, story, here) : null) ?? [here];
       const op = paintFloorOp(b, story, level, tiles, build.paint);
-      return { ops: op ? [op] : [], ghost: (ok) => ({ kind: 'tiles', tiles, ok }), readout: tiles.length > 1 ? `${tiles.length} m²` : null };
+      return { ops: op ? [op] : [], ghost: (ok) => ({ kind: 'tiles', tiles, ok, color: build.paint ? FLOOR_PAINTS[build.paint]?.color : undefined }), readout: tiles.length > 1 ? `${tiles.length} m²` : null };
     }
     case 'wallpaint': {
       const w = nearestWall(story, p);
@@ -96,11 +96,11 @@ function plan(b: Building, build: BuildState, p: Vec2, drag: Drag | null, shift:
       const sides: Vec2[] = w.d === 'e' ? [{ x: w.x, z: w.z - 1 }, { x: w.x, z: w.z }] : [{ x: w.x - 1, z: w.z }, { x: w.x, z: w.z }];
       // The cursor's side of the wall, or the smaller room when the cursor is on the wall itself.
       const off = w.d === 'e' ? p.z - w.z : p.x - w.x;
-      const rooms = shift ? sides.map((t) => floodRoom(b, story, t)) : [];
+      const rooms = shift || build.fill ? sides.map((t) => floodRoom(b, story, t)) : [];
       const room = Math.abs(off) > 0.15 && rooms[off < 0 ? 0 : 1] ? rooms[off < 0 ? 0 : 1] : (rooms.filter((r): r is Vec2[] => !!r).sort((x, y) => x.length - y.length)[0] ?? null);
       const walls = room ? wallsAround(story, room) : [w];
       const op = paintWallsOp(level, walls.length ? walls : [w], build.style);
-      return { ops: op ? [op] : [], ghost: (ok) => ({ kind: 'walls', walls: walls.length ? walls : [w], ok }), readout: null };
+      return { ops: op ? [op] : [], ghost: (ok) => ({ kind: 'walls', walls: walls.length ? walls : [w], ok, color: WALL_STYLES[build.style]?.color }), readout: null };
     }
     case 'opening': {
       const w = nearestWall(story, p);
@@ -223,7 +223,7 @@ export function BuildInput() {
         drag = { tool: kind, a: vertexOf(c.p), erase: modifiers.ctrl, tiles: new Map(), flood: false, lastTile: null };
       } else if (kind === 'floor') {
         const t = tileOf(c.p);
-        drag = { tool: 'floor', a: t, erase: false, tiles: new Map([[tkey(t), t]]), flood: modifiers.shift, lastTile: t };
+        drag = { tool: 'floor', a: t, erase: false, tiles: new Map([[tkey(t), t]]), flood: modifiers.shift || c.build.fill, lastTile: t };
       }
       refresh();
     };

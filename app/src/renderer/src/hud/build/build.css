@@ -489,3 +489,27 @@ html[data-building] .labels * {
   background: rgba(255, 255, 255, 0.9);
   color: var(--ink);
 }
+.bh-fill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 24px;
+  padding: 0 11px;
+  border: 0;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.16);
+  color: white;
+  font: 700 12.5px/1 var(--body);
+  cursor: pointer;
+}
+.bh-fill:hover {
+  background: rgba(255, 255, 255, 0.28);
+}
+.bh-fill[aria-pressed='true'] {
+  background: var(--moss);
+  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.85);
+}
+.bh-fill:focus-visible {
+  outline: 2px solid white;
+  outline-offset: 2px;
+}
