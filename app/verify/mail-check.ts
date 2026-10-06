@@ -249,6 +249,7 @@ console.log('\n# done means done');
   wait.fresh.add('a.txt');
   const w1 = ids(wait.room.post(owner('ana', 'write it')));
   const waiting = wait.room.reply(ANA, requestIn(lastPrompt(wait, ANA)), { outcome: 'done', text: "Waiting for Eli's gauntlet, I'll check back", artifact: ['a.txt'] });
+  check(wait.room.reply(ANA, requestIn(lastPrompt(wait, ANA)), { outcome: 'done', text: "I'm standing by until Eli ships it.", artifact: ['a.txt'] }).ok === false, 'standing by is waiting too');
   check(!waiting.ok && waiting.reason === 'still_waiting' && life(wait, w1) === 'delivered', 'a done reply whose text says it is waiting is refused even with artifacts');
 
   const auto = world();
