@@ -119,6 +119,15 @@ export async function launch({ env = {}, width = 1280, height = 800, exe } = {})
       await api.key('keyDown', code, key);
       await api.key('keyUp', code, key);
     },
+    // A key the way a keyboard sends it: with its virtual key code, so Tab moves focus and Enter presses a button, and with
+    // modifiers (Alt 1, Ctrl 2, Meta 4, Shift 8) so Cmd+Enter carries the meta key. `press` sends no code for keys such as Tab.
+    async chord(key, modifiers = 0) {
+      const vk = { Backspace: 8, Tab: 9, Enter: 13, Escape: 27, ' ': 32, End: 35, Home: 36, ArrowLeft: 37, ArrowUp: 38, ArrowRight: 39, ArrowDown: 40 }[key] ?? key.toUpperCase().charCodeAt(0);
+      const base = { code: key === ' ' ? 'Space' : key.length === 1 ? `Key${key.toUpperCase()}` : key, key, modifiers, windowsVirtualKeyCode: vk, nativeVirtualKeyCode: vk };
+      const text = key === 'Enter' ? '\r' : key === ' ' ? ' ' : undefined;
+      await call('Input.dispatchKeyEvent', { ...base, type: text && !(modifiers & 6) ? 'keyDown' : 'rawKeyDown', ...(text && !(modifiers & 6) ? { text } : {}) });
+      await call('Input.dispatchKeyEvent', { ...base, type: 'keyUp' });
+    },
     async waitFor(expr, ms = 15000) {
       const t0 = Date.now();
       while (Date.now() - t0 < ms) {
