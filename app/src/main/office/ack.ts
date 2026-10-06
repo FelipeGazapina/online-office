@@ -25,15 +25,19 @@ WORK: the boss wants something made or changed in the project (code, tests, docs
 The message may be in any language. When unsure, answer WORK.
 Reply with exactly one word: QUESTION or WORK.`;
 
-export type AckInput = { who: string; name: string; role: string; company: string; block: string; teammates: readonly string[]; request: string };
+// `question` is a request that wants words and no work: the person looks and answers, nobody hands it on.
+export type AckInput = { who: string; name: string; role: string; company: string; block: string; teammates: readonly string[]; request: string; question: boolean };
 
 const ROLE = {
   orchestrator: 'the PO. You lead: you split the work between your teammates and check what they hand back. You do not build or write anything yourself, so say you will split the work or hand it to a teammate, never that you will do it.',
+  orchestratorQuestion: 'the PO. This is a question, not a goal, so you look into it yourself and answer. Do not say you will hand it to a teammate or split it.',
   employee: 'an employee.',
 };
 
+const roleOf = (i: AckInput) => (i.role === 'orchestrator' ? (i.question ? ROLE.orchestratorQuestion : ROLE.orchestrator) : ROLE.employee);
+
 const promptOf = (i: AckInput) =>
-  `You are ${i.name}, ${i.role === 'orchestrator' ? ROLE.orchestrator : ROLE.employee} Your team is ${i.block} at ${i.company}. Your teammates: ${i.teammates.join(', ') || 'none yet'}.\n\nThe boss sent you this request:\n\"\"\"\n${i.request}\n\"\"\"\n\nSay your acknowledgement now.`;
+  `You are ${i.name}, ${roleOf(i)} Your team is ${i.block} at ${i.company}. Your teammates: ${i.teammates.join(', ') || 'none yet'}.\n\nThe boss sent you this ${i.question ? 'question' : 'request'}:\n\"\"\"\n${i.request}\n\"\"\"\n\nSay your acknowledgement now.`;
 
 // One process that answers exactly one prompt, started ahead of time so the answer does not pay for the start.
 class OneShot {
@@ -141,9 +145,9 @@ export class Acknowledger {
 
   // Which kind of message the owner wrote. Undefined at once when triage is off, and undefined later when the call fails or
   // runs late, so the caller treats the message as work, the kind that has to show files.
-  triage(text: string): Promise<OwnerIntent | undefined> | undefined {
+  triage(text: string, timeoutMs = TRIAGE_TIMEOUT_MS): Promise<OwnerIntent | undefined> | undefined {
     if (!this.enabled || process.env.OFFICE_TRIAGE === '0') return undefined;
-    return this.answer('triage', `The boss wrote:\n"""\n${clip(text)}\n"""`, TRIAGE_TIMEOUT_MS).then((word) => (/^QUESTION\b/i.test(word ?? '') ? 'help' : /^WORK\b/i.test(word ?? '') ? 'work' : undefined));
+    return this.answer('triage', `The boss wrote:\n"""\n${clip(text)}\n"""`, timeoutMs).then((word) => (/^QUESTION\b/i.test(word ?? '') ? 'help' : /^WORK\b/i.test(word ?? '') ? 'work' : undefined));
   }
 
   private refill(kind: Kind) {

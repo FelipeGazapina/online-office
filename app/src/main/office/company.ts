@@ -414,7 +414,7 @@ export class Office {
           const block = e && this.company.blocks.find((b) => b.id === e.blockId);
           if (!e || !block || request.kind !== 'request') return undefined;
           const teammates = this.company.employees.filter((x) => x.blockId === e.blockId && x.id !== e.id).map((x) => `${x.name} (${x.role ?? 'employee'})`);
-          return this.acker.ack({ who: e.id, name: e.name, role: e.role ?? 'employee', company: this.company.name, block: block.name, teammates, request: request.text }, onDelta);
+          return this.acker.ack({ who: e.id, name: e.name, role: e.role ?? 'employee', company: this.company.name, block: block.name, teammates, request: request.text, question: request.intent === 'help' }, onDelta);
         },
         now: () => Date.now(),
         newId: defaultIds,

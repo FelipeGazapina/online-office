@@ -30,6 +30,7 @@ export const env = {
 const ANSWER_WAIT_MS = 120_000;
 const FIRST_BUBBLE_MAX_MS = 3000;
 const HIRE_TO_FIRST_MESSAGE_MS = 8000;
+const CALM_LOAD = 10;
 const BASELINE = process.env.OFFICE_TRIAGE === '0';
 const TRIALS = Number(process.env.OFFICE_QUESTION_TRIALS ?? (BASELINE ? 5 : 0));
 const QUESTIONS = ['Where are the shout tests?', 'What is the test command in package.json?', 'How is the shout function tested?', 'What is this project called?', 'Does the README mention shout?', 'Which test file covers the empty string?', 'What version does package.json declare?', 'What does the README say about the project?'];
@@ -82,7 +83,14 @@ export default async (s) => {
     setTimeout(() => finish('timeout'), 30000);
   })`);
 
+  // Triage has a 2.5 s leash and falls back to work, so on a machine another job is flattening the questions would come back
+  // as blocked for a reason this script is not about. Wait for a quiet minute before each message, up to two minutes.
+  const calm = async () => {
+    for (let waited = 0; loadavg()[0] > CALM_LOAD && waited < 120_000; waited += 5000) await s.sleep(5000);
+    if (loadavg()[0] > CALM_LOAD) console.log(`load ${loadavg()[0].toFixed(1)} did not drop under ${CALM_LOAD}, going on`);
+  };
   const ask = async (to, text, key) => {
+    await calm();
     const bubble = await s.eval(`window.__send(${JSON.stringify(to)}, ${JSON.stringify(text)}, ${JSON.stringify(key)})`);
     const t0 = Date.now();
     while (Date.now() - t0 < ANSWER_WAIT_MS) {
@@ -145,5 +153,6 @@ export default async (s) => {
 
 export const diagnose = async (s) => {
   console.log('ledger tail:', JSON.stringify(posts().slice(-6)));
+  console.log('people:', await s.eval(`JSON.stringify(${company}.employees.map((e) => ({ name: e.name, status: e.status, activity: e.activity })))`));
   console.log('chips:', await s.eval(`JSON.stringify([...document.querySelectorAll('.cp-chip')].map((c) => c.innerText))`));
 };

@@ -4,6 +4,7 @@
 // Run from app/: node verify/intent-eval.ts [--set A|B|AB] [--cand q,l,ql] [--n 3] [--par 6] [--probe texts.json]
 // A "work order called a question" is the dangerous cell: it would settle without files. A "question called work" is the
 // status quo (a good answer tagged blocked).
+import { loadavg } from 'node:os';
 import { query } from '@anthropic-ai/claude-agent-sdk';
 import { Acknowledger } from '../src/main/office/ack.ts';
 import { isPlainOrder } from '../src/main/office/owner-intent.ts';
@@ -18,6 +19,7 @@ const cands = arg('cand', 'q,l,ql').split(',');
 const N = Number(arg('n', '3'));
 const PAR = Number(arg('par', '6'));
 const PROBE = arg('probe', '');
+const LEASH_MS = 2500;
 const MODEL = process.env.OFFICE_ACK_MODEL ?? 'claude-haiku-4-5-20251001';
 
 const sets: Record<string, readonly Labeled[]> = { A: SET_A };
@@ -32,7 +34,8 @@ const askModel = async (text: string): Promise<Call> => {
   desk.warm();
   await new Promise((r) => setTimeout(r, 6000));
   const t0 = performance.now();
-  const said = await desk.triage(text);
+  // No leash here, so a slow call is still sorted. Whether it would have been in time is read off `ms` against LEASH.
+  const said = await desk.triage(text, 30_000);
   const ms = performance.now() - t0;
   desk.stop();
   return { kind: said === 'help' ? 'question' : said === 'work' ? 'work' : 'none', ms };
@@ -56,7 +59,9 @@ const matrix = (rows: Row[]) => {
 
 const show = (name: string, rows: Row[]) => {
   const m = matrix(rows);
+  const late = rows.flatMap((r) => r.ms).filter((ms) => ms > LEASH_MS).length;
   console.log(`\n${name}`);
+  console.log(`  load average at the start ${loadavg()[0]!.toFixed(1)}`);
   console.log('                     said question   said work');
   console.log(`  is question        ${String(m.question.question).padStart(8)}   ${String(m.question.work).padStart(8)}   <- the work column is the status quo (answered, tagged blocked)`);
   console.log(`  is work            ${String(m.work.question).padStart(8)}   ${String(m.work.work).padStart(8)}   <- the question column must be 0 (settles with no files)`);
@@ -65,6 +70,7 @@ const show = (name: string, rows: Row[]) => {
     if (wrong) console.log(`  WRONG ${wrong}/${r.said.length} (is ${r.is}, said ${r.said.join('/')}) [${r.set}] ${r.text}`);
   }
   const ms = rows.flatMap((r) => r.ms).sort((a, b) => a - b);
+  if (ms.length) console.log(`  ${late} of ${ms.length} calls took over ${LEASH_MS} ms, so the shipped leash would have left them as work`);
   if (ms.length) console.log(`  latency ms: p50 ${ms[Math.floor(ms.length * 0.5)]!.toFixed(0)}  p95 ${ms[Math.floor(ms.length * 0.95)]!.toFixed(0)}  max ${ms.at(-1)!.toFixed(0)}`);
 };
 
@@ -95,9 +101,9 @@ for (const set of which.split('').filter((c) => c === 'A' || c === 'B')) {
     });
     if (cands.includes('l')) show(`l (${MODEL}) on set ${set} (${mine.length} messages x ${N})`, rows);
     if (cands.includes('ql')) {
-      // A plain order never reaches the model, so it has no model latency either.
-      const hybrid = rows.map((r) => (isPlainOrder(r.text) ? { ...r, said: r.said.map(() => 'work' as const), ms: [] } : r));
-      show(`ql on set ${set}: plain orders skip the call, ${hybrid.filter((r) => r.ms.length === 0).length} of ${mine.length} did`, hybrid);
+      // As shipped: a plain order never reaches the model, and an answer later than the leash is dropped, so it counts as work.
+      const hybrid = rows.map((r) => (isPlainOrder(r.text) ? { ...r, said: r.said.map(() => 'work' as const), ms: [] } : { ...r, said: r.said.map((s, k) => (r.ms[k]! > LEASH_MS ? ('work' as const) : s)) }));
+      show(`ql as shipped on set ${set}: ${hybrid.filter((r) => r.ms.length === 0).length} of ${mine.length} plain orders skip the call, a call over ${LEASH_MS} ms counts as work`, hybrid);
     }
     const none = rows.flatMap((r) => r.said).filter((s) => s === 'none').length;
     if (none) console.log(`  ${none} calls gave no usable answer (counted as work)`);
