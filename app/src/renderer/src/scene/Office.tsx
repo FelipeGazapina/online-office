@@ -1,6 +1,6 @@
 import { Html } from '@react-three/drei';
-import { useEffect, useMemo } from 'react';
-import { MeshStandardMaterial, Object3D, type BufferGeometry } from 'three';
+import { useMemo } from 'react';
+import { MeshStandardMaterial, type BufferGeometry } from 'three';
 import { box, cyl, merge } from './building/models.ts';
 import { detail } from './shading.ts';
 import type { Company } from '../../../shared/protocol.ts';
@@ -12,7 +12,7 @@ import { ownerSeat, worldFor, type World } from '../world.ts';
 import { LobbyDecor } from './Decor.tsx';
 import { Environment } from './Environment.tsx';
 import { Exterior } from './Exterior.tsx';
-import { LightPools, usePools } from './Lighting.tsx';
+import { Lights } from './Lighting.tsx';
 import { Chair, Desk, RoundedPlane } from './Furniture.tsx';
 import { fitText, FONT_BODY, FONT_DISPLAY, roundRect, useCanvasTexture } from './textures.ts';
 
@@ -257,42 +257,6 @@ function MeetingRoom({ world }: { world: World }) {
         </div>
       </Html>
     </group>
-  );
-}
-
-function Lights({ b, slots }: { b: Bounds; slots: readonly number[] }) {
-  const cx = (b.x0 + b.x1) / 2;
-  const cz = (b.z0 + b.z1) / 2;
-  const ext = Math.max(b.x1 - b.x0, b.z1 - b.z0) * 0.66;
-  const target = useMemo(() => new Object3D(), []);
-  useEffect(() => {
-    target.position.set(cx, 0, cz);
-    target.updateMatrixWorld();
-  }, [target, cx, cz]);
-  const pools = usePools(b, slots);
-  return (
-    <>
-      <hemisphereLight args={['#b4c8ee', '#d3a273', 0.9]} />
-      <directionalLight
-        target={target}
-        castShadow
-        color="#ffbd78"
-        intensity={3.1}
-        position={[cx + 38, 12, cz + 14]}
-        shadow-mapSize={[2048, 2048]}
-        shadow-bias={-0.0004}
-        shadow-normalBias={0.03}
-        shadow-radius={3}
-        shadow-camera-left={-ext}
-        shadow-camera-right={ext}
-        shadow-camera-top={ext}
-        shadow-camera-bottom={-ext}
-        shadow-camera-near={1}
-        shadow-camera-far={110}
-      />
-      <LightPools pools={pools} />
-      <primitive object={target} />
-    </>
   );
 }
 
