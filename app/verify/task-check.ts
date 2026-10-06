@@ -38,6 +38,7 @@ import { MemoryStore } from '../src/main/office/memory.ts';
 import { TaskBoardService, type HoursCall } from '../src/main/office/task-board.ts';
 import { Tasks, type TasksHost } from '../src/main/office/tasks.ts';
 import { check, finish, sleep, until } from './check.ts';
+import { startFakeCronoSpark } from './fake-cronospark.ts';
 import { ANA, B1, B2, BRUNO, PO, world } from './mail-world.ts';
 
 const e = (s: string) => s as EmployeeId;
@@ -370,19 +371,26 @@ console.log('\n# a retried assign never posts twice');
 {
   const x = taskWorld();
   const made = x.tasks.createTask(x.tasks.boardsOf(B1)[0]!.id, 'Retry me');
+  const beforeAssign = readFileSync(x.file, 'utf8');
   x.tasks.assign(made.id, ANA);
   x.sync();
-  // The crash window: the request is in the ledger and the task never learned of it.
-  const lost = new Tasks(join(dir, 'lost.json'), x.host, x.w.persisted);
-  lost.recover([B1, B2], []);
-  const copy = lost.createTask(lost.boardsOf(B1)[0]!.id, 'Retry me');
-  check(lost.view(0).tasks.find((y) => y.id === copy.id)!.runs.length === 0, 'a task that did not get to record its run starts with none');
   const keyed = [...x.w.room.state.keys.keys()].filter((k) => k.startsWith('task:'));
-  check(keyed.length === 1 && keyed[0]!.startsWith(`task:${made.id}:${ANA}:0`), 'the request has a key made of the task, the person and their run number', keyed.join());
+  check(keyed.length === 1 && keyed[0] === `task:${made.id}:${ANA}:0`, 'the request has a key made of the task, the person and their run number', keyed.join());
+  // The crash window: the request is in the ledger and the task file never heard of it.
+  writeFileSync(x.file, beforeAssign);
   const again = new Tasks(x.file, x.host, x.w.persisted);
+  check(again.view(0).tasks[0]!.runs.length === 0, 'a task file written before the assign knows no run');
   again.recover([B1, B2], []);
-  check(again.view(0).tasks[0]!.runs.length === 1, 'a restart relinks a run found by its key without posting anything');
-  check(x.w.room.state.order.filter((id) => x.w.room.state.messages.get(id)!.kind === 'request').length === 1, 'one request in the ledger');
+  const healed = again.view(0).tasks[0]!;
+  check(healed.runs.length === 1 && healed.assignees[0] === ANA && healed.stage === 'doing', 'a restart relinks the run it finds by its key and puts the task in doing');
+  const requests = () => x.w.room.state.order.filter((id) => x.w.room.state.messages.get(id)!.kind === 'request').length;
+  again.assign(made.id, ANA);
+  check(requests() === 1 && again.view(0).tasks[0]!.runs.length === 1, 'asking again while the run is open posts nothing');
+  // The same call retried by someone who has not seen the run yet: the key finds the request, so it is linked, not posted.
+  writeFileSync(x.file, beforeAssign);
+  const retry = new Tasks(x.file, x.host, x.w.persisted);
+  retry.assign(made.id, ANA);
+  check(requests() === 1 && retry.view(0).tasks[0]!.runs.length === 1 && retry.view(0).tasks[0]!.runs[0] === healed.runs[0], 'a retry that has not seen the run finds the request by its key and links it');
 }
 
 console.log('\n# CronoSpark hours');
@@ -477,6 +485,31 @@ console.log('\n# CronoSpark hours');
 
   const idle = x.tasks.view(x.now()).tasks.find((y) => y.id === synced[1]!.id)!;
   check(idle.stage === 'todo' && idle.runs.length === 0, 'a synced card nobody worked on stays where its status put it');
+}
+
+console.log('\n# the CronoSpark client against a local server');
+{
+  const fake = await startFakeCronoSpark({ tasks: [{ _id: 'ext-9', code: 'CS-9', title: 'Wire it up', status: 'in-progress', priority: 1 }] });
+  const saved = { url: process.env.CRONOSPARK_MCP_URL, key: process.env.CRONOSPARK_MCP_API_KEY, user: process.env.CRONOSPARK_MCP_USER_ID, fixture: process.env.OFFICE_TASK_BOARD_FIXTURE };
+  Object.assign(process.env, { CRONOSPARK_MCP_URL: fake.url, CRONOSPARK_MCP_API_KEY: 'fake-key', CRONOSPARK_MCP_USER_ID: 'fake-user' });
+  delete process.env.OFFICE_TASK_BOARD_FIXTURE;
+  const service = new TaskBoardService();
+  const listed = await service.fetchSources([{ provider: 'cronospark', projectId: 'p1' }]);
+  check(listed.errors.length === 0 && listed.cards.length === 1 && listed.cards[0]!.externalId === 'ext-9' && listed.cards[0]!.identifier === 'CS-9', 'cards come over MCP with the provider id the hours need', JSON.stringify(listed));
+  await service.logHours({ taskId: 'ext-9', hours: 0.5, date: '2026-10-06', description: 'Ana (AI employee, Online Office)' });
+  check(fake.calls.length === 1 && fake.calls[0]!.taskId === 'ext-9' && fake.calls[0]!.hours === 0.5 && fake.calls[0]!.date === '2026-10-06', 'registrar_horas gets the task id, hours, date and description', JSON.stringify(fake.calls));
+  check(fake.headers.every((h) => h.authorization === 'Bearer fake-key' && h.user === 'fake-user'), 'every call carries the saved credentials');
+  let refusedByServer = '';
+  await service.logHours({ taskId: 'ext-9', hours: 25, date: '2026-10-06', description: 'x' }).catch((error: Error) => void (refusedByServer = error.message));
+  check(refusedByServer !== '' && fake.calls.length === 1, 'an error from the tool is thrown, not swallowed', refusedByServer);
+  process.env.OFFICE_TASK_BOARD_FIXTURE = join(dir, 'unused.json');
+  await service.logHours({ taskId: 'ext-9', hours: 1, date: '2026-10-06', description: 'x' });
+  check(fake.calls.length === 1, 'with a fixture set, nothing goes to any server');
+  for (const [key, value] of Object.entries({ CRONOSPARK_MCP_URL: saved.url, CRONOSPARK_MCP_API_KEY: saved.key, CRONOSPARK_MCP_USER_ID: saved.user, OFFICE_TASK_BOARD_FIXTURE: saved.fixture })) {
+    if (value === undefined) delete process.env[key];
+    else process.env[key] = value;
+  }
+  await fake.close();
 }
 
 console.log('\n# board and task rules');

@@ -119,10 +119,9 @@ export class Tasks {
     for (const [key, id] of this.host.mail().state.keys) {
       const [tag, taskId, who] = key.split(':');
       const task = tag === 'task' ? this.tasks.find((t) => t.id === taskId) : undefined;
-      if (task && who && !task.runs.includes(id)) {
-        this.tasks = this.tasks.map((t) => (t === task ? { ...t, runs: [...t.runs, id], assignees: t.assignees.includes(who as EmployeeId) ? t.assignees : [...t.assignees, who as EmployeeId] } : t));
-        changed = true;
-      }
+      if (!task || !who || task.runs.includes(id)) continue;
+      this.tasks = this.tasks.map((t) => (t === task ? this.withRun(t, id, who as EmployeeId) : t));
+      changed = true;
     }
     if (changed || !this.existed) this.save();
   }
@@ -321,13 +320,18 @@ export class Tasks {
     const { title, text } = runRequest(task, board);
     const posted = mail.post({ from: 'owner', to: employeeId, blockId: board.blockId, key: runKey(task.id, employeeId, theirs.length), body: { kind: 'request', intent: 'work', title, text } });
     if (!posted.ok) throw new OfficeError(posted.detail);
-    this.replace({
+    this.replace(this.withRun(task, posted.id, employeeId));
+  }
+
+  // The task with `who` taking the run that starts at `root`, and in doing: what assigning means.
+  private withRun(task: Task, root: MessageId, who: EmployeeId): Task {
+    return {
       ...task,
-      runs: task.runs.includes(posted.id) ? task.runs : [...task.runs, posted.id],
-      assignees: task.assignees.includes(employeeId) ? task.assignees : [...task.assignees, employeeId],
+      runs: task.runs.includes(root) ? task.runs : [...task.runs, root],
+      assignees: task.assignees.includes(who) ? task.assignees : [...task.assignees, who],
       stage: 'doing',
       updatedAt: this.host.now(),
-    });
+    };
   }
 
   // Throws when `taskId` is not a task of `blockId`, so a hire can be refused before anyone is hired.
