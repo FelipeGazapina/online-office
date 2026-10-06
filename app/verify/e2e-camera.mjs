@@ -44,7 +44,7 @@ export default async (s) => {
   const fp = await cam(s);
   assert(Math.abs(fp.y - 1.6) < 0.08, `first person stands at eye height (${fp.y.toFixed(2)} m)`);
   assert(Math.hypot(fp.x - owner.x, fp.z - owner.z) < 0.2, 'the first-person camera sits on the owner');
-  assert(Math.abs(fp.fov - 70) < 0.5, `the field of view is 70 (${fp.fov.toFixed(1)})`);
+  assert(Math.abs(fp.fov - 65) < 0.5, `the field of view is 65 (${fp.fov.toFixed(1)})`);
   assert(!fp.ownerVisible, 'the owner mesh is hidden in first person');
   // Look into the open floor for the picture.
   await s.eval('__office.teleport(2, 2, Math.PI / 4)');

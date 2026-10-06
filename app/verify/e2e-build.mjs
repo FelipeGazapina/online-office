@@ -112,7 +112,7 @@ export default async function (s) {
     }
     throw new Error(`could not bring ${x}, ${z} into view`);
   };
-  const findFree = async (w, h, margin, not = []) => {
+  const freeSpots = (w, h, margin, not = []) => {
     const cand = [];
     for (let z = b0.lot.z0; z < b0.lot.z0 + b0.lot.h - h; z++) {
       for (let x = b0.lot.x0; x < b0.lot.x0 + b0.lot.w - w; x++) {
@@ -120,11 +120,16 @@ export default async function (s) {
         if (freeBox(x, z, w, h, margin)) cand.push({ x, z, d: Math.hypot(x + w / 2 - owner.x, z + h / 2 - owner.z) });
       }
     }
-    cand.sort((a, c) => a.d - c.d);
-    if (!cand.length) throw new Error(`no free ${w} x ${h} ground`);
-    await bring(cand[0].x + w / 2, cand[0].z + h / 2);
-    return { x: cand[0].x, z: cand[0].z, w, h };
+    return cand.sort((a, c) => a.d - c.d).map(({ x, z }) => ({ x, z, w, h }));
   };
+  const findFree = async (w, h, margin, not = []) => {
+    const spot = freeSpots(w, h, margin, not)[0];
+    if (!spot) throw new Error(`no free ${w} x ${h} ground`);
+    await bring(spot.x + w / 2, spot.z + h / 2);
+    return spot;
+  };
+  // The room goes where the 7 x 8 stairwell still fits afterwards; which ground is nearest the owner depends on where the owner spawns.
+  const roomSpot = freeSpots(5, 4, 2).find((r) => freeSpots(7, 8, 0, [r]).length > 0);
 
   // ---- enter build mode
   await s.press('KeyB', 'b');
@@ -191,7 +196,9 @@ export default async function (s) {
   await s.sleep(900);
 
   // ---- room tool: a 5 x 4 room
-  const room = await findFree(5, 4, 2);
+  if (!roomSpot) throw new Error('no free 5 x 4 ground that leaves 7 x 8 for the stairs');
+  const room = roomSpot;
+  await bring(room.x + 2.5, room.z + 2);
   const rv = { a: { x: room.x, z: room.z }, b: { x: room.x + 5, z: room.z + 4 } };
   const before = await building(s);
   await clickSel('[data-tab="walls"]');
