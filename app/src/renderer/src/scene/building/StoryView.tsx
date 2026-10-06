@@ -5,7 +5,7 @@ import { PROVIDERS, type Employee } from '../../../../shared/protocol.ts';
 import { ITEM_DEFS, STORY_H, WALL_STYLES, YAW, type FloorGeometry, type ItemId } from '../../../../shared/space/index.ts';
 import { hasFloorAt, tileIndex } from '../../../../shared/space/geom.ts';
 import { runtime } from '../../runtime.ts';
-import { draft } from '../../hud/build/state.ts';
+import { buildView, draft } from '../../hud/build/state.ts';
 import { get, set, useStore } from '../../store.ts';
 import { walkTo } from '../../sim.ts';
 import { chairOf } from '../../world.ts';
@@ -16,7 +16,7 @@ import { reflective } from '../Lighting.tsx';
 import { floorGeometry } from './floor.ts';
 import { propOf } from '../props.ts';
 import { box, cyl, merge, DEFAULT_TINT, DYNAMIC, modelOf, onTopOf, PROP_DEFS, screenGeometry } from './models.ts';
-import { curbModel, facesCamera, frameModel, glassModel, occludes, octantOf, VARIANTS, wallMatrix, wallModel, wallRecords, ZERO, type Variant, type WallRecord } from './walls.ts';
+import { crossesView, curbModel, facesCamera, frameModel, glassModel, occludes, octantOf, VARIANTS, wallMatrix, wallModel, wallRecords, ZERO, type Variant, type WallRecord } from './walls.ts';
 
 const up = new Vector3(0, 1, 0);
 const q = new Quaternion();
@@ -176,11 +176,14 @@ function Walls({ geom }: { geom: FloorGeometry }) {
     // While furniture is being placed on this floor, the walls between the camera and it step out of the way too.
     const f = iso && mode !== 'down' && draft.focus?.level === geom.index ? draft.focus : null;
     const yaw = runtime.view.yaw;
-    const stamp = `${key}|${f ? `${Math.round(f.x * 2)},${Math.round(f.z * 2)},${octantOf(yaw)}` : ''}`;
+    // Interior walls step down by where the owner stands, so the stamp carries the owner's tile too.
+    const at = get().build ? buildView : runtime.owner.pos;
+    const fx = Math.round(at.x), fz = Math.round(at.z);
+    const stamp = `${key}|${key >= 0 ? `${fx},${fz}` : ''}|${f ? `${Math.round(f.x * 2)},${Math.round(f.z * 2)},${octantOf(yaw)}` : ''}`;
     if (stamp === seen.current) return;
     seen.current = stamp;
     const cutYaw = key * (Math.PI / 4);
-    const isCut = (r: WallRecord) => key === ALL_DOWN || (key >= 0 && facesCamera(r, cutYaw)) || (!!f && occludes(r, yaw, f));
+    const isCut = (r: WallRecord) => key === ALL_DOWN || (key >= 0 && (facesCamera(r, cutYaw) || crossesView(r, cutYaw, { x: fx, z: fz }))) || (!!f && occludes(r, yaw, f));
     apply(isCut);
     colorCurbs(isCut);
   });

@@ -118,6 +118,19 @@ export function wallMatrix(r: WallRecord, out = new Matrix4()): Matrix4 {
 /** The wall faces the camera when its outward normal points at it. `yaw` is the camera's heading, the way view.yaw runs. */
 export const facesCamera = (r: WallRecord, yaw: number): boolean => -Math.sin(yaw) * r.nx - Math.cos(yaw) * r.nz > 0.35;
 
+/**
+ * An interior wall has a room on both sides, so it has no outward normal. It still hides the room behind it from a camera
+ * looking across it, so it steps down when its line is across the view and it stands between the camera and `focus`.
+ */
+export function crossesView(r: WallRecord, yaw: number, focus: { x: number; z: number }): boolean {
+  if (r.nx !== 0 || r.nz !== 0) return false;
+  if (r.angle !== 0 && r.angle !== -Math.PI / 2) return false;
+  const tx = -Math.sin(yaw);
+  const tz = -Math.cos(yaw);
+  const across = r.angle === 0 ? Math.abs(tz) : Math.abs(tx);
+  return across > 0.35 && (r.x - focus.x) * tx + (r.z - focus.z) * tz > -0.5;
+}
+
 /** The camera's heading snapped to one of eight directions, so the cutaway only changes when the view turns far enough. */
 export const octantOf = (yaw: number): number => ((Math.round(yaw / (Math.PI / 4)) % 8) + 8) % 8;
 
