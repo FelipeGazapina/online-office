@@ -530,12 +530,13 @@ export class Office {
       case 'configure_linear_board':
         return this.configureLinearBoard(msg.blockId, msg.url);
       case 'create_board':
-        this.block(msg.blockId);
         this.tasks.createBoard(msg.blockId, msg.name, msg.spec);
         return this.events.changed();
-      case 'update_board':
-        this.tasks.updateBoard(msg.boardId, { ...(msg.name !== undefined ? { name: msg.name } : {}), ...(msg.sources !== undefined ? { sources: msg.sources } : {}), ...(msg.logHours !== undefined ? { logHours: msg.logHours } : {}) });
+      case 'update_board': {
+        const { type: _, boardId, ...patch } = msg;
+        this.tasks.updateBoard(boardId, patch);
         return this.events.changed();
+      }
       case 'delete_board':
         this.tasks.deleteBoard(msg.boardId);
         return this.events.changed();
@@ -544,9 +545,11 @@ export class Office {
       case 'create_task':
         this.tasks.createTask(msg.boardId, msg.title, msg.notes);
         return this.events.changed();
-      case 'update_task':
-        this.tasks.updateTask(msg.taskId, { ...(msg.title !== undefined ? { title: msg.title } : {}), ...(msg.notes !== undefined ? { notes: msg.notes } : {}), ...(msg.stage ? { stage: msg.stage } : {}) });
+      case 'update_task': {
+        const { type: _, taskId, ...patch } = msg;
+        this.tasks.updateTask(taskId, patch);
         return this.events.changed();
+      }
       case 'delete_task':
         this.tasks.deleteTask(msg.taskId);
         return this.events.changed();

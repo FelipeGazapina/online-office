@@ -21,7 +21,9 @@ import {
   stageOfStatus,
   syncCards,
   timesOf as timesOfTasks,
+  totalWorkedMs,
   turnLogOf,
+  workedMs,
   type Board,
   type BoardId,
   type RunState,
@@ -105,6 +107,9 @@ console.log('# time is a fold of the ledger');
 
   const shared = timesOf([t('A', 'r1'), t('B', 'r2')], turnLogOf([post('r1', 'r1', 0), post('r2', 'r2', 0), deliver(['r1', 'r2'], 'ana', 't1', 0)]), 200);
   check(shared.A!.running[0]!.share === 0.5 && shared.A!.totalMs === 100, 'an open turn on two tasks runs at half speed on each');
+  check(workedMs(at500, e('ana'), 800) === 700 && totalWorkedMs(at500, 800) === 700 && workedMs(at500, e('po'), 800) === 0, 'a screen counts on from when the time was measured');
+  check(workedMs(shared.A!, e('ana'), 400) === 200 && totalWorkedMs(shared.B!, 400) === 200, 'and counts at half speed while the turn is split');
+  check(workedMs(one, e('ana'), 9999) === 60 && totalWorkedMs(one, 9999) === 60, 'and stops counting for someone who is not running');
 
   // A message that reaches a turn in the middle (the agent read its inbox) is billed from then on.
   const mid = timesOf(

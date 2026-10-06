@@ -264,7 +264,7 @@ export class Tasks {
     const last = this.sync.get(boardId);
     this.sync.set(boardId, { kind: 'loading', ...(last && 'lastFetchedAt' in last && last.lastFetchedAt ? { lastFetchedAt: last.lastFetchedAt } : {}) });
     this.host.changed();
-    const result = await this.host.provider.fetchSources(before.sources);
+    const result = await this.host.provider.fetchSources(before.sources).catch((err: unknown) => ({ cards: [] as TaskCard[], errors: [err instanceof Error ? err.message : String(err)] }));
     const board = this.boards.find((b) => b.id === boardId);
     if (!board || board.kind === 'quick') return;
     // The sources changed while this was out, and the change asked for its own round.
