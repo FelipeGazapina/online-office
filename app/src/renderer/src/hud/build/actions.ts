@@ -38,14 +38,13 @@ export function exitBuild() {
 
 export const toggleBuild = () => (get().build ? exitBuild() : enterBuild());
 
-/** Esc and a right click: a block in hand goes back and the block tool stays, anything else drops to the select tool. */
+/** Esc and a right click. A block in hand goes back and the block tool stays, so the next block is one click away. */
 export function stepBack() {
   const tool = get().build?.tool;
   if (tool?.kind === 'block' && tool.carry) setTool({ kind: 'block', carry: null });
   else if (tool && tool.kind !== 'select') setTool({ kind: 'select' });
 }
 
-/** Takes the block in hand, held by the point `at` (meters). False when the block has nothing on this floor. */
 export function pickUpBlock(blockId: string, at: Vec2): boolean {
   const s = get();
   const box = s.build && s.building ? cellBounds(blockItems(s.building.stories[s.build.level], blockId)) : null;
@@ -137,7 +136,6 @@ useStore.subscribe((s, prev) => {
 
 const turned = (rot: Rot, step: 1 | -1) => (((rot + step) % 4) + 4) % 4 as Rot;
 
-/** Whether the tool in hand can be turned: a piece being placed or moved, or a block being carried. */
 export const canTurn = (tool: BuildTool) => (tool.kind === 'item' && ITEM_DEFS[tool.def]?.kind !== 'stairs') || (tool.kind === 'block' && !!tool.carry);
 
 export function rotate(step: 1 | -1) {

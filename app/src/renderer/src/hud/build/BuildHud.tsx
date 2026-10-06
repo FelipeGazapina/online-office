@@ -20,13 +20,17 @@ const HINTS: Record<BuildTool['kind'], (t: BuildTool) => string[][]> = {
 };
 
 function Mover() {
-  const block = useStore((s) => s.build?.tool.kind === 'block');
+  // Neither switch lights while a wall, floor or catalog tool is in hand: they say what a click on a placed piece picks up.
+  const mode = useStore((s) => {
+    const t = s.build?.tool;
+    return t?.kind === 'block' ? 'block' : t?.kind === 'select' || (t?.kind === 'item' && t.carry) ? 'piece' : null;
+  });
   return (
     <div className="bh-mover" role="group" aria-label="What a click picks up">
-      <button className="bh-mode" aria-pressed={!block} onClick={(e) => { setTool({ kind: 'select' }); e.currentTarget.blur(); }} title="Pick up one piece of furniture" data-testid="mode-piece">
+      <button className="bh-mode" aria-pressed={mode === 'piece'} onClick={(e) => { setTool({ kind: 'select' }); e.currentTarget.blur(); }} title="Pick up one piece of furniture" data-testid="mode-piece">
         <PieceIcon /> Furniture
       </button>
-      <button className="bh-mode" aria-pressed={block} onClick={(e) => { setTool({ kind: 'block', carry: null }); e.currentTarget.blur(); }} title="Pick up a whole block, desks and board together (Shift-click does the same)" data-testid="mode-block">
+      <button className="bh-mode" aria-pressed={mode === 'block'} onClick={(e) => { setTool({ kind: 'block', carry: null }); e.currentTarget.blur(); }} title="Pick up a whole block, desks and board together (Shift-click does the same)" data-testid="mode-block">
         <BlockIcon /> Block
       </button>
     </div>
@@ -200,7 +204,6 @@ function Readout() {
   );
 }
 
-// The way into build mode in live mode, top right and always there, in the overview and in first person. B does the same.
 function EnterButton() {
   const ready = useStore((s) => !!s.building);
   return (

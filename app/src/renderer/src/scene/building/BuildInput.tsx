@@ -133,7 +133,6 @@ function plan(b: Building, build: BuildState, p: Vec2, drag: Drag | null, shift:
   }
 }
 
-/** What a press on the floor picks up: the block under it with the block tool or Shift held, else the piece under it. */
 function pickAt(b: Building, build: BuildState, p: Vec2, whole: boolean): boolean {
   const story = b.stories[build.level];
   if (build.tool.kind === 'block') {
@@ -248,6 +247,7 @@ export function BuildInput() {
 
     const onDown = (e: PointerEvent) => {
       track(e);
+      grabbed = false;
       down = { x: e.clientX, y: e.clientY, button: e.button };
       if (e.button !== 0) return;
       const c = current();

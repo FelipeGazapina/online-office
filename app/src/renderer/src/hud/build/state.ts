@@ -11,7 +11,6 @@ export type Ghost =
   | { kind: 'vertex'; at: Vec2 }
   | { kind: 'item'; item: Item; ok: boolean }
   | { kind: 'outline'; item: Item }
-  // A whole block as it would stand, with one footprint around all of it, and the block under the pointer before it is picked.
   | { kind: 'block'; items: readonly Item[]; ok: boolean }
   | { kind: 'blockSelect'; items: readonly Item[] };
 

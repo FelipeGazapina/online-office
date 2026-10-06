@@ -2,11 +2,10 @@
 // all with real mouse and key events through the DevTools protocol. The test reads the building main holds, not the screen.
 // It also shows why the B key alone failed: it is typed into the chat composer whenever a person is selected.
 // Run: pnpm build:verify && OFFICE_OUT_DIR=out/verify OFFICE_CDP_PORT=9341 node verify/cdp.mjs verify/e2e-build-move.mjs
-import { copyFileSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { assert, scratch } from './lib.mjs';
 
-const SHOTS = '/Users/feliperico/.claude/orchestrate/online-office-game/shots/b1';
 const { dataDir, repo } = scratch();
 mkdirSync(join(repo, 'b'));
 writeFileSync(join(dataDir, 'company.json'), readFileSync(new URL('./fixtures/company-no-building.json', import.meta.url), 'utf8').replaceAll('__REPO__', repo));
@@ -24,15 +23,8 @@ const chairOf = (item) => {
   return { x: (item.x + local.x) / 2, z: (item.z + local.z) / 2 };
 };
 
-async function save(s, name) {
-  mkdirSync('/tmp/office-shots', { recursive: true });
-  const path = await s.shot(name);
-  mkdirSync(SHOTS, { recursive: true });
-  copyFileSync(path, join(SHOTS, `${name}.png`));
-}
-
-// The test window says it is a test. The pictures for the panel show the office the way the owner sees it.
-const dress = (s) => s.eval(`document.documentElement.classList.remove('test-run'); document.querySelector('.test-banner')?.remove();`);
+// The pictures for the Sims panel come from shots-build-move.mjs, on a copy of a real company. These are for reading a failed run.
+const save = (s, name) => s.shot(`move-${name}`);
 
 const building = (s) => s.eval(`${store}.building`);
 const tool = (s) => s.eval(`${store}.build?.tool ?? null`);
@@ -84,13 +76,18 @@ export default async function (s, { launch }) {
   const deskPoint = (d) => ({ x: d.x / 2 + 0.75, z: d.z / 2 + 0.5 });
 
   // ---- the way in: a button in the top right, in every camera
-  await dress(s);
   const vw = await s.eval('innerWidth');
   const button = await rect('[data-testid="build-enter"]');
   assert(!!button && button.right > vw - 40 && button.top < 60 && button.right <= vw, `a Build button sits in the top right (${Math.round(button.left)},${Math.round(button.top)} to ${Math.round(button.right)},${Math.round(button.bottom)})`);
   const crowd = await Promise.all(['.camera-toggle', '.clock-bar', '.waiting'].map(rect));
   assert(crowd.every((r) => !r || r.right <= button.left || r.left >= button.right || r.bottom <= button.top || r.top >= button.bottom), 'and it covers none of the other HUD controls');
   assert((await s.eval(`document.querySelector('[data-testid="build-enter"]').textContent`)).includes('Build'), 'it is labelled Build');
+  await s.eval(`__office.store.setState({ update: { status: 'available', version: '9.9.9' } })`);
+  await s.waitFor(`!!document.querySelector('.update-chip')`, 3000);
+  const [moved, chip] = await Promise.all([rect('[data-testid="build-enter"]'), rect('.update-chip')]);
+  assert(moved.right <= chip.left || moved.left >= chip.right, 'with the update notice showing, the Build button steps aside instead of sitting on it');
+  await s.eval(`__office.store.setState({ update: null })`);
+  await s.waitFor(`!document.querySelector('.update-chip')`, 3000);
   await s.sleep(400);
   await save(s, 'entry');
 
@@ -171,7 +168,6 @@ export default async function (s, { launch }) {
   await s.sleep(200);
   await bring(goal.x, goal.z);
   await hover(goal.x, goal.z);
-  await dress(s);
   await save(s, 'carry');
   const drop = await at(goal.x, goal.z);
   await s.click(drop.x, drop.y);
@@ -210,7 +206,6 @@ export default async function (s, { launch }) {
   await hover(grabAt.x, grabAt.z);
   const sel = await footprint('block-select');
   assert(sel && sel.pieces === before.length, `hovering any piece outlines the whole block, all ${before.length} pieces`);
-  await dress(s);
   await s.sleep(200);
   await save(s, 'block-hover');
   await s.mouse('mousePressed', grabPx.x, grabPx.y, 1);
@@ -222,7 +217,6 @@ export default async function (s, { launch }) {
   const shift = { x: 8, z: 0 };
   const half = { x: grabAt.x + 6, z: grabAt.z };
   await hover(half.x, half.z);
-  await dress(s);
   await s.sleep(300);
   await save(s, 'block');
   const carry = await footprint('block-footprint');
@@ -299,13 +293,28 @@ export default async function (s, { launch }) {
   await s.clickOn('[aria-label="Redo"]');
   await waitBuilding(`JSON.stringify(b.stories[0].items) === ${JSON.stringify(JSON.stringify(spunBuilding.stories[0].items))}`, 'two redos did not restore the turned block');
   assert(near(await avatar(dana), chairOf(spun)), 'two redos put it back turned');
+
+  // A block can be dragged too: press on it, drag, let go, and it drops where the pointer ends.
+  await s.clickOn('[data-testid="mode-block"]');
+  const turnedDesk = turned.find((i) => i.def === 'bench_desk');
+  const from = await bring(deskPoint(turnedDesk).x, deskPoint(turnedDesk).z);
+  const to = await at(deskPoint(turnedDesk).x, deskPoint(turnedDesk).z + 2);
+  await s.drag({ x: from.x, y: from.y }, { x: to.x, y: to.y }, 14);
+  await s.sleep(300);
+  const dragged = items(await building(s), blockId);
+  const ddx = dragged[0].x - turned[0].x;
+  const ddz = dragged[0].z - turned[0].z;
+  assert(dragged.every((i, n) => i.id === turned[n].id && i.x - turned[n].x === ddx && i.z - turned[n].z === ddz && i.rot === turned[n].rot), `dragging the block moves every piece by the same ${ddx / 2} m, ${ddz / 2} m`);
+  assert(Math.abs(ddz - 4) <= 1 && Math.abs(ddx) <= 1 && (await tool(s)).kind === 'block' && (await tool(s)).carry === null, 'to where the pointer was let go, with the block tool left empty-handed');
+  assert(near(await avatar(dana), chairOf(byId(await building(s)).get(desk0.id))), 'and Dana went with it');
+  const stood = dragged;
   await leaveByButton();
 
   // ---- it all survives a restart
   const file = join(dataDir, 'company.json');
   const onDisk = JSON.parse(readFileSync(file, 'utf8'));
   const diskBlock = onDisk.building.stories[0].items.filter((i) => i.blockId === blockId);
-  assert(diskBlock.length === before.length && diskBlock.every((i) => turned.some((t) => t.id === i.id && t.x === i.x && t.z === i.z && t.rot === i.rot)), 'company.json holds the turned block where it stands');
+  assert(diskBlock.length === before.length && diskBlock.every((i) => stood.some((t) => t.id === i.id && t.x === i.x && t.z === i.z && t.rot === i.rot)), 'company.json holds the block where it stands');
   await s.close();
   const app = await launch({ env });
   await app.waitFor('!!window.__office && !!window.office');
@@ -314,10 +323,10 @@ export default async function (s, { launch }) {
   await app.sleep(500);
   const reopened = await app.eval(`${store}.building`);
   const nowBlock = items(reopened, blockId);
-  assert(nowBlock.length === before.length && nowBlock.every((i) => turned.some((t) => t.id === i.id && t.x === i.x && t.z === i.z && t.rot === i.rot)), 'after a restart the block stands where it was left, turned');
+  assert(nowBlock.length === before.length && nowBlock.every((i) => stood.some((t) => t.id === i.id && t.x === i.x && t.z === i.z && t.rot === i.rot)), 'after a restart the block stands where it was left');
   const reSeats = await app.eval(`${store}.company.employees.map((e) => [e.id, e.seat])`);
   assert(JSON.stringify(reSeats) === JSON.stringify(seatsBefore), 'every employee has the same desk id');
   const danaAgain = (await app.eval('__office.state()')).avatars.find((a) => a.id === dana);
-  assert(near(danaAgain, chairOf(byId(reopened).get(desk0.id))) && danaAgain.seated, 'and Dana is seated at the turned desk');
+  assert(near(danaAgain, chairOf(byId(reopened).get(desk0.id))) && danaAgain.seated, 'and Dana is seated at its desk');
   await app.close();
 }

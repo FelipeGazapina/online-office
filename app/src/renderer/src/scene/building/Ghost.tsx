@@ -252,7 +252,6 @@ function ItemModel({ item, ok }: { item: Item; ok: boolean }) {
   );
 }
 
-// The box a block selection draws around everything in it: twelve edges, like the white room box of the Sims.
 const CAGE_HEIGHT = 2.4;
 const CAGE_EDGE = 0.07;
 function Cage({ x0, z0, x1, z1, color }: { x0: number; z0: number; x1: number; z1: number; color: string }) {
@@ -277,7 +276,6 @@ function Cage({ x0, z0, x1, z1, color }: { x0: number; z0: number; x1: number; z
   );
 }
 
-// A whole block: one footprint around all of it, the pieces as they would stand, and the turn mark at a corner.
 function BlockGhost({ items, ok }: { items: readonly Item[]; ok: boolean }) {
   const box = cellBounds(items);
   if (!box) return null;
@@ -294,7 +292,6 @@ function BlockGhost({ items, ok }: { items: readonly Item[]; ok: boolean }) {
   );
 }
 
-// The block the pointer is over before it is picked: white box, white outline of every piece in it.
 function BlockSelect({ items }: { items: readonly Item[] }) {
   const box = cellBounds(items);
   if (!box) return null;
