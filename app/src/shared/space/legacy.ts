@@ -1,6 +1,6 @@
 // The static office the app shipped with, as a Building. A company.json without a building migrates through this.
 import { PAINT } from './catalog.ts';
-import { BENCH_COUNT, globalId, itemId, lotForSlot, meetingItems, perimeter, plantItems, rugTiles, teamItems } from './kit.ts';
+import { BENCH_COUNT, DOOR_X, LOBBY_Z0, globalId, itemId, lotForSlot, meetingItems, perimeter, plantItems, rugTiles, teamItems } from './kit.ts';
 import { freeDesk, placeDesk } from './seats.ts';
 import { applyAll, emptyBuilding } from './story.ts';
 import { wrefKey } from './geom.ts';
@@ -29,6 +29,13 @@ export function legacyBuilding(
   const walls = new Map<number, WallSeg>();
   const wall = (w: WallSeg) => walls.set(wrefKey(w), w);
   for (const w of perimeter(lot)) wall(w);
+  // Four-tile window bands along the outer walls, so the facade reads as glazing between piers, not slits in plaster.
+  const band = (i: number) => i % 6 >= 1 && i % 6 <= 4;
+  for (const w of [...walls.values()]) {
+    if (w.open) continue;
+    if (w.d === 'e' && band(w.x - lot.x0) && (w.z === lot.z0 || Math.abs(w.x - DOOR_X) > 3)) wall({ ...w, open: 'window' });
+    if (w.d === 's' && band(w.z - lot.z0) && w.z < LOBBY_Z0 - 1) wall({ ...w, open: 'window' });
+  }
   const m = MEETING;
   for (let x = m.x0; x < m.x1; x++) {
     wall({ x, z: m.z0, d: 'e', style: 0 });

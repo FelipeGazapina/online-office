@@ -9,6 +9,7 @@ import { set, useStore } from '../store.ts';
 import { ownerSeat, worldFor, type World } from '../world.ts';
 import { LobbyDecor } from './Decor.tsx';
 import { Environment } from './Environment.tsx';
+import { Exterior } from './Exterior.tsx';
 import { Chair, Desk, RoundedPlane } from './Furniture.tsx';
 import { fitText, FONT_BODY, FONT_DISPLAY, roundRect, useCanvasTexture } from './textures.ts';
 
@@ -236,15 +237,12 @@ export function Office({ company }: { company: Company | null }) {
     <>
       <Lights b={b} />
       <Environment b={b} />
+      <Exterior b={b} />
       <CompanySign name={company?.name ?? 'Online Office'} b={b} />
       <SharedFacilities b={b} world={world} />
       <LobbyDecor cx={(b.x0 + b.x1) / 2} z1={b.z1} right={b.x1 - 4} doorX={DOOR_X} />
       <MeetingRoom world={world} />
       <OwnerCorner world={world} />
-      <mesh position={[DOOR_X, 1.5, b.z1 + 2.2]} rotation-y={Math.PI}>
-        <planeGeometry args={[4.4, 3.2]} />
-        <meshBasicMaterial color="#d6e8fa" />
-      </mesh>
       <group position={[DOOR_X, 0, b.z1 - 1.1]}>
         <RoundedPlane w={2.6} d={1.5} r={0.3} color="#6f9a90" y={0.01} />
       </group>

@@ -12,7 +12,7 @@ import { blobShadowTexture, ceilingTexture, codeTexture, plankTexture } from '..
 import { detail } from '../shading.ts';
 import { floorGeometry } from './floor.ts';
 import { chairModel, DEFAULT_TINT, DYNAMIC, modelOf, screenGeometry } from './models.ts';
-import { curbModel, facesCamera, glassModel, octantOf, VARIANTS, wallMatrix, wallModel, wallRecords, ZERO, type Variant } from './walls.ts';
+import { curbModel, facesCamera, frameModel, glassModel, octantOf, VARIANTS, wallMatrix, wallModel, wallRecords, ZERO, type Variant } from './walls.ts';
 
 const up = new Vector3(0, 1, 0);
 const q = new Quaternion();
@@ -27,6 +27,7 @@ const flatMaterial = detail(new MeshStandardMaterial({ vertexColors: true, rough
 const furnitureMaterial = detail(new MeshStandardMaterial({ vertexColors: true, roughness: 0.75 }), 'furniture');
 const wallMaterial = detail(new MeshStandardMaterial({ vertexColors: true, roughness: 0.95 }), 'wall');
 const glassMaterial = new MeshStandardMaterial({ color: '#cfe8ff', emissive: '#a8d4ff', emissiveIntensity: 0.9, roughness: 0.2, side: DoubleSide });
+const frameMaterial = new MeshStandardMaterial({ vertexColors: true, roughness: 0.5, metalness: 0.2 });
 const railMaterial = new MeshStandardMaterial({ color: '#c9cdd8', roughness: 0.5, metalness: 0.3 });
 const ceilingMap = ceilingTexture();
 ceilingMap.repeat.set(6.5, 6.5);
@@ -94,7 +95,7 @@ function Floor({ geom }: { geom: FloorGeometry }) {
 
 function Walls({ geom }: { geom: FloorGeometry }) {
   const records = useMemo(() => wallRecords(geom), [geom]);
-  const refs = useRef<Partial<Record<Variant | 'curb' | 'glass', InstancedMesh | null>>>({});
+  const refs = useRef<Partial<Record<Variant | 'curb' | 'glass' | 'frame', InstancedMesh | null>>>({});
   const seen = useRef(-2);
   const curbCount = records.solid.length + records.window.length;
 
@@ -108,7 +109,10 @@ function Walls({ geom }: { geom: FloorGeometry }) {
         const cut = cutYaw !== null && facesCamera(r, cutYaw);
         if (cut && (v === 'solid' || v === 'window')) refs.current.curb?.setMatrixAt(curbs++, wallMatrix(r, m));
         mesh.setMatrixAt(i, cut ? ZERO : wallMatrix(r, m));
-        if (v === 'window') refs.current.glass?.setMatrixAt(i, cut ? ZERO : wallMatrix(r, m));
+        if (v === 'window') {
+          refs.current.glass?.setMatrixAt(i, cut ? ZERO : wallMatrix(r, m));
+          refs.current.frame?.setMatrixAt(i, cut ? ZERO : wallMatrix(r, m));
+        }
       });
       mesh.instanceMatrix.needsUpdate = true;
     }
@@ -119,6 +123,7 @@ function Walls({ geom }: { geom: FloorGeometry }) {
     }
     const glass = refs.current.glass;
     if (glass) glass.instanceMatrix.needsUpdate = true;
+    if (refs.current.frame) refs.current.frame.instanceMatrix.needsUpdate = true;
   };
 
   useLayoutEffect(() => {
@@ -156,13 +161,14 @@ function Walls({ geom }: { geom: FloorGeometry }) {
     if (curb.instanceColor) curb.instanceColor.needsUpdate = true;
   };
 
-  const ref = (key: Variant | 'curb' | 'glass') => (m: InstancedMesh | null) => void (refs.current[key] = m);
+  const ref = (key: Variant | 'curb' | 'glass' | 'frame') => (m: InstancedMesh | null) => void (refs.current[key] = m);
   return (
     <>
       {VARIANTS.map((v) =>
         records[v].length ? <instancedMesh key={`${v}${records[v].length}`} userData={{ wall: v }} ref={ref(v)} args={[wallModel(v), wallMaterial, records[v].length]} frustumCulled={false} castShadow receiveShadow /> : null,
       )}
       {records.window.length > 0 && <instancedMesh key={`glass${records.window.length}`} ref={ref('glass')} args={[glassModel(), glassMaterial, records.window.length]} frustumCulled={false} />}
+      {records.window.length > 0 && <instancedMesh key={`frame${records.window.length}`} ref={ref('frame')} args={[frameModel(), frameMaterial, records.window.length]} frustumCulled={false} castShadow receiveShadow />}
       {curbCount > 0 && <instancedMesh key={`curb${curbCount}`} userData={{ wall: 'curb' }} ref={ref('curb')} args={[curbModel(), wallMaterial, curbCount]} frustumCulled={false} receiveShadow />}
     </>
   );
