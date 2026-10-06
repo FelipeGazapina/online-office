@@ -47,6 +47,9 @@ const blobMaterial = new MeshBasicMaterial({ map: blobShadowTexture(), transpare
 const blobGeometry = new PlaneGeometry(1, 1).rotateX(-Math.PI / 2);
 const aoMaterial = new MeshBasicMaterial({ map: wallAoTexture(), transparent: true, depthWrite: false, opacity: 0.9, polygonOffset: true, polygonOffsetFactor: -1 });
 const aoGeometry = new PlaneGeometry(1, 1.1).rotateX(-Math.PI / 2);
+// The light a screen throws on the desk in front of it, tinted by what the screen shows.
+const glowMaterial = new MeshBasicMaterial({ map: poolTexture(), transparent: true, depthWrite: false, blending: AdditiveBlending, toneMapped: false, polygonOffset: true, polygonOffsetFactor: -4 });
+const glowGeometry = new PlaneGeometry(1.2, 0.8).rotateX(-Math.PI / 2).translate(0, 0.78, -0.12);
 const NO_BLOB: ReadonlySet<string> = new Set(['rug', 'rail', 'stairs']);
 const CEILING_Y = STORY_H - 0.3;
 const screenMaterial = new MeshBasicMaterial({ map: codeTexture(), toneMapped: false });
@@ -294,6 +297,7 @@ function Screens({ geom }: { geom: FloorGeometry }) {
   const desks = useMemo(() => geom.story.items.filter((i) => i.def === 'bench_desk' || i.def === 'po_desk'), [geom]);
   const sitters = useRef<{ company: unknown; bySeat: Map<string, Employee> }>({ company: null, bySeat: new Map() });
   const geo = useMemo(() => screenGeometry(), []);
+  const glow = useRef<InstancedMesh>(null);
   const fill = useMemo(
     () => (m: InstancedMesh) => {
       const mat = new Matrix4();
@@ -306,6 +310,18 @@ function Screens({ geom }: { geom: FloorGeometry }) {
     },
     [desks],
   );
+
+  useLayoutEffect(() => {
+    const g = glow.current;
+    if (!g) return;
+    const mat = new Matrix4();
+    desks.forEach((d, i) => {
+      const def = ITEM_DEFS[d.def];
+      const f = d.rot % 2 === 0 ? { w: def.w, d: def.d } : { w: def.d, d: def.w };
+      g.setMatrixAt(i, place(mat, (d.x + f.w / 2) / 2, 0, (d.z + f.d / 2) / 2, YAW[d.rot]));
+    });
+    g.instanceMatrix.needsUpdate = true;
+  }, [desks]);
 
   useFrame((state, dt) => {
     const m = mesh.current;
@@ -331,11 +347,18 @@ function Screens({ geom }: { geom: FloorGeometry }) {
         color.setRGB(0.04, 0.04, 0.05);
       }
       m.setColorAt(i, color);
+      glow.current?.setColorAt(i, color.multiplyScalar(0.28));
     });
     if (m.instanceColor) m.instanceColor.needsUpdate = true;
+    if (glow.current?.instanceColor) glow.current.instanceColor.needsUpdate = true;
   });
 
-  return <Instances geometry={geo} material={screenMaterial} count={desks.length} fill={fill} castShadow={false} receiveShadow={false} />;
+  return (
+    <>
+      <Instances geometry={geo} material={screenMaterial} count={desks.length} fill={fill} castShadow={false} receiveShadow={false} />
+      {desks.length > 0 && <instancedMesh key={`glow${desks.length}`} ref={glow} args={[glowGeometry, glowMaterial, desks.length]} frustumCulled={false} renderOrder={3} />}
+    </>
+  );
 }
 
 function Rails({ geom }: { geom: FloorGeometry }) {
