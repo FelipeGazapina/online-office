@@ -22,7 +22,7 @@ const roster = (): Member[] => [
 
 export type Acknowledge = NonNullable<ConstructorParameters<typeof Mailroom>[0]['acknowledge']>;
 
-export function world(ledger: readonly LedgerEntry[] = [], acknowledge?: Acknowledge) {
+export function world(ledger: readonly LedgerEntry[] = [], acknowledge?: Acknowledge, clock?: () => number) {
   const streams: { who: string; delta: string; done: boolean }[] = [];
   const members = roster();
   const prompts = new Map<string, string[]>();
@@ -60,7 +60,7 @@ export function world(ledger: readonly LedgerEntry[] = [], acknowledge?: Acknowl
       changed: () => {},
       stream: (who, _to, delta, done) => void streams.push({ who, delta, done }),
       ...(acknowledge ? { acknowledge } : {}),
-      now: () => 1_000 + n,
+      now: clock ?? (() => 1_000 + n),
       newId: () => `m${String(++n).padStart(4, '0')}`,
     },
     ledger,

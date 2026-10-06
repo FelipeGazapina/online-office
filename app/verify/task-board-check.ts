@@ -5,9 +5,9 @@ import { linearToolArguments, normalizeTaskPayload, parseLinearSelector, TaskBoa
 import { taskBoardColumns, type TaskBoardSource, type TaskCard } from '../src/shared/protocol.ts';
 
 const cards: TaskCard[] = [
-  { id: 'linear:1', provider: 'linear', identifier: 'BLOOM-1', title: 'Review', status: 'In Review', sourceLabel: 'Linear' },
-  { id: 'linear:2', provider: 'linear', identifier: 'BLOOM-2', title: 'New', status: 'Todo', sourceLabel: 'Linear' },
-  { id: 'linear:3', provider: 'linear', identifier: 'BLOOM-3', title: 'Unknown', status: 'Waiting on vendor', sourceLabel: 'Linear' },
+  { id: 'linear:1', provider: 'linear', externalId: '1', identifier: 'BLOOM-1', title: 'Review', status: 'In Review', sourceLabel: 'Linear' },
+  { id: 'linear:2', provider: 'linear', externalId: '2', identifier: 'BLOOM-2', title: 'New', status: 'Todo', sourceLabel: 'Linear' },
+  { id: 'linear:3', provider: 'linear', externalId: '3', identifier: 'BLOOM-3', title: 'Unknown', status: 'Waiting on vendor', sourceLabel: 'Linear' },
 ];
 const projected = taskBoardColumns(cards);
 if (projected.map((column) => column.label).join('|') !== 'Open|Ready to Review|Waiting on vendor') throw new Error(`task board columns lost the Linear order or unknown state: ${JSON.stringify(projected.map((column) => column.label))}`);

@@ -11,7 +11,8 @@ import { SEAT_CEILING, type AllowRule, type Company, type Employee, type Employe
 import type { Message } from '../src/shared/mail.ts';
 import { HARNESSES } from '../src/main/office/adapters/index.ts';
 import type { SessionHost } from '../src/main/office/adapters/types.ts';
-import { Office, OfficeError } from '../src/main/office/company.ts';
+import { Office } from '../src/main/office/company.ts';
+import { OfficeError } from '../src/main/office/error.ts';
 import { startOfficeMcp } from '../src/main/office/mcp.ts';
 import { MemoryStore } from '../src/main/office/memory.ts';
 import { check, finish, sleep, until } from './check.ts';

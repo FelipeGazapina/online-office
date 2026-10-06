@@ -10,10 +10,10 @@ import type {
   MeetingDoor,
   ModelCatalog,
   Provider,
-  TaskBoardState,
   TaskConnectionState,
   UpdateState,
 } from '../../shared/protocol.ts';
+import type { Board, BoardId, BoardSync, Task, TaskId, TaskTime } from '../../shared/tasks.ts';
 import { emptyMailView, type MailView, type Message, type MessageId } from '../../shared/mail.ts';
 import type { Building, ItemId, PaintId, Rot } from '../../shared/space/index.ts';
 import type { Language, VoiceQuality } from '../../shared/voice.ts';
@@ -30,7 +30,7 @@ export const LANGS: Record<Lang, { stt: Language; tts: 'en-US' | 'pt-BR' }> = {
   // Whisper's json answer does not say which language it heard, so the employees keep an English voice.
   auto: { stt: 'auto', tts: 'en-US' },
 };
-export type Modal = null | { kind: 'hire'; bypassLimit?: boolean } | { kind: 'block' } | { kind: 'whiteboard'; blockId: BlockId } | { kind: 'github'; blockId: BlockId } | { kind: 'github_setup'; blockId: BlockId } | { kind: 'task_board'; blockId: BlockId; taskId?: string } | { kind: 'linear_board'; blockId: BlockId };
+export type Modal = null | { kind: 'hire'; bypassLimit?: boolean } | { kind: 'block' } | { kind: 'whiteboard'; blockId: BlockId } | { kind: 'github'; blockId: BlockId } | { kind: 'github_setup'; blockId: BlockId } | { kind: 'task_board'; blockId: BlockId; taskId?: TaskId } | { kind: 'linear_board'; blockId: BlockId };
 
 // What the owner is doing in build mode. `carry` is the placed item being moved, null for a new one.
 export type BuildTool =
@@ -82,7 +82,10 @@ type State = Settings & {
   harnesses: Record<Provider, HarnessStatus> | null;
   meetingDoor: MeetingDoor;
   catalogs: Record<Provider, ModelCatalog> | null;
-  taskBoards: Record<string, TaskBoardState>;
+  boards: Board[];
+  tasks: Task[];
+  boardSync: Record<BoardId, BoardSync>;
+  taskTime: Record<TaskId, TaskTime>;
   taskConnections: Record<'linear' | 'cronospark', TaskConnectionState>;
   logs: Record<string, LogLine[]>;
   // Chat panel: the request whose chain is open (null is the person's own thread), whether the composer targets the PO, and the details view.
@@ -131,7 +134,10 @@ export const useStore = create<State>()(() => ({
   harnesses: null,
   meetingDoor: 'open',
   catalogs: null,
-  taskBoards: {},
+  boards: [],
+  tasks: [],
+  boardSync: {},
+  taskTime: {},
   taskConnections: { linear: { kind: 'needs_auth' }, cronospark: { kind: 'needs_auth' } },
   logs: {},
   chatSub: null,

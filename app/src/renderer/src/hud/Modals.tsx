@@ -9,6 +9,7 @@ import {
   type Provider,
   taskBoardColumns,
 } from '../../../shared/protocol.ts';
+import { displayStatus, primaryBoard, sourcesOf, totalWorkedMs } from '../../../shared/tasks.ts';
 import { useDiagram } from '../scene/whiteboard.ts';
 import { send, set, useStore } from '../store.ts';
 import { tailPath } from './hooks.ts';
@@ -386,22 +387,29 @@ function WhiteboardModal({ blockId }: { blockId: BlockId }) {
 function TaskBoardModal({ blockId }: { blockId: BlockId }) {
   const block = useStore((s) => s.company?.blocks.find((candidate) => candidate.id === blockId));
   const company = useStore((s) => s.company);
-  const board = useStore((s) => s.taskBoards[blockId]);
+  const boards = useStore((s) => s.boards);
+  const allTasks = useStore((s) => s.tasks);
+  const taskTime = useStore((s) => s.taskTime);
+  const board = primaryBoard(boards, blockId);
+  const sync = useStore((s) => (board ? s.boardSync[board.id] : undefined));
   const linearConnection = useStore((s) => s.taskConnections.linear);
   const modal = useStore((s) => s.modal);
-  const employees = company?.employees.filter((employee) => employee.blockId === blockId && employee.status.kind === 'idle') ?? [];
-  const selected = board?.cards.find((card) => card.id === (modal?.kind === 'task_board' ? modal.taskId : undefined));
-  const columns = taskBoardColumns(board?.cards ?? []);
-  const hasLinearSource = block?.taskBoard?.sources.some((source) => source.provider === 'linear') ?? false;
-  const providerSummary = [...new Set((block?.taskBoard?.sources ?? []).map((source) => source.provider === 'linear' ? 'Linear' : 'CronoSpark'))].join(' and ') || 'configured sources';
-  const refresh = () => send({ type: 'refresh_task_board', blockId });
-  const emptyState = board?.kind === 'error'
-    ? <div className="task-board-empty"><p className="err-text">{board.message}</p>{hasLinearSource && linearConnection.kind !== 'ready' && <button className="btn primary" onClick={() => send({ type: 'connect_task_provider', provider: 'linear' })}>Connect Linear</button>}<button className="btn ghost" onClick={refresh}>Refresh</button></div>
-    : board?.kind === 'loading'
+  const people = [...(company?.employees.filter((employee) => employee.blockId === blockId) ?? [])].sort((a, b) => Number(b.role === 'orchestrator') - Number(a.role === 'orchestrator'));
+  const tasks = allTasks.filter((task) => task.boardId === board?.id);
+  const selected = tasks.find((task) => task.id === (modal?.kind === 'task_board' ? modal.taskId : undefined));
+  const columns = taskBoardColumns(tasks.map((task) => ({ task, status: displayStatus(task) })));
+  const sources = sourcesOf(board);
+  const hasLinearSource = sources.some((source) => source.provider === 'linear');
+  const providerSummary = [...new Set(sources.map((source) => source.provider === 'linear' ? 'Linear' : 'CronoSpark'))].join(' and ') || board?.name || 'configured sources';
+  const refresh = () => board && board.kind !== 'quick' && send({ type: 'refresh_board', boardId: board.id });
+  const emptyState = sync?.kind === 'error'
+    ? <div className="task-board-empty"><p className="err-text">{sync.message}</p>{hasLinearSource && linearConnection.kind !== 'ready' && <button className="btn primary" onClick={() => send({ type: 'connect_task_provider', provider: 'linear' })}>Connect Linear</button>}<button className="btn ghost" onClick={refresh}>Refresh</button></div>
+    : sync?.kind === 'loading'
       ? <p className="muted">Refreshing tickets…</p>
       : board
         ? <p className="muted">No tickets matched this board source.</p>
         : <p className="muted">This board has not loaded yet. Configure a source in the PO computer, then refresh.</p>;
+  const worked = selected && taskTime[selected.id] ? totalWorkedMs(taskTime[selected.id]!, Date.now()) : 0;
   return (
     <div className="scrim" onMouseDown={close}>
       <div className="modal wide task-board-modal" data-hud-resize-target="modal-task_board" onMouseDown={(event) => event.stopPropagation()} onKeyDown={(event) => event.key === 'Escape' && close()}>
@@ -409,7 +417,7 @@ function TaskBoardModal({ blockId }: { blockId: BlockId }) {
           <div>
             <p className="task-board-eyebrow">{providerSummary}</p>
             <h2>{block?.name ?? 'Task board'}</h2>
-            <p className="muted">{board?.kind === 'error' ? board.message : board?.kind === 'loading' ? 'Refreshing tickets…' : `${board?.cards.length ?? 0} issues synced from your workspace`}</p>
+            <p className="muted">{sync?.kind === 'error' ? sync.message : sync?.kind === 'loading' ? 'Refreshing tickets…' : `${tasks.length} issues synced from your workspace`}</p>
           </div>
           <div className="task-board-header-actions">
             <button className="task-board-filter active" type="button">All issues</button>
@@ -419,9 +427,9 @@ function TaskBoardModal({ blockId }: { blockId: BlockId }) {
         </div>
         <div className="task-board-toolbar" aria-label="Task board filters">
           <span className="task-board-filter-label">Board view</span>
-          <span className="task-board-filter-chip">{board?.cards.length ?? 0} issues</span>
-          <span className="task-board-filter-chip">{employees.length} idle employees</span>
-          {board?.kind === 'loading' && <span className="task-board-syncing">Syncing…</span>}
+          <span className="task-board-filter-chip">{tasks.length} issues</span>
+          <span className="task-board-filter-chip">{people.filter((person) => person.status.kind === 'idle').length} idle employees</span>
+          {sync?.kind === 'loading' && <span className="task-board-syncing">Syncing…</span>}
         </div>
         <div className="task-board-kanban-shell">
           <div className="task-board-kanban" data-testid="task-board-kanban">
@@ -429,34 +437,35 @@ function TaskBoardModal({ blockId }: { blockId: BlockId }) {
               <section className="task-board-column" key={column.id} data-column-id={column.id}>
                 <div className="task-board-column-head"><h3>{column.label}</h3><span>{column.cards.length}</span></div>
                 <div className="task-board-column-cards">
-                  {column.cards.map((card) => (
+                  {column.cards.map(({ task }) => (
                     <button
-                      key={card.id}
+                      key={task.id}
                       type="button"
-                      className={`task-card ${selected?.id === card.id ? 'selected' : ''}`}
-                      data-task-id={card.id}
-                      aria-pressed={selected?.id === card.id}
-                      onClick={() => set({ modal: { kind: 'task_board', blockId, taskId: card.id } })}
+                      className={`task-card ${selected?.id === task.id ? 'selected' : ''}`}
+                      data-task-id={task.id}
+                      aria-pressed={selected?.id === task.id}
+                      onClick={() => set({ modal: { kind: 'task_board', blockId, taskId: task.id } })}
                     >
-                      <span className={`task-provider ${card.provider}`}>{card.provider === 'linear' ? 'LIN' : 'CS'}</span>
-                      <span className="task-card-copy"><b>{card.identifier}</b><strong>{card.title}</strong><small>{card.priority ? `${card.priority} · ` : ''}{card.sourceLabel}</small></span>
+                      <span className={`task-provider ${task.origin.kind}`}>{task.origin.kind === 'linear' ? 'LIN' : task.origin.kind === 'cronospark' ? 'CS' : 'TASK'}</span>
+                      <span className="task-card-copy"><b>{task.origin.kind === 'manual' ? 'Task' : task.origin.identifier}</b><strong>{task.title}</strong><small>{task.origin.kind === 'manual' ? board?.name : `${task.origin.priority ? `${task.origin.priority} · ` : ''}${task.origin.sourceLabel}`}</small></span>
                     </button>
                   ))}
                 </div>
               </section>
             ))}
-            {!(board?.cards.length ?? 0) && <div className="task-board-empty">{emptyState}</div>}
+            {!tasks.length && <div className="task-board-empty">{emptyState}</div>}
           </div>
           <aside className="task-card-detail" aria-live="polite" data-testid="task-card-details">
             {selected ? <>
-              <div className="task-detail-topline"><span className={`task-provider ${selected.provider}`}>{selected.sourceLabel}</span><span className="task-detail-status">{selected.status}</span></div>
-              <h3>{selected.identifier}</h3>
+              <div className="task-detail-topline"><span className={`task-provider ${selected.origin.kind}`}>{selected.origin.kind === 'manual' ? board?.name : selected.origin.sourceLabel}</span><span className="task-detail-status">{displayStatus(selected)}</span></div>
+              <h3>{selected.origin.kind === 'manual' ? 'Task' : selected.origin.identifier}</h3>
               <h4>{selected.title}</h4>
-              <p className="muted">{selected.priority ? `Priority ${selected.priority}` : 'No priority set'}</p>
-              {selected.url && <a href={selected.url} target="_blank" rel="noreferrer">Open in {selected.sourceLabel}</a>}
+              <p className="muted">{selected.origin.kind === 'manual' ? selected.notes ?? '' : selected.origin.priority ? `Priority ${selected.origin.priority}` : 'No priority set'}</p>
+              {selected.origin.kind !== 'manual' && selected.origin.url && <a href={selected.origin.url} target="_blank" rel="noreferrer">Open in {selected.origin.sourceLabel}</a>}
+              {selected.runs.length > 0 && <p className="muted">{`Worked ${Math.round(worked / 1000)} s across ${selected.assignees.length} ${selected.assignees.length === 1 ? 'person' : 'people'}`}</p>}
               <h4>Assign to an AI employee</h4>
-              {employees.length ? employees.map((employee) => <button className="btn primary task-assign" key={employee.id} onClick={() => { send({ type: 'post', to: employee.id, clientId: crypto.randomUUID(), as: 'request', text: `Work on ${selected.identifier}: ${selected.title} [${selected.sourceLabel}]${selected.url ? ` ${selected.url}` : ''}` }); close(); }}>{employee.name}</button>) : <p className="muted">Every AI employee in this block is busy. Wait for one to become idle.</p>}
-            </> : <p className="muted">Select an issue to see its details and assign it to an idle AI employee.</p>}
+              {people.length ? people.map((person) => <button className="btn primary task-assign" key={person.id} onClick={() => { send({ type: 'assign_task', taskId: selected.id, employeeId: person.id }); close(); }}>{person.name}{person.role === 'orchestrator' ? ' (PO)' : ''}</button>) : <p className="muted">Hire an AI employee in this block to assign work.</p>}
+            </> : <p className="muted">Select an issue to see its details and assign it to an AI employee.</p>}
           </aside>
         </div>
       </div>

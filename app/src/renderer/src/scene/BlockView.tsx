@@ -1,6 +1,7 @@
 import { memo, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { Color, DoubleSide, MeshStandardMaterial } from 'three';
 import { taskBoardColumns, type Employee, type ProjectBlock } from '../../../shared/protocol.ts';
+import { displayStatus, primaryBoard, sourcesOf } from '../../../shared/tasks.ts';
 import { BLOCK_D, BLOCK_W, STORY_H, YAW, blockCenter, type Building, type Item } from '../../../shared/space/index.ts';
 import { enterProjectComputer } from '../computer.ts';
 import { set, useStore } from '../store.ts';
@@ -243,21 +244,24 @@ function GithubWhiteboard({ block }: { block: ProjectBlock }) {
 }
 
 function TaskBoardWhiteboard({ block }: { block: ProjectBlock }) {
-  const board = useStore((s) => s.taskBoards[block.id]);
-  const cards = board?.cards ?? [];
-  const columns = taskBoardColumns(cards);
+  const boards = useStore((s) => s.boards);
+  const allTasks = useStore((s) => s.tasks);
+  const board = primaryBoard(boards, block.id);
+  const sync = useStore((s) => (board ? s.boardSync[board.id] : undefined));
+  const cards = allTasks.filter((task) => task.boardId === board?.id);
+  const columns = taskBoardColumns(cards.map((task) => ({ task, status: displayStatus(task) })));
   const tex = useCanvasTexture(1536, 840, (g) => {
     g.fillStyle = '#fbfbf8'; g.fillRect(0, 0, 1536, 840);
     g.fillStyle = '#2b2e44'; g.font = `700 60px ${FONT_DISPLAY}`; g.fillText('Task board', 70, 100);
     g.font = `400 32px ${FONT_BODY}`; g.fillStyle = '#7b7e93';
-    g.fillText(board?.kind === 'loading' ? 'Refreshing incoming tickets…' : board?.kind === 'error' ? board.message : `${cards.length} incoming tickets · press F or click to assign work`, 72, 150);
+    g.fillText(sync?.kind === 'loading' ? 'Refreshing incoming tickets…' : sync?.kind === 'error' ? sync.message : `${cards.length} incoming tickets · press F or click to assign work`, 72, 150);
     columns.forEach((column, i) => {
       const x = 28 + i * 214;
       g.fillStyle = '#eeeef2'; roundRect(g, x, 200, 194, 570, 18); g.fill();
       g.fillStyle = '#2b2e44'; g.font = `700 23px ${FONT_DISPLAY}`; g.fillText(`${column.label} · ${column.cards.length}`, x + 14, 240);
-      column.cards.slice(0, 4).forEach((card, j) => { const y = 270 + j * 116; g.fillStyle = '#fff'; roundRect(g, x + 10, y, 174, 94, 11); g.fill(); g.fillStyle = '#2b2e44'; g.font = `700 18px ${FONT_BODY}`; g.fillText(card.identifier, x + 20, y + 29); g.font = `500 17px ${FONT_BODY}`; g.fillText(card.title.slice(0, 17), x + 20, y + 59); g.fillStyle = '#7b7e93'; g.font = `500 14px ${FONT_BODY}`; g.fillText(card.sourceLabel.slice(0, 18), x + 20, y + 81); });
+      column.cards.slice(0, 4).forEach(({ task }, j) => { const y = 270 + j * 116; const from = task.origin.kind === 'manual' ? { identifier: 'Task', sourceLabel: board?.name ?? '' } : task.origin; g.fillStyle = '#fff'; roundRect(g, x + 10, y, 174, 94, 11); g.fill(); g.fillStyle = '#2b2e44'; g.font = `700 18px ${FONT_BODY}`; g.fillText(from.identifier, x + 20, y + 29); g.font = `500 17px ${FONT_BODY}`; g.fillText(task.title.slice(0, 17), x + 20, y + 59); g.fillStyle = '#7b7e93'; g.font = `500 14px ${FONT_BODY}`; g.fillText(from.sourceLabel.slice(0, 18), x + 20, y + 81); });
     });
-  }, [board?.kind, board?.cards, board?.kind === 'error' ? board.message : undefined]);
+  }, [sync?.kind, cards, sync?.kind === 'error' ? sync.message : undefined]);
   return <group onClick={(e) => { e.stopPropagation(); if (e.delta < 6) set({ modal: { kind: 'task_board', blockId: block.id } }); }} onPointerOver={() => void (document.body.style.cursor = 'pointer')} onPointerOut={() => void (document.body.style.cursor = '')}><mesh castShadow position={[0, 1.85, 0]}><boxGeometry args={[4.4, 2.4, 0.1]} /><meshStandardMaterial color="#c9cdd8" metalness={0.3} roughness={0.5} /></mesh><mesh position={[0, 1.85, 0.056]}><planeGeometry args={[4.24, 2.32]} /><meshStandardMaterial map={tex} roughness={0.35} emissive="#fff" emissiveMap={tex} emissiveIntensity={0.3} /></mesh></group>;
 }
 
@@ -338,6 +342,7 @@ function Terminal({ blockId }: { blockId: ProjectBlock['id'] }) {
 
 export const BlockView = memo(function BlockView({ block, employees }: { block: ProjectBlock; employees: Employee[] }) {
   const building = useStore((s) => s.building);
+  const hasSources = useStore((s) => sourcesOf(primaryBoard(s.boards, block.id)).length > 0);
   const c = blockCenter(block.slot);
   const sign = useMemo(() => find(building, 'team_sign', block.id), [building, block.id]);
   const board = useMemo(() => find(building, 'whiteboard', block.id), [building, block.id]);
@@ -362,7 +367,7 @@ export const BlockView = memo(function BlockView({ block, employees }: { block: 
       )}
       {board && (
         <AtItem at={board}>
-          {block.linearBoardUrl ? <LinearBoardWhiteboard block={block} /> : block.taskBoard?.sources.length ? <TaskBoardWhiteboard block={block} /> : block.githubRepo ? <GithubWhiteboard block={block} /> : <Whiteboard block={block} authorName={author} />}
+          {block.linearBoardUrl ? <LinearBoardWhiteboard block={block} /> : hasSources ? <TaskBoardWhiteboard block={block} /> : block.githubRepo ? <GithubWhiteboard block={block} /> : <Whiteboard block={block} authorName={author} />}
         </AtItem>
       )}
       {terminal && (
