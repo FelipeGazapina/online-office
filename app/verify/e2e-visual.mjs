@@ -44,6 +44,15 @@ const firstPerson = async (s, name) => {
   await s.press('Tab');
   await s.waitFor('window.__officeCamera && window.__officeCamera.blend >= 0.999', 10000);
   await settle(s);
+  // The camera eases into place; shoot once it has not moved for a while, so two runs frame the same picture.
+  let last = '';
+  for (let i = 0; i < 40; i++) {
+    const now = await s.eval('JSON.stringify(window.__officeCamera, (k, v) => (typeof v === "number" ? Math.round(v * 1000) / 1000 : v))');
+    if (now === last) break;
+    last = now;
+    await s.eval('__office.step(0.2)');
+    await s.sleep(400);
+  }
   await save(s, name);
   await s.press('Tab');
   await s.waitFor('window.__officeCamera && window.__officeCamera.blend <= 0.001', 10000);
