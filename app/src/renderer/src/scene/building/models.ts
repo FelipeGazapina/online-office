@@ -16,10 +16,10 @@ const paint = (g: BufferGeometry, color: string | number | [number, number, numb
 };
 const at = (g: BufferGeometry, x: number, y: number, z: number) => g.translate(x, y, z);
 
-const box = (w: number, h: number, d: number, x: number, y: number, z: number, color: string | [number, number, number]) => paint(at(new BoxGeometry(w, h, d), x, y, z), color);
-const cyl = (rt: number, rb: number, h: number, x: number, y: number, z: number, color: string, seg = 14) => paint(at(new CylinderGeometry(rt, rb, h, seg), x, y, z), color);
-const blob = (r: number, x: number, y: number, z: number, color: string) => paint(at(new IcosahedronGeometry(r, 0), x, y, z), color);
-const merge = (parts: BufferGeometry[]) => {
+export const box = (w: number, h: number, d: number, x: number, y: number, z: number, color: string | [number, number, number]) => paint(at(new BoxGeometry(w, h, d), x, y, z), color);
+export const cyl = (rt: number, rb: number, h: number, x: number, y: number, z: number, color: string, seg = 14) => paint(at(new CylinderGeometry(rt, rb, h, seg), x, y, z), color);
+export const blob = (r: number, x: number, y: number, z: number, color: string) => paint(at(new IcosahedronGeometry(r, 0), x, y, z), color);
+export const merge = (parts: BufferGeometry[]) => {
   const g = mergeGeometries(parts, false);
   if (!g) throw new Error('A furniture model failed to merge');
   g.computeBoundingSphere();
@@ -42,6 +42,14 @@ function desk(po: boolean) {
     box(0.72, 0.44, 0.04, 0, 1.1, 0.2, '#1c1f27'),
     ...[-1, 1].flatMap((sx) => [-1, 1].map((sz) => box(0.06, 0.7, 0.06, sx * 0.67, 0.35, sz * 0.42, DARK))),
   ];
+  parts.push(
+    box(0.3, 0.02, 0.1, 0.34, 0.76, -0.3, '#fbf6ec'),
+    box(0.3, 0.021, 0.025, 0.34, 0.765, -0.3, po ? '#d97757' : '#3a3f4e'),
+    box(0.16, 0.025, 0.2, 0.58, 0.76, -0.02, '#f4f0e6'),
+    cyl(0.07, 0.09, 0.02, -0.62, 0.77, 0.3, '#2b2e38', 10),
+    box(0.02, 0.24, 0.02, -0.62, 0.9, 0.3, '#2b2e38'),
+    box(0.14, 0.05, 0.1, -0.62, 1.03, 0.27, '#f2b84b'),
+  );
   if (po) parts.push(box(0.32, 0.02, 0.12, -0.5, 0.76, -0.22, '#d97757'));
   return merge(parts);
 }

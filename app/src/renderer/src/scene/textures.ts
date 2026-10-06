@@ -45,28 +45,39 @@ export function fitText(g: CanvasRenderingContext2D, text: string, maxW: number,
   return s;
 }
 
+// A small seeded noise so the same texture comes out every launch.
+const noise = (seed: number) => {
+  let s = seed;
+  return () => ((s = (Math.imul(s, 1664525) + 1013904223) >>> 0) / 4294967296);
+};
+
 let plank: CanvasTexture | null = null;
 export function plankTexture() {
   if (plank) return plank;
   const c = document.createElement('canvas');
-  c.width = c.height = 512;
+  c.width = c.height = 1024;
   const g = c.getContext('2d')!;
-  const rows = 8;
-  const rh = 512 / rows;
-  for (let r = 0; r < rows; r++) {
-    // Staggered seams, each plank a slightly different honey tone.
-    let x = -((r * 173) % 256);
-    while (x < 512) {
-      const len = 200 + ((x * 7 + r * 31) % 160);
-      const l = 62 + ((x * 13 + r * 17) % 9);
-      g.fillStyle = `hsl(${30 + ((x + r * 11) % 5)}, ${46 + ((r * 7) % 8)}%, ${l}%)`;
-      g.fillRect(x, r * rh, len, rh);
-      g.fillStyle = 'rgba(90,55,25,0.22)';
-      g.fillRect(x, r * rh, 2, rh);
+  const r = noise(3);
+  const rows = 16;
+  const rh = 1024 / rows;
+  for (let row = 0; row < rows; row++) {
+    // Staggered seams, each plank a slightly different honey tone, with grain streaks along its length.
+    let x = -((row * 173) % 400);
+    while (x < 1024) {
+      const len = 380 + r() * 340;
+      const l = 63 + r() * 7;
+      g.fillStyle = `hsl(${30 + r() * 4}, ${46 + r() * 8}%, ${l}%)`;
+      g.fillRect(x, row * rh, len, rh);
+      for (let k = 0; k < 7; k++) {
+        g.fillStyle = r() < 0.5 ? 'rgba(120,70,30,0.10)' : 'rgba(255,235,200,0.10)';
+        g.fillRect(x, row * rh + r() * rh, len * (0.4 + r() * 0.6), 1 + r() * 2);
+      }
+      g.fillStyle = 'rgba(80,45,20,0.35)';
+      g.fillRect(x, row * rh, 2, rh);
       x += len;
     }
-    g.fillStyle = 'rgba(90,55,25,0.28)';
-    g.fillRect(0, r * rh, 512, 2);
+    g.fillStyle = 'rgba(80,45,20,0.32)';
+    g.fillRect(0, row * rh, 1024, 2);
   }
   const t = new CanvasTexture(c);
   t.colorSpace = SRGBColorSpace;
@@ -150,4 +161,126 @@ export function ownerComputerTexture() {
   ownerComputer.colorSpace = SRGBColorSpace;
   ownerComputer.anisotropy = 8;
   return ownerComputer;
+}
+
+const tile = (size: number, draw: (g: CanvasRenderingContext2D) => void, repeat?: number) => {
+  const c = document.createElement('canvas');
+  c.width = c.height = size;
+  draw(c.getContext('2d')!);
+  const t = new CanvasTexture(c);
+  t.colorSpace = SRGBColorSpace;
+  t.wrapS = t.wrapT = RepeatWrapping;
+  t.anisotropy = 8;
+  if (repeat) t.repeat.set(repeat, repeat);
+  return t;
+};
+
+let grass: CanvasTexture | null = null;
+export function grassTexture() {
+  return (grass ??= tile(
+    256,
+    (g) => {
+      const r = noise(7);
+      g.fillStyle = '#74b24e';
+      g.fillRect(0, 0, 256, 256);
+      for (let i = 0; i < 90; i++) {
+        const x = r() * 256, y = r() * 256, rad = 14 + r() * 34;
+        const grad = g.createRadialGradient(x, y, 0, x, y, rad);
+        grad.addColorStop(0, r() < 0.5 ? 'rgba(125,185,80,0.35)' : 'rgba(80,145,65,0.3)');
+        grad.addColorStop(1, 'rgba(0,0,0,0)');
+        g.fillStyle = grad;
+        for (const ox of [-256, 0, 256]) for (const oy of [-256, 0, 256]) {
+          g.beginPath(); g.arc(x + ox, y + oy, rad, 0, 6.3); g.fill();
+        }
+      }
+      for (let i = 0; i < 1400; i++) {
+        g.fillStyle = r() < 0.5 ? 'rgba(50,115,45,0.22)' : 'rgba(160,210,110,0.22)';
+        g.fillRect(r() * 256, r() * 256, 1.5, 3 + r() * 3);
+      }
+    },
+    210,
+  ));
+}
+
+let pavers: CanvasTexture | null = null;
+export function paverTexture() {
+  return (pavers ??= tile(256, (g) => {
+    const r = noise(31);
+    g.fillStyle = '#9b9486';
+    g.fillRect(0, 0, 256, 256);
+    for (let row = 0; row < 4; row++) {
+      let x = -((row * 37) % 64);
+      while (x < 256) {
+        const w = 48 + r() * 30;
+        const l = 62 + r() * 12;
+        g.fillStyle = `hsl(${34 + r() * 8}, ${8 + r() * 8}%, ${l}%)`;
+        g.fillRect(x + 2, row * 64 + 2, w - 4, 60);
+        x += w;
+      }
+    }
+  }));
+}
+
+let sky: CanvasTexture | null = null;
+export function skyTexture(horizon: string) {
+  if (sky) return sky;
+  const c = document.createElement('canvas');
+  c.width = 1024;
+  c.height = 512;
+  const g = c.getContext('2d')!;
+  // The sphere's v runs from the nadir (0) to the zenith (1): ground haze below the horizon, blue above.
+  const grad = g.createLinearGradient(0, 0, 0, 512);
+  grad.addColorStop(0, horizon);
+  grad.addColorStop(0.5, horizon);
+  grad.addColorStop(0.62, '#a9d2ee');
+  grad.addColorStop(1, '#4f93dc');
+  g.fillStyle = grad;
+  g.fillRect(0, 0, 1024, 512);
+  const r = noise(5);
+  for (let i = 0; i < 26; i++) {
+    const x = r() * 1024, y = 150 + r() * 80, w = 60 + r() * 110;
+    for (let k = 0; k < 6; k++) {
+      const px = x + (r() - 0.5) * w, py = y + (r() - 0.5) * 16, rad = 18 + r() * 26;
+      const cg = g.createRadialGradient(px, py, 0, px, py, rad);
+      cg.addColorStop(0, 'rgba(255,255,255,0.8)');
+      cg.addColorStop(1, 'rgba(255,255,255,0)');
+      g.fillStyle = cg;
+      for (const ox of [-1024, 0, 1024]) { g.beginPath(); g.arc(px + ox, py, rad, 0, 6.3); g.fill(); }
+    }
+  }
+  sky = new CanvasTexture(c);
+  sky.colorSpace = SRGBColorSpace;
+  return sky;
+}
+
+let blob: CanvasTexture | null = null;
+export function blobShadowTexture() {
+  if (blob) return blob;
+  const c = document.createElement('canvas');
+  c.width = c.height = 64;
+  const g = c.getContext('2d')!;
+  const grad = g.createRadialGradient(32, 32, 0, 32, 32, 32);
+  grad.addColorStop(0, 'rgba(0,0,0,0.85)');
+  grad.addColorStop(0.55, 'rgba(0,0,0,0.35)');
+  grad.addColorStop(1, 'rgba(0,0,0,0)');
+  g.fillStyle = grad;
+  g.fillRect(0, 0, 64, 64);
+  blob = new CanvasTexture(c);
+  return blob;
+}
+
+let ceiling: CanvasTexture | null = null;
+export function ceilingTexture() {
+  return (ceiling ??= tile(128, (g) => {
+    const r = noise(11);
+    g.fillStyle = '#f3f0ea';
+    g.fillRect(0, 0, 128, 128);
+    for (let i = 0; i < 260; i++) {
+      g.fillStyle = r() < 0.5 ? 'rgba(120,110,95,0.10)' : 'rgba(255,255,255,0.35)';
+      g.fillRect(r() * 128, r() * 128, 1.5, 1.5);
+    }
+    g.fillStyle = 'rgba(110,100,85,0.45)';
+    g.fillRect(0, 0, 128, 3);
+    g.fillRect(0, 0, 3, 128);
+  }));
 }

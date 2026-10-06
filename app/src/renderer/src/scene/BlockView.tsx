@@ -5,6 +5,7 @@ import { BLOCK_D, BLOCK_W, STORY_H, YAW, blockCenter, type Building, type Item }
 import { enterProjectComputer } from '../computer.ts';
 import { set, useStore } from '../store.ts';
 import { itemCenter } from '../world.ts';
+import { PodDecor } from './Decor.tsx';
 import { Chair, RoundedPlane } from './Furniture.tsx';
 import { fitText, FONT_BODY, FONT_DISPLAY, ownerComputerTexture, roundRect, useCanvasTexture } from './textures.ts';
 import { useDiagram } from './whiteboard.ts';
@@ -38,7 +39,7 @@ function Sign({ name, cwd, color }: { name: string; cwd: string; color: string }
     g.fillText('Project lead · ' + (cwd.length > 32 ? `…${cwd.slice(-31)}` : cwd), 214, 236);
   }, [name, cwd, color]);
   return (
-    <group>
+    <group scale={0.68}>
       <mesh castShadow position={[0, 0.35, -0.05]}>
         <boxGeometry args={[0.12, 0.7, 0.12]} />
         <meshStandardMaterial color="#3a3f4e" />
@@ -66,7 +67,7 @@ function DailyHuddle({ color }: { color: string }) {
       <mesh receiveShadow position={[0, 0.035, 0]}><cylinderGeometry args={[1.25, 1.25, 0.06, 20]} /><meshStandardMaterial color={color} roughness={0.9} /></mesh>
       <mesh castShadow position={[0, 0.62, 0]}><cylinderGeometry args={[0.75, 0.82, 0.1, 16]} /><meshStandardMaterial color="#eadfc9" roughness={0.75} /></mesh>
       {[-1, 1].map((x) => <Chair key={x} position={[x * 0.95, 0, 0]} color={color} rotationY={x < 0 ? -Math.PI / 2 : Math.PI / 2} />)}
-      <mesh position={[0, 1.4, -0.82]}><planeGeometry args={[2.3, 0.98]} /><meshBasicMaterial map={tex} transparent /></mesh>
+      <mesh position={[0, 1.05, -0.82]}><planeGeometry args={[1.5, 0.64]} /><meshBasicMaterial map={tex} transparent /></mesh>
     </group>
   );
 }
@@ -333,6 +334,7 @@ export const BlockView = memo(function BlockView({ block, employees }: { block: 
         <RoundedPlane w={RUG_W + 0.5} d={RUG_D + 0.5} r={0.5} color="#d6dbe0" y={0.008} />
         <RoundedPlane w={RUG_W} d={RUG_D} r={0.35} color={rug} y={0.014} />
         <PodBoundary color={trim} />
+        <PodDecor />
       </group>
       {sign && (
         <AtItem at={sign}>
