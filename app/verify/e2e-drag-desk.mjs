@@ -460,7 +460,7 @@ export default async (s) => {
   await s.eval(`[...document.querySelectorAll('[data-testid=task-tray] .tb-card')].find((c) => c.innerText.includes(${JSON.stringify(titles.esc)})).focus()`);
   await s.press('Enter');
   await s.waitFor("!!document.querySelector('[data-testid=task-board]') && !!document.querySelector('[data-testid=task-detail]') && !document.querySelector('[data-testid=task-tray]')");
-  assert(await s.eval(`${state}.modal?.kind === 'task_board' && !${state}.modal.tray && ${state}.modal.taskId === ${JSON.stringify((await task('esc')).id)} && [...document.querySelectorAll('[data-testid=task-detail] h3')].some((h) => h.innerText === 'Assign')`), 'Enter on a tray card opens the whole board on that task, with its Assign list');
+  assert(await s.eval(`${state}.modal?.kind === 'task_board' && !${state}.modal.tray && ${state}.modal.taskId === ${JSON.stringify((await task('esc')).id)} && [...document.querySelectorAll('[data-testid=task-detail] h3')].some((h) => h.textContent === 'Assign')`), 'Enter on a tray card opens the whole board on that task, with its Assign list');
   assert(await s.eval(`[...document.querySelectorAll('.tb-col[data-stage=doing] .tb-card')].filter((c) => ${JSON.stringify(rows.map((r) => r.title))}.some((t) => c.innerText.includes(t))).length === 3`), 'and the whole board has the three handed cards in In Progress');
   const assignAll = await sentOf('assign_task');
   assert(assignAll.length === 5 && assignAll.map((m) => m.employeeId).join() === [ana.id, pia.id, ana.id, cleo.id, pia.id].join(), 'over the whole run exactly five assign_task messages left the HUD: Ana, the PO, then the three of the row');
