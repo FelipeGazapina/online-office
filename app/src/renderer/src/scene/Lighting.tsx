@@ -74,7 +74,6 @@ function useRoomReflections(at: Vector3) {
   const room = useRef<{ texture: Texture; dispose: () => void } | null>(null);
   const cube = useRef<WebGLCubeRenderTarget | null>(null);
   const phase = useRef<'settling' | 'linking' | 'linked' | 'taken'>('settling');
-  const frames = useRef(0);
   const apply = (texture: Texture | null) => {
     for (const [material, strength] of reflective) {
       material.envMap = texture;
@@ -95,7 +94,7 @@ function useRoomReflections(at: Vector3) {
     };
   }, []);
   useFrame(() => {
-    if (phase.current === 'settling' && ++frames.current >= 90) {
+    if (phase.current === 'settling' && gl.info.render.frame >= 90) {
       phase.current = 'linking';
       cube.current = new WebGLCubeRenderTarget(CAPTURE_SIZE, { type: HalfFloatType });
       void compileScene(gl, scene, camera, cube.current).then(() => (phase.current = 'linked'));

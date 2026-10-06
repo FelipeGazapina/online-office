@@ -109,7 +109,6 @@ function AdaptiveQuality() {
   }, [gl]);
 
   useFrame((_, dt) => {
-    if (!performance.getEntriesByName('office-first-frame').length) performance.mark('office-first-frame');
     const state = quality.current;
     state.total += Math.min(dt, 0.1);
     if (++state.samples < 30) return;
@@ -139,6 +138,18 @@ function AdaptiveQuality() {
   return null;
 }
 
+// R3F draws after its useFrame callbacks unless a callback with a priority above zero takes the draw over, as this one does, so the
+// first draw can wait for the GPU while the simulation, the camera and every other callback keep running as they always did.
+function Draw({ ready }: { ready: boolean }) {
+  const { gl, scene, camera } = useThree();
+  useFrame(() => {
+    if (!ready) return;
+    if (!performance.getEntriesByName('office-first-frame').length) performance.mark('office-first-frame');
+    gl.render(scene, camera);
+  }, 1);
+  return null;
+}
+
 // If the GPU or the main process never answers, the office draws anyway after this long.
 const WARMUP_LIMIT_MS = 4000;
 
@@ -159,10 +170,10 @@ export function Scene() {
         dpr={[1, 1.5]}
         camera={{ fov: 55, near: 0.1, far: 220, position: [-10, 6, 12] }}
         gl={{ antialias: true, powerPreference: 'high-performance' }}
-        frameloop={warm ? 'always' : 'never'}
       >
         <color attach="background" args={['#f1d9bd']} />
         <AdaptiveQuality />
+        <Draw ready={warm} />
         <Suspense fallback={null}>
           <World onReady={open} />
         </Suspense>
