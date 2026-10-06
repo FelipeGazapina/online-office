@@ -440,6 +440,10 @@ export default async (s) => {
   await s.clickOn('[role=tab]', 'Quick tasks');
   await s.waitFor("document.querySelector('[role=tab][aria-selected=true]')?.innerText.includes('Quick tasks')");
 
+  // A turn that serves two tasks splits its time between them, which is right and is not what the per-person comparison below
+  // measures, so the PO finishes the task the composer gave them before anyone is handed another.
+  await settled(s, poTitle, 'the PO\'s task made by the composer');
+
   // ── assign to the PO and to an employee, from the detail ──
   await s.eval(`window.office.send({ type: 'create_task', boardId: ${JSON.stringify(quickId)}, title: 'Confirm the launch checklist', notes: 'Reply done at once. Do not delegate, hire anyone or change any file.' })`);
   await s.eval(`window.office.send({ type: 'create_task', boardId: ${JSON.stringify(quickId)}, title: 'Create board.txt', notes: 'Create a file named board.txt in the project folder whose only line is: hello from the board. Then reply done naming it.' })`);
@@ -484,7 +488,6 @@ export default async (s) => {
   assert(live1 !== live2, `the detail's total ticks too (${live1} then ${live2})`);
 
   // ── both runs settle ──
-  await settled(s, poTitle, 'the PO\'s task made by the composer');
   await settled(s, 'Confirm the launch checklist', 'the PO\'s task');
   const out = await settled(s, 'Create board.txt', 'Ana\'s task');
   assert(out.stage === 'review' && out.out === 'done', 'Ana\'s run finished and the task moved to In Review on its own');
