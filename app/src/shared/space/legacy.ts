@@ -9,6 +9,18 @@ import type { Building, BuildOp, BlockId, EmployeeId, FloorCell, Item, ItemId, L
 const OWNER_WALLS = 3;
 const MEETING = { x0: -18, x1: -11, z0: 2, z1: 8, doorZ: [4, 5] } as const;
 
+/** The lobby's default dressing: a seating group on a rug west of the front door, a shelf by the first archway. */
+function lobbyItems(lot: Lot): Item[] {
+  if (lot.x0 > -18 || lot.w < 24) return [];
+  const put = (def: string, n: number, x: number, z: number, rot: 0 | 1 | 2 | 3 = 0): Item => ({ id: globalId(def, 50 + n), def, x, z, rot });
+  return [
+    put('rug', 0, -19, 8),
+    put('sofa', 0, -19, 5),
+    put('sofa', 1, -19, 12, 2),
+    put('bookshelf', 0, -21, 4),
+  ];
+}
+
 export type LegacyBlock = { id: BlockId; slot: number };
 export type LegacyEmployee = { id: EmployeeId; blockId: BlockId; desk: number; orchestrator: boolean };
 
@@ -49,6 +61,13 @@ export function legacyBuilding(
   }
   for (let z = m.z0; z < m.z1; z++) wall({ x: m.x1, z, d: 's', style: OWNER_WALLS, ...((m.doorZ as readonly number[]).includes(z) ? { open: 'door' as const } : {}) });
 
+  // A glass partition between the lobby and the workspace, with two three-tile archways: it names the zones and frames the view.
+  const PART_Z = LOBBY_Z0 + 3;
+  for (let x = m.x1; x < right; x++) {
+    const arch = (x >= -6 && x <= -4) || (x >= 5 && x <= 7);
+    wall({ x, z: PART_Z, d: 'e', style: 2, open: arch ? 'arch' : (x - m.x1) % 4 === 3 ? undefined : 'window' });
+  }
+
   const cells: FloorCell[] = [];
   const bottom = lot.z0 + lot.h;
   const inBox = (x: number, z: number, x0: number, x1: number, z0: number, z1: number) => x >= x0 && x < x1 && z >= z0 && z < z1;
@@ -68,7 +87,7 @@ export function legacyBuilding(
     for (let z = r.z0; z < r.z1; z++) for (let x = r.x0; x < r.x1; x++) cells.push({ x, z, half: 0, paint: rugPaints[b.slot % rugPaints.length] });
   }
 
-  const items: Item[] = [{ id: globalId('owner_desk', 0), def: 'owner_desk', x: -34, z: 9, rot: 1 }, ...plantItems(lot), ...meetingItems(lot)];
+  const items: Item[] = [{ id: globalId('owner_desk', 0), def: 'owner_desk', x: -34, z: 9, rot: 1 }, ...plantItems(lot), ...meetingItems(lot), ...lobbyItems(lot)];
   for (const b of blocks) items.push(...teamItems(b.id, b.slot));
 
   const ops: BuildOp[] = [

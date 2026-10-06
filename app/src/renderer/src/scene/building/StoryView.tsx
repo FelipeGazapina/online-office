@@ -1,6 +1,6 @@
 import { useFrame, type ThreeEvent } from '@react-three/fiber';
 import { memo, useLayoutEffect, useMemo, useRef } from 'react';
-import { BackSide, BoxGeometry, BufferGeometry, Color, DoubleSide, Group, InstancedMesh, Matrix4, MeshBasicMaterial, MeshStandardMaterial, PlaneGeometry, Quaternion, RepeatWrapping, Vector3 } from 'three';
+import { AdditiveBlending, BackSide, BufferGeometry, Color, DoubleSide, Group, InstancedMesh, Matrix4, MeshBasicMaterial, MeshStandardMaterial, PlaneGeometry, Quaternion, RepeatWrapping, Vector3 } from 'three';
 import { PROVIDERS, type Employee } from '../../../../shared/protocol.ts';
 import { ITEM_DEFS, STORY_H, WALL_STYLES, YAW, type FloorGeometry, type ItemId } from '../../../../shared/space/index.ts';
 import { hasFloorAt, tileIndex } from '../../../../shared/space/geom.ts';
@@ -8,10 +8,10 @@ import { runtime } from '../../runtime.ts';
 import { get, set, useStore } from '../../store.ts';
 import { walkTo } from '../../sim.ts';
 import { chairOf } from '../../world.ts';
-import { blobShadowTexture, ceilingTexture, codeTexture, plankTexture, wallAoTexture } from '../textures.ts';
+import { blobShadowTexture, ceilingTexture, codeTexture, plankTexture, poolTexture, wallAoTexture } from '../textures.ts';
 import { detail } from '../shading.ts';
 import { floorGeometry } from './floor.ts';
-import { chairModel, DEFAULT_TINT, DYNAMIC, modelOf, screenGeometry } from './models.ts';
+import { box, chairModel, cyl, merge, DEFAULT_TINT, DYNAMIC, modelOf, screenGeometry } from './models.ts';
 import { curbModel, facesCamera, frameModel, glassModel, octantOf, VARIANTS, wallMatrix, wallModel, wallRecords, ZERO, type Variant } from './walls.ts';
 
 const up = new Vector3(0, 1, 0);
@@ -31,10 +31,18 @@ const frameMaterial = new MeshStandardMaterial({ vertexColors: true, roughness: 
 const railMaterial = new MeshStandardMaterial({ color: '#c9cdd8', roughness: 0.5, metalness: 0.3 });
 const ceilingMap = ceilingTexture();
 ceilingMap.repeat.set(6.5, 6.5);
-const ceilingMaterial = new MeshStandardMaterial({ map: ceilingMap, roughness: 0.95, side: BackSide, emissive: '#fff4e0', emissiveIntensity: 0.4 });
+const ceilingMaterial = new MeshStandardMaterial({ map: ceilingMap, roughness: 0.95, side: BackSide, color: '#cdbfae', emissive: '#fff0d8', emissiveIntensity: 0.22 });
 const slabMaterial = new MeshStandardMaterial({ color: '#cdbfa9', roughness: 0.95 });
-const fixtureMaterial = new MeshBasicMaterial({ color: '#fff6dc', toneMapped: false });
-const fixtureGeometry = new BoxGeometry(1.3, 0.05, 0.5);
+const fixtureMaterial = new MeshBasicMaterial({ vertexColors: true, toneMapped: false });
+// A pendant: a dark cross beam on the ceiling, a cord, a brass drum shade and the glowing disc inside it.
+const fixtureGeometry = merge([
+  box(1.7, 0.12, 0.2, 0, 0.1, 0, '#3a2c22'),
+  cyl(0.012, 0.012, 0.55, 0, -0.25, 0, '#2b2e38', 4),
+  cyl(0.08, 0.25, 0.22, 0, -0.62, 0, '#b08a4e', 14),
+  cyl(0.23, 0.23, 0.03, 0, -0.74, 0, '#ffe6b0', 14),
+]);
+const poolMaterial = new MeshBasicMaterial({ map: poolTexture(), color: '#ffc982', transparent: true, depthWrite: false, blending: AdditiveBlending, opacity: 0.3, fog: false, polygonOffset: true, polygonOffsetFactor: -3 });
+const poolGeometry = new PlaneGeometry(4.6, 4.6).rotateX(-Math.PI / 2);
 const blobMaterial = new MeshBasicMaterial({ map: blobShadowTexture(), transparent: true, depthWrite: false, opacity: 0.55, polygonOffset: true, polygonOffsetFactor: -2 });
 const blobGeometry = new PlaneGeometry(1, 1).rotateX(-Math.PI / 2);
 const aoMaterial = new MeshBasicMaterial({ map: wallAoTexture(), transparent: true, depthWrite: false, opacity: 0.9, polygonOffset: true, polygonOffsetFactor: -1 });
@@ -380,6 +388,13 @@ function Ceiling({ geom }: { geom: FloorGeometry }) {
     },
     [lamps],
   );
+  const fillPools = useMemo(
+    () => (mesh: InstancedMesh) => {
+      const m = new Matrix4();
+      lamps.forEach(([x, z], i) => mesh.setMatrixAt(i, place(m, x, 0.03, z, 0)));
+    },
+    [lamps],
+  );
   useFrame(() => {
     const g = group.current;
     if (g) g.visible = runtime.view.blend > 0.5;
@@ -389,6 +404,7 @@ function Ceiling({ geom }: { geom: FloorGeometry }) {
     <group ref={group} visible={false}>
       <mesh geometry={geo} material={ceilingMaterial} position-y={CEILING_Y} />
       <Instances geometry={fixtureGeometry} material={fixtureMaterial} count={lamps.length} fill={fill} castShadow={false} receiveShadow={false} />
+      <Instances geometry={poolGeometry} material={poolMaterial} count={lamps.length} fill={fillPools} castShadow={false} receiveShadow={false} />
     </group>
   );
 }

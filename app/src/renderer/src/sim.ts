@@ -265,7 +265,8 @@ function stepOwner(dt: number, world: World, talkingTo: EmployeeId | null) {
   if (!owner.placed) {
     owner.placed = true;
     owner.floor = world.entry.floor;
-    owner.pos.set(world.entry.x, floorBase(owner.floor), world.entry.z - 3.2);
+    // A few steps in from the door and off to the side, so the first look down the hall is not a wall or the door's own frame.
+    owner.pos.set(world.entry.x + 4.5, floorBase(owner.floor), world.entry.z - 1.8);
     const spot = standable(world, owner.floor, owner.pos);
     if (spot) owner.pos.set(spot.x, owner.pos.y, spot.z);
     owner.yaw = Math.PI;
