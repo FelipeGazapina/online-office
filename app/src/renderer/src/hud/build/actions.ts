@@ -3,7 +3,6 @@ import { leaveComputer } from '../../computer.ts';
 import { runtime } from '../../runtime.ts';
 import { get, send, set, setSetting, useStore, type BuildState, type BuildTool } from '../../store.ts';
 import { ENTRIES, type Entry, type TabId } from './catalog.ts';
-import { reseatSeated } from './reseat.ts';
 import { BUILD_DIST, buildView, modifiers, setGhost } from './state.ts';
 
 const FRESH: Omit<BuildState, 'level'> = { tool: { kind: 'select' }, tab: 'desks', search: '', searching: false, peek: null, fill: false, paint: 1, style: 0, wallsMode: 'cutaway' };
@@ -127,7 +126,6 @@ export function addFloor() {
   send({ type: 'build', ops: [{ t: 'stories', count: b.stories.length + 1 }] });
 }
 useStore.subscribe((s, prev) => {
-  if (s.building !== prev.building) reseatSeated();
   if (wantNewFloor && s.build && s.building && prev.building && s.building.stories.length > prev.building.stories.length) {
     wantNewFloor = false;
     setLevel(s.building.stories.length - 1);

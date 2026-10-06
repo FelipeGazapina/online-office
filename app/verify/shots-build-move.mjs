@@ -1,6 +1,7 @@
 // Pictures of the build entry, a piece in hand and a block mid-move, on a copy of a real company.json, for the Sims 4
 // comparison panel. Reads the file named by OFFICE_SHOT_COMPANY, points every block at a scratch repo, and writes
-// entry.png, carry.png and block.png at 1440x900 to the b1 shots folder. Nothing it does touches the original file.
+// entry.png, carry.png and block.png at 1440x900 to OFFICE_SHOTS_DIR (the b2 folder unless set). Nothing it does touches
+// the original file.
 // Run: pnpm build:verify && OFFICE_SHOT_COMPANY=/path/to/company.json OFFICE_OUT_DIR=out/verify OFFICE_CDP_PORT=9341 node verify/cdp.mjs verify/shots-build-move.mjs
 import { copyFileSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -9,7 +10,7 @@ import { assert, scratch } from './lib.mjs';
 
 const source = process.env.OFFICE_SHOT_COMPANY;
 if (!source) throw new Error('set OFFICE_SHOT_COMPANY to the company.json to photograph');
-const SHOTS = '/Users/feliperico/.claude/orchestrate/online-office-game/shots/b1';
+const SHOTS = process.env.OFFICE_SHOTS_DIR ?? '/Users/feliperico/.claude/orchestrate/online-office-game/shots/b2';
 const BLOCK = process.env.OFFICE_SHOT_BLOCK ?? 'online-office';
 const { dataDir, repo } = scratch();
 const company = JSON.parse(readFileSync(source, 'utf8'));
@@ -136,19 +137,20 @@ export default async function (s) {
   // A block mid-move, wide, so the whole block and where it is going share the picture.
   await zoom(1000);
   await s.clickOn('[data-testid="mode-block"]');
-  // Of the nearest legal spots, the one that lands right of the block on screen, clear of the build bar.
-  await center(deskAt.x, deskAt.z);
+  // Of the nearest legal spots, the one that puts the middle of the block right of center on screen, clear of the build bar.
+  const heart = { x: (box.x0 + box.x1) / 4, z: (box.z0 + box.z1) / 4 };
+  await center(heart.x, heart.z);
   let far = blockOffsets[0];
   let best = Infinity;
   for (const o of blockOffsets.slice(0, 60)) {
-    const p = await at(deskAt.x + o.x, deskAt.z + o.z);
+    const p = await at(heart.x + o.x, heart.z + o.z);
     const miss = Math.hypot(p.x - 1020, p.y - 420);
     if (miss < best) {
       best = miss;
       far = o;
     }
   }
-  await center(deskAt.x + far.x / 2, deskAt.z + far.z / 2);
+  await center(heart.x + far.x / 2, heart.z + far.z / 2);
   const grab = await at(deskAt.x, deskAt.z);
   await s.mouse('mouseMoved', grab.x, grab.y);
   await s.sleep(300);

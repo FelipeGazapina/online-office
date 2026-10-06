@@ -44,6 +44,12 @@ html[data-building] .labels * {
 .bh-enter kbd {
   margin-left: 2px;
 }
+/* The pointer is locked in first person, so the key is the way in and the button says so. */
+.bh-enter.key-first kbd {
+  background: var(--ink);
+  border-color: var(--ink);
+  color: var(--paper);
+}
 /* The update notice owns the top right corner while it shows. */
 .hud:has(.update-chip) .bh-enter {
   right: 316px;
@@ -264,6 +270,12 @@ html[data-building] .labels * {
   background: rgba(255, 255, 255, 0.14);
   border-color: rgba(255, 255, 255, 0.22);
   color: inherit;
+}
+/* The one key that destroys a piece reads as such, so it is not mistaken for the one that puts it back. */
+.bh-hint kbd.danger {
+  background: #ff4d4d;
+  border-color: #ff9a9a;
+  color: white;
 }
 .bh-panel {
   background: rgba(251, 249, 245, 0.96);
