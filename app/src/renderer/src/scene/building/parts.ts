@@ -1,5 +1,6 @@
 // Primitive pieces every furniture model is merged from: boxes, cylinders and blobs with their color baked in as vertex colors.
 import { BoxGeometry, BufferGeometry, Color, CylinderGeometry, Float32BufferAttribute, IcosahedronGeometry } from 'three';
+import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 
 export const paint = (g: BufferGeometry, color: string | number | [number, number, number]): BufferGeometry => {
@@ -28,3 +29,7 @@ export const rbox = (w: number, h: number, d: number, x: number, y: number, z: n
   g.rotateY(yaw);
   return paint(at(g, x, y, z), color);
 };
+
+/** A box with softened edges: the bevel catches a highlight where a plain box would give a hard corner. */
+export const bbox = (w: number, h: number, d: number, x: number, y: number, z: number, color: string | [number, number, number], radius = 0.04) =>
+  paint(at(new RoundedBoxGeometry(w, h, d, 2, Math.min(radius, Math.min(w, h, d) / 2 - 0.002)), x, y, z), color);

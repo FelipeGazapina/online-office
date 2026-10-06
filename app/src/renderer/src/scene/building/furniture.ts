@@ -1,7 +1,7 @@
 // The catalog's furniture beyond the first dozen pieces: one merged model per def, in meters, centered on the footprint
 // and facing +z at rot 0. Every one is a handful of boxes, cylinders and blobs so a def still costs one draw call.
 import type { BufferGeometry } from 'three';
-import { blob, box, cyl, merge, rbox } from './parts.ts';
+import { bbox, blob, box, cyl, merge, rbox } from './parts.ts';
 
 const WOOD = '#efe0c6';
 const WALNUT = '#8c6a4a';
@@ -91,15 +91,15 @@ export const FURNITURE: Readonly<Record<string, () => BufferGeometry>> = {
   // ---- seating
   armchair: () =>
     merge([
-      box(0.9, 0.35, 0.85, 0, 0.3, 0.02, '#c8745a'),
-      box(0.9, 0.55, 0.18, 0, 0.7, -0.38, '#b6644c'),
-      box(0.16, 0.3, 0.85, -0.45, 0.55, 0.02, '#b6644c'),
-      box(0.16, 0.3, 0.85, 0.45, 0.55, 0.02, '#b6644c'),
+      bbox(0.9, 0.35, 0.85, 0, 0.3, 0.02, '#c8745a', 0.07),
+      bbox(0.9, 0.55, 0.18, 0, 0.7, -0.38, '#b6644c', 0.07),
+      bbox(0.16, 0.3, 0.85, -0.45, 0.55, 0.02, '#b6644c', 0.06),
+      bbox(0.16, 0.3, 0.85, 0.45, 0.55, 0.02, '#b6644c', 0.06),
       ...[-1, 1].flatMap((sx) => [-1, 1].map((sz) => box(0.06, 0.12, 0.06, sx * 0.38, 0.06, sz * 0.36, WALNUT))),
     ]),
   bench: () =>
     merge([
-      box(1.9, 0.08, 0.4, 0, 0.45, 0, WALNUT),
+      bbox(1.9, 0.08, 0.4, 0, 0.45, 0, WALNUT, 0.03),
       box(0.08, 0.42, 0.34, -0.8, 0.21, 0, DARK),
       box(0.08, 0.42, 0.34, 0.8, 0.21, 0, DARK),
       box(1.9, 0.04, 0.34, 0, 0.12, 0, DARK),
@@ -108,19 +108,19 @@ export const FURNITURE: Readonly<Record<string, () => BufferGeometry>> = {
   stool: () => merge([cyl(0.2, 0.2, 0.06, 0, 0.66, 0, CLAY, 16), cyl(0.03, 0.03, 0.64, 0, 0.32, 0, INK, 8), cyl(0.18, 0.18, 0.03, 0, 0.02, 0, INK, 14), cyl(0.12, 0.12, 0.02, 0, 0.3, 0, INK, 12)]),
   loveseat: () =>
     merge([
-      box(1.4, 0.4, 0.85, 0, 0.2, 0.03, '#5d7fa6'),
-      box(1.4, 0.5, 0.18, 0, 0.65, -0.35, '#4f6f95'),
-      box(0.16, 0.3, 0.85, -0.7, 0.55, 0.03, '#4f6f95'),
-      box(0.16, 0.3, 0.85, 0.7, 0.55, 0.03, '#4f6f95'),
+      bbox(1.4, 0.4, 0.85, 0, 0.2, 0.03, '#5d7fa6', 0.07),
+      bbox(1.4, 0.5, 0.18, 0, 0.65, -0.35, '#4f6f95', 0.07),
+      bbox(0.16, 0.3, 0.85, -0.7, 0.55, 0.03, '#4f6f95', 0.06),
+      bbox(0.16, 0.3, 0.85, 0.7, 0.55, 0.03, '#4f6f95', 0.06),
     ]),
-  ottoman: () => merge([box(0.46, 0.34, 0.46, 0, 0.2, 0, '#a2474c'), box(0.5, 0.06, 0.5, 0, 0.4, 0, '#b05a5f')]),
+  ottoman: () => merge([bbox(0.46, 0.34, 0.46, 0, 0.2, 0, '#a2474c', 0.07), box(0.5, 0.06, 0.5, 0, 0.4, 0, '#b05a5f')]),
 
   // ---- tables
   meeting_round: () => merge([cyl(1.0, 1.0, 0.08, 0, 0.72, 0, OAK, 28), cyl(0.1, 0.16, 0.7, 0, 0.35, 0, DARK, 10), cyl(0.5, 0.5, 0.04, 0, 0.02, 0, DARK, 18)]),
-  meeting_long: () => merge([box(3.9, 0.1, 1.4, 0, 0.72, 0, OAK), box(0.12, 0.7, 1.1, -1.7, 0.35, 0, DARK), box(0.12, 0.7, 1.1, 1.7, 0.35, 0, DARK), box(3.2, 0.06, 0.1, 0, 0.5, 0, DARK)]),
-  coffee_table: () => merge([box(0.9, 0.05, 0.9, 0, 0.42, 0, WALNUT), ...legs(0.9, 0.9, 0.4, 0.07, DARK), cyl(0.07, 0.07, 0.01, 0.1, 0.46, 0.1, SKY, 12)]),
+  meeting_long: () => merge([bbox(3.9, 0.1, 1.4, 0, 0.72, 0, OAK, 0.04), box(0.12, 0.7, 1.1, -1.7, 0.35, 0, DARK), box(0.12, 0.7, 1.1, 1.7, 0.35, 0, DARK), box(3.2, 0.06, 0.1, 0, 0.5, 0, DARK)]),
+  coffee_table: () => merge([bbox(0.9, 0.05, 0.9, 0, 0.42, 0, WALNUT, 0.02), ...legs(0.9, 0.9, 0.4, 0.07, DARK), cyl(0.07, 0.07, 0.01, 0.1, 0.46, 0.1, SKY, 12)]),
   side_table: () => merge([cyl(0.22, 0.22, 0.04, 0, 0.52, 0, WALNUT, 16), cyl(0.03, 0.03, 0.5, 0, 0.25, 0, DARK, 8), cyl(0.15, 0.15, 0.03, 0, 0.02, 0, DARK, 12)]),
-  high_table: () => merge([box(1.4, 0.06, 0.9, 0, 1.05, 0, OAK), ...legs(1.4, 0.9, 1.02, 0.08, STEEL), box(1.2, 0.03, 0.7, 0, 0.3, 0, STEEL)]),
+  high_table: () => merge([bbox(1.4, 0.06, 0.9, 0, 1.05, 0, OAK, 0.025), ...legs(1.4, 0.9, 1.02, 0.08, STEEL), box(1.2, 0.03, 0.7, 0, 0.3, 0, STEEL)]),
   cafe_table: () => merge([cyl(0.45, 0.45, 0.05, 0, 0.74, 0, CREAM, 22), cyl(0.04, 0.04, 0.72, 0, 0.36, 0, INK, 8), cyl(0.28, 0.28, 0.03, 0, 0.02, 0, INK, 16)]),
   folding_table: () => merge([box(1.9, 0.05, 0.9, 0, 0.74, 0, '#e8e2d4'), ...legs(1.9, 0.9, 0.72, 0.12, STEEL), box(1.6, 0.03, 0.04, 0, 0.3, 0, STEEL)]),
 

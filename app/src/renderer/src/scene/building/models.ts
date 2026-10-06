@@ -4,7 +4,7 @@
 import { BufferGeometry, IcosahedronGeometry, PlaneGeometry } from 'three';
 import { ITEM_DEFS, STORY_H } from '../../../../shared/space/index.ts';
 import { FURNITURE } from './furniture.ts';
-import { at, blob, box, cyl, merge, paint } from './parts.ts';
+import { at, bbox, blob, box, cyl, merge, paint } from './parts.ts';
 
 export { blob, box, cyl, merge, paint };
 
@@ -16,13 +16,13 @@ const TINT: [number, number, number] = [1, 1, 1];
 
 function desk(po: boolean) {
   const parts = [
-    box(1.46, 0.06, 0.94, 0, 0.72, 0, WOOD),
-    box(1.3, 0.4, 0.03, 0, 0.5, 0.4, PANEL),
+    bbox(1.46, 0.06, 0.94, 0, 0.72, 0, WOOD, 0.025),
+    bbox(1.3, 0.4, 0.03, 0, 0.5, 0.4, PANEL, 0.01),
     box(0.5, 0.025, 0.16, 0, 0.755, -0.12, '#2b2e38'),
     cyl(0.05, 0.045, 0.1, 0.58, 0.8, -0.12, '#fbf6ec', 12),
     // A low, slim monitor: its top stays under a seated sitter's eyes, so faces read across the desk.
     box(0.06, 0.1, 0.06, 0, 0.8, 0.2, '#2b2e38'),
-    box(0.7, 0.38, 0.04, 0, 0.98, 0.2, '#1c1f27'),
+    bbox(0.7, 0.38, 0.04, 0, 0.98, 0.2, '#1c1f27', 0.015),
     ...[-1, 1].flatMap((sx) => [-1, 1].map((sz) => box(0.06, 0.7, 0.06, sx * 0.67, 0.35, sz * 0.42, DARK))),
   ];
   parts.push(
@@ -54,10 +54,13 @@ function desk(po: boolean) {
 
 export function chairModel(): BufferGeometry {
   return merge([
-    cyl(0.26, 0.26, 0.04, 0, 0.02, 0, '#2b2e38', 16),
-    cyl(0.04, 0.04, 0.32, 0, 0.2, 0, '#2b2e38', 8),
-    box(0.5, 0.09, 0.5, 0, 0.38, 0, TINT),
-    box(0.5, 0.56, 0.07, 0, 0.72, -0.25, TINT),
+    cyl(0.28, 0.28, 0.035, 0, 0.02, 0, '#2b2e38', 20),
+    cyl(0.035, 0.05, 0.3, 0, 0.19, 0, '#2b2e38', 10),
+    cyl(0.1, 0.1, 0.05, 0, 0.34, 0, '#3a3f4e', 12),
+    bbox(0.5, 0.1, 0.5, 0, 0.4, 0, TINT, 0.045),
+    bbox(0.46, 0.5, 0.09, 0, 0.75, -0.25, TINT, 0.045),
+    bbox(0.34, 0.06, 0.05, 0, 0.5, -0.2, '#3a3f4e', 0.02),
+    ...[-1, 1].flatMap((sx) => [bbox(0.05, 0.04, 0.34, sx * 0.29, 0.58, -0.04, '#2b2e38', 0.015), box(0.03, 0.18, 0.03, sx * 0.29, 0.49, -0.04, '#2b2e38')]),
   ]);
 }
 
@@ -105,16 +108,17 @@ function build(def: string): BufferGeometry {
       return stairs();
     case 'sofa':
       return merge([
-        box(1.9, 0.4, 0.9, 0, 0.2, 0.05, '#7c9c92'),
-        box(1.9, 0.5, 0.2, 0, 0.65, -0.4, '#6d8d83'),
-        box(0.2, 0.3, 0.9, -0.95, 0.55, 0.05, '#6d8d83'),
-        box(0.2, 0.3, 0.9, 0.95, 0.55, 0.05, '#6d8d83'),
+        bbox(1.9, 0.4, 0.9, 0, 0.2, 0.05, '#7c9c92', 0.07),
+        bbox(1.9, 0.5, 0.2, 0, 0.65, -0.4, '#6d8d83', 0.08),
+        bbox(0.2, 0.3, 0.9, -0.95, 0.55, 0.05, '#6d8d83', 0.08),
+        bbox(0.2, 0.3, 0.9, 0.95, 0.55, 0.05, '#6d8d83', 0.08),
+        bbox(1.55, 0.12, 0.7, 0, 0.46, 0.1, '#86a89d', 0.05),
       ]);
     case 'coffee_machine':
       return merge([box(0.4, 0.6, 0.35, 0, 0.3, 0, '#444a55'), box(0.3, 0.08, 0.3, 0, 0.64, 0, '#d95d63')]);
     case 'meeting_table':
       return merge([
-        box(2.9, 0.1, 1.4, 0, 0.7, 0, '#d8b47d'),
+        bbox(2.9, 0.1, 1.4, 0, 0.7, 0, '#d8b47d', 0.04),
         ...[-1, 1].flatMap((sx) => [-1, 1].map((sz) => box(0.08, 0.66, 0.08, sx * 1.35, 0.33, sz * 0.62, DARK))),
       ]);
     case 'rug':
