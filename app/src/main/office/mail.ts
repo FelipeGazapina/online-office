@@ -217,7 +217,7 @@ export const settleAtTurnEnd = (s: MailState, turn: TurnId, ok: boolean): Messag
   return [...out];
 };
 
-export type ReplyRefusal = 'not_yours' | 'unknown' | 'open_children' | 'verdict_required' | 'no_artifacts' | 'artifact_unchanged' | 'artifact_missing' | 'still_waiting';
+export type ReplyRefusal = 'not_yours' | 'unknown' | 'open_children' | 'verdict_required' | 'no_artifacts' | 'artifact_unchanged' | 'artifact_missing' | 'still_waiting' | 'piece_blocked';
 
 // Work is the only intent whose done has to be shown. A question, a review and a gauntlet are answered in words or verdicts.
 const needsArtifacts = (m: Message) => m.kind === 'request' && m.intent === 'work';
@@ -270,6 +270,26 @@ const replyOf = (s: MailState, id: MessageId): Extract<Message, { kind: 'reply' 
   const m = life?.s === 'settled' ? s.messages.get(life.by) : undefined;
   return m?.kind === 'reply' ? m : undefined;
 };
+
+// The pieces a request handed out (work and gauntlet), grouped by the person who took them, oldest first.
+const piecesByPerson = (s: MailState, id: MessageId): Map<ActorId, Extract<Message, { kind: 'request' }>[]> => {
+  const out = new Map<ActorId, Extract<Message, { kind: 'request' }>[]>();
+  for (const c of s.children.get(id) ?? []) {
+    const m = s.messages.get(c);
+    if (m?.kind !== 'request' || (m.intent !== 'work' && m.intent !== 'gauntlet')) continue;
+    out.set(m.to, [...(out.get(m.to) ?? []), m]);
+  }
+  return out;
+};
+
+// People whose latest piece under this request came back blocked or failed, with how many pieces they were given.
+// A piece that came back not done is not the end of the goal: the asker sends it again, once, before giving up.
+export const failedPieces = (s: MailState, id: MessageId): { piece: Extract<Message, { kind: 'request' }>; attempts: number }[] =>
+  [...piecesByPerson(s, id).values()].flatMap((list) => {
+    const piece = list.at(-1)!;
+    const outcome = replyOf(s, piece.id)?.outcome;
+    return outcome === 'blocked' || outcome === 'failed' ? [{ piece, attempts: list.length }] : [];
+  });
 
 // What the gauntlet does next, derived from its children alone. null while a round is still open.
 export type GauntletStep =
@@ -439,6 +459,8 @@ export class Mailroom {
       if (target.id === 'owner') return { ok: false, reason: 'bad_request', detail: 'Ask the owner with ask_owner. To tell them something, use message.' };
       const hops = parent ? parent.hops + 1 : 0;
       if (hops > MAX_HOPS) return { ok: false, reason: 'hop_limit', detail: `Delegation is already ${MAX_HOPS} levels deep. Do this one yourself or reply blocked.` };
+      const spread = body.intent === 'help' ? undefined : this.spreadRefusal(req.from, target.id, parent);
+      if (spread) return { ok: false, reason: 'bad_request', detail: spread };
       if (req.from !== 'owner' && this.openOutgoing(req.from) >= MAX_OPEN_OUTGOING) return { ok: false, reason: 'too_many_open', detail: `You already have ${MAX_OPEN_OUTGOING} open requests. Wait for replies first.` };
     }
     if (hasMailbox(target.id) && (this.state.queue.get(target.id)?.length ?? 0) >= MAX_QUEUE_PER_ACTOR) {
@@ -473,6 +495,23 @@ export class Mailroom {
     return servingNow(this.state, req.from);
   }
 
+  // A goal with several pieces goes to several people. A second piece for someone who already took one of this request's
+  // pieces is refused while a teammate has none and holds no work, and the refusal names them. Sending a piece again to the
+  // person it came back from is not a second piece.
+  private spreadRefusal(from: ActorId, to: ActorId, parent: Message | undefined): string | undefined {
+    if (!parent || !hasMailbox(from) || !hasMailbox(to)) return undefined;
+    const given = piecesByPerson(this.state, parent.id);
+    const mine = given.get(to);
+    if (!mine) return undefined;
+    const outcome = replyOf(this.state, mine.at(-1)!.id)?.outcome;
+    if (outcome === 'blocked' || outcome === 'failed') return undefined;
+    const block = this.ports.members().find((m) => m.id === from)?.blockId;
+    const busy = (id: ActorId) => [...this.state.unsettled].some((r) => { const m = this.state.messages.get(r)!; return m.kind === 'request' && m.to === id && m.intent === 'work'; });
+    const free = this.ports.members().filter((m) => m.blockId === block && m.id !== from && m.id !== to && !given.has(m.id) && !busy(m.id));
+    if (!free.length) return undefined;
+    return `${this.ports.nameOf(to)} already has a piece of this goal. Pieces go to different people: ${free.map((m) => m.name).join(' and ') } ${free.length > 1 ? 'have' : 'has'} none. Send this one to ${free[0]!.name}, and tell them what it depends on.`;
+  }
+
   private openOutgoing(from: ActorId): number {
     let n = 0;
     for (const id of this.state.unsettled) if (this.state.messages.get(id)!.from === from) n++;
@@ -498,12 +537,23 @@ export class Mailroom {
     if (req.intent === 'review' && r.outcome === 'done' && !r.verdict && this.state.unsettled.has(req.id)) {
       return { ok: false, reason: 'verdict_required', detail: 'A review needs a verdict. Call reply again with verdict { pass, findings }: pass true only when the artifact meets the whole bar, and put the biggest gap first in findings.' };
     }
-    // The same rule the auto-settle at turn end follows: a parent is not done while a piece it handed out is still open.
-    if (r.outcome === 'done' && this.state.unsettled.has(req.id)) {
+    // The same rule the auto-settle at turn end follows: a parent is not settled while a piece it handed out is still open,
+    // whether it replies done or blocked. To stop early it cancels them. A piece that came back not done is sent again
+    // once before the parent gives up.
+    if ((r.outcome === 'done' || r.outcome === 'blocked' || r.outcome === 'failed') && this.state.unsettled.has(req.id)) {
       const open = openChildren(this.state, req.id);
       if (open.length) {
         const titles = open.map((id) => `"${(this.state.messages.get(id) as { title?: string } | undefined)?.title ?? id}"`).join(', ');
-        return { ok: false, reason: 'open_children', detail: `Not done yet: ${open.length} request(s) you made are still open (${titles}). End your turn without replying; the last reply wakes you, then reply.` };
+        return { ok: false, reason: 'open_children', detail: `Not ${r.outcome} yet: ${open.length} request(s) you made are still open (${titles}). End your turn without replying; the last reply wakes you, then reply. To stop early, cancelRequest them first.` };
+      }
+      const failed = failedPieces(this.state, req.id).filter((f) => r.outcome === 'done' || f.attempts < 2);
+      if (failed.length) {
+        const who = failed.map((f) => `${this.ports.nameOf(f.piece.to as ActorId)} ("${f.piece.title}")`).join(', ');
+        const next = r.outcome === 'done' ? 'You cannot reply done over it. Send it again with what was missing, or reply blocked once it has been retried.' : 'Send it again with what was missing (a new request to the same person) before you give up, then end your turn.';
+        return { ok: false, reason: 'piece_blocked', detail: `A piece came back not done: ${who}. ${next}` };
+      }
+      if (r.outcome !== 'done' && WAITING_TEXT.test(r.text) && (this.state.children.get(req.id)?.length ?? 0) > 0) {
+        return { ok: false, reason: 'still_waiting', detail: 'Every request you made is settled, so you are waiting for nobody. Read their replies, check them against the bar, then reply done, or send a piece back as a new request.' };
       }
     }
     let settle = r;
@@ -719,7 +769,7 @@ export class Mailroom {
       else {
         // Nobody named files, so the folder decides: a turn that left changes behind did work, one that did not is blocked.
         const made = [...new Set([...this.ports.artifacts.changed(who, req.at), ...this.childArtifacts(req.id)])];
-        const waiting = WAITING_TEXT.test(text);
+        const waiting = WAITING_TEXT.test(text) || failedPieces(this.state, req.id).length > 0;
         if (made.length && !waiting) this.settleWith(req, who, { outcome: 'done', artifact: made, auto: true, ...this.land(req, who, text) });
         else this.settleWith(req, who, { outcome: 'blocked', text, auto: true });
       }
