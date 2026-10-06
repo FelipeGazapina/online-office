@@ -1,12 +1,14 @@
-import { useLayoutEffect, useMemo, useRef } from 'react';
-import { AdditiveBlending, Color, InstancedMesh, Matrix4, MeshBasicMaterial, PlaneGeometry, Quaternion, Vector3 } from 'three';
+import { useThree } from '@react-three/fiber';
+import { useEffect, useLayoutEffect, useMemo, useRef } from 'react';
+import { AdditiveBlending, Color, InstancedMesh, Matrix4, MeshBasicMaterial, MeshStandardMaterial, Object3D, PlaneGeometry, PMREMGenerator, Quaternion, Vector3 } from 'three';
+import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
 import { blockCenter, DOOR_X } from '../../../shared/space/index.ts';
 import type { Bounds } from './Environment.tsx';
 import { poolTexture } from './textures.ts';
 
 // Pools of lamplight lie on the floor under every zone's lights: one additive decal each, all drawn together. They
 // are the cheap half of the room lighting; a couple of real point lights give the lobby its glow.
-const poolMaterial = new MeshBasicMaterial({ map: poolTexture(), transparent: true, depthWrite: false, blending: AdditiveBlending, opacity: 0.34, fog: false, polygonOffset: true, polygonOffsetFactor: -3 });
+const poolMaterial = new MeshBasicMaterial({ map: poolTexture(), transparent: true, depthWrite: false, blending: AdditiveBlending, opacity: 0.16, fog: false, polygonOffset: true, polygonOffsetFactor: -3 });
 const poolGeometry = new PlaneGeometry(1, 1).rotateX(-Math.PI / 2);
 const q = new Quaternion();
 const m = new Matrix4();
@@ -52,4 +54,70 @@ export function LightPools({ pools }: { pools: Pool[] }) {
 export function usePools(b: Bounds, slots: readonly number[]) {
   const key = slots.join(',');
   return useMemo(() => poolsFor(b, slots), [b.x0, b.x1, b.z0, b.z1, key]);
+}
+
+// Materials that take the room reflection, and how strongly. Only polished floors do: lit through the whole scene it would
+// also act as ambient light and flatten the sun, but on a glossy floor it reads as a faint sheen of the room above it.
+export const reflective = new Map<MeshStandardMaterial, number>();
+
+function useRoomReflections() {
+  const { gl } = useThree();
+  useEffect(() => {
+    const pmrem = new PMREMGenerator(gl);
+    const room = new RoomEnvironment();
+    const target = pmrem.fromScene(room, 0.04);
+    for (const [material, strength] of reflective) {
+      material.envMap = target.texture;
+      material.envMapIntensity = strength;
+      material.needsUpdate = true;
+    }
+    return () => {
+      for (const material of reflective.keys()) {
+        material.envMap = null;
+        material.needsUpdate = true;
+      }
+      target.dispose();
+      pmrem.dispose();
+      room.dispose();
+    };
+  }, [gl]);
+}
+
+// Late afternoon sun through the windows. Its shadows are wide and soft, and the sky and bounce fill is strong enough that
+// the rooms read inside a streak of shade, so a close look at a desk shows the desk and not a black bar across it.
+export function Lights({ b, slots }: { b: Bounds; slots: readonly number[] }) {
+  const cx = (b.x0 + b.x1) / 2;
+  const cz = (b.z0 + b.z1) / 2;
+  const ext = Math.max(b.x1 - b.x0, b.z1 - b.z0) * 0.66;
+  const target = useMemo(() => new Object3D(), []);
+  useEffect(() => {
+    target.position.set(cx, 0, cz);
+    target.updateMatrixWorld();
+  }, [target, cx, cz]);
+  useRoomReflections();
+  const pools = usePools(b, slots);
+  return (
+    <>
+      <hemisphereLight args={['#c3d2f0', '#d3a273', 0.95]} />
+      <directionalLight
+        target={target}
+        castShadow
+        color="#ffc88a"
+        intensity={3.0}
+        position={[cx + 38, 12, cz + 14]}
+        shadow-mapSize={[2048, 2048]}
+        shadow-bias={-0.0004}
+        shadow-normalBias={0.03}
+        shadow-radius={5}
+        shadow-camera-left={-ext}
+        shadow-camera-right={ext}
+        shadow-camera-top={ext}
+        shadow-camera-bottom={-ext}
+        shadow-camera-near={1}
+        shadow-camera-far={110}
+      />
+      <LightPools pools={pools} />
+      <primitive object={target} />
+    </>
+  );
 }
