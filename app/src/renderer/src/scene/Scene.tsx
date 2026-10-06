@@ -12,6 +12,7 @@ import { CrowdMeshes } from './people/CrowdMeshes.tsx';
 import { OwnerView } from './OwnerView.tsx';
 import { DeskAim } from './DeskAim.tsx';
 import { setPickView } from './pickView.ts';
+import { Staged } from './Staged.tsx';
 import { loadProps } from './props.ts';
 import { warmFirstDraw } from './warmup.ts';
 import { WalkMarker } from './WalkMarker.tsx';
@@ -48,19 +49,25 @@ function World({ onReady }: { onReady: () => void }) {
       <PickView />
       <SimDriver />
       <CameraRig />
-      <BuildingLayer />
-      <BuildLayer />
-      <Office company={company} />
-      {company?.blocks.map((b) => (
-        <BlockView key={b.id} block={b} employees={company.employees.filter((e) => e.blockId === b.id)} />
-      ))}
-      <CrowdMeshes />
-      <OwnerView />
-      <WalkMarker />
-      <DeskAim />
-      {company?.employees.map((e) => (
-        <EmployeeView key={e.id} employee={e} />
-      ))}
+      <Staged>
+        <BuildingLayer />
+        <BuildLayer />
+        <Office company={company} />
+        <>
+          {company?.blocks.map((b) => (
+            <BlockView key={b.id} block={b} employees={company.employees.filter((e) => e.blockId === b.id)} />
+          ))}
+        </>
+        <CrowdMeshes />
+        <OwnerView />
+        <WalkMarker />
+        <DeskAim />
+        <>
+          {company?.employees.map((e) => (
+            <EmployeeView key={e.id} employee={e} />
+          ))}
+        </>
+      </Staged>
       {company && built && <FirstDraw onReady={onReady} />}
     </>
   );

@@ -1,5 +1,6 @@
 import type { Camera, Scene, Texture, WebGLRenderer, WebGLRenderTarget } from 'three';
 import { bitmapTexturesReady } from './bitmapTexture.ts';
+import { stagesMounted } from './Staged.tsx';
 
 // WebGL links a program in the background, but the first call that reads it (a uniform lookup, a draw) waits for the link on
 // the calling thread. three.js reads a program at the first draw that uses it, so the first draw of the office waited
@@ -9,7 +10,7 @@ import { bitmapTexturesReady } from './bitmapTexture.ts';
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
 // Unlike setTimeout, a message is not clamped to 4 ms after a few nested calls.
-const yieldToBrowser = () =>
+export const yieldToBrowser = () =>
   new Promise<void>((resolve) => {
     const channel = new MessageChannel();
     channel.port1.onmessage = () => {
@@ -63,6 +64,7 @@ async function inSlices<T>(items: readonly T[], each: (item: T) => void, sliceMs
 
 /** Gets everything the first draw would wait for out of its way: linked programs and uploaded textures. */
 export async function warmFirstDraw(gl: WebGLRenderer, scene: Scene, camera: Camera) {
+  await stagesMounted();
   performance.mark('office-compile-start');
   await compileScene(gl, scene, camera);
   performance.mark('office-programs-linked', { detail: { programs: gl.info.programs?.length } });
