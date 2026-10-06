@@ -5,13 +5,15 @@ import type { Board, BoardSync, Task, TaskId, TaskStage } from '../../../../shar
 import { STAGE_LABEL, boardFor, boardsOf, columnsOf, fmtAgo, fmtClock, isRunning, peopleOf, stageOf, stageStep, statsOf, type Column } from '../../boardView.ts';
 import { send, set, useStore } from '../../store.ts';
 import { useNow } from '../hooks.ts';
-import { createTaskIn, moveTask, openBoard, pickBoard } from './actions.ts';
+import { actionOf, toneOf } from '../../deskDrop.ts';
+import { createTaskIn, dropOnDesk, moveTask, openBoard, pickBoard } from './actions.ts';
 import { Card } from './Card.tsx';
 import { Detail } from './Detail.tsx';
 import { useCardDrag } from './drag.ts';
 import { Alert, Close, Plus, Sliders, StageIcon, Sync, Whiteboard } from './icons.tsx';
 import { Settings } from './Settings.tsx';
 import { BoardTabs } from './Tabs.tsx';
+import { CarryTray } from './Tray.tsx';
 import './tasks.css';
 
 const close = () => set({ modal: null });
@@ -122,6 +124,7 @@ export function TaskBoardModal({ blockId }: { blockId: BlockId }) {
   const holds = useStore((s) => s.stageHold);
   const modal = useStore((s) => s.modal);
   const connections = useStore((s) => s.taskConnections);
+  const aim = useStore((s) => s.aim);
   const root = useRef<HTMLDivElement>(null);
   const [composing, setComposing] = useState<TaskStage | null>(null);
 
@@ -168,7 +171,18 @@ export function TaskBoardModal({ blockId }: { blockId: BlockId }) {
 
   const dock = useCallback((next: { taskId?: TaskId; settings?: boolean }) => set({ modal: { kind: 'task_board', blockId, ...next } }), [blockId]);
   const open = useCallback((task: Task) => dock({ taskId: task.id }), [dock]);
-  const { drag, press, ghostRef, wasDragged } = useCardDrag(moveTask);
+  const { drag, press, ghostRef, wasDragged } = useCardDrag({
+    blockId,
+    home: () => root.current?.querySelector('[data-testid=task-board-columns]'),
+    onStage: moveTask,
+    onDesk: dropOnDesk,
+  });
+  // A card taken out of the columns folds the board away so the office shows. The dialog's own grips go with it.
+  const away = !!drag?.away;
+  useEffect(() => {
+    document.body.classList.toggle('tb-carrying-away', away);
+    return () => document.body.classList.remove('tb-carrying-away');
+  }, [away]);
 
   const focusCard = (id: string | undefined) => requestAnimationFrame(() => root.current?.querySelector<HTMLElement>(`[data-task-id="${id}"]`)?.focus());
   const onCardKey = useCallback(
@@ -219,10 +233,11 @@ export function TaskBoardModal({ blockId }: { blockId: BlockId }) {
       </div>
     );
   const empty = board.kind !== 'quick' && board.sources.length === 0;
+  const stageCounts = Object.fromEntries(columns.map((c) => [c.stage, c.tasks.length])) as Record<TaskStage, number>;
   const linearWithoutLogin = board.kind !== 'quick' && board.sources.some((s) => s.provider === 'linear') && connections.linear.kind !== 'ready';
 
   return (
-    <div className="scrim" onMouseDown={close}>
+    <div className={`scrim ${away ? 'tb-away' : ''}`} onMouseDown={close}>
       <div
         ref={root}
         className="modal wide tb"
@@ -260,6 +275,7 @@ export function TaskBoardModal({ blockId }: { blockId: BlockId }) {
                 <Whiteboard size={14} />Whiteboard
               </button>
             )}
+            {boardTasks.length > 0 && <span className="tb-tip" data-testid="drag-tip">Drag a card out of the board onto a desk to give it to the person there</span>}
             <SyncStatus board={board} sync={sync} now={now} />
             {board.kind !== 'quick' && (
               <button type="button" className="tb-btn" aria-label="Sync this board" disabled={sync?.kind === 'loading' || board.sources.length === 0} onClick={() => send({ type: 'refresh_board', boardId: board.id })}>
@@ -323,11 +339,19 @@ export function TaskBoardModal({ blockId }: { blockId: BlockId }) {
       </div>
       {drag &&
         createPortal(
-          <div className="tb-ghost" ref={ghostRef} style={{ width: drag.width }} onMouseDown={(e) => e.stopPropagation()}>
-            <Card task={drag.task} stage={drag.from} time={times[drag.task.id]} now={now} people={people} selected={false} dragging={false} ghost onOpen={open} onPress={press} onKey={onCardKey} wasDragged={wasDragged} />
+          <div className={`tb-ghost ${away ? 'away' : ''}`} ref={ghostRef} style={{ width: drag.width, ['--gx' as string]: `${drag.grabX}px`, ['--gy' as string]: `${drag.grabY}px` }} onMouseDown={(e) => e.stopPropagation()}>
+            <div className="tb-ghost-in">
+              <Card task={drag.task} stage={drag.from} time={times[drag.task.id]} now={now} people={people} selected={false} dragging={false} ghost onOpen={open} onPress={press} onKey={onCardKey} wasDragged={wasDragged} />
+            </div>
+            {away && (
+              <div className={`tb-ghost-aim ${aim ? toneOf(aim.verdict) : 'idle'}`} data-testid="ghost-aim" style={{ left: drag.grabX + 12, top: drag.grabY + 12 + drag.height * 0.5 + 6 }}>
+                {aim ? actionOf(aim.verdict) : 'Hold it over a desk'}
+              </div>
+            )}
           </div>,
           document.body,
         )}
+      {drag?.away && createPortal(<CarryTray from={drag.from} over={drag.over} counts={stageCounts} />, document.body)}
     </div>
   );
 }

@@ -3,7 +3,8 @@
 // a board it has not seen.
 import type { BlockId } from '../../../../shared/protocol.ts';
 import type { Board, BoardId, Task, TaskId, TaskStage } from '../../../../shared/tasks.ts';
-import { get, send, set, useStore } from '../../store.ts';
+import type { Aim } from '../../deskDrop.ts';
+import { get, send, set, toast, useStore } from '../../store.ts';
 
 const HOLD_MS = 4000;
 const PENDING_MS = 10_000;
@@ -21,6 +22,26 @@ export function moveTask(task: Task, stage: TaskStage) {
   if (task.stage === stage) return;
   hold(task, stage);
   send({ type: 'update_task', taskId: task.id, stage });
+}
+
+// A card dropped on a desk. Someone sits there: the task goes to them and the owner is back in the office to see them start.
+// Nobody does: the hire panel opens for that desk with the task in it. Anything else is refused and the board comes back.
+export function dropOnDesk(task: Task, aim: Aim) {
+  const v = aim.verdict;
+  switch (v.kind) {
+    case 'assign':
+      if (v.already) return void toast(`${v.to.name} is already on "${task.title}".`);
+      send({ type: 'assign_task', taskId: task.id, employeeId: v.to.id });
+      set({ modal: null });
+      toast(`"${task.title}" goes to ${v.to.name}.`, 'ok');
+      return;
+    case 'hire':
+      set({ modal: { kind: 'hire', for: { taskId: task.id, blockId: v.blockId, deskId: aim.deskId, role: v.role } } });
+      return;
+    case 'refuse':
+      toast(v.message, 'warn');
+      return;
+  }
 }
 
 type PendingBoard = { blockId: BlockId; name: string; before: Set<BoardId>; until: number };
