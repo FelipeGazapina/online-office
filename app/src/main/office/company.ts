@@ -543,7 +543,7 @@ export class Office {
       case 'refresh_board':
         return void this.tasks.refresh(msg.boardId);
       case 'create_task':
-        this.tasks.createTask(msg.boardId, msg.title, msg.notes);
+        this.tasks.createTask(msg.boardId, msg.title, msg.notes, msg.stage);
         return this.events.changed();
       case 'update_task': {
         const { type: _, taskId, ...patch } = msg;

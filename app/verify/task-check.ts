@@ -318,6 +318,9 @@ console.log('\n# a task worked by the PO and a delegate');
   check(!!quick && x.tasks.boardsOf(B2).length === 1, 'every block starts with a quick board');
   const made = x.tasks.createTask(quick.id, '  Add CSV export ', 'with tests');
   check(made.title === 'Add CSV export' && made.notes === 'with tests' && made.stage === 'todo' && made.origin.kind === 'manual', 'a manual task on a quick board');
+  const inReview = x.tasks.createTask(quick.id, 'Born in review', undefined, 'review');
+  check(inReview.stage === 'review' && x.tasks.view(x.now()).tasks.find((y) => y.id === inReview.id)!.stage === 'review', 'a task can be created straight into another column, in one step');
+  x.tasks.deleteTask(inReview.id);
 
   x.tasks.assign(made.id, PO);
   x.sync();

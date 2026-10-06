@@ -279,11 +279,11 @@ export class Tasks {
 
   // ── tasks ──
 
-  createTask(boardId: BoardId, title: string, notes?: string): Task {
+  createTask(boardId: BoardId, title: string, notes?: string, stage: TaskStage = 'todo'): Task {
     this.board(boardId);
     const clean = title.trim();
     if (!clean) throw new OfficeError('A task needs a title.');
-    const task = newTask({ id: this.taskId(), boardId, title: clean, ...(notes?.trim() ? { notes: notes.trim() } : {}), origin: { kind: 'manual' }, stage: 'todo', now: this.host.now() });
+    const task = newTask({ id: this.taskId(), boardId, title: clean, ...(notes?.trim() ? { notes: notes.trim() } : {}), origin: { kind: 'manual' }, stage, now: this.host.now() });
     this.tasks = [...this.tasks, task];
     this.save();
     return task;

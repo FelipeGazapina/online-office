@@ -244,7 +244,8 @@ export type ClientMessage =
   | { type: 'delete_board'; boardId: BoardId }
   // Pulls the board's sources again. A quick board has none.
   | { type: 'refresh_board'; boardId: BoardId }
-  | { type: 'create_task'; boardId: BoardId; title: string; notes?: string }
+  // `stage` is the column the task starts in, todo when absent.
+  | { type: 'create_task'; boardId: BoardId; title: string; notes?: string; stage?: TaskStage }
   // `notes: ''` clears the notes. The owner may set any stage, and done is only ever the owner's call.
   | { type: 'update_task'; taskId: TaskId; title?: string; notes?: string; stage?: TaskStage }
   // Cancels the runs still open, then drops the task.
