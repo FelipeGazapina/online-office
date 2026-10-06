@@ -68,7 +68,9 @@ export default async (s) => {
   assert((await state(s)).camera === 'iso', 'key 2 switched to the Overview camera');
   await settle(s);
 
-  const target = { x: -11, z: -7.1 };
+  // A click walks to the first thing it hits. Behind the bench desks the floor is hidden from the camera, so a click on
+  // (-11, -7.1) lands on a desk top and walks to the desk. This lane is open to the camera and the route to it still bends.
+  const target = { x: -7, z: -7.1 };
   await floorClick(s, target.x, target.z);
   await s.waitFor(`__office.state().intent.kind === 'walk'`);
   const walk = (await state(s)).intent;

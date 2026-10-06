@@ -16,6 +16,21 @@ export const assert = (cond, msg) => {
   console.log('ok:', msg);
 };
 
+// The first seconds of a page hold main-thread stalls of up to two seconds while the scene builds. A stall holds input back,
+// and a screenshot taken inside one moves the pointer to twice its place for as long as it lasts, so a script that
+// checks hover or timing starts after the last one. The owner stands at the origin until the first frame places them.
+export async function sceneReady(s, quietMs = 2500) {
+  await s.eval(`(() => {
+    if (window.__lastStall !== undefined) return;
+    window.__lastStall = 0;
+    const seen = (list) => list.forEach((e) => (window.__lastStall = Math.max(window.__lastStall, e.startTime + e.duration)));
+    const observer = new PerformanceObserver((list) => seen(list.getEntries()));
+    observer.observe({ type: 'longtask', buffered: true });
+    seen(observer.takeRecords());
+  })()`);
+  await s.waitFor(`performance.now() - window.__lastStall > ${quietMs} && (__office.state().owner.x !== 0 || __office.state().owner.z !== 0)`, 30000);
+}
+
 // A data dir for the app and a git repo for the block. realpath so the path equals the canonical one the app stores
 // (macOS tmp is a symlink).
 export function scratch() {
