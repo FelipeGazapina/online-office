@@ -4,13 +4,16 @@
 //
 // A card moves between the board's columns, or leaves them. Once it is outside the columns it is `away`: the board folds out
 // of the way, the office shows, and the desk the pointer is over is the drop target (`aim`, kept in the store for the scene).
-// The stage chips of the tray stay drop targets too, so a card taken out can still go to a column.
+// The stage chips of the tray stay drop targets too, so a card taken out can still go to a column. While it is away the card
+// hangs off the pointer wherever it covers no name tag (`hang.ts`).
 import { useCallback, useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
 import type { BlockId } from '../../../../shared/protocol.ts';
 import { STAGES, type Task, type TaskStage } from '../../../../shared/tasks.ts';
 import type { Aim } from '../../deskDrop.ts';
 import { get } from '../../store.ts';
+import type { Point } from '../../carry.ts';
 import { aimAt, setAim } from './aim.ts';
+import { hang } from './hang.ts';
 
 // A press that moves less than this is a click.
 const THRESHOLD_PX = 5;
@@ -37,6 +40,21 @@ export function useCardDrag(drops: Drops) {
   dropRef.current = drops;
   // The click that follows a drag's release must not open the card.
   const dragged = useRef(false);
+
+  // Out in the office the tags can move under a still pointer (people walk, a label fades in), so this runs every frame.
+  const away = !!drag?.away;
+  useEffect(() => {
+    if (!away) return;
+    let raf = 0;
+    let hung: Point | null = null;
+    const tick = () => {
+      const { ghost, drag: d } = live.current;
+      if (ghost && d) hung = hang(ghost, { x: d.x, y: d.y }, hung);
+      raf = requestAnimationFrame(tick);
+    };
+    tick();
+    return () => cancelAnimationFrame(raf);
+  }, [away]);
 
   const stop = useCallback(() => {
     live.current.armed = null;

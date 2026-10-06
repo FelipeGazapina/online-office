@@ -2,7 +2,8 @@
 // dropping there would do (assign, hire, refuse). Run from app/: node verify/desk-drop-check.ts   Exits 1 on any failed check.
 import type { BlockId, Company, Employee, EmployeeId, ModelId } from '../src/shared/protocol.ts';
 import { ITEM_DEFS, STORY_H, legacyBuilding, seatPose, type Building, type ItemId } from '../src/shared/space/index.ts';
-import { actionOf, deskUnder, labelOf, toneOf, verdictFor, type Ray } from '../src/renderer/src/deskDrop.ts';
+import { barOf, hangCard, type Box } from '../src/renderer/src/carry.ts';
+import { deskUnder, labelOf, toneOf, verdictFor, type Ray } from '../src/renderer/src/deskDrop.ts';
 import { check, finish } from './check.ts';
 
 const B1 = 'block-1' as BlockId;
@@ -117,26 +118,92 @@ console.log('\n# what a drop does');
   check(onAna.kind === 'assign' && onAna.to.name === 'Ana' && !onAna.to.po && !onAna.already && labelOf(onAna) === 'Ana' && toneOf(onAna) === 'go', 'an employee\'s desk assigns to them, labelled with their name, lit green', JSON.stringify(onAna));
   const onPia = verdictFor(desk(po(B1)), B1, c, none);
   check(onPia.kind === 'assign' && onPia.to.po && labelOf(onPia) === 'Pia · PO', 'the PO desk assigns to the PO', labelOf(onPia));
-  check(actionOf(onAna) === 'Give it to Ana', 'the card in hand says what letting go does: give it to Ana');
   const again = verdictFor(desk(bench(B1, 0)), B1, c, new Set(['ana' as EmployeeId]));
   check(again.kind === 'assign' && again.already && toneOf(again) === 'same' && /already/.test(labelOf(again)), 'someone already running the task is said so, and nothing would change');
 
   const empty = verdictFor(desk(bench(B1, 4)), B1, c, none);
   check(empty.kind === 'hire' && empty.blockId === B1 && empty.role === 'employee' && labelOf(empty) === 'Empty desk: hire' && toneOf(empty) === 'go', 'an empty bench desk hires an employee', JSON.stringify(empty));
-  check(actionOf(empty) === 'Hire for this desk', 'and over an empty desk: hire for this desk');
   const noPo = { ...c, employees: c.employees.filter((e) => e.role !== 'orchestrator') };
   const emptyPo = verdictFor(desk(po(B1)), B1, noPo, none);
   check(emptyPo.kind === 'hire' && emptyPo.role === 'orchestrator' && labelOf(emptyPo) === 'Empty PO desk: hire', 'an empty PO desk hires a PO', JSON.stringify(emptyPo));
 
   const other = verdictFor(desk(bench(B2, 0)), B1, c, none);
   check(other.kind === 'refuse' && toneOf(other) === 'stop' && /Billing/.test(labelOf(other)) && /Checkout/.test(labelOf(other)), 'a desk of another block is refused and the message names both blocks', labelOf(other));
-  check(actionOf(other) === labelOf(other), 'a refusal says why on the card in hand too');
   const otherEmpty = verdictFor(desk(bench(B2, 4)), B1, c, none);
   check(otherEmpty.kind === 'refuse', 'an empty desk of another block is refused too: no hire across blocks');
 
   const full = verdictFor(desk(bench(B1, 4)), B1, company(2), none);
   check(full.kind === 'refuse' && /Headcount cap reached \(2 at level 2\)/.test(labelOf(full)), 'a company at its headcount cap cannot hire into an empty desk', labelOf(full));
   check(verdictFor(desk(bench(B1, 0)), B1, company(2), none).kind === 'assign', 'but the cap does not stop an assignment');
+}
+
+console.log('\n# the words on the bar and on the card in hand');
+{
+  const c = company();
+  const none = new Set<EmployeeId>();
+  const desk = (d: ItemId) => building.stories[0]!.items.find((i) => i.id === d)!;
+  const aim = (d: ItemId, running = none) => ({ deskId: d, story: 0, verdict: verdictFor(desk(d), B1, c, running) });
+  const ana = barOf(aim(bench(B1, 0)), null, 'todo');
+  check(ana.tone === 'go' && ana.chip === 'Give it to Ana' && /give it to Ana/.test(ana.text) && /starts at once/.test(ana.text), 'over Ana: the card says "Give it to Ana" and the bar says she starts at once', JSON.stringify(ana));
+  const pia = barOf(aim(po(B1)), null, 'todo');
+  check(pia.tone === 'go' && /Pia, the PO/.test(pia.text), 'over the PO: the bar names the PO', pia.text);
+  const again = barOf(aim(bench(B1, 0), new Set(['ana' as EmployeeId])), null, 'todo');
+  check(again.tone === 'same' && again.chip === 'Already on it' && /already on it/.test(again.text) && /changes nothing/.test(again.text), 'over someone already on it: it says nothing changes', again.text);
+  const hire = barOf(aim(bench(B1, 4)), null, 'todo');
+  check(hire.tone === 'go' && hire.chip === 'Hire for this desk' && /Empty desk/.test(hire.text) && /hire/.test(hire.text) && !/give it to/.test(hire.text), 'over an empty desk: it talks about hiring and never about the person there', hire.text);
+  const refuse = barOf(aim(bench(B2, 0)), null, 'todo');
+  check(refuse.tone === 'stop' && refuse.text === labelOf(aim(bench(B2, 0)).verdict) && /Billing/.test(refuse.text) && refuse.chip === 'Not there', 'over another block\'s desk: the bar gives the reason', refuse.text);
+  const stage = barOf(null, 'doing', 'todo');
+  check(stage.tone === 'go' && stage.chip === 'Move to In Progress' && /move it to In Progress/.test(stage.text), 'over a stage chip: it says move to that stage', stage.text);
+  const here = barOf(null, 'todo', 'todo');
+  check(here.tone === 'same' && /already in Todo/.test(here.text), 'over the stage it came from: it says it is already there', here.text);
+  const idle = barOf(null, null, 'todo');
+  check(idle.tone === 'idle' && idle.chip === 'Hold it over a desk' && /over a desk/.test(idle.text), 'over nothing: it says how to start', idle.text);
+  check(barOf(aim(bench(B1, 0)), 'doing', 'todo').chip === 'Give it to Ana', 'a desk answers before a stage');
+  const texts = [ana, pia, again, hire, refuse, stage, here, idle].map((b) => b.text);
+  check(new Set(texts).size === texts.length && !texts.some((t) => /the person there/.test(t) && t !== idle.text), 'every target has its own wording, and "the person there" is only the hint for nothing');
+}
+
+console.log('\n# where the card in hand hangs');
+{
+  const screen: Box = { left: 0, top: 0, right: 1440, bottom: 900 };
+  const size = { w: 190, h: 76 };
+  const at = (b: Box, p: { x: number; y: number }, s = size): Box => ({ left: b.left + p.x, top: b.top + p.y, right: b.left + p.x + s.w, bottom: b.top + p.y + s.h });
+  const hits = (a: Box, b: Box) => a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom;
+  const pointer = { x: 700, y: 400 };
+  const origin: Box = { left: pointer.x, top: pointer.y, right: pointer.x, bottom: pointer.y };
+  const open = hangCard(pointer, size, [], screen, null);
+  check(open.x > 0 && open.y > 0 && open.x < 40 && open.y < 40, 'with nothing in the way it hangs below and to the right, close to the pointer', JSON.stringify(open));
+  const tag: Box = { left: 700, top: 430, right: 820, bottom: 470 };
+  const moved = hangCard(pointer, size, [tag], screen, null);
+  check(!hits(at(origin, moved), tag), 'a tag where it would hang moves it off the tag', JSON.stringify(moved));
+  check(!hits(at({ ...origin }, moved), { ...tag, left: tag.left - 10, right: tag.right + 10, top: tag.top - 10, bottom: tag.bottom + 10 }), 'and keeps a margin from it');
+  // A row of tags across the screen below the pointer and one above: the card finds the gap, or goes out to the side.
+  const rows: Box[] = [{ left: 100, top: 440, right: 1340, bottom: 480 }, { left: 100, top: 330, right: 1340, bottom: 370 }];
+  const squeezed = hangCard(pointer, size, rows, screen, null);
+  check(rows.every((r) => !hits(at(origin, squeezed), r)), 'between two rows of tags it still covers none', JSON.stringify(squeezed));
+  // Every spot around the pointer is a tag: the least covered one wins rather than throwing.
+  const wall: Box[] = [{ left: 0, top: 0, right: 1440, bottom: 900 }];
+  const lost = hangCard(pointer, size, wall, screen, null);
+  check(Number.isFinite(lost.x) && Number.isFinite(lost.y), 'with no free spot it still answers');
+  // The pointer at the bottom right corner: the card hangs up and to the left, inside the window.
+  const corner = { x: 1430, y: 890 };
+  const cornered = hangCard(corner, size, [], screen, null);
+  const box = at({ left: corner.x, top: corner.y, right: corner.x, bottom: corner.y }, cornered);
+  check(box.left >= 0 && box.top >= 0 && box.right <= 1440 && box.bottom <= 900 && cornered.x < 0 && cornered.y < 0, 'at the corner of the window it hangs inside it', JSON.stringify(cornered));
+  // Stability: a slot that still fits is kept while a tag drifts by a pixel elsewhere, so the card does not hop.
+  const first = hangCard(pointer, size, [tag], screen, null);
+  const second = hangCard(pointer, size, [{ ...tag, left: tag.left + 1, right: tag.right + 1 }], screen, first);
+  check(second.x === first.x && second.y === first.y, 'the card stays where it hangs while that spot stays free');
+  const freed = hangCard(pointer, size, [], screen, first);
+  check(freed.x === first.x && freed.y === first.y, 'and stays there once the tag is gone, as near as the free spot already is');
+  const far = hangCard(pointer, size, [], screen, { x: 250, y: 250 });
+  check(far.x < 40 && far.y < 40, 'but a spot far from the pointer is not kept when a near one is free', JSON.stringify(far));
+  const onPointer = hangCard(pointer, size, [], screen, { x: -20, y: -20 });
+  check(!(onPointer.x < 0 && onPointer.x + size.w > 0 && onPointer.y < 0 && onPointer.y + size.h > 0), 'a place that now sits on the pointer is never kept', JSON.stringify(onPointer));
+  // Bigger card (the line under it grew): the answer is re-worked for the new size.
+  const wide = hangCard(pointer, { w: 320, h: 76 }, [tag], screen, first);
+  check(!hits(at(origin, wide, { w: 320, h: 76 }), tag), 'a wider card is placed clear of the tag too', JSON.stringify(wide));
 }
 
 finish();

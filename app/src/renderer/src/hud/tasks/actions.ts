@@ -25,15 +25,17 @@ export function moveTask(task: Task, stage: TaskStage) {
   send({ type: 'update_task', taskId: task.id, stage });
 }
 
-// A card dropped on a desk. Someone sits there: the task goes to them and the owner is back in the office to see them start.
-// Nobody does: the hire panel opens for that desk with the task in it. Anything else is refused and the board comes back.
+// A card dropped on a desk. Someone sits there: the task goes to them, the owner is in the office to see them start, and the
+// board stays folded as a tray of the cards still waiting, for the next one. Nobody does: the hire panel opens for that desk
+// with the task in it. Anything else is refused and the board comes back.
 export function dropOnDesk(task: Task, aim: Aim) {
   const v = aim.verdict;
   switch (v.kind) {
     case 'assign':
       if (v.already) return void toast(`${v.to.name} is already on "${task.title}".`);
       send({ type: 'assign_task', taskId: task.id, employeeId: v.to.id });
-      set({ modal: null });
+      hold(task, 'doing');
+      set((s) => ({ modal: s.modal?.kind === 'task_board' ? { kind: 'task_board', blockId: s.modal.blockId, tray: true } : null }));
       toast(`"${task.title}" goes to ${v.to.name}.`, 'ok');
       return;
     case 'hire':
