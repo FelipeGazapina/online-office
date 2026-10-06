@@ -400,15 +400,23 @@ export default async function (s) {
   const saved = JSON.parse(readFileSync(join(dataDir, 'company.json'), 'utf8'));
   assert(saved.building.stories.length === 2, 'main saved the two floors');
 
-  // ---- the standing perf bar with fifteen people, building
+  // ---- the standing perf bar with fifteen people, in the office and then building in it
   const people = 15;
   await s.eval(`__office.injectFake(${people})`);
+  await s.sleep(2500);
+  const measure = async (label) => {
+    const { deltas, drawCalls } = await s.eval('__office.measureFrames(6000)');
+    const avg = deltas.reduce((a, c) => a + c, 0) / deltas.length;
+    const slow = (deltas.filter((d) => d > 25).length / deltas.length) * 100;
+    const result = { perf: label, employees: people, frames: deltas.length, fpsAvg: +(1000 / avg).toFixed(1), slowPct: +slow.toFixed(2), drawCalls };
+    console.log(JSON.stringify(result));
+    return result;
+  };
+  const live = await measure('live mode');
   await s.press('KeyB', 'b');
   await s.waitFor(`!!${store}.build`, 4000);
   await s.sleep(2500);
-  const { deltas, drawCalls } = await s.eval('__office.measureFrames(6000)');
-  const avg = deltas.reduce((a, c) => a + c, 0) / deltas.length;
-  const slow = (deltas.filter((d) => d > 25).length / deltas.length) * 100;
-  console.log(JSON.stringify({ perf: 'build mode', employees: people, frames: deltas.length, fpsAvg: +(1000 / avg).toFixed(1), slowPct: +slow.toFixed(2), drawCalls }));
-  if (process.env.OFFICE_PERF_ASSERT === '1') assert(1000 / avg >= 59.5 && slow <= 1, 'build mode keeps 60 fps with 15 people');
+  const building15 = await measure('build mode');
+  if (process.env.OFFICE_PERF_ASSERT === '1') assert(building15.fpsAvg >= 59.5 && building15.slowPct <= 1, 'build mode keeps 60 fps with 15 people');
+  void live;
 }
