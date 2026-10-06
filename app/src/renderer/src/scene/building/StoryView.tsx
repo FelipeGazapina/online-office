@@ -1,6 +1,6 @@
 import { useFrame, type ThreeEvent } from '@react-three/fiber';
 import { memo, useLayoutEffect, useMemo, useRef } from 'react';
-import { AdditiveBlending, BackSide, BufferGeometry, Color, DoubleSide, Group, InstancedMesh, Matrix4, MeshBasicMaterial, MeshStandardMaterial, PlaneGeometry, Quaternion, RepeatWrapping, Vector3 } from 'three';
+import { AdditiveBlending, BackSide, BufferGeometry, Color, DoubleSide, Group, InstancedMesh, Matrix4, MeshBasicMaterial, MeshStandardMaterial, PlaneGeometry, Quaternion, Vector2, Vector3 } from 'three';
 import { PROVIDERS, type Employee } from '../../../../shared/protocol.ts';
 import { ITEM_DEFS, STORY_H, WALL_STYLES, YAW, type FloorGeometry, type ItemId } from '../../../../shared/space/index.ts';
 import { hasFloorAt, tileIndex } from '../../../../shared/space/geom.ts';
@@ -9,8 +9,10 @@ import { draft } from '../../hud/build/state.ts';
 import { get, set, useStore } from '../../store.ts';
 import { walkTo } from '../../sim.ts';
 import { chairOf } from '../../world.ts';
-import { blobShadowTexture, ceilingTexture, codeTexture, plankTexture, poolTexture, wallAoTexture } from '../textures.ts';
+import { blobShadowTexture, ceilingTexture, codeTexture, plankCanvas, poolTexture, wallAoTexture } from '../textures.ts';
+import { carpetSurface, concreteSurface, tileSurface, woodSurface, type Surface } from '../surfaceTextures.ts';
 import { detail } from '../shading.ts';
+import { reflective } from '../Lighting.tsx';
 import { floorGeometry } from './floor.ts';
 import { box, chairModel, cyl, merge, DEFAULT_TINT, DYNAMIC, modelOf, screenGeometry } from './models.ts';
 import { curbModel, facesCamera, frameModel, glassModel, occludes, octantOf, VARIANTS, wallMatrix, wallModel, wallRecords, ZERO, type Variant, type WallRecord } from './walls.ts';
@@ -22,9 +24,17 @@ const one = new Vector3(1, 1, 1);
 const s3 = new Vector3();
 const color = new Color();
 
-const woodMaterial = detail(new MeshStandardMaterial({ map: plankTexture(), vertexColors: true, roughness: 0.85 }), 'floor');
-woodMaterial.map!.wrapS = woodMaterial.map!.wrapT = RepeatWrapping;
-const flatMaterial = detail(new MeshStandardMaterial({ vertexColors: true, roughness: 0.9 }), 'floor');
+const floorMaterial = (surface: Surface, roughness: number, normalScale: number, extra: Partial<ConstructorParameters<typeof MeshStandardMaterial>[0]> = {}) =>
+  detail(new MeshStandardMaterial({ map: surface.map, normalMap: surface.normalMap, roughnessMap: surface.roughnessMap, normalScale: new Vector2(normalScale, normalScale), vertexColors: true, roughness, ...extra }), 'floor');
+// In the order of FLOOR_FAMILIES.
+const floorMaterials = [
+  floorMaterial(woodSurface(plankCanvas(), 1 / 4), 1, 0.9),
+  floorMaterial(carpetSurface(), 1, 0.7),
+  floorMaterial(tileSurface(), 1, 0.8),
+  floorMaterial(concreteSurface(), 1, 0.8),
+];
+reflective.set(floorMaterials[0], 0.25);
+reflective.set(floorMaterials[2], 0.7);
 const furnitureMaterial = detail(new MeshStandardMaterial({ vertexColors: true, roughness: 0.75 }), 'furniture');
 const wallMaterial = detail(new MeshStandardMaterial({ vertexColors: true, roughness: 0.95 }), 'wall');
 const glassMaterial = new MeshStandardMaterial({ color: '#cfe8ff', emissive: '#a8d4ff', emissiveIntensity: 0.9, roughness: 0.2, side: DoubleSide });
@@ -42,7 +52,7 @@ const fixtureGeometry = merge([
   cyl(0.07, 0.2, 0.18, 0, -0.35, 0, '#b08a4e', 14),
   cyl(0.18, 0.18, 0.03, 0, -0.45, 0, '#ffd08a', 14),
 ]);
-const poolMaterial = new MeshBasicMaterial({ map: poolTexture(), color: '#ffb865', transparent: true, depthWrite: false, blending: AdditiveBlending, opacity: 0.3, fog: false, polygonOffset: true, polygonOffsetFactor: -3 });
+const poolMaterial = new MeshBasicMaterial({ map: poolTexture(), color: '#ffb865', transparent: true, depthWrite: false, blending: AdditiveBlending, opacity: 0.14, fog: false, polygonOffset: true, polygonOffsetFactor: -3 });
 const poolGeometry = new PlaneGeometry(4.6, 4.6).rotateX(-Math.PI / 2);
 const blobMaterial = new MeshBasicMaterial({ map: blobShadowTexture(), transparent: true, depthWrite: false, opacity: 0.55, polygonOffset: true, polygonOffsetFactor: -2 });
 const blobGeometry = new PlaneGeometry(1, 1).rotateX(-Math.PI / 2);
@@ -94,7 +104,7 @@ function Floor({ geom }: { geom: FloorGeometry }) {
   return (
     <mesh
       geometry={geo}
-      material={[woodMaterial, flatMaterial]}
+      material={floorMaterials}
       receiveShadow
       onClick={(e) => {
         if (e.delta >= 6 || get().camera !== 'iso') return;

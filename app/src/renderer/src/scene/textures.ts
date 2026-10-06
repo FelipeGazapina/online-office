@@ -51,8 +51,9 @@ const noise = (seed: number) => {
   return () => ((s = (Math.imul(s, 1664525) + 1013904223) >>> 0) / 4294967296);
 };
 
-let plank: CanvasTexture | null = null;
-export function plankTexture() {
+let plank: HTMLCanvasElement | null = null;
+/** The honey plank floor, drawn once. Surface textures turn it into colour, normal and roughness maps. */
+export function plankCanvas() {
   if (plank) return plank;
   const c = document.createElement('canvas');
   c.width = c.height = 1024;
@@ -79,12 +80,8 @@ export function plankTexture() {
     g.fillStyle = 'rgba(80,45,20,0.32)';
     g.fillRect(0, row * rh, 1024, 2);
   }
-  const t = new CanvasTexture(c);
-  t.colorSpace = SRGBColorSpace;
-  t.wrapS = t.wrapT = RepeatWrapping;
-  t.anisotropy = 8;
-  plank = t;
-  return t;
+  plank = c;
+  return c;
 }
 
 let code: CanvasTexture | null = null;

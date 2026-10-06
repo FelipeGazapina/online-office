@@ -13,6 +13,22 @@ float vnoise(vec2 p) {
 }
 `;
 
+// Surface relief, drawn with no UVs: a height from the world position, turned into a tilt of the normal with the screen
+// derivatives. Plaster is fine and mottled; furniture gets a laminate grain plus a woven fabric pattern. The relief fades out
+// when a pixel covers a centimetre or more, so far surfaces stay calm instead of shimmering.
+const RELIEF: Partial<Record<Surface, { height: string; strength: string; rough: string }>> = {
+  wall: {
+    height: 'vnoise(vWPos.xy * 46.0 + vWPos.zz * 46.0) * 0.6 + vnoise(vWPos.xy * 11.0 + vWPos.zz * 11.0) * 0.4',
+    strength: '0.9',
+    rough: 'vnoise(vWPos.xz * 5.0 + vWPos.yy * 3.0)',
+  },
+  furniture: {
+    height: 'vnoise(vec2(vWPos.x + vWPos.z, vWPos.y) * vec2(70.0, 9.0)) * 0.5 + (sin(vWPos.x * 420.0) * sin(vWPos.z * 420.0 + vWPos.y * 420.0)) * 0.1 + vnoise(vWPos.xz * 30.0) * 0.4',
+    strength: '0.7',
+    rough: 'vnoise(vWPos.xz * 9.0 + vWPos.yy * 6.0)',
+  },
+};
+
 const BODY: Record<Surface, string> = {
   wall: /* glsl */ `
     float y = mod(vWPos.y + 0.01, ${STORY_H.toFixed(2)});
@@ -58,6 +74,31 @@ export function detail<M extends MeshStandardMaterial>(material: M, surface: Sur
     shader.fragmentShader = shader.fragmentShader
       .replace('#include <common>', `#include <common>\nvarying vec3 vWPos;\nvarying vec3 vNorm;\n${GLSL}`)
       .replace('#include <color_fragment>', `#include <color_fragment>\n${BODY[surface]}`);
+    const relief = RELIEF[surface];
+    if (relief) {
+      shader.fragmentShader = shader.fragmentShader
+        .replace(
+          '#include <roughnessmap_fragment>',
+          `#include <roughnessmap_fragment>\nroughnessFactor = clamp(roughnessFactor * (0.82 + 0.3 * (${relief.rough})), 0.05, 1.0);`,
+        )
+        .replace(
+          '#include <normal_fragment_maps>',
+          `#include <normal_fragment_maps>
+          {
+            float hh = ${relief.height};
+            float footprint = length(dFdx(vWPos)) + length(dFdy(vWPos));
+            float fade = 1.0 - smoothstep(0.004, 0.014, footprint);
+            vec2 dh = clamp(vec2(dFdx(hh), dFdy(hh)) * ${relief.strength} * fade, -0.6, 0.6);
+            vec3 sp = -vViewPosition;
+            vec3 sx = normalize(dFdx(sp));
+            vec3 sy = normalize(dFdy(sp));
+            vec3 r1 = cross(sy, normal);
+            vec3 r2 = cross(normal, sx);
+            float det = dot(sx, r1) * faceDirection;
+            normal = normalize(abs(det) * normal - sign(det) * (dh.x * r1 + dh.y * r2));
+          }`,
+        );
+    }
   };
   material.customProgramCacheKey = () => `detail-${surface}`;
   return material;
