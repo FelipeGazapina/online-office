@@ -355,4 +355,56 @@ console.log('\n# ledger: replay and restart');
   check((crashedTwice.prompts.get(ANA)?.length ?? 0) === 1, 'a second crash before settling redelivers once more, still one open request');
 }
 
+{
+  console.log('\n# acknowledgement');
+  const calls: string[] = [];
+  let finishAck!: (text: string | undefined) => void;
+  let emit!: (delta: string) => void;
+  const ack = (to: string, request: { id: string }, onDelta: (d: string) => void) => {
+    calls.push(`${to}:${request.id}`);
+    emit = onDelta;
+    return new Promise<string | undefined>((resolve) => (finishAck = resolve));
+  };
+  const w = world([], ack);
+  const r = ids(w.room.post(owner('ana', 'write the slugify function')));
+  check(calls.length === 1 && calls[0] === `ana:${r}`, 'an owner request to an employee is acknowledged once');
+  check(/already being said to the boss/.test(lastPrompt(w, ANA)) && /write the slugify function/.test(lastPrompt(w, ANA)), 'the real turn is told the boss already heard from them');
+  emit('On it, ');
+  w.room.streamed(ANA, 'the real turn writes', false);
+  emit('starting now.');
+  check(w.streams.filter((s) => !s.done).map((s) => s.delta).join('') === 'On it, starting now.', 'the acknowledgement streams alone while it is being written');
+  finishAck('On it, starting now.');
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  const said = [...w.room.state.messages.values()].filter((m) => m.kind === 'say' && m.from === ANA);
+  check(said.length === 1 && said[0]!.kind === 'say' && said[0]!.text === 'On it, starting now.' && said[0]!.parentId === r, 'it lands as one message from them to the owner, under the request');
+  check(w.streams.at(-1)?.done === true, 'and its stream is closed');
+  w.room.streamed(ANA, 'later bubble', false);
+  check(w.streams.at(-1)?.delta === 'later bubble', 'once it is over the turn streams again');
+
+  const again = world([...w.persisted], ack);
+  again.room.recoverOnStart();
+  check(calls.length === 1 && /already being said/.test(lastPrompt(again, ANA)), 'a redelivery does not acknowledge twice and still carries the note');
+  const sayCount = [...again.room.state.messages.values()].filter((m) => m.kind === 'say' && m.from === ANA).length;
+  check(sayCount === 1, 'and no second acknowledgement lands');
+
+  const quiet = world([], ack);
+  quiet.room.post({ from: 'owner', to: 'bruno', blockId: B1, body: { kind: 'say', text: 'hello' } });
+  quiet.room.post(ask(PO, 'cleo', 'build the thing'));
+  check(calls.length === 1, 'a plain message and a request from a teammate are not acknowledged');
+  check(!/already being said/.test(lastPrompt(quiet, ANA)), 'and their turns carry no note');
+
+  const failed = world([], () => Promise.resolve(undefined));
+  const f = ids(failed.room.post(owner('ana', 'try')));
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  check(![...failed.room.state.messages.values()].some((m) => m.kind === 'say') && failed.streams.at(-1)?.done === true && life(failed, f) === 'delivered', 'a failed acknowledgement says nothing, closes its stream and leaves the turn alone');
+
+  const off = world([], () => undefined);
+  ids(off.room.post(owner('ana', 'try')));
+  check(!/already being said/.test(lastPrompt(off, ANA)), 'when acknowledging is off the turn is not told to skip replying first');
+
+  const stale = world();
+  stale.room.closeStream(ANA);
+  check(stale.streams.at(-1)?.who === ANA && stale.streams.at(-1)?.done === true, 'closing a stream emits the closing event the owner screen waits for');
+}
+
 finish();

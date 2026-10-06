@@ -341,6 +341,9 @@ export type MailPorts = {
   persist(entry: LedgerEntry): void;
   changed(view: MailView): void;
   stream(employeeId: EmployeeId, replyingTo: MessageId | null, delta: string, done: boolean): void;
+  // Says the first words of an answer to a request at once, while the real turn is still starting. Streams through
+  // `onDelta` and resolves with the whole text, or undefined when it failed. Returns undefined at once when it cannot.
+  acknowledge?(to: EmployeeId, request: Message, onDelta: (delta: string) => void): Promise<string | undefined> | undefined;
   now(): number;
   newId(): string;
 };
@@ -359,6 +362,9 @@ export type Resolved = { ok: true; id: ActorId; label: string } | { ok: false; r
 
 type Waiter = { who: EmployeeId; ids: MessageId[]; mode: 'any' | 'all'; poll(): boolean; resolve(): void };
 
+// Tells the real turn that the boss already heard from the employee, so it does not open with a second acknowledgement.
+const ACK_NOTE = '[Office note. A short acknowledgement of this request is already being said to the boss in your name. Skip the "reply first" step: do not send your own acknowledgement. Carry on with your usual steps from the next one, and use message only for what the boss has not heard.]';
+
 const mid = (id: string) => id as MessageId;
 const tid = (id: string) => id as TurnId;
 
@@ -366,6 +372,8 @@ export class Mailroom {
   readonly state = emptyMail();
   private readonly ports: MailPorts;
   private waiters = new Set<Waiter>();
+  // Employees whose acknowledgement is being written, so nothing else streams into their bubble.
+  private acking = new Map<EmployeeId, { cancelled: boolean }>();
   private dirty = false;
 
   constructor(ports: MailPorts, ledger: readonly LedgerEntry[] = []) {
@@ -658,12 +666,43 @@ export class Mailroom {
     const redelivered = batch.some((m) => (this.state.life.get(m.id) as { redelivered?: boolean }).redelivered);
     const turn = tid(this.ports.newId());
     this.append({ t: 'deliver', ids: batch.map((m) => m.id), to, turn, at: this.ports.now() });
-    const prompt = renderBatch(batch, redelivered, this.ports.nameOf);
+    const ack = this.acknowledge(to, batch);
+    const prompt = `${ack ? `${ACK_NOTE}\n\n` : ''}${renderBatch(batch, redelivered, this.ports.nameOf)}`;
     try {
       this.ports.deliver(to, prompt, titleOfBatch(batch));
     } catch (e) {
+      ack?.cancel();
       this.turnEnded(to, e instanceof Error ? e.message : String(e), false);
     }
+  }
+
+  // A request from the owner is answered with a few words before the real turn gets going. A review is not: nobody reads
+  // that bubble. One acknowledgement per request, found by its key, so a redelivery does not say it twice.
+  private acknowledge(to: EmployeeId, batch: readonly Message[]): { cancel(): void } | undefined {
+    const request = batch.find((m) => m.kind === 'request' && m.from === 'owner' && (m.intent === 'work' || m.intent === 'help'));
+    if (!request) return undefined;
+    const key = `ack:${request.id}`;
+    if (this.state.keys.has(key)) return { cancel() {} };
+    const token = { cancelled: false };
+    const spoken = this.ports.acknowledge?.(to, request, (delta) => {
+      if (!token.cancelled) this.ports.stream(to, request.id, delta, false);
+    });
+    if (!spoken) return undefined;
+    this.acking.set(to, token);
+    void spoken.then((text) => {
+      if (token.cancelled) return;
+      if (text) this.post({ from: to, to: 'owner', body: { kind: 'say', text }, key });
+      this.closeStream(to);
+    });
+    return { cancel: () => this.closeStream(to) };
+  }
+
+  // Nothing of this employee's is being written any more: the session ended, or the acknowledgement is over.
+  closeStream(who: EmployeeId) {
+    const token = this.acking.get(who);
+    if (token) token.cancelled = true;
+    this.acking.delete(who);
+    this.ports.stream(who, null, '', true);
   }
 
   // The harness finished its turn. Settles what the turn served, then wakes the employee again if more is waiting.
@@ -768,6 +807,8 @@ export class Mailroom {
   // ── streaming ──
 
   streamed(who: EmployeeId, delta: string, done: boolean) {
+    // The acknowledgement owns the bubble until it ends. What the turn writes meanwhile lands whole as a message.
+    if (this.acking.has(who)) return;
     this.ports.stream(who, servingNow(this.state, who)?.id ?? null, delta, done);
   }
 

@@ -162,7 +162,7 @@ const OFFICE_MCP_TIMEOUT_MS = 24 * 60 * 60 * 1000;
 //   sessions and with every other employee in the folder.
 // - If the boss's shell exports CLAUDE_AUTO_BACKGROUND_TASKS, Claude moves any MCP call that runs past 2 minutes to a
 //   background task and hands the model a placeholder instead of the answer. 0 turns that off.
-const sessionEnv = (): Record<string, string | undefined> => ({
+export const sessionEnv = (): Record<string, string | undefined> => ({
   ...process.env,
   CLAUDE_CODE_DISABLE_AUTO_MEMORY: '1',
   CLAUDE_CODE_MCP_AUTO_BACKGROUND_MS: '0',
@@ -477,6 +477,9 @@ export class ClaudeSession implements EmployeeSession {
     this.life.abort();
     for (const id of this.subagents) this.host.subagentFinished(id);
     this.subagents.clear();
+    // A bubble the dead process was still writing never gets its closing event.
+    if (this.bubbles.size) this.host.streamed?.('', true);
+    this.bubbles.clear();
     // The next process reads the rules as they are then.
     this.notices = [];
     this.warming = false;

@@ -25,6 +25,8 @@ mkdirSync(repo);
 const memRoot = join(dir, 'memory');
 const memory = MemoryStore.open(memRoot);
 const mcp = await startOfficeMcp();
+// The acknowledgement would start a real Claude process, and there is no model here.
+const acker = { warm() {}, ack: () => undefined, stop() {} };
 
 // What a harness adapter does, reduced to its calls into the host.
 type Fake = { host: SessionHost; assigned: string[]; interjected: string[]; models: string[]; policies: PermissionPolicy[]; notices: string[]; stopped: boolean };
@@ -74,7 +76,7 @@ const office = new Office(
   join(dir, 'company.json'),
   { 'claude-code': { kind: 'ready', version: 'fake' }, codex: { kind: 'missing' }, hermes: { kind: 'missing' } },
   { ...noBuild, changed() {}, said() {}, log: (_id, line) => void logs.push(line), error: (m) => void errors.push(m) },
-  { mcp, memory },
+  { mcp, memory, acker },
 );
 
 const company = () => office.snapshot().company;
@@ -230,7 +232,7 @@ check(/^http:\/\/127\.0\.0\.1:\d+\/mcp\/[0-9a-f]{64}$/.test(fa.host.mcp.url) && 
 check(fa.host.memoryDigest() === '', 'the digest is empty before any note is saved');
 check(fa.host.rules() === '' && fb.host.rules() === '', 'no rules are in scope until F2 reads the rule files');
 
-const capOffice = new Office(join(dir, 'cap-company.json'), { 'claude-code': { kind: 'ready', version: 'fake' }, codex: { kind: 'missing' }, hermes: { kind: 'missing' } }, { ...noBuild, changed() {}, said() {}, log() {} }, { mcp, memory });
+const capOffice = new Office(join(dir, 'cap-company.json'), { 'claude-code': { kind: 'ready', version: 'fake' }, codex: { kind: 'missing' }, hermes: { kind: 'missing' } }, { ...noBuild, changed() {}, said() {}, log() {} }, { mcp, memory, acker });
 capOffice.handle({ type: 'create_block', cwd: repo });
 const capBlock = capOffice.snapshot().company.blocks[0]!.id;
 for (const name of ['Fay', 'Gus', 'Hana']) capOffice.handle({ type: 'hire', provider: 'claude-code', blockId: capBlock, name });
@@ -353,7 +355,7 @@ writeFileSync(oldFile, fixture);
 check(!fixture.includes('"model"') && !fixture.includes('"permissions"') && !fixture.includes('"settings"'), 'the fixture is a company.json from before models, permissions and settings');
 
 process.env.OFFICE_CLAUDE_MODEL = 'env-model';
-const loaded = new Office(oldFile, statuses, quiet, { mcp, memory });
+const loaded = new Office(oldFile, statuses, quiet, { mcp, memory, acker });
 const migrated = loaded.snapshot().company;
 check(migrated.employees.length === 2 && migrated.employees.every((e) => e.model === 'env-model'), 'a Claude employee without a model gets OFFICE_CLAUDE_MODEL');
 check(migrated.employees.every((e) => JSON.stringify(e.permissions) === '{"mode":"inherit","alwaysAllow":[]}' && e.subagents.length === 0), 'every employee gets the inherit mode, no rules and no subagents');
@@ -365,20 +367,20 @@ check(onDisk.employees.every((e) => e.model === 'env-model' && e.permissions.mod
 check(!readFileSync(oldFile, 'utf8').includes('subagents'), 'no subagents key is written');
 const once = readFileSync(oldFile, 'utf8');
 loaded.shutdown();
-const reloaded = new Office(oldFile, statuses, quiet, { mcp, memory });
+const reloaded = new Office(oldFile, statuses, quiet, { mcp, memory, acker });
 check(readFileSync(oldFile, 'utf8') === once, 'loading the migrated file again writes the same bytes');
 reloaded.shutdown();
 
 delete process.env.OFFICE_CLAUDE_MODEL;
 writeFileSync(oldFile, fixture);
-const fallback = new Office(oldFile, statuses, quiet, { mcp, memory });
+const fallback = new Office(oldFile, statuses, quiet, { mcp, memory, acker });
 check(fallback.snapshot().company.employees.every((e) => e.model === 'claude-sonnet-5-5'), 'without OFFICE_CLAUDE_MODEL the model is the harness default');
 fallback.shutdown();
 
 const partial = { ...JSON.parse(fixture), settings: { defaultPermissions: 'yolo', defaultModels: { 'claude-code': 'company-pick' } } };
 const partialFile = join(dir, 'old', 'partial.json');
 writeFileSync(partialFile, JSON.stringify(partial));
-const withSettings = new Office(partialFile, statuses, quiet, { mcp, memory });
+const withSettings = new Office(partialFile, statuses, quiet, { mcp, memory, acker });
 const settled = withSettings.snapshot().company;
 check(settled.settings.defaultPermissions === 'yolo' && settled.settings.seats.perBlock === 3 && settled.employees.every((e) => e.permissions.mode === 'yolo'), 'a file with some settings keeps them, fills the rest, and its old employees take the company default mode');
 withSettings.handle({ type: 'hire', provider: 'claude-code', blockId: settled.blocks[0]!.id, name: 'Cy' });
@@ -393,8 +395,9 @@ console.log('\n# model, mode and Always allow');
 const labFile = join(dir, 'lab', 'company.json');
 const labLogs: string[] = [];
 let labChanges = 0;
-const labEvents = { ...noBuild, changed: () => void labChanges++, said() {}, log: (_id: EmployeeId, line: string) => void labLogs.push(line) };
-const lab = new Office(labFile, statuses, labEvents, { mcp, memory });
+const labStreams: { id: EmployeeId; delta: string; done: boolean }[] = [];
+const labEvents = { ...noBuild, changed: () => void labChanges++, said() {}, stream: (id: EmployeeId, _to: unknown, delta: string, done: boolean) => void labStreams.push({ id, delta, done }), log: (_id: EmployeeId, line: string) => void labLogs.push(line) };
+const lab = new Office(labFile, statuses, labEvents, { mcp, memory, acker });
 lab.handle({ type: 'create_block', cwd: repo });
 const labBlock = lab.snapshot().company.blocks[0]!.id;
 lab.handle({ type: 'hire', provider: 'claude-code', blockId: labBlock, name: 'Dia', model: 'picked-model' as ModelId });
@@ -529,7 +532,10 @@ oldDia.host.setSessionId('sess-old');
 const lastWords = oldDia.host.ask({ kind: 'ask', text: 'Any last words?' });
 check(inLab(dia).sessionId === 'sess-old' && inLab(dia).status.kind === 'blocked_on_owner' && labShown(dia)?.text === 'Any last words?', 'the employee is mid-task with a conversation to resume and a question open');
 const oldUrl = oldDia.host.mcp.url;
+oldDia.host.streamed?.('Half a sen');
+check(labStreams.at(-1)?.id === dia && !labStreams.at(-1)!.done, 'a bubble is open on the owner screen when the session is restarted');
 lab.handle({ type: 'fresh_session', employeeId: dia });
+check(labStreams.at(-1)?.id === dia && labStreams.at(-1)!.done, 'restarting the session closes the bubble its old session left open');
 const newDia = fakeOf(dia);
 check(oldDia.stopped && newDia !== oldDia && !newDia.stopped, 'fresh_session stops the session and builds a new session object');
 check((await lastWords) === '' && labShown(dia) === undefined && inLab(dia).status.kind === 'idle', 'the questions are dropped and the employee is idle');
@@ -576,7 +582,7 @@ check(!readFileSync(labFile, 'utf8').includes('subagents') && dolls() === 'f<', 
 
 console.log('\n# restart');
 lab.shutdown();
-const lab2 = new Office(labFile, statuses, labEvents, { mcp, memory });
+const lab2 = new Office(labFile, statuses, labEvents, { mcp, memory, acker });
 check((await promptly(fakeOf(dia).host.ask(use('Write', 'src/c.ts')))) === 'Allow' && lab2.snapshot().company.employees.find((e) => e.id === dia)?.model === 'next-model', 'after a restart the rule still allows and the model is still the one picked');
 lab2.shutdown();
 
@@ -645,7 +651,7 @@ console.log('\n# the mailroom, end to end with scripted employees');
 {
   process.env.OFFICE_START_LEVEL = '5';
   const history: Message[][] = [];
-  const mailOffice = new Office(join(dir, 'mail-company.json'), { 'claude-code': { kind: 'ready', version: 'fake' }, codex: { kind: 'missing' }, hermes: { kind: 'missing' } }, { ...noBuild, changed() {}, said() {}, log() {}, history: (_c, messages) => void history.push(messages) }, { mcp, memory });
+  const mailOffice = new Office(join(dir, 'mail-company.json'), { 'claude-code': { kind: 'ready', version: 'fake' }, codex: { kind: 'missing' }, hermes: { kind: 'missing' } }, { ...noBuild, changed() {}, said() {}, log() {}, history: (_c, messages) => void history.push(messages) }, { mcp, memory, acker });
   process.env.OFFICE_START_LEVEL = '3';
   mailOffice.handle({ type: 'create_block', cwd: repo });
   const mb = mailOffice.snapshot().company.blocks[0]!.id;
@@ -712,7 +718,7 @@ console.log('\n# the mailroom, end to end with scripted employees');
 
   const fileLines = readFileSync(join(dir, 'mail-company.mail.jsonl'), 'utf8').trim().split('\n').length;
   mailOffice.shutdown();
-  const reopened = new Office(join(dir, 'mail-company.json'), { 'claude-code': { kind: 'ready', version: 'fake' }, codex: { kind: 'missing' }, hermes: { kind: 'missing' } }, { ...noBuild, changed() {}, said() {}, log() {} }, { mcp, memory });
+  const reopened = new Office(join(dir, 'mail-company.json'), { 'claude-code': { kind: 'ready', version: 'fake' }, codex: { kind: 'missing' }, hermes: { kind: 'missing' } }, { ...noBuild, changed() {}, said() {}, log() {} }, { mcp, memory, acker });
   check(fileLines > 5 && reopened.snapshot().mail.tail.some((m) => m.kind === 'reply' && m.to === 'owner') && reopened.snapshot().mail.open.length === 0, 'the thread survives a restart');
   reopened.shutdown();
   for (const c of [asPo, asAnna, asBenj]) await c.c.close().catch(() => undefined);

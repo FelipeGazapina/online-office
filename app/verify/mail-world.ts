@@ -20,7 +20,10 @@ const roster = (): Member[] => [
   { id: OUTSIDER, name: 'Zed', role: 'employee', blockId: B2, status: 'idle' },
 ];
 
-export function world(ledger: readonly LedgerEntry[] = []) {
+export type Acknowledge = NonNullable<ConstructorParameters<typeof Mailroom>[0]['acknowledge']>;
+
+export function world(ledger: readonly LedgerEntry[] = [], acknowledge?: Acknowledge) {
+  const streams: { who: string; delta: string; done: boolean }[] = [];
   const members = roster();
   const prompts = new Map<string, string[]>();
   const steers: { to: string; text: string; style: string }[] = [];
@@ -55,13 +58,14 @@ export function world(ledger: readonly LedgerEntry[] = []) {
       },
       persist: (entry) => void persisted.push(entry),
       changed: () => {},
-      stream: () => {},
+      stream: (who, _to, delta, done) => void streams.push({ who, delta, done }),
+      ...(acknowledge ? { acknowledge } : {}),
       now: () => 1_000 + n,
       newId: () => `m${String(++n).padStart(4, '0')}`,
     },
     ledger,
   );
-  return { room, prompts, steers, persisted, hires, members, fresh, stale, setDirty: (d: string[]) => void (dirty = d), failDeliver: (e?: EmployeeId) => void (failDeliver = e) };
+  return { room, streams, prompts, steers, persisted, hires, members, fresh, stale, setDirty: (d: string[]) => void (dirty = d), failDeliver: (e?: EmployeeId) => void (failDeliver = e) };
 }
 
 

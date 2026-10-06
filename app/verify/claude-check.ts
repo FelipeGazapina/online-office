@@ -257,6 +257,15 @@ check(liveProc.options.includePartialMessages === true, 'partial messages are on
 check(live.streamed.join('') === 'On it, splitting this up.<done>', `the message tool's text streams as it is written (${live.streamed.join('|')})`);
 await feed(liveProc, turnEnd());
 check(live.completed.length === 1, 'the finished turn reports its end once');
+
+const cut = scripted();
+cut.session.assign('go');
+const cutProc = processes.at(-1)!;
+await feed(cutProc, sdk({ type: 'stream_event', parent_tool_use_id: null, event: { type: 'content_block_start', index: 1, content_block: { type: 'tool_use', name: 'mcp__office__message', id: 't9', input: {} } } }));
+await feed(cutProc, delta(1, '{"to":"owner","text":"Half a sen'));
+cutProc.out.close();
+await until(() => cut.streamed.at(-1) === '<done>');
+check(cut.streamed.join('') === 'Half a sen<done>', `a bubble the process died in the middle of is closed (${cut.streamed.join('|')})`);
 live.session.stop();
 
 ana.session.stop();
