@@ -121,6 +121,17 @@ async function waitForStage(s, taskId, stage, label) {
   throw new Error(`${label}: still not ${stage} after ${Math.round(WAIT_MS / 1000)} s`);
 }
 
+// A task reaches review while the PO's last turn can still be open, and the snapshot only carries a closed turn once it ends.
+// Time is compared with mail.jsonl only when nobody is running any of these tasks.
+async function quiet(s, ids) {
+  const t0 = Date.now();
+  while (Date.now() - t0 < 90_000) {
+    if (!(await s.eval(`${JSON.stringify(ids)}.some((id) => ${state}.taskTime[id]?.running.length)`))) return;
+    await s.sleep(1000);
+  }
+  throw new Error(`a turn on ${ids.length} task(s) never ended`);
+}
+
 const deliverable = (file, line) =>
   `One deliverable and no acceptance bar. Send it to Ana as one plain request, not a gauntlet, and do not hire anyone. The deliverable is a file named ${file} in the project folder whose only line is: ${line}. When Ana replies done, check the file exists and reply done to the owner naming ${file}.`;
 
@@ -173,7 +184,8 @@ export default async (s, { launch }) => {
     assert(t2.at > t1.at || t2.total >= t1.total, 'the snapshot carries time and the PO is running, so a screen can keep counting');
 
     await waitForStage(s, hello.id, 'review', 'hello.txt');
-    await s.sleep(3000);
+    await quiet(s, [hello.id]);
+    await s.sleep(1500);
     const done = await s.eval(`(() => { const t = ${taskExpr(hello.id)}; return { assignees: t.assignees, runs: t.runs, last: t.lastOutcome?.outcome, time: ${state}.taskTime[t.id] }; })()`);
     assert(done.last === 'done', 'the work settled done and the task moved doing to review');
     assert(existsSync(join(repo, 'hello.txt')), 'hello.txt reached the block folder');
@@ -256,6 +268,8 @@ export default async (s, { launch }) => {
     assert(existsSync(join(repo, 'hire.txt')), 'the new hire did the task without any further owner action');
 
     // ── restart ──
+    await quiet(s, [hello.id, card.id, hireTask.id]);
+    await s.sleep(1500);
     const before = await s.eval(`(() => { const st = ${state}; return { tasks: st.tasks.map((t) => ({ id: t.id, stage: t.stage, runs: t.runs.length })), time: st.taskTime, boards: st.boards.length }; })()`);
     const callsBefore = fake.calls.length;
     await s.close();

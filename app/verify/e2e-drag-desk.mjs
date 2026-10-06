@@ -104,7 +104,7 @@ export default async (s) => {
   assert(await s.eval(`!${state}.company.employees.some((e) => e.seat === ${JSON.stringify(emptyDesk)})`), 'the last bench desk of Checkout is empty');
   const quick = await s.eval(`${state}.boards.find((b) => b.blockId === ${JSON.stringify(checkout)}).id`);
   const titles = { ana: 'Add ana.txt', po: 'Add po.txt', hire: 'Add hire.txt', cross: 'Rename the staging bucket', floor: 'Draft the release notes', esc: 'Audit the unused flags', tray: 'Book the demo room' };
-  const notes = { ana: `First run the shell command sleep 8, then ${deliverable('ana.txt', 'hello from ana').replace(/^Create/, 'create')}`, po: delegated('po.txt', 'hello from the po', 'Ana'), hire: deliverable('hire.txt', 'hello from the new hire') };
+  const notes = { ana: `First run the shell command sleep 15, then ${deliverable('ana.txt', 'hello from ana').replace(/^Create/, 'create')}`, po: delegated('po.txt', 'hello from the po', 'Ana'), hire: deliverable('hire.txt', 'hello from the new hire') };
   for (const [key, title] of Object.entries(titles)) await send({ type: 'create_task', boardId: quick, title, ...(notes[key] ? { notes: notes[key] } : {}) });
   await s.waitFor(`${state}.tasks.length === ${Object.keys(titles).length}`);
   const task = (key) => s.eval(`${taskBy(titles[key])}`);
@@ -246,6 +246,8 @@ export default async (s) => {
   await s.shot('t3-before-drop');
   await s.mouse('mouseReleased', anaAt.x, anaAt.y);
   const released = Date.now();
+  await s.waitFor(`[...document.querySelectorAll('.toast')].some((t) => t.innerText.includes('"Add ana.txt" goes to Ana'))`, 1500);
+  ok('a toast says who has it');
   const assigns = async () => (await s.eval(`window.__sent.slice(${mark}).filter((m) => m.type === 'assign_task')`));
   // The bubble over the employee's head: the working line, or whatever they say.
   const bubble = (id) => `(() => { const l = document.querySelector('.emp-label[data-hud-resize-target="employee-label-${id}"]'); const b = l?.querySelector('.bub'); return !!b && getComputedStyle(l).visibility !== 'hidden' && (b.classList.contains('work') || b.classList.contains('said')); })()`;
@@ -263,7 +265,6 @@ export default async (s) => {
   await s.sleep(1500);
   assert((await assigns()).length === 1, 'and not again');
   assert(await s.eval(`!${state}.modal && !document.querySelector('[data-testid=task-board]')`), 'the owner is back in the office, the board closed');
-  assert(await s.eval(`[...document.querySelectorAll('.toast')].some((t) => t.innerText.includes('"Add ana.txt" goes to Ana'))`), 'a toast says who has it');
   await s.waitFor(`${taskBy(titles.ana)}.stage === 'doing' && ${taskBy(titles.ana)}.assignees.includes(${JSON.stringify(ana.id)}) && ${taskBy(titles.ana)}.runs.length === 1`);
   const run = requestsTo(ana.id).find((m) => m.from === 'owner' && m.title === titles.ana);
   assert(!!run && run.intent === 'work' && (await task('ana')).runs[0] === run.id, 'mail.jsonl has one work request from the owner to Ana, and it is the task\'s run');
@@ -276,6 +277,14 @@ export default async (s) => {
   await s.sleep(1500);
   const t2 = await ms();
   assert(t1 >= 0 && t2 >= t1 + 1000 && (await s.eval(`${cardOf}.querySelector('[data-testid=task-timer]').dataset.running`)) === 'true', `the card's timer ticks while she works (${t1} to ${t2} ms)`);
+  mark = await sentCount();
+  await pickUp(titles.ana);
+  await hover(anaAt, `${state}.aim?.deskId === ${JSON.stringify(ana.seat)}`);
+  assert((await aim()).verdict.already === true && (await s.eval("document.querySelector('[data-testid=desk-aim]').innerText.trim()")) === 'Ana is already on it' && (await s.eval("__office.probe('desk-aim')"))[0]?.tone === 'same', 'while Ana is on the task, her desk says so and lights amber');
+  await s.mouse('mouseReleased', anaAt.x, anaAt.y);
+  await boardBack();
+  await nothingSince(mark, 'dropping the card on her again sends nothing');
+  assert(await s.eval(`[...document.querySelectorAll('.toast')].some((t) => t.innerText.includes('already on'))`), 'and a toast says she is already on it');
   await s.press('Escape');
   await s.waitFor("!document.querySelector('[data-testid=task-board]')");
   await s.eval("__office.set({ camera: 'first' })");
