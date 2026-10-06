@@ -117,3 +117,14 @@ export const facesCamera = (r: WallRecord, yaw: number): boolean => -Math.sin(ya
 
 /** The camera's heading snapped to one of eight directions, so the cutaway only changes when the view turns far enough. */
 export const octantOf = (yaw: number): number => ((Math.round(yaw / (Math.PI / 4)) % 8) + 8) % 8;
+
+/** The wall stands between the camera and a point on its floor: on the camera's side of it and within a body's width of the line of sight. */
+export function occludes(r: WallRecord, yaw: number, at: { x: number; z: number }): boolean {
+  const tx = -Math.sin(yaw);
+  const tz = -Math.cos(yaw);
+  const dx = r.x - at.x;
+  const dz = r.z - at.z;
+  const along = dx * tx + dz * tz;
+  const across = Math.abs(dx * tz - dz * tx);
+  return along > 0.2 && along < 7 && across < 2.4;
+}

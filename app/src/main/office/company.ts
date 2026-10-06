@@ -1,4 +1,5 @@
 import { boardPage } from './board.ts';
+import { folderArtifacts } from './mail-artifacts.ts';
 import { randomUUID } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { appendFileSync, existsSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
@@ -346,6 +347,10 @@ export class Office {
         deliver: (to, prompt, title) => this.deliver(to, prompt, title),
         steer: (to, text, style) => this.steer(to, text, style),
         hire: (from, spec) => this.hireFor(from, spec),
+        artifacts: folderArtifacts((who) => {
+          const e = this.company.employees.find((x) => x.id === who);
+          return e ? this.company.blocks.find((b) => b.id === e.blockId)?.cwd : undefined;
+        }),
         persist: (entry) => {
           mkdirSync(dirname(this.ledgerFile), { recursive: true });
           appendFileSync(this.ledgerFile, `${JSON.stringify(entry)}\n`);

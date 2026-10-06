@@ -1,30 +1,12 @@
 // Every simple furniture def as one merged geometry with its colors baked in as vertex colors, so a def costs one draw
 // call per story however many of it there are. A model sits on the floor with its origin at the middle of the item's
 // footprint and faces +z at rot 0, the way the space module's seats do.
-import { BoxGeometry, BufferGeometry, Color, CylinderGeometry, Float32BufferAttribute, IcosahedronGeometry, PlaneGeometry } from 'three';
-import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
+import { BufferGeometry, IcosahedronGeometry, PlaneGeometry } from 'three';
 import { ITEM_DEFS, STORY_H } from '../../../../shared/space/index.ts';
+import { FURNITURE } from './furniture.ts';
+import { at, blob, box, cyl, merge, paint } from './parts.ts';
 
-export const paint = (g: BufferGeometry, color: string | number | [number, number, number]): BufferGeometry => {
-  const flat = g.index ? g.toNonIndexed() : g;
-  const n = flat.getAttribute('position').count;
-  const c = Array.isArray(color) ? new Color(color[0], color[1], color[2]) : new Color(color as string);
-  const rgb = Array.isArray(color) ? color : [c.r, c.g, c.b];
-  flat.setAttribute('color', new Float32BufferAttribute(Array.from({ length: n }, () => rgb).flat(), 3));
-  if (!flat.getAttribute('uv')) flat.setAttribute('uv', new Float32BufferAttribute(new Float32Array(n * 2), 2));
-  return flat;
-};
-const at = (g: BufferGeometry, x: number, y: number, z: number) => g.translate(x, y, z);
-
-export const box = (w: number, h: number, d: number, x: number, y: number, z: number, color: string | [number, number, number]) => paint(at(new BoxGeometry(w, h, d), x, y, z), color);
-export const cyl = (rt: number, rb: number, h: number, x: number, y: number, z: number, color: string, seg = 14) => paint(at(new CylinderGeometry(rt, rb, h, seg), x, y, z), color);
-export const blob = (r: number, x: number, y: number, z: number, color: string) => paint(at(new IcosahedronGeometry(r, 0), x, y, z), color);
-export const merge = (parts: BufferGeometry[]) => {
-  const g = mergeGeometries(parts, false);
-  if (!g) throw new Error('A furniture model failed to merge');
-  g.computeBoundingSphere();
-  return g;
-};
+export { blob, box, cyl, merge, paint };
 
 const WOOD = '#efe0c6';
 const DARK = '#3a3f4e';
@@ -145,6 +127,8 @@ function build(def: string): BufferGeometry {
     case 'rail':
       return merge([box(1, 0.9, 0.04, 0, 0.45, 0, '#c9cdd8')]);
     default: {
+      const made = FURNITURE[def];
+      if (made) return made();
       const d = ITEM_DEFS[def];
       return merge([box(d.w / 2 - 0.04, d.height, d.d / 2 - 0.04, 0, d.height / 2, 0, '#b8b2a7')]);
     }

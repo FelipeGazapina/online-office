@@ -339,6 +339,7 @@ const wrong = await call(po.client, 'request', { to: 'Zed', text: 'x' });
 check(wrong.json().ok === false && wrong.json().reason === 'cross_block', 'another block is refused with a reason');
 const waiting = call(po.client, 'awaitReplies', { timeoutSec: 5 });
 const reqId = sent.json().id as string;
+mailWorld.fresh.add('src/csv.ts');
 const replied = await call(ana.client, 'reply', { requestId: reqId, outcome: 'done', text: 'csv route done', artifact: ['src/csv.ts'] });
 check(replied.json().ok === true, 'reply settles a request');
 const got = (await waiting).json();

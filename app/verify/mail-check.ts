@@ -105,6 +105,36 @@ console.log('\n# delegation and settling');
   check(final?.outcome === 'done' && final.auto === true && final.text === 'CSV export shipped' && final.to === 'owner', 'the parent auto-settles to the owner only after all children settled');
   check(serving(w.room.state, PO).length === 0, 'nothing is left being served');
 
+  const early = world();
+  const earlyRoot = ids(early.room.post(owner('po', 'ship it')));
+  ids(early.room.post(ask(PO, 'Ana', 'backend')));
+  const refused = early.room.reply(PO, earlyRoot, { outcome: 'done', text: 'all shipped' });
+  check(!refused.ok && refused.reason === 'open_children' && !replyTo(early, earlyRoot), 'a done reply is refused while a request the replier made is still open');
+  check(early.room.reply(PO, earlyRoot, { outcome: 'blocked', text: 'stuck' }).ok && replyTo(early, earlyRoot)?.outcome === 'blocked', 'a blocked reply is still allowed with open children');
+  const late = world();
+  const lateRoot = ids(late.room.post(owner('po', 'ship it')));
+  ids(late.room.post(ask(PO, 'Ana', 'backend')));
+  late.room.turnEnded(ANA, 'backend done', true);
+  check(late.room.reply(PO, lateRoot, { outcome: 'done', text: 'all shipped' }).ok && replyTo(late, lateRoot)?.outcome === 'done', 'a done reply goes through once every request it made is settled');
+
+  const rv = world();
+  const g1 = posted(rv.room.requestGauntlet(PO, { piece: 'build it', bar: ['it works'], builder: 'Ana', critic: 'Bruno' })).id;
+  rv.room.turnEnded(ANA, 'built', true);
+  const reviewId = requestIn(lastPrompt(rv, BRUNO));
+  const bare = rv.room.reply(BRUNO, reviewId, { outcome: 'done', text: 'Artifact passes.' });
+  check(!bare.ok && bare.reason === 'verdict_required' && life(rv, g1) === 'running', 'a review reply without a verdict is refused and the gauntlet keeps running');
+  check(rv.room.reply(BRUNO, reviewId, { outcome: 'done', text: 'ok', verdict: { pass: true, findings: [] } }).ok && replyTo(rv, g1)?.outcome === 'done', 'the same review with a verdict passes the gauntlet');
+
+  const auto = world();
+  const ag = posted(auto.room.requestGauntlet(PO, { piece: 'build it', bar: ['it works'], builder: 'Ana', critic: 'Bruno' })).id;
+  auto.room.turnEnded(ANA, 'built', true);
+  auto.room.turnEnded(BRUNO, '**Verdict: PASS**', true);
+  check(replyTo(auto, ag)?.outcome === 'done', 'a critic whose turn ends with a bare PASS passes the gauntlet');
+  const af = posted(auto.room.requestGauntlet(PO, { piece: 'again', bar: ['it works'], builder: 'Ana', critic: 'Bruno' })).id;
+  auto.room.turnEnded(ANA, 'built', true);
+  auto.room.turnEnded(BRUNO, 'FAIL: the button does not download. Not a pass.', true);
+  check(!replyTo(auto, af) && /Round 2/.test(lastPrompt(auto, ANA)), 'a critic text with FAIL in it sends the builder round again');
+
   const e = world();
   const r = ids(e.room.post(owner('ana', 'crash')));
   e.room.turnEnded(ANA, 'boom', false);
@@ -133,7 +163,7 @@ console.log('\n# asking a peer and waiting');
   const w = world();
   w.room.post(owner('ana', 'task'));
   w.room.post(owner('bruno', 'task'));
-  const q = ids(w.room.post(ask(BRUNO, 'ana', 'does the route take ?from=?')));
+  const q = ids(w.room.post({ from: BRUNO, to: 'ana', body: { kind: 'request', intent: 'help', text: 'does the route take ?from=?' } }));
   check(life(w, q) === 'queued', 'the question to a busy peer queues');
   const wait = w.room.await(BRUNO, { ids: [q], timeoutSec: 5 });
   const other = w.room.await(ANA, { ids: [], timeoutSec: 5 });
@@ -149,6 +179,7 @@ console.log('\n# asking a peer and waiting');
 console.log('\n# gauntlet');
 {
   const w = world();
+  for (const f of ['src/Button.tsx', 'git diff main', 'x']) w.fresh.add(f);
   const root = ids(w.room.post(owner('po', 'make the button')));
   const same = w.room.requestGauntlet(PO, { piece: 'ui', bar: ['visible'], builder: 'Ana', critic: 'ana' });
   check(!same.ok && same.reason === 'critic_is_builder', 'critic === builder is refused');
@@ -170,6 +201,7 @@ console.log('\n# gauntlet');
   check(/Reply from the office to your request/.test(lastPrompt(w, PO)) || w.prompts.get(PO)!.length >= 1, 'the requester hears about it');
 
   const b = world();
+  b.fresh.add('x');
   ids(b.room.post(owner('po', 'loop forever')));
   const lg = posted(b.room.requestGauntlet(PO, { piece: 'hard piece', bar: ['perfect'], builder: 'Ana', critic: 'Bruno', maxRounds: 2 }));
   for (let round = 1; round <= 2; round++) {
@@ -185,6 +217,87 @@ console.log('\n# gauntlet');
   const cg = posted(c.room.requestGauntlet(PO, { piece: 'p', bar: ['b'], builder: 'Ana', critic: 'Bruno' }));
   c.room.turnEnded(ANA, 'crashed', false);
   check(replyTo(c, cg.id)?.outcome === 'failed', 'a builder that fails settles the gauntlet failed');
+}
+
+console.log('\n# done means done');
+{
+  const w = world();
+  w.setDirty([]);
+  const r = ids(w.room.post(owner('ana', 'build the parser')));
+  const rid = requestIn(lastPrompt(w, ANA));
+  const bare = w.room.reply(ANA, rid, { outcome: 'done', text: 'parser built' });
+  check(!bare.ok && bare.reason === 'no_artifacts' && life(w, r) === 'delivered', 'a done reply to a work request with no artifacts is refused and the request stays open');
+  w.stale.add('docs/old.md');
+  const old = w.room.reply(ANA, rid, { outcome: 'done', text: 'parser built', artifact: ['docs/old.md'] });
+  check(!old.ok && old.reason === 'artifact_unchanged' && life(w, r) === 'delivered', 'an artifact that did not change since the request is refused');
+  const ghost = w.room.reply(ANA, rid, { outcome: 'done', text: 'parser built', artifact: ['src/ghost.ts'] });
+  check(!ghost.ok && ghost.reason === 'artifact_missing', 'an artifact that does not exist is refused');
+  const mixed = w.room.reply(ANA, rid, { outcome: 'done', text: 'parser built', artifact: ['src/parser.ts', 'docs/old.md'] });
+  check(!mixed.ok, 'one bad ref among good ones refuses the reply');
+  w.fresh.add('src/parser.ts');
+  check(w.room.reply(ANA, rid, { outcome: 'done', text: 'parser built', artifact: ['src/parser.ts'] }).ok && replyTo(w, r)?.outcome === 'done' && replyTo(w, r)?.artifact?.[0] === 'src/parser.ts', 'a done reply with a changed file is accepted and carries it');
+
+  const blk = world();
+  const b1 = ids(blk.room.post(owner('ana', 'try it')));
+  check(blk.room.reply(ANA, requestIn(lastPrompt(blk, ANA)), { outcome: 'blocked', text: 'no access' }).ok && replyTo(blk, b1)?.outcome === 'blocked', 'blocked and failed replies need no artifacts');
+
+  const help = world();
+  const h1 = ids(help.room.post({ from: 'owner', to: 'ana', blockId: B1, body: { kind: 'request', intent: 'help', text: 'where is the router?' } }));
+  check(help.room.reply(ANA, requestIn(lastPrompt(help, ANA)), { outcome: 'done', text: 'src/router.ts' }).ok && replyTo(help, h1)?.outcome === 'done', 'a help request is answered without artifacts');
+
+  const wait = world();
+  wait.fresh.add('a.txt');
+  const w1 = ids(wait.room.post(owner('ana', 'write it')));
+  const waiting = wait.room.reply(ANA, requestIn(lastPrompt(wait, ANA)), { outcome: 'done', text: "Waiting for Eli's gauntlet, I'll check back", artifact: ['a.txt'] });
+  check(wait.room.reply(ANA, requestIn(lastPrompt(wait, ANA)), { outcome: 'done', text: "I'm standing by until Eli ships it.", artifact: ['a.txt'] }).ok === false, 'standing by is waiting too');
+  check(!waiting.ok && waiting.reason === 'still_waiting' && life(wait, w1) === 'delivered', 'a done reply whose text says it is waiting is refused even with artifacts');
+
+  const auto = world();
+  auto.setDirty([]);
+  const a1 = ids(auto.room.post(owner('po', 'root')));
+  const child = ids(auto.room.post(ask(PO, 'Ana', 'write the lexer')));
+  auto.room.turnEnded(PO, 'split', true);
+  auto.room.turnEnded(ANA, 'Lexer is written.', true);
+  const blocked = replyTo(auto, child);
+  check(blocked?.outcome === 'blocked' && blocked.auto === true && blocked.text === 'Lexer is written.' && !blocked.artifact, 'a turn that ends on a work request with nothing on disk settles blocked with the final text');
+  check(/Reply from Ana to your request/.test(lastPrompt(auto, PO)) && /blocked/.test(lastPrompt(auto, PO)), 'the requester is woken with the blocked reply');
+  check(life(auto, a1) === 'delivered', 'the parent is not settled by a blocked child');
+
+  const real = world();
+  real.setDirty(['src/lexer.ts', 'src/lexer.test.ts']);
+  const c = ids(real.room.post(owner('ana', 'write the lexer')));
+  real.room.turnEnded(ANA, 'Lexer is written.', true);
+  check(replyTo(real, c)?.outcome === 'done' && replyTo(real, c)?.artifact?.join() === 'src/lexer.ts,src/lexer.test.ts', 'a turn that ends after real changes settles done with those files as artifacts');
+
+  const talk = world();
+  talk.setDirty(['x']);
+  const t = ids(talk.room.post(owner('ana', 'write it')));
+  talk.room.turnEnded(ANA, "Waiting for Morgan to finish, will check back.", true);
+  check(replyTo(talk, t)?.outcome === 'blocked', 'an auto reply whose text says it is waiting settles blocked even with changes');
+
+  const rev = world();
+  rev.setDirty([]);
+  const g = posted(rev.room.requestGauntlet(PO, { piece: 'p', bar: ['b'], builder: 'Ana', critic: 'Bruno' })).id;
+  rev.fresh.add('p.txt');
+  answer(rev, ANA, { outcome: 'done', text: 'built', artifact: ['p.txt'] });
+  rev.room.turnEnded(BRUNO, '**Verdict: PASS**', true);
+  check(replyTo(rev, g)?.outcome === 'done' && replyTo(rev, g)?.artifact?.[0] === 'p.txt', 'review requests still settle with verdicts and need no artifacts of their own');
+
+  const po = world();
+  po.fresh.add('api.ts');
+  po.fresh.add('ui.tsx');
+  const root = ids(po.room.post(owner('po', 'ship csv export')));
+  ids(po.room.post(ask(PO, 'Ana', 'backend')));
+  ids(po.room.post(ask(PO, 'Bruno', 'ui')));
+  po.room.turnEnded(PO, 'split', true);
+  po.room.reply(ANA, requestIn(lastPrompt(po, ANA)), { outcome: 'done', text: 'api done', artifact: ['api.ts'] });
+  po.room.turnEnded(ANA, 'api done', true);
+  po.room.reply(BRUNO, requestIn(lastPrompt(po, BRUNO)), { outcome: 'done', text: 'ui done', artifact: ['ui.tsx'] });
+  po.room.turnEnded(BRUNO, 'ui done', true);
+  po.setDirty([]);
+  po.room.turnEnded(PO, 'CSV export shipped', true);
+  const final = replyTo(po, root);
+  check(final?.outcome === 'done' && final.artifact?.join() === 'api.ts,ui.tsx', 'the PO final reply carries the union of its children artifacts, no files of its own needed');
 }
 
 console.log('\n# hiring');

@@ -133,19 +133,48 @@ export default async function (s) {
   assert(await s.eval(`!!document.querySelector('.bh-dock') && !!document.querySelector('.bh-top') && !!document.querySelector('.bh-levels')`), 'the build bar, the catalog and the level widget are on screen');
   assert(await s.eval(`document.querySelector('.bottom') === null || getComputedStyle(document.querySelector('.bottom')).display === 'none'`), 'the conversation bar steps aside');
   await s.sleep(1200);
-  await save(s, 's3-catalog');
+  await save(s, 's4-catalog');
   const cardCount = await s.eval(`document.querySelectorAll('.bh-card').length`);
-  assert(cardCount >= 2, `the catalog lists its desks (${cardCount} cards)`);
-  assert(await s.eval(`[...document.querySelectorAll('.bh-card img')].every((i) => i.src.startsWith('data:image/png'))`), 'every furniture card shows a rendered thumbnail');
+  assert(cardCount >= 8, `the catalog lists its desks (${cardCount} cards)`);
+  const labels = await s.eval(`[...document.querySelectorAll('.bh-tab')].map((t) => t.textContent.trim())`);
+  assert(labels.length === 10 && labels.every((l) => l.length > 2), `every category tab shows its name (${labels.join(', ')})`);
+  for (const tab of ['desks', 'seating', 'tables', 'decor', 'plants', 'storage']) {
+    await clickSel(`[data-tab="${tab}"]`);
+    const n = await s.eval(`document.querySelectorAll('.bh-card').length`);
+    assert(n >= 8, `the ${tab} tab holds ${n} items`);
+    assert(await s.eval(`[...document.querySelectorAll('.bh-card img')].every((i) => i.src.startsWith('data:image/png') && i.src.length > 1500)`), `every ${tab} card shows a rendered thumbnail`);
+    assert(await s.eval(`[...document.querySelectorAll('.bh-card')].every((c) => /^[0-9.]+ × [0-9.]+ m$/.test(c.querySelector('[data-testid="footprint-badge"]')?.textContent ?? ''))`), `and a footprint badge on each ${tab} card`);
+  }
+  await clickSel('[data-tab="desks"]');
   await clickSel('.bh-search input');
+  const everything = await s.eval(`document.querySelectorAll('.bh-card').length`);
+  assert(everything >= 60, `an empty search box lists everything (${everything} cards)`);
   await s.type('pla');
   await s.sleep(250);
   const found = await s.eval(`[...document.querySelectorAll('.bh-card')].map((c) => c.dataset.entry)`);
-  assert(found.includes('plant') && !found.includes('sofa'), `the search box narrows the catalog to plants (${found.join(', ')})`);
+  assert(found.includes('plant') && found.includes('plant_tree') && !found.includes('sofa'), `typing narrows it live to plants (${found.length} left)`);
+  await s.type('nt_t');
+  await s.sleep(250);
+  assert((await s.eval(`[...document.querySelectorAll('.bh-card')].map((c) => c.dataset.entry)`)).join() === 'plant_tree', 'and keeps narrowing as more letters come');
   await s.eval(`document.querySelector('.bh-search input').blur()`);
   await clickSel('.bh-clear');
   await s.press('Escape');
   assert((await s.eval(`${store}.build.search`)) === '', 'and the clear button empties the search');
+  await clickSel('[data-tab="desks"]');
+  const cardAt = (id) => s.eval(`(() => { const r = document.querySelector('[data-entry="${id}"]').getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; })()`);
+  await clickSel('[data-tab="plants"]');
+  const over = await cardAt('plant_large');
+  await s.mouse('mouseMoved', over.x, over.y);
+  await s.sleep(300);
+  const peeked = await s.eval(`__office.probe('footprint')`);
+  assert(peeked.length === 1 && peeked[0].w === 0.5 && peeked[0].d === 0.5, `hovering a card previews the piece as the cursor ghost (${peeked[0]?.w} x ${peeked[0]?.d} m)`);
+  assert((await ui(s)).tool.kind === 'select', 'without taking the piece in hand');
+  await s.mouse('mouseMoved', 700, 300);
+  await s.sleep(150);
+  await s.mouse('mouseMoved', 720, 320);
+  await s.sleep(250);
+  assert((await s.eval(`__office.probe('footprint')`)).length === 0, 'and the ghost goes away with the pointer');
+  await clickSel('[data-tab="desks"]');
 
   // ---- the camera pans on its own while building
   const cam0 = await s.eval('({ x: __officeCamera.x, z: __officeCamera.z })');
@@ -168,10 +197,19 @@ export default async function (s) {
   await clickSel('[data-tab="walls"]');
   await clickSel('[data-entry="room"]');
   assert((await ui(s)).tool.kind === 'room', 'the Room card puts the room tool in hand');
+  const activeBg = await s.eval(`getComputedStyle(document.querySelector('.bh-card[aria-pressed="true"]')).backgroundColor`);
+  assert(activeBg !== 'rgb(255, 255, 255)' && activeBg !== 'rgba(0, 0, 0, 0)', `the active tool card is filled (${activeBg})`);
+  await hover(rv.a.x, rv.a.z);
+  const startDot = await s.eval(`__office.probe('snap-dot')`);
+  assert(startDot.length === 1 && startDot[0].x === rv.a.x && startDot[0].z === rv.a.z, `before dragging, a snapping dot sits on the grid corner under the mouse (${startDot[0]?.x}, ${startDot[0]?.z})`);
   await dragTo(rv.a, rv.b, 0, async () => {
     const c = await cursor(s);
-    assert(c.readout?.text === '5 × 4 m', `mid-drag the cursor reads the room size (${c.readout?.text})`);
-    await save(s, 's3-room-drag');
+    assert(c.readout?.text === '5 × 4 m' && c.readout.anchored === true, `mid-drag the room size reads on the edge being dragged (${c.readout?.text})`);
+    const edges = await s.eval(`[...document.querySelectorAll('[data-testid="edge-length"]')].map((e) => e.textContent.trim()).sort()`);
+    assert(edges.join('|') === '4 m|4 m|5 m|5 m', `and every edge of the room shows its length (${edges.join(', ')})`);
+    const corners = await s.eval(`__office.probe('corner-dot').length + __office.probe('snap-dot').length`);
+    assert(corners === 4, `with a dot on each of the four corners (${corners})`);
+    await save(s, 's4-room-drag');
   });
   await waitBuilding(`b.stories[0].walls.length === ${before.stories[0].walls.length + 18}`, 'the room did not arrive');
   const after = await building(s);
@@ -182,17 +220,25 @@ export default async function (s) {
   const doorRef = { d: 'e', x: room.x + 2, z: room.z + 4 };
   assert(wallAt(after, 0, 'e', room.x, room.z) && wallAt(after, 0, 's', room.x + 5, room.z + 3), 'with walls on its north and east sides');
 
-  // ---- paint the floor: Shift fills the whole room
+  // ---- paint the floor: hover previews the swatch, the Fill room toggle covers the whole room
   await clickSel('[data-tab="floors"]');
+  const chips = await s.eval(`[...document.querySelectorAll('.bh-chip:not(.none)')].map((c) => getComputedStyle(c).backgroundImage.startsWith('url('))`);
+  assert(chips.length >= 8 && chips.every(Boolean), `floor swatches show their material texture (${chips.length} swatches)`);
   await clickSel('[data-entry="floor:6"]');
   assert((await ui(s)).tool.kind === 'floor' && (await ui(s)).paint === 6, 'a floor swatch puts the paint tool in hand');
-  await hold('ShiftLeft', 'Shift');
+  await hover(room.x + 1.5, room.z + 1.5);
+  const livePreview = await s.eval(`__office.probe('paint-preview')`);
+  assert(livePreview.length === 1 && livePreview[0].surface === 'floor' && livePreview[0].color === '#a2474c', `hovering a tile previews the swatch on it in the swatch's color (${livePreview[0]?.color})`);
+  assert((await building(s)).stories[0].paint[paintIndex(b0, 0, room.x + 1, room.z + 1)] !== 6, 'and nothing is painted until the click');
+  await clickSel('[data-testid="fill-toggle"]');
+  assert(await s.eval(`document.querySelector('[data-testid="fill-toggle"]').getAttribute('aria-pressed') === 'true'`), 'the Fill room toggle lights up');
   await hover(room.x + 2.5, room.z + 2.5);
   const fill = await cursor(s);
-  assert(fill.readout?.text === '20 m²', `with Shift held the ghost covers the room (${fill.readout?.text})`);
-  await save(s, 's3-paint');
+  assert(fill.readout?.text === '20 m²', `with Fill room on the ghost covers the room (${fill.readout?.text})`);
+  assert((await s.eval(`__office.probe('paint-preview')[0].tiles`)) === 20, 'and the preview paints all 20 tiles');
+  await save(s, 's4-paint');
   await clickAt(room.x + 2.5, room.z + 2.5);
-  await release('ShiftLeft', 'Shift');
+  await clickSel('[data-testid="fill-toggle"]');
   await waitBuilding(`b.stories[0].paint[${paintIndex(b0, 0, room.x + 2, room.z + 2)}] === 6`, 'the floor paint did not arrive');
   const painted = await building(s);
   const inside = [];
@@ -214,6 +260,10 @@ export default async function (s) {
   await waitBuilding(`b.stories[0].walls.some((w) => w.d === 'e' && w.x === ${room.x + 2} && w.z === ${room.z} && w.open === 'window')`, 'the window did not arrive');
   assert(true, 'a window went into the north wall');
   await choose('walls', 'style:1');
+  await hover(room.x + 5, room.z + 1.5);
+  const wallPreview = await s.eval(`__office.probe('paint-preview')`);
+  assert(wallPreview.length === 1 && wallPreview[0].surface === 'wall' && wallPreview[0].color === '#a65b45', `hovering a wall previews the swatch on it (${wallPreview[0]?.color})`);
+  assert((await building(s)).stories[0].walls.filter((w) => w.style === 1).length === 0, 'without painting it');
   await clickAt(room.x + 5, room.z + 1.5);
   await waitBuilding(`b.stories[0].walls.find((w) => w.d === 's' && w.x === ${room.x + 5} && w.z === ${room.z + 1})?.style === 1`, 'the wall paint did not arrive');
   const styled = (await building(s)).stories[0].walls.filter((w) => w.style === 1);
@@ -231,6 +281,9 @@ export default async function (s) {
   const wallsBefore = (await building(s)).stories[0].walls.length;
   await dragTo({ x: room.x - 2, z: room.z - 1 }, { x: room.x + 2, z: room.z - 1 }, 0, async () => {
     assert((await cursor(s)).readout?.text === '4 m', 'mid-drag the wall tool reads its length: 4 m');
+    const label = await s.eval(`[...document.querySelectorAll('[data-testid="edge-length"]')].map((e) => e.textContent.trim())`);
+    assert(label.length === 1 && label[0] === '4 m', `and the wall carries its own length label (${label})`);
+    assert((await s.eval(`__office.probe('snap-dot').length`)) === 2, 'with a ring on its start and on its end');
   });
   await waitBuilding(`b.stories[0].walls.length === ${wallsBefore + 4}`, 'the wall did not arrive');
   assert(true, 'releasing the drag built four wall segments');
@@ -248,11 +301,33 @@ export default async function (s) {
   const deskAt = { x: room.x + 2.5, z: room.z + 2 };
   await hover(room.x - 1.6, room.z + 2);
   assert((await cursor(s)).verdict?.ok === true, 'the desk ghost is green on bare floor beside the room');
-  await save(s, 's3-ghost-green');
+  const pad = await s.eval(`__office.probe('footprint')`);
+  assert(pad.length === 1 && pad[0].ok === true && pad[0].w === 1.5 && pad[0].d === 1, `the footprint rectangle covers the desk's full 1.5 x 1 m (${pad[0]?.w} x ${pad[0]?.d})`);
+  assert(pad[0].color === '#2fe06a', `and it is green (${pad[0].color})`);
+  await save(s, 's4-ghost-green');
   await hover(room.x - 0.4, room.z + 2);
   const wallRed = await cursor(s);
   assert(wallRed.verdict?.ok === false && wallRed.readout?.bad, `and red across the new wall, with the reason (${wallRed.verdict?.text})`);
-  await save(s, 's3-ghost-red');
+  const redPad = await s.eval(`__office.probe('footprint')`);
+  assert(redPad.length === 1 && redPad[0].ok === false && redPad[0].color === '#ff4d4d', `the footprint turns red where the desk is blocked (${redPad[0]?.color})`);
+  await save(s, 's4-ghost-red');
+  await hover(room.x - 1.6, room.z + 2);
+  const rot0 = (await ui(s)).tool.rot;
+  await clickSel('[data-testid="rotate-handle"]');
+  assert((await ui(s)).tool.rot === (rot0 + 1) % 4, 'the Turn handle rotates the ghost a quarter');
+  await clickSel('[data-testid="rotate-handle"]');
+  await clickSel('[data-testid="rotate-handle"]');
+  await clickSel('[data-testid="rotate-handle"]');
+  assert((await ui(s)).tool.rot === rot0, 'four turns come back round');
+  await clickSel('[aria-label="Walls up"]');
+  await s.sleep(300);
+  const upBefore = await s.eval('__office.wallStats()');
+  await hover(room.x + 2.5, room.z + 2);
+  await s.sleep(300);
+  const upAfter = await s.eval('__office.wallStats()');
+  assert(upAfter.curbs > upBefore.curbs, `with the walls up, the ones between the camera and the ghost drop to curbs while placing (${upBefore.curbs} -> ${upAfter.curbs})`);
+  await clickSel('[aria-label="Cutaway"]');
+  await s.sleep(300);
   const desksBefore = itemsOf(await building(s), 0, 'bench_desk').length;
   await hover(deskAt.x, deskAt.z);
   const green = await cursor(s);
@@ -332,6 +407,11 @@ export default async function (s) {
   await waitBuilding('b.stories.length === 2', 'the floor was not added');
   await s.waitFor(`${store}.build.level === 1 && ${store}.story === 1`, 4000);
   assert(true, 'Add floor adds floor 2 and switches to it');
+  const tabs = await s.eval(`[...document.querySelectorAll('.bh-floor-tab')].map((t) => ({ f: t.dataset.floor, on: t.getAttribute('aria-selected') === 'true', text: t.textContent.trim() }))`);
+  assert(tabs.length === 2 && tabs.find((t) => t.on)?.f === '1' && tabs.map((t) => t.text).join() === 'Floor 2,Floor 1', `each floor is a tab and the one being built on is selected (${tabs.map((t) => t.text + (t.on ? '*' : '')).join(', ')})`);
+  const addBg = await s.eval(`getComputedStyle(document.querySelector('.bh-add')).backgroundColor`);
+  assert(addBg !== 'rgba(0, 0, 0, 0)' && addBg !== 'transparent', `and Add floor is a real button (${addBg})`);
+  assert((await s.eval(`__office.probe('below-ghost').length`)) === 1 && (await s.eval(`__office.probe('below-ghost')[0].opacity`)) === 0.3, 'floor 1 shows through under floor 2 as a 30% ghost');
   await s.sleep(1400);
   const stairs = await findFree(7, 8, 0, [room]);
   const hole = { x: stairs.x, z: stairs.z };
@@ -342,13 +422,16 @@ export default async function (s) {
   await dragTo({ x: landing.x, z: landing.z }, { x: landing.x + 6, z: landing.z + 4 }, 1);
   await waitBuilding(`b.stories[1].walls.length === 20 && b.stories[1].paint.filter((p) => p > 0).length === 24`, 'the room on floor 2 did not arrive');
   assert(true, 'floor 2 holds a 6 x 4 room whose corner is the stairs landing');
-  await clickSel('[aria-label="Floor down"]');
+  await clickSel('[data-floor="0"]');
   await s.waitFor(`${store}.build.level === 0`, 4000);
   await s.sleep(1200);
   await choose('stairs', 'stairs');
   await hover(hole.x + 0.5, hole.z + 2);
   const stairGhost = await cursor(s);
   assert(stairGhost.verdict?.ok === true, `the stairs ghost is green at ${hole.x}, ${hole.z} (${stairGhost.verdict?.text})`);
+  const holePreview = await s.eval(`__office.probe('stair-hole')`);
+  assert(holePreview.length === 1 && holePreview[0].tiles === 3, `the stairwell it will cut in floor 2 is previewed up there (${holePreview[0]?.tiles} tiles)`);
+  assert((await s.eval(`__office.probe('below-ghost').length`)) === 0, 'and the ground floor shows no ghost of itself');
   await clickAt(hole.x + 0.5, hole.z + 2);
   await waitBuilding(`b.stories[0].items.some((i) => i.def === 'stairs')`, 'the stairs did not arrive');
   const stairsItem = (await building(s)).stories[0].items.find((i) => i.def === 'stairs');
@@ -362,7 +445,7 @@ export default async function (s) {
   await s.waitFor(`${store}.build.level === 1 && ${store}.story === 1`, 4000);
   await bring(landing.x + 3, landing.z + 2, 1);
   await s.sleep(900);
-  await save(s, 's3-levels');
+  await save(s, 's4-levels');
 
   // ---- walls up, cutaway, down
   await s.sleep(500);

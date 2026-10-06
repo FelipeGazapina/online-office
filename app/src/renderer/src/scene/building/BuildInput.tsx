@@ -3,7 +3,8 @@
 // and a click or a release sends exactly the ops the ghost was checked with.
 import { useThree } from '@react-three/fiber';
 import { useEffect } from 'react';
-import { checkOps, ITEM_DEFS, rectWalls, type Building, type BuildOp, type Item, type ItemId, type Vec2 } from '../../../../shared/space/index.ts';
+import { Vector3 } from 'three';
+import { checkOps, FLOOR_PAINTS, ITEM_DEFS, rectWalls, STORY_H, WALL_STYLES, type Building, type BuildOp, type Item, type ItemId, type Vec2 } from '../../../../shared/space/index.ts';
 import {
   floodRoom,
   itemAt,
@@ -24,11 +25,12 @@ import {
 } from '../../../../shared/space/buildersGesture.ts';
 import { rotate, sendOps, setTool, toolItem } from '../../hud/build/actions.ts';
 import { buildView, draft, modifiers, setGhost, spaceContext, VIOLATION_TEXT, type Ghost } from '../../hud/build/state.ts';
-import { get, set, useStore, type BuildCursor, type BuildState } from '../../store.ts';
+import { get, set, useStore, type BuildCursor, type BuildState, type BuildTool } from '../../store.ts';
 import { groundPoint, tileOf, vertexOf } from './Picking.ts';
 
 type Drag = { tool: 'wall' | 'room' | 'floor'; a: Vec2; erase: boolean; tiles: Map<string, Vec2>; flood: boolean; lastTile: Vec2 | null };
-type Plan = { ops: BuildOp[]; ghost: (ok: boolean) => Ghost | null; readout: string | null };
+// `anchor` pins the readout to a spot of the floor, like the edge being dragged, instead of the pointer.
+type Plan = { ops: BuildOp[]; ghost: (ok: boolean) => Ghost | null; readout: string | null; anchor?: Vec2 };
 type Verdict = { ok: boolean; text: string };
 
 const CLICK_PX = 5;
@@ -45,11 +47,17 @@ function storyItem(b: Building, level: number, id: ItemId | null): Item | null {
   return id ? (b.stories[level]?.items.find((i) => i.id === id) ?? null) : null;
 }
 
+function peekTool(def: string): Extract<BuildTool, { kind: 'item' }> {
+  return { kind: 'item', def, rot: 0, carry: null, blockId: ITEM_DEFS[def].seat ? (get().company?.blocks[0]?.id ?? null) : null };
+}
+
 function plan(b: Building, build: BuildState, p: Vec2, drag: Drag | null, shift: boolean, ctrl: boolean): Plan | null {
   const level = build.level;
   const story = b.stories[level];
   if (!story) return null;
-  const tool = build.tool;
+  // A furniture card under the pointer stands in for whatever tool is in hand, so hovering shows the piece as the cursor ghost.
+  const peeked = !drag && build.peek && ITEM_DEFS[build.peek] ? peekTool(build.peek) : null;
+  const tool = peeked ?? build.tool;
   const kind = drag?.tool ?? (tool.kind === 'room' && shift ? 'wall' : tool.kind);
   switch (kind) {
     case 'select':
@@ -63,6 +71,7 @@ function plan(b: Building, build: BuildState, p: Vec2, drag: Drag | null, shift:
         ops: op ? [op] : [],
         ghost: (ok) => ({ kind: 'run', refs, start: drag.a, end: runEnd(drag.a, v), erase: drag.erase, ok }),
         readout: refs.length ? `${drag.erase ? 'Delete ' : ''}${refs.length} m` : null,
+        anchor: { x: (drag.a.x + runEnd(drag.a, v).x) / 2, z: (drag.a.z + runEnd(drag.a, v).z) / 2 },
       };
     }
     case 'room': {
@@ -71,15 +80,15 @@ function plan(b: Building, build: BuildState, p: Vec2, drag: Drag | null, shift:
       const rect = roomRect(drag.a, v);
       if (!rect) return { ops: [], ghost: () => ({ kind: 'vertex', at: v }), readout: null };
       const ops = drag.erase ? [wallOp(level, [], wallsToDelete(story, rectWalls(rect)))].filter((o): o is BuildOp => !!o) : roomOps(b, story, level, rect, build.style, build.paint || 1);
-      return { ops, ghost: (ok) => ({ kind: 'room', rect, ok }), readout: `${rect.w} × ${rect.h} m` };
+      return { ops, ghost: (ok) => ({ kind: 'room', rect, ok }), readout: `${rect.w} × ${rect.h} m`, anchor: { x: rect.x + (v.x > drag.a.x ? rect.w / 2 : rect.w / 2), z: v.z } };
     }
     case 'floor': {
       const here = tileOf(p);
       let tiles: Vec2[];
       if (drag && !drag.flood) tiles = [...drag.tiles.values()];
-      else tiles = (shift ? floodRoom(b, story, here) : null) ?? [here];
+      else tiles = (shift || build.fill ? floodRoom(b, story, here) : null) ?? [here];
       const op = paintFloorOp(b, story, level, tiles, build.paint);
-      return { ops: op ? [op] : [], ghost: (ok) => ({ kind: 'tiles', tiles, ok }), readout: tiles.length > 1 ? `${tiles.length} m²` : null };
+      return { ops: op ? [op] : [], ghost: (ok) => ({ kind: 'tiles', tiles, ok, color: build.paint ? FLOOR_PAINTS[build.paint]?.color : undefined }), readout: tiles.length > 1 ? `${tiles.length} m²` : null };
     }
     case 'wallpaint': {
       const w = nearestWall(story, p);
@@ -87,11 +96,11 @@ function plan(b: Building, build: BuildState, p: Vec2, drag: Drag | null, shift:
       const sides: Vec2[] = w.d === 'e' ? [{ x: w.x, z: w.z - 1 }, { x: w.x, z: w.z }] : [{ x: w.x - 1, z: w.z }, { x: w.x, z: w.z }];
       // The cursor's side of the wall, or the smaller room when the cursor is on the wall itself.
       const off = w.d === 'e' ? p.z - w.z : p.x - w.x;
-      const rooms = shift ? sides.map((t) => floodRoom(b, story, t)) : [];
+      const rooms = shift || build.fill ? sides.map((t) => floodRoom(b, story, t)) : [];
       const room = Math.abs(off) > 0.15 && rooms[off < 0 ? 0 : 1] ? rooms[off < 0 ? 0 : 1] : (rooms.filter((r): r is Vec2[] => !!r).sort((x, y) => x.length - y.length)[0] ?? null);
       const walls = room ? wallsAround(story, room) : [w];
       const op = paintWallsOp(level, walls.length ? walls : [w], build.style);
-      return { ops: op ? [op] : [], ghost: (ok) => ({ kind: 'walls', walls: walls.length ? walls : [w], ok }), readout: null };
+      return { ops: op ? [op] : [], ghost: (ok) => ({ kind: 'walls', walls: walls.length ? walls : [w], ok, color: WALL_STYLES[build.style]?.color }), readout: null };
     }
     case 'opening': {
       const w = nearestWall(story, p);
@@ -116,6 +125,8 @@ export function BuildInput() {
     if (!on) return;
     const el = gl.domElement;
     let last: { x: number; y: number } | null = null;
+    // Where the pointer last was over the scene, so a card hovered afterwards still previews its piece there.
+    let seen: { x: number; y: number } | null = null;
     let drag: Drag | null = null;
     let down: { x: number; y: number; button: number } | null = null;
     let verdictKey = '';
@@ -142,10 +153,19 @@ export function BuildInput() {
       set({ buildCursor: next });
     };
 
+    const screenOf = (at: Vec2, level: number) => {
+      const r = el.getBoundingClientRect();
+      const p = new Vector3(at.x, level * STORY_H, at.z).project(camera);
+      return { x: r.left + ((p.x + 1) / 2) * r.width, y: r.top + ((1 - p.y) / 2) * r.height };
+    };
+
     const current = () => {
       const s = get();
-      if (!s.build || !s.building || !last) return null;
-      const p = groundPoint(camera, el, last.x, last.y, s.build.level);
+      if (!s.build || !s.building) return null;
+      const r = el.getBoundingClientRect();
+      const from = last ?? (s.build.peek ? (seen ?? { x: r.left + r.width / 2, y: r.top + r.height / 2 }) : null);
+      if (!from) return null;
+      const p = groundPoint(camera, el, from.x, from.y, s.build.level);
       return p ? { s, build: s.build, b: s.building, p } : null;
     };
 
@@ -170,18 +190,22 @@ export function BuildInput() {
         ghost = pl.ghost(v.ok);
         if (ghost) verdict = { ok: v.ok, text: v.text };
         const text = !v.ok ? v.text : pl.readout;
-        if (text && last) readout = { text, x: last.x, y: last.y, bad: !v.ok };
+        if (text && (last ?? seen)) {
+          const spot = drag && pl.anchor ? screenOf(pl.anchor, build.level) : null;
+          const at = (last ?? seen)!;
+          readout = spot ? { text, x: spot.x, y: spot.y, bad: !v.ok, anchored: true } : { text, x: at.x, y: at.y, bad: !v.ok };
+        }
       }
       if (!ghost && build.tool.kind === 'select' && hover && story) {
         const item = story.items.find((i) => i.id === hover);
         if (item) ghost = { kind: 'outline', item };
       }
-      setGhost(ghost);
+      setGhost(ghost, build.level);
       publish({ readout, verdict, hover });
     };
 
     const track = (e: PointerEvent) => {
-      last = { x: e.clientX, y: e.clientY };
+      last = seen = { x: e.clientX, y: e.clientY };
       modifiers.shift = e.shiftKey || modifiers.shift;
       const r = el.getBoundingClientRect();
       buildView.edge.x = e.clientX - r.left < EDGE_PX ? -1 : r.right - e.clientX < EDGE_PX ? 1 : 0;
@@ -199,7 +223,7 @@ export function BuildInput() {
         drag = { tool: kind, a: vertexOf(c.p), erase: modifiers.ctrl, tiles: new Map(), flood: false, lastTile: null };
       } else if (kind === 'floor') {
         const t = tileOf(c.p);
-        drag = { tool: 'floor', a: t, erase: false, tiles: new Map([[tkey(t), t]]), flood: modifiers.shift, lastTile: t };
+        drag = { tool: 'floor', a: t, erase: false, tiles: new Map([[tkey(t), t]]), flood: modifiers.shift || c.build.fill, lastTile: t };
       }
       refresh();
     };

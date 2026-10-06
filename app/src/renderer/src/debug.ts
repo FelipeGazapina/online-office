@@ -89,6 +89,20 @@ function wallStats() {
   return stats;
 }
 
+// Test-only: the scene meshes a build-mode piece tagged `userData.probe`, with their data and the color they draw in.
+function probe(name: string) {
+  const root = _roots.values().next().value;
+  if (!root) return [];
+  const found: Record<string, unknown>[] = [];
+  root.store.getState().scene.traverse((o) => {
+    const data = o.userData as Record<string, unknown> | undefined;
+    if (data?.probe !== name) return;
+    const m = (o as import('three').Mesh).material as import('three').MeshBasicMaterial | undefined;
+    found.push({ ...data, color: m?.color ? `#${m.color.getHexString()}` : null, opacity: m?.opacity ?? null });
+  });
+  return found;
+}
+
 export function installDebug() {
   (window as unknown as { __office: unknown }).__office = {
     step(seconds: number, fps = 30) {
@@ -124,6 +138,7 @@ export function installDebug() {
       return { x: size.left + ((p.x + 1) / 2) * size.width, y: size.top + ((1 - p.y) / 2) * size.height };
     },
     wallStats,
+    probe,
     // The same walk a floor click starts, aimed at any story. The overview draws only the stories up to the owner's, so a click cannot reach a higher one yet.
     walkTo: (floor: number, x: number, z: number) => walkTo({ kind: 'point', at: { x, z }, floor }),
     injectFake,

@@ -73,6 +73,21 @@ The project computer's **Task boards** app has a CronoSpark credentials section.
 - ChatGPT (Codex) and Hermes show in the hire menu when installed, but cannot be hired until their adapters land.
 - Your voice is transcribed on this Mac by whisper.cpp, and it reaches an employee the way typed text does. The employees' voices use `speechSynthesis`. See Voice below.
 
+## How the company works
+
+Give the block's PO (the employee with the PO badge) one goal and it leads the rest.
+
+1. The PO answers first with a short bubble, then looks at the team with `team`.
+2. It splits the goal into pieces, one per deliverable, each with a checkable bar and the files its owner may change. The PO does not write code or docs itself.
+3. A piece with a concrete bar runs as `requestGauntlet`: a builder makes it, then a different critic sees only the artifact and the bar and returns a pass or fail verdict. If the block has fewer than two employees besides the PO, the PO calls `hireTeammate` first, within the seat cap.
+4. Other pieces go out with `request`. Teammates can ask each other for help the same way. A busy teammate queues the request.
+5. The PO checks each result against its bar. It cannot reply `done` to you while a request it made is still open, and the office refuses that reply with the list of open pieces.
+6. Then the PO replies to you with what shipped and the evidence.
+
+You can also give a task straight to any employee. It settles between the two of you and the PO is not involved.
+
+`verify/e2e-company.mjs` runs this with real Claude agents on a scratch git repo (fixture in `verify/fixtures/company-project`) and checks the ledger, the repo and the chat. Employees run in yolo mode in that script because nobody is at the keyboard.
+
 ## The office MCP server
 
 `src/main/office/mcp.ts` starts a Streamable HTTP server on `127.0.0.1` at an ephemeral port before the first session. It imports nothing from Electron, so a Node script can run it.
