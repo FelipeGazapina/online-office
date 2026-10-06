@@ -203,7 +203,7 @@ export async function startOfficeMcp(): Promise<OfficeMcp> {
 
     tool(
       'reply',
-      'Settle a request you were given, with its result. Finish the work completely first. If you end your turn without calling reply, your final text becomes the reply. When serving a gauntlet work request, list the artifact refs (paths, a diff command, a URL). A critic reviewing an artifact must send a verdict.',
+      'Settle a request you were given, with its result. Finish the work completely first. A done reply to a work request must list artifact: paths relative to the block folder that you wrote or edited since the request arrived, or a commit sha. The office checks that each exists and changed, and refuses done otherwise. If you are still waiting on someone, do not settle: awaitReplies, or end your turn and the last reply wakes you. If you end your turn without calling reply, the office settles from the folder: done when your turn left changes, blocked when it left none. A critic reviewing an artifact must send a verdict.',
       {
         requestId: z.string().min(1).max(80),
         outcome: OUTCOME,

@@ -30,7 +30,9 @@ import {
   type TurnId,
   type Urgency,
   type Verdict,
+  WAITING_TEXT,
 } from '../../shared/mail.ts';
+import type { ArtifactPort } from './mail-artifacts.ts';
 
 // ───────────────────────────── Pure core ─────────────────────────────
 
@@ -214,6 +216,11 @@ export const settleAtTurnEnd = (s: MailState, turn: TurnId, ok: boolean): Messag
   return [...out];
 };
 
+export type ReplyRefusal = 'not_yours' | 'unknown' | 'open_children' | 'verdict_required' | 'no_artifacts' | 'artifact_unchanged' | 'artifact_missing' | 'still_waiting';
+
+// Work is the only intent whose done has to be shown. A question, a review and a gauntlet are answered in words or verdicts.
+const needsArtifacts = (m: Message) => m.kind === 'request' && m.intent === 'work';
+
 const bullets = (items: readonly string[]) => items.map((i) => `- ${i}`).join('\n');
 
 // The chat transcript an agent reads at the start of a turn. Request ids are shown because `reply` takes one.
@@ -227,7 +234,8 @@ export const renderBatch = (batch: readonly Message[], redelivered: boolean, nam
         const body = m.intent === 'review' ? '' : `\n${m.text}`;
         const artifact = m.artifact?.length ? `\nArtifact to review:\n${bullets(m.artifact)}` : '';
         const bar = m.bar?.length ? `\nAcceptance bar:\n${bullets(m.bar)}` : '';
-        return `${head}${body}${artifact}${bar}\nSettle it with the reply tool (requestId ${m.id}), or end your turn and your final text becomes the reply.`;
+        const proof = m.intent === 'work' ? ' A done reply must name the files you wrote or edited (artifact), or the office refuses it.' : '';
+        return `${head}${body}${artifact}${bar}\nSettle it with the reply tool (requestId ${m.id}), or end your turn and your final text becomes the reply.${proof}`;
       }
       case 'reply': {
         const verdict = m.verdict ? `\nVerdict: ${m.verdict.pass ? 'PASS' : 'FAIL'}${m.verdict.findings.length ? `\nFindings:\n${bullets(m.verdict.findings)}` : ''}` : '';
@@ -321,6 +329,7 @@ export type MailPorts = {
   deliver(to: EmployeeId, prompt: string, title: string): void;
   steer(to: EmployeeId, text: string, style: 'next' | 'now'): void;
   hire(from: EmployeeId, spec: HireSpec): Hired;
+  artifacts: ArtifactPort;
   persist(entry: LedgerEntry): void;
   changed(view: MailView): void;
   stream(employeeId: EmployeeId, replyingTo: MessageId | null, delta: string, done: boolean): void;
@@ -465,7 +474,7 @@ export class Mailroom {
   }
 
   // Idempotent. A second reply to a settled request is ok and changes nothing.
-  reply(from: EmployeeId, requestId: string, r: { outcome: Outcome; text: string; verdict?: Verdict; artifact?: string[] }): { ok: true } | { ok: false; reason: 'not_yours' | 'unknown' | 'open_children' | 'verdict_required'; detail?: string } {
+  reply(from: EmployeeId, requestId: string, r: { outcome: Outcome; text: string; verdict?: Verdict; artifact?: string[] }): { ok: true } | { ok: false; reason: ReplyRefusal; detail?: string } {
     const req = this.findRequest(requestId);
     if (!req || req.kind !== 'request') return { ok: false, reason: 'unknown' };
     if (req.to !== from || req.intent === 'gauntlet') return { ok: false, reason: 'not_yours' };
@@ -481,9 +490,43 @@ export class Mailroom {
         return { ok: false, reason: 'open_children', detail: `Not done yet: ${open.length} request(s) you made are still open (${titles}). End your turn without replying; the last reply wakes you, then reply.` };
       }
     }
-    if (this.state.unsettled.has(req.id)) this.settleWith(req, from, r);
+    let settle = r;
+    if (r.outcome === 'done' && this.state.unsettled.has(req.id) && needsArtifacts(req)) {
+      const proof = this.proveWork(req, from, r.artifact ?? [], r.text);
+      if (!proof.ok) return proof;
+      settle = { ...r, artifact: proof.artifact };
+    }
+    if (this.state.unsettled.has(req.id)) this.settleWith(req, from, settle);
     this.pump(from);
     return { ok: true };
+  }
+
+  // A done work reply stands only on files that exist and changed since the request, plus what its own children proved.
+  private proveWork(req: Message, who: EmployeeId, given: string[], text: string): { ok: true; artifact: string[] } | { ok: false; reason: ReplyRefusal; detail: string } {
+    if (WAITING_TEXT.test(text)) {
+      return { ok: false, reason: 'still_waiting', detail: 'This says you are still waiting, so it is not done. Do not settle. Keep the request open: call awaitReplies on what you wait for, or end your turn and the last reply wakes you. Reply blocked if nobody is coming.' };
+    }
+    const states = this.ports.artifacts.check(who, given, req.at);
+    const bad = given.filter((_, i) => states[i] !== 'changed');
+    if (bad.length) {
+      const missing = given.some((_, i) => states[i] === 'missing');
+      return { ok: false, reason: missing ? 'artifact_missing' : 'artifact_unchanged', detail: `${missing ? 'Not found in the block folder' : 'Not changed since the request arrived'}: ${bad.join(', ')}. Name only files you wrote or edited for this request (paths relative to the folder, or a commit sha).` };
+    }
+    const artifact = [...new Set([...given, ...this.childArtifacts(req.id)])];
+    if (!artifact.length) {
+      return { ok: false, reason: 'no_artifacts', detail: 'A done reply to a work request must name what you made: paths relative to the block folder that you wrote or edited, or a commit sha. If nothing was made, reply blocked and say why.' };
+    }
+    return { ok: true, artifact };
+  }
+
+  // What the requests this one handed out proved when they settled done.
+  private childArtifacts(id: MessageId): string[] {
+    const out: string[] = [];
+    for (const c of this.state.children.get(id) ?? []) {
+      const rep = replyOf(this.state, c);
+      if (rep?.outcome === 'done') out.push(...(rep.artifact ?? []));
+    }
+    return out;
   }
 
   private settleWith(req: Message, from: ActorId, r: { outcome: Outcome; text: string; verdict?: Verdict; artifact?: string[]; auto?: boolean }) {
@@ -600,7 +643,15 @@ export class Mailroom {
       const req = this.state.messages.get(id)!;
       const text = finalText.trim() || 'Done.';
       const verdict = req.kind === 'request' && req.intent === 'review' ? { verdict: verdictFromText(text) } : {};
-      this.settleWith(req, who, ok ? { outcome: 'done', text, ...verdict, auto: true } : { outcome: 'failed', text: finalText.trim() || 'The turn failed.', auto: true });
+      if (!ok) this.settleWith(req, who, { outcome: 'failed', text: finalText.trim() || 'The turn failed.', auto: true });
+      else if (!needsArtifacts(req)) this.settleWith(req, who, { outcome: 'done', text, ...verdict, auto: true });
+      else {
+        // Nobody named files, so the folder decides: a turn that left changes behind did work, one that did not is blocked.
+        const made = [...new Set([...this.ports.artifacts.changed(who, req.at), ...this.childArtifacts(req.id)])];
+        const waiting = WAITING_TEXT.test(text);
+        if (made.length && !waiting) this.settleWith(req, who, { outcome: 'done', text, artifact: made, auto: true });
+        else this.settleWith(req, who, { outcome: 'blocked', text, auto: true });
+      }
     }
     this.pump(who);
   }

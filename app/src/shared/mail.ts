@@ -56,6 +56,9 @@ export type Lifecycle =
   | { s: 'running' }
   | { s: 'settled'; by: MessageId; outcome: Outcome };
 
+// A reply that says it is still waiting is not a result. The office refuses it as `done`.
+export const WAITING_TEXT = /waiting|will check back|once .* (is|are) done/i;
+
 export const MAX_HOPS = 3;
 export const MAX_QUEUE_PER_ACTOR = 20;
 export const MAX_OPEN_OUTGOING = 8;

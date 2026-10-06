@@ -81,7 +81,7 @@ function Tracker({ item, state, employees }: { item: Extract<Item, { t: 'gauntle
   );
 }
 
-function Line({ item, states, employees, labels }: { item: Item; states: Map<MessageId, ReqState>; employees: Employee[]; labels: boolean }) {
+function Line({ item, states, employees, labels, waitingOn }: { item: Item; states: Map<MessageId, ReqState>; employees: Employee[]; labels: boolean; waitingOn: Map<MessageId, string> }) {
   switch (item.t) {
     case 'note':
       return <div className="cp-note">{item.m.text}</div>;
@@ -98,7 +98,13 @@ function Line({ item, states, employees, labels }: { item: Item; states: Map<Mes
           <div className={`msg ${side === 'owner' ? 'owner' : 'employee'}`}>{m.text}</div>
           <div className="cp-meta">
             {m.kind === 'reply' && m.auto && <span className="cp-auto" title="The office wrote this from the end of the turn">auto</span>}
+            {m.kind === 'reply' && m.artifact?.map((a) => (
+              <span key={a} className="cp-artifact" title={a}>
+                {a}
+              </span>
+            ))}
             {state && <Chip state={state} />}
+            {state?.kind === 'working' && waitingOn.has(m.id) && <span className="cp-chip waiting">waiting on {waitingOn.get(m.id)}</span>}
             {state?.kind === 'queued' && (
               <button className="cp-undo" onClick={() => send({ type: 'cancel_message', messageId: m.id })}>
                 Cancel
@@ -149,6 +155,12 @@ export function Thread({ who }: { who: Employee }) {
     return () => ro.disconnect();
   }, [who.id, sub]);
 
+  const waitingOn = useMemo(() => {
+    const by = new Map<MessageId, string[]>();
+    for (const r of mail.open) if (r.parentId && r.life.s !== 'running') by.set(r.parentId, [...(by.get(r.parentId) ?? []), nameOf(employees, r.to)]);
+    return new Map([...by].map(([id, names]) => [id, [...new Set(names)].join(', ')]));
+  }, [mail.open, employees]);
+
   const oldest = messages.find((m) => m.kind !== 'event' && (m.from === who.id || m.to === who.id));
   const empty = items.length === 0 && mine.length === 0;
   return (
@@ -170,7 +182,7 @@ export function Thread({ who }: { who: Employee }) {
         )}
         {empty && <p className="muted cp-empty">{sub ? 'Nothing in this request yet.' : `Nothing here yet. Ask ${who.name} for something and the reply shows up in this thread.`}</p>}
         {items.map((item) => (
-          <Line key={item.m.id} item={item} states={states} employees={employees} labels={Boolean(sub)} />
+          <Line key={item.m.id} item={item} states={states} employees={employees} labels={Boolean(sub)} waitingOn={waitingOn} />
         ))}
         {mine.map((p) => (
           <div key={p.clientId} className="cp-line owner">
