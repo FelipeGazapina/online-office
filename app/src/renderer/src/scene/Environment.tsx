@@ -230,7 +230,7 @@ function groundGeometry(b: Bounds) {
     pos.setXYZ(i, x, terrainHeight(x, z, b), z);
     const n = Math.sin(x * 0.11) * Math.cos(z * 0.09) + Math.sin(x * 0.031 + z * 0.047) * 0.8 + Math.sin(x * 0.27 + 2) * Math.cos(z * 0.23) * 0.35;
     const t = (n + 1.6) / 3.2;
-    c.setRGB(0.68 + t * 0.55, 0.84 + t * 0.26, 0.62 + (1 - t) * 0.4);
+    c.setRGB(0.8 + t * 0.55, 0.98 + t * 0.26, 0.7 + (1 - t) * 0.4);
     colors[i * 3] = c.r; colors[i * 3 + 1] = c.g; colors[i * 3 + 2] = c.b;
   }
   g.setAttribute('color', new Float32BufferAttribute(colors, 3));

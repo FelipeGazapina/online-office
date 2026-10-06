@@ -101,7 +101,7 @@ export function Exterior({ b }: { b: Bounds }) {
     return { solid: merge([...p.solid, ...pl.solid]), glow: merge([...p.glow, ...pl.glow]) };
   }, [b.x0, b.x1, b.z0, b.z1]);
   const lines = useCanvasTexture(1024, 512, (g) => {
-    g.fillStyle = '#4a4d55';
+    g.fillStyle = '#6a6d76';
     g.fillRect(0, 0, 1024, 512);
     for (let i = 0; i < 700; i++) {
       g.fillStyle = i % 2 ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.08)';
