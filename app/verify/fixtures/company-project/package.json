@@ -1,0 +1,6 @@
+{
+  "name": "tiny-text-utils",
+  "version": "0.0.1",
+  "type": "module",
+  "scripts": { "test": "node --test" }
+}

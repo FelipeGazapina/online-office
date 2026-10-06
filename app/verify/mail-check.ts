@@ -105,6 +105,26 @@ console.log('\n# delegation and settling');
   check(final?.outcome === 'done' && final.auto === true && final.text === 'CSV export shipped' && final.to === 'owner', 'the parent auto-settles to the owner only after all children settled');
   check(serving(w.room.state, PO).length === 0, 'nothing is left being served');
 
+  const early = world();
+  const earlyRoot = ids(early.room.post(owner('po', 'ship it')));
+  ids(early.room.post(ask(PO, 'Ana', 'backend')));
+  const refused = early.room.reply(PO, earlyRoot, { outcome: 'done', text: 'all shipped' });
+  check(!refused.ok && refused.reason === 'open_children' && !replyTo(early, earlyRoot), 'a done reply is refused while a request the replier made is still open');
+  check(early.room.reply(PO, earlyRoot, { outcome: 'blocked', text: 'stuck' }).ok && replyTo(early, earlyRoot)?.outcome === 'blocked', 'a blocked reply is still allowed with open children');
+  const late = world();
+  const lateRoot = ids(late.room.post(owner('po', 'ship it')));
+  ids(late.room.post(ask(PO, 'Ana', 'backend')));
+  late.room.turnEnded(ANA, 'backend done', true);
+  check(late.room.reply(PO, lateRoot, { outcome: 'done', text: 'all shipped' }).ok && replyTo(late, lateRoot)?.outcome === 'done', 'a done reply goes through once every request it made is settled');
+
+  const rv = world();
+  const g1 = posted(rv.room.requestGauntlet(PO, { piece: 'build it', bar: ['it works'], builder: 'Ana', critic: 'Bruno' })).id;
+  rv.room.turnEnded(ANA, 'built', true);
+  const reviewId = requestIn(lastPrompt(rv, BRUNO));
+  const bare = rv.room.reply(BRUNO, reviewId, { outcome: 'done', text: 'Artifact passes.' });
+  check(!bare.ok && bare.reason === 'verdict_required' && life(rv, g1) === 'running', 'a review reply without a verdict is refused and the gauntlet keeps running');
+  check(rv.room.reply(BRUNO, reviewId, { outcome: 'done', text: 'ok', verdict: { pass: true, findings: [] } }).ok && replyTo(rv, g1)?.outcome === 'done', 'the same review with a verdict passes the gauntlet');
+
   const e = world();
   const r = ids(e.room.post(owner('ana', 'crash')));
   e.room.turnEnded(ANA, 'boom', false);

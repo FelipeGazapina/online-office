@@ -458,10 +458,22 @@ export class Mailroom {
   }
 
   // Idempotent. A second reply to a settled request is ok and changes nothing.
-  reply(from: EmployeeId, requestId: string, r: { outcome: Outcome; text: string; verdict?: Verdict; artifact?: string[] }): { ok: true } | { ok: false; reason: 'not_yours' | 'unknown' } {
+  reply(from: EmployeeId, requestId: string, r: { outcome: Outcome; text: string; verdict?: Verdict; artifact?: string[] }): { ok: true } | { ok: false; reason: 'not_yours' | 'unknown' | 'open_children' | 'verdict_required'; detail?: string } {
     const req = this.findRequest(requestId);
     if (!req || req.kind !== 'request') return { ok: false, reason: 'unknown' };
     if (req.to !== from || req.intent === 'gauntlet') return { ok: false, reason: 'not_yours' };
+    // A review without a verdict would count as a fail and send the builder round again, so the critic has to retry.
+    if (req.intent === 'review' && r.outcome === 'done' && !r.verdict && this.state.unsettled.has(req.id)) {
+      return { ok: false, reason: 'verdict_required', detail: 'A review needs a verdict. Call reply again with verdict { pass, findings }: pass true only when the artifact meets the whole bar, and put the biggest gap first in findings.' };
+    }
+    // The same rule the auto-settle at turn end follows: a parent is not done while a piece it handed out is still open.
+    if (r.outcome === 'done' && this.state.unsettled.has(req.id)) {
+      const open = openChildren(this.state, req.id);
+      if (open.length) {
+        const titles = open.map((id) => `"${(this.state.messages.get(id) as { title?: string } | undefined)?.title ?? id}"`).join(', ');
+        return { ok: false, reason: 'open_children', detail: `Not done yet: ${open.length} request(s) you made are still open (${titles}). End your turn without replying; the last reply wakes you, then reply.` };
+      }
+    }
     if (this.state.unsettled.has(req.id)) this.settleWith(req, from, r);
     this.pump(from);
     return { ok: true };
