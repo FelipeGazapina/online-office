@@ -235,9 +235,11 @@ export function RoundedPlane({ w, d, r, color, y, opacity = 1, surface }: { w: n
     s.quadraticCurveTo(x, z, x + r, z);
     return new ShapeGeometry(s, 6);
   }, [w, d, r]);
+  // A photographed carpet is darker than the flat colour it replaces; lift it so a rug keeps its colour.
+  const tint = useMemo(() => new Color(color).multiplyScalar(surface ? 1.3 : 1), [color, surface]);
   return (
     <mesh geometry={geo} rotation-x={-Math.PI / 2} position={[0, y, 0]} receiveShadow>
-      <meshStandardMaterial color={color} roughness={1} transparent={opacity < 1} opacity={opacity} map={surface?.map} normalMap={surface?.normalMap} normalScale={RUG_NORMAL} roughnessMap={surface?.roughnessMap} />
+      <meshStandardMaterial color={tint} roughness={1} transparent={opacity < 1} opacity={opacity} map={surface?.map} normalMap={surface?.normalMap} normalScale={RUG_NORMAL} roughnessMap={surface?.armMap} aoMap={surface?.armMap} />
     </mesh>
   );
 }

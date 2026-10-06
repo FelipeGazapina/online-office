@@ -9,12 +9,13 @@ import { draft } from '../../hud/build/state.ts';
 import { get, set, useStore } from '../../store.ts';
 import { walkTo } from '../../sim.ts';
 import { chairOf } from '../../world.ts';
-import { blobShadowTexture, ceilingTexture, codeTexture, plankCanvas, poolTexture, wallAoTexture } from '../textures.ts';
-import { carpetSurface, concreteSurface, tileSurface, woodSurface, type Surface } from '../surfaceTextures.ts';
-import { detail } from '../shading.ts';
+import { blobShadowTexture, ceilingTexture, codeTexture, poolTexture, wallAoTexture } from '../textures.ts';
+import { carpetSurface, concreteSurface, PLASTER_MEAN, PLASTER_METRES, plasterSurface, tileSurface, woodSurface, type Surface } from '../surfaceTextures.ts';
+import { detail, showAo } from '../shading.ts';
 import { reflective } from '../Lighting.tsx';
 import { floorGeometry } from './floor.ts';
-import { box, chairModel, cyl, merge, DEFAULT_TINT, DYNAMIC, modelOf, screenGeometry } from './models.ts';
+import { propOf } from '../props.ts';
+import { box, cyl, merge, DEFAULT_TINT, DYNAMIC, modelOf, onTopOf, PROP_DEFS, screenGeometry } from './models.ts';
 import { curbModel, facesCamera, frameModel, glassModel, occludes, octantOf, VARIANTS, wallMatrix, wallModel, wallRecords, ZERO, type Variant, type WallRecord } from './walls.ts';
 
 const up = new Vector3(0, 1, 0);
@@ -24,19 +25,22 @@ const one = new Vector3(1, 1, 1);
 const s3 = new Vector3();
 const color = new Color();
 
-const floorMaterial = (surface: Surface, roughness: number, normalScale: number, extra: Partial<ConstructorParameters<typeof MeshStandardMaterial>[0]> = {}) =>
-  detail(new MeshStandardMaterial({ map: surface.map, normalMap: surface.normalMap, roughnessMap: surface.roughnessMap, normalScale: new Vector2(normalScale, normalScale), vertexColors: true, roughness, ...extra }), 'floor');
+// `gain` lifts a texture whose real photographed albedo is darker than the stylised light the scene is lit for.
+const floorMaterial = (surface: Surface, roughness: number, normalScale: number, gain: number, extra: Partial<ConstructorParameters<typeof MeshStandardMaterial>[0]> = {}) =>
+  showAo(detail(new MeshStandardMaterial({ map: surface.map, normalMap: surface.normalMap, roughnessMap: surface.armMap, aoMap: surface.armMap, normalScale: new Vector2(normalScale, normalScale), vertexColors: true, color: new Color(gain, gain, gain), roughness, ...extra }), 'floor'), 0.8);
 // In the order of FLOOR_FAMILIES.
 const floorMaterials = [
-  floorMaterial(woodSurface(plankCanvas(), 1 / 4), 0.6, 0.9),
-  floorMaterial(carpetSurface(), 1, 0.7),
-  floorMaterial(tileSurface(), 0.4, 0.8),
-  floorMaterial(concreteSurface(), 1, 0.8),
+  floorMaterial(woodSurface(), 0.6, 0.9, 1.45),
+  floorMaterial(carpetSurface(), 1, 0.7, 1.1),
+  floorMaterial(tileSurface(), 0.4, 0.8, 1.9),
+  floorMaterial(concreteSurface(), 1, 0.8, 1.8),
 ];
 reflective.set(floorMaterials[0], 0.3);
 reflective.set(floorMaterials[2], 1.2);
+const chairMaterial = new MeshStandardMaterial({ vertexColors: true, roughness: 0.6 });
 const furnitureMaterial = detail(new MeshStandardMaterial({ vertexColors: true, roughness: 0.75 }), 'furniture');
-const wallMaterial = detail(new MeshStandardMaterial({ vertexColors: true, roughness: 0.95 }), 'wall');
+const plaster = plasterSurface();
+const wallMaterial = detail(new MeshStandardMaterial({ vertexColors: true, roughness: 0.95 }), 'wall', { ...plaster, mean: PLASTER_MEAN, metresPerRepeat: PLASTER_METRES });
 // Clear glass: the sky, the lawn and the trees show through it, with a faint cool tint and a sheen of the room on it.
 const glassMaterial = new MeshStandardMaterial({ color: '#dcefff', emissive: '#a8d4ff', emissiveIntensity: 0.06, roughness: 0.06, transparent: true, opacity: 0.16, depthWrite: false, side: DoubleSide });
 reflective.set(glassMaterial, 0.9);
@@ -47,13 +51,10 @@ ceilingMap.repeat.set(6.5, 6.5);
 const ceilingMaterial = new MeshStandardMaterial({ map: ceilingMap, roughness: 0.95, side: BackSide, color: '#e6d8c4', emissive: '#fff0d8', emissiveIntensity: 0.14 });
 const slabMaterial = new MeshStandardMaterial({ color: '#cdbfa9', roughness: 0.95 });
 const fixtureMaterial = new MeshBasicMaterial({ vertexColors: true, toneMapped: false });
-// A pendant: a dark cross beam on the ceiling, a cord, a brass drum shade and the glowing disc inside it.
-const fixtureGeometry = merge([
-  box(1.7, 0.12, 0.2, 0, 0.1, 0, '#3a2c22'),
-  cyl(0.012, 0.012, 0.3, 0, -0.12, 0, '#2b2e38', 4),
-  cyl(0.07, 0.2, 0.18, 0, -0.35, 0, '#b08a4e', 14),
-  cyl(0.18, 0.18, 0.03, 0, -0.45, 0, '#ffd08a', 14),
-]);
+// The pendant's glowing disc, set in the underside of the baked lamp's shade. The shade itself is the `lamp` prop.
+const fixtureGeometry = merge([cyl(0.14, 0.14, 0.03, 0, -0.5, 0, '#ffd08a', 14)]);
+const LAMP_DROP = 0.04;
+
 const poolMaterial = new MeshBasicMaterial({ map: poolTexture(), color: '#ffb865', transparent: true, depthWrite: false, blending: AdditiveBlending, opacity: 0.14, fog: false, polygonOffset: true, polygonOffsetFactor: -3 });
 const poolGeometry = new PlaneGeometry(4.6, 4.6).rotateX(-Math.PI / 2);
 const blobMaterial = new MeshBasicMaterial({ map: blobShadowTexture(), transparent: true, depthWrite: false, opacity: 0.95, polygonOffset: true, polygonOffsetFactor: -4 });
@@ -244,8 +245,8 @@ function Furniture({ geom }: { geom: FloorGeometry }) {
         <ModelInstances key={def} def={def} matrices={data.matrices} ids={data.ids} onClick={pick(data.ids)} />
       ))}
       <Instances
-        geometry={chairModel()}
-        material={furnitureMaterial}
+        geometry={propOf('chair').geometry}
+        material={chairMaterial}
         count={desks.length}
         onClick={pick(desks.map((d) => d.id))}
         fill={useMemo(
@@ -279,7 +280,16 @@ function ModelInstances({ def, matrices, ids, onClick }: { def: string; matrices
     },
     [def, matrices, ids],
   );
-  return <Instances geometry={modelOf(def)} material={furnitureMaterial} count={ids.length} fill={fill} onClick={onClick} />;
+  const baked = PROP_DEFS[def];
+  if (!baked) return <Instances geometry={modelOf(def)} material={furnitureMaterial} count={ids.length} fill={fill} onClick={onClick} />;
+  const { geometry, material } = propOf(baked.prop);
+  const onTop = onTopOf(def);
+  return (
+    <>
+      <Instances geometry={geometry} material={material} count={ids.length} fill={fill} onClick={onClick} />
+      {onTop && <Instances geometry={onTop} material={furnitureMaterial} count={ids.length} fill={fill} onClick={onClick} />}
+    </>
+  );
 }
 
 // A soft dark patch under each piece of furniture, one draw for the whole story. It grounds the objects the way ambient occlusion would.
@@ -429,7 +439,7 @@ function Ceiling({ geom }: { geom: FloorGeometry }) {
   const fill = useMemo(
     () => (mesh: InstancedMesh) => {
       const m = new Matrix4();
-      lamps.forEach(([x, z], i) => mesh.setMatrixAt(i, place(m, x, CEILING_Y - 0.03, z, 0)));
+      lamps.forEach(([x, z], i) => mesh.setMatrixAt(i, place(m, x, CEILING_Y + LAMP_DROP, z, 0)));
     },
     [lamps],
   );
@@ -449,6 +459,7 @@ function Ceiling({ geom }: { geom: FloorGeometry }) {
     <group ref={group} visible={false}>
       <mesh geometry={geo} material={ceilingMaterial} position-y={CEILING_Y} />
       <Instances geometry={fixtureGeometry} material={fixtureMaterial} count={lamps.length} fill={fill} castShadow={false} receiveShadow={false} />
+      <Instances geometry={propOf('lamp').geometry} material={propOf('lamp').material} count={lamps.length} fill={fill} castShadow={false} receiveShadow={false} />
       <Instances geometry={poolGeometry} material={poolMaterial} count={lamps.length} fill={fillPools} castShadow={false} receiveShadow={false} />
     </group>
   );

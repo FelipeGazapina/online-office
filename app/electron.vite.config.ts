@@ -38,6 +38,8 @@ export default defineConfig({
     build: { rolldownOptions: { output: { format: 'cjs' } } },
   },
   renderer: {
+    // Prop models are bundled as files and read at start-up, never downloaded.
+    assetsInclude: ['**/*.glb'],
     plugins: [
       react(),
       tailwindcss(),

@@ -1,6 +1,7 @@
-import { useMemo } from 'react';
-import { MeshStandardMaterial, type BufferGeometry } from 'three';
+import { useLayoutEffect, useMemo, useRef } from 'react';
+import { BufferGeometry, Float32BufferAttribute, type InstancedMesh, Matrix4, MeshStandardMaterial, Quaternion, Vector3 } from 'three';
 import { box, blob, cyl, leafMass, merge } from './building/models.ts';
+import { propOf } from './props.ts';
 import { detail } from './shading.ts';
 
 // Set dressing that the building model has no item for: one merged mesh per room, so a whole room's decor is one draw call.
@@ -11,16 +12,46 @@ const move = (parts: BufferGeometry[], x: number, z: number) => {
   return parts;
 };
 
-// `s` scales the plant; 1 is about 1.1 m tall, the size of a floor plant in a real office.
-export const pottedPlant = (x: number, z: number, s = 1): BufferGeometry[] => [
-  cyl(0.2 * s, 0.15 * s, 0.36 * s, x, 0.18 * s, z, '#f1ebe0'),
-  cyl(0.21 * s, 0.21 * s, 0.03 * s, x, 0.37 * s, z, '#4a3a2b'),
-  leafMass(0.24 * s, x, 0.62 * s, z, '#4d8a5d'),
-  leafMass(0.18 * s, x + 0.14 * s, 0.78 * s, z + 0.07 * s, '#78b97a'),
-  leafMass(0.19 * s, x - 0.13 * s, 0.82 * s, z - 0.05 * s, '#5f9f6c'),
-  leafMass(0.16 * s, x + 0.03 * s, 0.98 * s, z, '#8ccb84'),
-  leafMass(0.15 * s, x - 0.07 * s, 0.56 * s, z + 0.13 * s, '#78b97a'),
-];
+// A potted plant is a marker, not geometry: a one-vertex mesh that `move` carries along with the room it belongs to, so each room's
+// plants can be pulled out afterwards and drawn as instances of the baked plant model. `s` scales the plant; 1 is about 1.1 m tall,
+// the size of a floor plant in a real office.
+export const pottedPlant = (x: number, z: number, s = 1): BufferGeometry[] => {
+  const g = new BufferGeometry();
+  g.setAttribute('position', new Float32BufferAttribute([x, 0, z], 3));
+  g.userData.plantScale = s;
+  return [g];
+};
+
+type PlantSpot = { x: number; y: number; z: number; s: number };
+/** Pulls the plant markers out of a room's parts, leaving the parts that merge into the room's mesh. */
+export function splitPlants(parts: BufferGeometry[]): { rest: BufferGeometry[]; plants: PlantSpot[] } {
+  const plants: PlantSpot[] = [];
+  const rest: BufferGeometry[] = [];
+  for (const g of parts) {
+    const at = g.getAttribute('position');
+    if (g.userData.plantScale === undefined) rest.push(g);
+    else plants.push({ x: at.getX(0), y: at.getY(0), z: at.getZ(0), s: g.userData.plantScale as number });
+  }
+  return { rest, plants };
+}
+function mergeRoom(parts: BufferGeometry[]): { geo: BufferGeometry; plants: PlantSpot[] } {
+  const { rest, plants } = splitPlants(parts);
+  return { geo: merge(rest), plants };
+}
+
+export function Plants({ spots }: { spots: PlantSpot[] }) {
+  const { geometry, material } = propOf('plant_ficus');
+  const ref = useRef<InstancedMesh>(null);
+  useLayoutEffect(() => {
+    const m = ref.current;
+    if (!m) return;
+    const mat = new Matrix4();
+    spots.forEach(({ x, y, z, s }, i) => m.setMatrixAt(i, mat.compose(new Vector3(x, y, z), new Quaternion().setFromAxisAngle(new Vector3(0, 1, 0), i * 2.4), new Vector3(s, s, s))));
+    m.instanceMatrix.needsUpdate = true;
+  }, [spots]);
+  if (!spots.length) return null;
+  return <instancedMesh key={spots.length} ref={ref} args={[geometry, material, spots.length]} frustumCulled={false} castShadow receiveShadow />;
+}
 
 // A framed picture hung on a wall: a dark frame, a mat and a few blocks of color. `face` is +1 for a wall that looks toward +z, -1 for -z.
 const PALETTES = [['#d9724c', '#f2c14e', '#3f6f9f'], ['#2f6f73', '#e8d9b5', '#c8553d'], ['#6a4c93', '#f4a259', '#e9e4da'], ['#4f7ea3', '#d9b45a', '#78b97a']];
@@ -146,7 +177,7 @@ function lobby(cx: number, z1: number, doorX: number): BufferGeometry[] {
 export type DecorSpec = { cx: number; z1: number; right: number; doorX: number };
 
 export function LobbyDecor({ cx, z1, right, doorX }: DecorSpec) {
-  const geo = useMemo(() => {
+  const { geo, plants } = useMemo(() => {
     const rooms = [
       move(reception(), cx, z1 - 1.25),
       move(kitchen(), right, z1 - 4.15),
@@ -154,9 +185,14 @@ export function LobbyDecor({ cx, z1, right, doorX }: DecorSpec) {
       move(meeting(), cx, -0.45),
       lobby(cx, z1, doorX),
     ];
-    return merge(rooms.flat());
+    return mergeRoom(rooms.flat());
   }, [cx, z1, right, doorX]);
-  return <mesh geometry={geo} material={decorMaterial} castShadow receiveShadow />;
+  return (
+    <>
+      <mesh geometry={geo} material={decorMaterial} castShadow receiveShadow />
+      <Plants spots={plants} />
+    </>
+  );
 }
 
 function pod(): BufferGeometry[] {
@@ -185,6 +221,11 @@ function pod(): BufferGeometry[] {
 }
 
 export function PodDecor() {
-  const geo = useMemo(() => merge(pod()), []);
-  return <mesh geometry={geo} material={decorMaterial} castShadow receiveShadow />;
+  const { geo, plants } = useMemo(() => mergeRoom(pod()), []);
+  return (
+    <>
+      <mesh geometry={geo} material={decorMaterial} castShadow receiveShadow />
+      <Plants spots={plants} />
+    </>
+  );
 }

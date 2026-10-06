@@ -3,7 +3,7 @@ import { CapsuleGeometry, MeshBasicMaterial, MeshStandardMaterial, type BufferGe
 import { DOOR_X } from '../../../shared/space/index.ts';
 import { box, cyl, merge, paint } from './building/models.ts';
 import { detail } from './shading.ts';
-import { pottedPlant } from './Decor.tsx';
+import { Plants, pottedPlant, splitPlants } from './Decor.tsx';
 import { useCanvasTexture } from './textures.ts';
 import { GROUND_Y, type Bounds } from './Environment.tsx';
 
@@ -98,7 +98,8 @@ export function Exterior({ b }: { b: Bounds }) {
   const geo = useMemo(() => {
     const p = porch(b.z1);
     const pl = plaza(b);
-    return { solid: merge([...p.solid, ...pl.solid]), glow: merge([...p.glow, ...pl.glow]) };
+    const { rest, plants } = splitPlants([...p.solid, ...pl.solid]);
+    return { solid: merge(rest), glow: merge([...p.glow, ...pl.glow]), plants };
   }, [b.x0, b.x1, b.z0, b.z1]);
   const lines = useCanvasTexture(1024, 512, (g) => {
     g.fillStyle = '#6a6d76';
@@ -116,6 +117,7 @@ export function Exterior({ b }: { b: Bounds }) {
     <>
       <mesh geometry={geo.solid} material={exteriorMaterial} castShadow receiveShadow />
       <mesh geometry={geo.glow} material={glowMaterial} />
+      <Plants spots={geo.plants} />
       <mesh rotation-x={-Math.PI / 2} position={[DOOR_X + 17, GROUND_Y + 0.03, b.z1 + 9.2]} receiveShadow>
         <planeGeometry args={[22, 11]} />
         <meshStandardMaterial map={lines} roughness={0.95} />

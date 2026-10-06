@@ -3,6 +3,7 @@
 // footprint and faces +z at rot 0, the way the space module's seats do.
 import { BufferGeometry, IcosahedronGeometry, PlaneGeometry } from 'three';
 import { ITEM_DEFS, STORY_H } from '../../../../shared/space/index.ts';
+import type { PropName } from '../props.ts';
 import { FURNITURE } from './furniture.ts';
 import { at, bbox, blob, box, cyl, merge, paint } from './parts.ts';
 
@@ -14,17 +15,17 @@ const PANEL = '#e2d1b3';
 // White parts take the instance color, so a team's chairs come out in the team's color.
 const TINT: [number, number, number] = [1, 1, 1];
 
-function desk(po: boolean) {
-  const parts = [
-    bbox(1.46, 0.06, 0.94, 0, 0.72, 0, WOOD, 0.025),
-    bbox(1.3, 0.4, 0.03, 0, 0.5, 0.4, PANEL, 0.01),
+// With `body` false only what sits on the desk is built: the textured desk prop supplies the top, legs and drawers.
+function desk(po: boolean, body = true) {
+  const parts = body ? [bbox(1.46, 0.06, 0.94, 0, 0.72, 0, WOOD, 0.025), bbox(1.3, 0.4, 0.03, 0, 0.5, 0.4, PANEL, 0.01)] : [];
+  parts.push(
     box(0.5, 0.025, 0.16, 0, 0.755, -0.12, '#2b2e38'),
     cyl(0.05, 0.045, 0.1, 0.58, 0.8, -0.12, '#fbf6ec', 12),
     // A low, slim monitor: its top stays under a seated sitter's eyes, so faces read across the desk.
     box(0.06, 0.1, 0.06, 0, 0.8, 0.2, '#2b2e38'),
     bbox(0.7, 0.38, 0.04, 0, 0.98, 0.2, '#1c1f27', 0.015),
-    ...[-1, 1].flatMap((sx) => [-1, 1].map((sz) => box(0.06, 0.7, 0.06, sx * 0.67, 0.35, sz * 0.42, DARK))),
-  ];
+  );
+  if (body) parts.push(...[-1, 1].flatMap((sx) => [-1, 1].map((sz) => box(0.06, 0.7, 0.06, sx * 0.67, 0.35, sz * 0.42, DARK))));
   parts.push(
     box(0.3, 0.02, 0.1, 0.34, 0.76, -0.3, '#fbf6ec'),
     box(0.3, 0.021, 0.025, 0.34, 0.765, -0.3, po ? '#d97757' : '#3a3f4e'),
@@ -139,6 +140,28 @@ function build(def: string): BufferGeometry {
     }
   }
 }
+
+/** Defs drawn from a baked prop model; a def whose entry has `onTop` keeps its procedural desk-top clutter on top of the model. */
+export const PROP_DEFS: Readonly<Record<string, { prop: PropName; onTop?: (def: string) => BufferGeometry }>> = {
+  sofa: { prop: 'sofa' },
+  armchair: { prop: 'armchair' },
+  bookshelf: { prop: 'bookshelf' },
+  plant: { prop: 'plant_ficus' },
+  plant_large: { prop: 'plant_tall' },
+  plant_fern: { prop: 'plant_syngonium' },
+  plant_small: { prop: 'plant_succulent' },
+  plant_cactus: { prop: 'plant_succulent' },
+  bench_desk: { prop: 'desk', onTop: () => desk(false, false) },
+  po_desk: { prop: 'desk', onTop: () => desk(true, false) },
+};
+const onTopCache = new Map<string, BufferGeometry>();
+export const onTopOf = (def: string): BufferGeometry | undefined => {
+  const make = PROP_DEFS[def]?.onTop;
+  if (!make) return undefined;
+  let g = onTopCache.get(def);
+  if (!g) onTopCache.set(def, (g = make(def)));
+  return g;
+};
 
 const cache = new Map<string, BufferGeometry>();
 export function modelOf(def: string): BufferGeometry {
