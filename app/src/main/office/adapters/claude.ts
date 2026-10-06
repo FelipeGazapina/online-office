@@ -15,6 +15,7 @@ import { SHELL_TOOL, isAllow } from '../../../shared/permissions.ts';
 import type { InterruptStyle, ModelCatalog, ModelId, ModelOption, PermissionMode, PermissionPolicy, QuestionBody } from '../../../shared/protocol.ts';
 import { logger } from '../debug.ts';
 import { persona } from '../persona.ts';
+import { trace } from '../trace.ts';
 import type { EmployeeSession, SessionFactory, SessionHost } from './types.ts';
 
 const debug = logger('claude');
@@ -385,8 +386,28 @@ export class ClaudeSession implements EmployeeSession {
     this.host.setActivity('Getting started');
   }
 
+  // Hops already traced since the last message went in.
+  private hops = new Set<string>();
+  private hop(name: string) {
+    if (this.hops.has(name)) return;
+    this.hops.add(name);
+    trace(this.host.employee.id, name);
+  }
+
+  // True from `warm` until the first message goes in.
+  private warming = false;
+
+  warm() {
+    if (this.q || this.stopped) return;
+    this.warming = true;
+    this.start();
+  }
+
   private send(text: string, priority?: InterruptStyle) {
+    this.warming = false;
+    this.hops.clear();
     if (!this.q) this.start();
+    this.hop('push');
     this.inbox.push({
       type: 'user',
       message: { role: 'user', content: text },
@@ -405,6 +426,7 @@ export class ClaudeSession implements EmployeeSession {
     const rules = this.host.rules();
     const executable = claudeCodeExecutable();
     debug(`session start for ${employee.name}, memory digest:\n${digest || '(no notes yet)'}`);
+    this.hop('spawn');
     this.q = this.run({
       prompt: this.inbox,
       options: {
@@ -447,6 +469,7 @@ export class ClaudeSession implements EmployeeSession {
 
   // The process is gone, and its subagents with it. The next assign starts a new one, resuming the stored session.
   private fail(message: string) {
+    const quiet = this.warming;
     // A resume that dies before init means the stored session is gone. Start clean next time.
     if (!this.gotInit) this.host.setSessionId('');
     this.q?.close();
@@ -456,7 +479,9 @@ export class ClaudeSession implements EmployeeSession {
     this.subagents.clear();
     // The next process reads the rules as they are then.
     this.notices = [];
-    this.reportError(message);
+    this.warming = false;
+    if (quiet) debug(`warm process ended: ${message}`);
+    else this.reportError(message);
   }
 
   // This turn failed but the process is fine, so the conversation carries on with the next message.
@@ -469,6 +494,7 @@ export class ClaudeSession implements EmployeeSession {
 
   private onMessage(m: SDKMessage) {
     const { host } = this;
+    this.hop(m.type === 'stream_event' ? `event_${m.event.type}` : m.type === 'system' ? `system_${m.subtype}` : m.type);
     if (m.type === 'system' && m.subtype === 'init') {
       this.gotInit = true;
       this.interrupting = false;
@@ -500,7 +526,10 @@ export class ClaudeSession implements EmployeeSession {
       if (!bubble) return;
       bubble.json += event.delta.partial_json;
       const text = partialText(bubble.json);
-      if (text.length > bubble.sent) this.host.streamed(text.slice(bubble.sent));
+      if (text.length > bubble.sent) {
+        this.hop('first_delta');
+        this.host.streamed(text.slice(bubble.sent));
+      }
       bubble.sent = Math.max(bubble.sent, text.length);
     } else if (event.type === 'content_block_stop' && this.bubbles.delete(event.index)) {
       this.host.streamed('', true);
@@ -539,6 +568,7 @@ export class ClaudeSession implements EmployeeSession {
       } else if (block.type === 'text' && m.parent_tool_use_id === null) {
         const text = block.text.trim();
         if (!text) continue;
+        this.hop('first_text');
         this.lastSaid = text;
         host.said(text);
         host.log(`Said: ${text}`);
