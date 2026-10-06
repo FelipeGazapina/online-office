@@ -10,14 +10,26 @@ import { EmployeeView } from './EmployeeView.tsx';
 import { Office } from './Office.tsx';
 import { CrowdMeshes } from './people/CrowdMeshes.tsx';
 import { OwnerView } from './OwnerView.tsx';
+import { DeskAim } from './DeskAim.tsx';
+import { setPickView } from './pickView.ts';
 import { loadProps } from './props.ts';
 import { WalkMarker } from './WalkMarker.tsx';
+
+function PickView() {
+  const { camera, gl } = useThree();
+  useEffect(() => {
+    setPickView(camera, gl.domElement);
+    return () => setPickView(null, null);
+  }, [camera, gl]);
+  return null;
+}
 
 function World() {
   use(loadProps());
   const company = useStore((s) => s.company);
   return (
     <>
+      <PickView />
       <SimDriver />
       <CameraRig />
       <BuildingLayer />
@@ -29,6 +41,7 @@ function World() {
       <CrowdMeshes />
       <OwnerView />
       <WalkMarker />
+      <DeskAim />
       {company?.employees.map((e) => (
         <EmployeeView key={e.id} employee={e} />
       ))}

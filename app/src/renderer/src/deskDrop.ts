@@ -79,6 +79,18 @@ export function labelOf(v: Verdict): string {
   }
 }
 
+// The line under the card in hand: what letting go does. The desk itself carries the name, so this one carries the verb.
+export function actionOf(v: Verdict): string {
+  switch (v.kind) {
+    case 'assign':
+      return v.already ? 'Already on it' : `Give it to ${v.to.name}`;
+    case 'hire':
+      return 'Hire for this desk';
+    case 'refuse':
+      return v.message;
+  }
+}
+
 // How the highlight is drawn: green when dropping would do something, red when it is refused, amber when nothing would change.
 export type Tone = 'go' | 'stop' | 'same';
 export const toneOf = (v: Verdict): Tone => (v.kind === 'refuse' ? 'stop' : v.kind === 'assign' && v.already ? 'same' : 'go');

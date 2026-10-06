@@ -206,3 +206,9 @@
 .btn.tasks-chip:hover { background: #fff; }
 .tasks-chip .tb-count { background: rgba(35, 38, 64, 0.1); }
 .tasks-chip .tb-live { margin-left: 2px; }
+
+/* A task card held over the office: the label above the desk it is over, and the line under the card in hand */
+.desk-aim { display: inline-flex; align-items: center; gap: 7px; max-width: 280px; padding: 6px 12px 6px 10px; border-radius: 999px; background: rgba(24, 27, 45, 0.94); color: #fff; font: 700 13px/1.2 var(--body); white-space: nowrap; box-shadow: 0 8px 22px rgba(10, 8, 24, 0.4), 0 0 0 2px var(--aim); --aim: #2fe06a; }
+.desk-aim.stop { --aim: #ff4d4d; white-space: normal; text-align: left; }
+.desk-aim.same { --aim: #ffb340; }
+.desk-aim i { flex: none; width: 9px; height: 9px; border-radius: 50%; background: var(--aim); box-shadow: 0 0 0 3px color-mix(in srgb, var(--aim) 30%, transparent); }

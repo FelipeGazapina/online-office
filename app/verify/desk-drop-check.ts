@@ -2,7 +2,7 @@
 // dropping there would do (assign, hire, refuse). Run from app/: node verify/desk-drop-check.ts   Exits 1 on any failed check.
 import type { BlockId, Company, Employee, EmployeeId, ModelId } from '../src/shared/protocol.ts';
 import { ITEM_DEFS, STORY_H, legacyBuilding, seatPose, type Building, type ItemId } from '../src/shared/space/index.ts';
-import { deskUnder, labelOf, toneOf, verdictFor, type Ray } from '../src/renderer/src/deskDrop.ts';
+import { actionOf, deskUnder, labelOf, toneOf, verdictFor, type Ray } from '../src/renderer/src/deskDrop.ts';
 import { check, finish } from './check.ts';
 
 const B1 = 'block-1' as BlockId;
@@ -117,17 +117,20 @@ console.log('\n# what a drop does');
   check(onAna.kind === 'assign' && onAna.to.name === 'Ana' && !onAna.to.po && !onAna.already && labelOf(onAna) === 'Ana' && toneOf(onAna) === 'go', 'an employee\'s desk assigns to them, labelled with their name, lit green', JSON.stringify(onAna));
   const onPia = verdictFor(desk(po(B1)), B1, c, none);
   check(onPia.kind === 'assign' && onPia.to.po && labelOf(onPia) === 'Pia · PO', 'the PO desk assigns to the PO', labelOf(onPia));
+  check(actionOf(onAna) === 'Give it to Ana', 'the card in hand says what letting go does: give it to Ana');
   const again = verdictFor(desk(bench(B1, 0)), B1, c, new Set(['ana' as EmployeeId]));
   check(again.kind === 'assign' && again.already && toneOf(again) === 'same' && /already/.test(labelOf(again)), 'someone already running the task is said so, and nothing would change');
 
   const empty = verdictFor(desk(bench(B1, 4)), B1, c, none);
   check(empty.kind === 'hire' && empty.blockId === B1 && empty.role === 'employee' && labelOf(empty) === 'Empty desk: hire' && toneOf(empty) === 'go', 'an empty bench desk hires an employee', JSON.stringify(empty));
+  check(actionOf(empty) === 'Hire for this desk', 'and over an empty desk: hire for this desk');
   const noPo = { ...c, employees: c.employees.filter((e) => e.role !== 'orchestrator') };
   const emptyPo = verdictFor(desk(po(B1)), B1, noPo, none);
   check(emptyPo.kind === 'hire' && emptyPo.role === 'orchestrator' && labelOf(emptyPo) === 'Empty PO desk: hire', 'an empty PO desk hires a PO', JSON.stringify(emptyPo));
 
   const other = verdictFor(desk(bench(B2, 0)), B1, c, none);
   check(other.kind === 'refuse' && toneOf(other) === 'stop' && /Billing/.test(labelOf(other)) && /Checkout/.test(labelOf(other)), 'a desk of another block is refused and the message names both blocks', labelOf(other));
+  check(actionOf(other) === labelOf(other), 'a refusal says why on the card in hand too');
   const otherEmpty = verdictFor(desk(bench(B2, 4)), B1, c, none);
   check(otherEmpty.kind === 'refuse', 'an empty desk of another block is refused too: no hire across blocks');
 

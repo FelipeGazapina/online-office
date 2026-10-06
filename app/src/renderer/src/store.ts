@@ -15,6 +15,7 @@ import type {
 } from '../../shared/protocol.ts';
 import type { Board, BoardId, BoardSync, Task, TaskId, TaskTime } from '../../shared/tasks.ts';
 import type { StageHolds } from './boardView.ts';
+import type { Aim } from './deskDrop.ts';
 import { emptyMailView, type MailView, type Message, type MessageId } from '../../shared/mail.ts';
 import type { Building, ItemId, PaintId, Rot, Vec2 } from '../../shared/space/index.ts';
 import type { Language, VoiceQuality } from '../../shared/voice.ts';
@@ -95,6 +96,8 @@ type State = Settings & {
   // Task screens only: the board each block shows, and stages the owner just chose that the snapshot has not confirmed yet.
   boardPick: Record<string, BoardId>;
   stageHold: StageHolds;
+  // The desk a task card in hand is over, and what dropping it there would do. Null when it is over anything else.
+  aim: Aim | null;
   logs: Record<string, LogLine[]>;
   // Chat panel: the request whose chain is open (null is the person's own thread), whether the composer targets the PO, and the details view.
   chatSub: MessageId | null;
@@ -149,6 +152,7 @@ export const useStore = create<State>()(() => ({
   taskConnections: { linear: { kind: 'needs_auth' }, cronospark: { kind: 'needs_auth' } },
   boardPick: {},
   stageHold: {},
+  aim: null,
   logs: {},
   chatSub: null,
   chatToPo: false,
