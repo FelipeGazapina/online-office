@@ -31,12 +31,10 @@ export async function sceneReady(s, quietMs = 2500) {
   await s.waitFor(`performance.now() - window.__lastStall > ${quietMs} && (__office.state().owner.x !== 0 || __office.state().owner.z !== 0)`, 30000);
 }
 
-// A point of the floor that a click walks to, found with the app's own picking so a test aims where the camera really sees
-// floor. For every 0.5 m point around the owner it projects the point, wants the pixel inside the viewport and over the
-// canvas, and wants a raycast there to reach the floor itself (no desk, wall, sign, avatar or the Expand site in front of
-// it) at the point and half a meter around it, so a small camera shift does not change what the click hits. Of those it
-// returns the one nearest the screen center. `min` and `max` bound the distance from the owner, `bends` the waypoints
-// the route to it has, and `margin` keeps the pixel that far inside the viewport.
+// A click acts on the first clickable thing at its pixel (a desk top, the new-project lot, a sign), so a hard-coded world
+// point can sit under one and start no walk. This returns the floor point nearest the screen center whose pixel and the four
+// pixels half a meter around it all raycast to bare floor, so a small camera shift keeps it floor. `min` and `max` bound the
+// distance from the owner, `bends` the waypoints of the route to it, `margin` how far inside the viewport the pixel is.
 export async function findFloorClick(s, { min = 0, max = 10, bends = 1, margin = 60 } = {}) {
   const found = await s.eval(`(() => {
     const { owner } = __office.state();
