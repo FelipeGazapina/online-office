@@ -13,7 +13,7 @@ import type { useCardDrag } from './drag.ts';
 export function CarryTray({ bar, from, over, counts }: { bar: Bar; from: TaskStage; over: TaskStage | null; counts: Readonly<Record<TaskStage, number>> }) {
   return (
     <div className="tb-tray" data-testid="carry-tray" data-carry-avoid onMouseDown={(e) => e.stopPropagation()}>
-      <p className={`tb-tray-hint ${bar.tone}`} data-testid="carry-bar" data-tone={bar.tone} aria-live="polite">
+      <p className={`tb-tray-hint ${bar.tone}`} data-testid="carry-bar" data-tone={bar.tone}>
         <span>
           {bar.text} <kbd>Esc</kbd> puts it back.
         </span>

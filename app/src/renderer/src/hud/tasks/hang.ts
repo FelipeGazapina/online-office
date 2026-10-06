@@ -38,6 +38,6 @@ export function hang(ghost: HTMLElement, pointer: Point, prev: Point | null): Po
     ghost.style.setProperty('--ox', `${at.x}px`);
     ghost.style.setProperty('--oy', `${at.y}px`);
   }
-  ghost.style.setProperty('--ch', `${ch}px`);
+  if (ghost.style.getPropertyValue('--ch') !== `${ch}px`) ghost.style.setProperty('--ch', `${ch}px`);
   return at;
 }

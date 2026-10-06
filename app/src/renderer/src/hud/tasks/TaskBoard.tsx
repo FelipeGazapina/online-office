@@ -219,110 +219,8 @@ export function TaskBoardModal({ blockId }: { blockId: BlockId }) {
   const bar = barOf(aim, drag?.over ?? null, drag?.from ?? 'todo');
   const linearWithoutLogin = board.kind !== 'quick' && board.sources.some((s) => s.provider === 'linear') && connections.linear.kind !== 'ready';
 
-  return (
-    <div className={`scrim ${folded ? 'tb-away' : ''}`} onMouseDown={close}>
-      {!tray && (
-        <div
-          ref={root}
-          className="modal wide tb"
-          tabIndex={-1}
-          role="dialog"
-          aria-label={`${block.name} task board`}
-          data-hud-resize-target="modal-task_board"
-          data-testid="task-board"
-          onMouseDown={(e) => e.stopPropagation()}
-          onKeyDown={(e) => {
-            // The office's own shortcuts (H, Tab, Enter, WASD) must not fire through an open board. Escape is let through to
-            // the document listener below, unless a field inside already took it.
-            if (e.key !== 'Escape') e.stopPropagation();
-          }}
-        >
-          <header className="tb-head">
-            <div className="tb-title">
-              <i className="tb-swatch" style={{ background: block.color }} />
-              {(company?.blocks.length ?? 0) > 1 ? (
-                <select className="tb-block-pick" aria-label="Project block" value={blockId} onChange={(e) => openBoard(e.target.value as BlockId)}>
-                  {company?.blocks.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
-                </select>
-              ) : (
-                <h2>{block.name}</h2>
-              )}
-              <span className="tb-stats" data-testid="board-stats">
-                {stats.tasks} {stats.tasks === 1 ? 'task' : 'tasks'}
-                {stats.running > 0 && <><i className="tb-dotsep" /><span className="tb-running"><i className="tb-live" />{stats.running} running</span></>}
-                {stats.ms > 0 && <><i className="tb-dotsep" />{fmtClock(stats.ms)} worked</>}
-              </span>
-            </div>
-            <div className="tb-head-actions">
-              {block.whiteboard && (
-                <button type="button" className="tb-btn" onClick={() => set({ modal: { kind: 'whiteboard', blockId } })}>
-                  <Whiteboard size={14} />Whiteboard
-                </button>
-              )}
-              {boardTasks.length > 0 && <span className="tb-tip" data-testid="drag-tip">Drag a card out of the board onto a desk to give it to the person there</span>}
-              <SyncStatus board={board} sync={sync} now={now} />
-              {board.kind !== 'quick' && (
-                <button type="button" className="tb-btn" aria-label="Sync this board" disabled={sync?.kind === 'loading' || board.sources.length === 0} onClick={() => send({ type: 'refresh_board', boardId: board.id })}>
-                  <Sync size={14} className={sync?.kind === 'loading' ? 'spin' : ''} />Sync
-                </button>
-              )}
-              <button type="button" className={`tb-btn ${settings ? 'on' : ''}`} aria-label="Board settings" aria-pressed={settings} onClick={() => dock(settings ? {} : { settings: true })}>
-                <Sliders size={14} />Settings
-              </button>
-              <button type="button" className="tb-icon" aria-label="Close the board" onClick={close}>
-                <Close />
-              </button>
-            </div>
-          </header>
-
-          <BoardTabs blockId={blockId} boards={mine} current={board.id} tasks={blockTasks} times={times} />
-
-          {sync?.kind === 'error' && (
-            <div className="tb-banner bad" role="alert" data-testid="sync-error">
-              <Alert size={15} />
-              <span>{sync.message}</span>
-              {linearWithoutLogin && <button type="button" className="tb-btn" onClick={() => send({ type: 'connect_task_provider', provider: 'linear' })}>Connect Linear</button>}
-              <button type="button" className="tb-btn" onClick={() => send({ type: 'refresh_board', boardId: board.id })}>Try again</button>
-            </div>
-          )}
-          {empty && (
-            <div className="tb-banner" data-testid="no-sources">
-              <span>This board has no source yet. Connect Linear or CronoSpark and its tasks land here. You can still add tasks by hand.</span>
-              <button type="button" className="tb-btn primary" onClick={() => dock({ settings: true })}>Set up sources</button>
-            </div>
-          )}
-
-          <div className="tb-main">
-            <div className="tb-cols" data-testid="task-board-columns">
-              {columns.map((c) => (
-                <ColumnView
-                  key={c.stage}
-                  column={c}
-                  board={board}
-                  composing={composing === c.stage}
-                  dragOver={!!drag && drag.over === c.stage && drag.from !== c.stage}
-                  dragging={drag?.task.id ?? null}
-                  selected={selected?.id}
-                  times={times}
-                  people={people}
-                  team={team}
-                  now={now}
-                  open={open}
-                  compose={setComposing}
-                  press={press}
-                  wasDragged={wasDragged}
-                  onKey={onCardKey}
-                />
-              ))}
-            </div>
-            {settings ? (
-              <Settings key={board.id} board={board} isLast={mine.length === 1} taskCount={boardTasks.length} onClose={() => dock({})} />
-            ) : selected ? (
-              <Detail key={selected.id} task={selected} board={board} blockPeople={team} people={people} time={times[selected.id]} stage={stageOf(selected, holds, Date.now())} now={now} onClose={() => dock({})} />
-            ) : null}
-          </div>
-        </div>
-      )}
+  const carried = (
+    <>
       {drag &&
         createPortal(
           <div className={`tb-ghost ${away ? 'away' : ''}`} ref={ghostRef} style={{ width: drag.width, ['--gx' as string]: `${drag.grabX}px`, ['--gy' as string]: `${drag.grabY}px` }} onMouseDown={(e) => e.stopPropagation()}>
@@ -357,6 +255,120 @@ export function TaskBoardModal({ blockId }: { blockId: BlockId }) {
             />,
             document.body,
           )}
+    </>
+  );
+
+  // Folded as a tray, the board is not drawn at all: only the cards still waiting and the way back.
+  if (tray)
+    return (
+      <div className="scrim tb-away" onMouseDown={close}>
+        {carried}
+      </div>
+    );
+
+  return (
+    <div className={`scrim ${away ? 'tb-away' : ''}`} onMouseDown={close}>
+      <div
+        ref={root}
+        className="modal wide tb"
+        tabIndex={-1}
+        role="dialog"
+        aria-label={`${block.name} task board`}
+        data-hud-resize-target="modal-task_board"
+        data-testid="task-board"
+        onMouseDown={(e) => e.stopPropagation()}
+        onKeyDown={(e) => {
+          // The office's own shortcuts (H, Tab, Enter, WASD) must not fire through an open board. Escape is let through to
+          // the document listener below, unless a field inside already took it.
+          if (e.key !== 'Escape') e.stopPropagation();
+        }}
+      >
+        <header className="tb-head">
+          <div className="tb-title">
+            <i className="tb-swatch" style={{ background: block.color }} />
+            {(company?.blocks.length ?? 0) > 1 ? (
+              <select className="tb-block-pick" aria-label="Project block" value={blockId} onChange={(e) => openBoard(e.target.value as BlockId)}>
+                {company?.blocks.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
+              </select>
+            ) : (
+              <h2>{block.name}</h2>
+            )}
+            <span className="tb-stats" data-testid="board-stats">
+              {stats.tasks} {stats.tasks === 1 ? 'task' : 'tasks'}
+              {stats.running > 0 && <><i className="tb-dotsep" /><span className="tb-running"><i className="tb-live" />{stats.running} running</span></>}
+              {stats.ms > 0 && <><i className="tb-dotsep" />{fmtClock(stats.ms)} worked</>}
+            </span>
+          </div>
+          <div className="tb-head-actions">
+            {block.whiteboard && (
+              <button type="button" className="tb-btn" onClick={() => set({ modal: { kind: 'whiteboard', blockId } })}>
+                <Whiteboard size={14} />Whiteboard
+              </button>
+            )}
+            {boardTasks.length > 0 && <span className="tb-tip" data-testid="drag-tip">Drag a card out of the board onto a desk to give it to the person there</span>}
+            <SyncStatus board={board} sync={sync} now={now} />
+            {board.kind !== 'quick' && (
+              <button type="button" className="tb-btn" aria-label="Sync this board" disabled={sync?.kind === 'loading' || board.sources.length === 0} onClick={() => send({ type: 'refresh_board', boardId: board.id })}>
+                <Sync size={14} className={sync?.kind === 'loading' ? 'spin' : ''} />Sync
+              </button>
+            )}
+            <button type="button" className={`tb-btn ${settings ? 'on' : ''}`} aria-label="Board settings" aria-pressed={settings} onClick={() => dock(settings ? {} : { settings: true })}>
+              <Sliders size={14} />Settings
+            </button>
+            <button type="button" className="tb-icon" aria-label="Close the board" onClick={close}>
+              <Close />
+            </button>
+          </div>
+        </header>
+
+        <BoardTabs blockId={blockId} boards={mine} current={board.id} tasks={blockTasks} times={times} />
+
+        {sync?.kind === 'error' && (
+          <div className="tb-banner bad" role="alert" data-testid="sync-error">
+            <Alert size={15} />
+            <span>{sync.message}</span>
+            {linearWithoutLogin && <button type="button" className="tb-btn" onClick={() => send({ type: 'connect_task_provider', provider: 'linear' })}>Connect Linear</button>}
+            <button type="button" className="tb-btn" onClick={() => send({ type: 'refresh_board', boardId: board.id })}>Try again</button>
+          </div>
+        )}
+        {empty && (
+          <div className="tb-banner" data-testid="no-sources">
+            <span>This board has no source yet. Connect Linear or CronoSpark and its tasks land here. You can still add tasks by hand.</span>
+            <button type="button" className="tb-btn primary" onClick={() => dock({ settings: true })}>Set up sources</button>
+          </div>
+        )}
+
+        <div className="tb-main">
+          <div className="tb-cols" data-testid="task-board-columns">
+            {columns.map((c) => (
+              <ColumnView
+                key={c.stage}
+                column={c}
+                board={board}
+                composing={composing === c.stage}
+                dragOver={!!drag && drag.over === c.stage && drag.from !== c.stage}
+                dragging={drag?.task.id ?? null}
+                selected={selected?.id}
+                times={times}
+                people={people}
+                team={team}
+                now={now}
+                open={open}
+                compose={setComposing}
+                press={press}
+                wasDragged={wasDragged}
+                onKey={onCardKey}
+              />
+            ))}
+          </div>
+          {settings ? (
+            <Settings key={board.id} board={board} isLast={mine.length === 1} taskCount={boardTasks.length} onClose={() => dock({})} />
+          ) : selected ? (
+            <Detail key={selected.id} task={selected} board={board} blockPeople={team} people={people} time={times[selected.id]} stage={stageOf(selected, holds, Date.now())} now={now} onClose={() => dock({})} />
+          ) : null}
+        </div>
+      </div>
+      {carried}
     </div>
   );
 }

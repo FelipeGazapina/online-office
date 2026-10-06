@@ -18,7 +18,7 @@ import { hang } from './hang.ts';
 // A press that moves less than this is a click.
 const THRESHOLD_PX = 5;
 
-export type Drag = { task: Task; from: TaskStage; over: TaskStage | null; away: boolean; width: number; height: number; grabX: number; grabY: number; x: number; y: number };
+export type Drag = { task: Task; from: TaskStage; over: TaskStage | null; away: boolean; width: number; grabX: number; grabY: number; x: number; y: number };
 
 export type Drops = {
   // The block the task belongs to: a desk of any other block refuses it.
@@ -70,7 +70,7 @@ export function useCardDrag(drops: Drops) {
       if (s.armed && !s.drag) {
         if (Math.hypot(e.clientX - s.armed.x, e.clientY - s.armed.y) < THRESHOLD_PX) return;
         const { rect, task, from } = s.armed;
-        s.drag = { task, from, over: from, away: false, width: rect.width, height: rect.height, grabX: s.armed.x - rect.left, grabY: s.armed.y - rect.top, x: e.clientX, y: e.clientY };
+        s.drag = { task, from, over: from, away: false, width: rect.width, grabX: s.armed.x - rect.left, grabY: s.armed.y - rect.top, x: e.clientX, y: e.clientY };
         document.body.style.cursor = 'grabbing';
         setDrag(s.drag);
       }

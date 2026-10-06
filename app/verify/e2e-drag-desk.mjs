@@ -456,12 +456,37 @@ export default async (s) => {
     assert(!!req && req.intent === 'work' && (await inRow(r)).runs[0] === req.id, `${r.who.name}'s run of "${r.title}" started: one work request in mail.jsonl, and the clock is running`);
   }
   assert((await s.eval(`${state}.modal?.tray === true`)), 'and the tray is still up for the next card');
-  await s.clickOn('[data-testid=tray-open]');
-  await s.waitFor("!!document.querySelector('[data-testid=task-board]') && !document.querySelector('.scrim.tb-away') && !document.querySelector('[data-testid=task-tray]')");
-  assert(await s.eval(`[...document.querySelectorAll('.tb-col[data-stage=doing] .tb-card')].filter((c) => ${JSON.stringify(rows.map((r) => r.title))}.some((t) => c.innerText.includes(t))).length === 3`), 'Open board brings the whole board back with the three cards in In Progress');
+  // The keyboard way in: Enter on a card of the tray opens it in the whole board, where its detail has Assign.
+  await s.eval(`[...document.querySelectorAll('[data-testid=task-tray] .tb-card')].find((c) => c.innerText.includes(${JSON.stringify(titles.esc)})).focus()`);
+  await s.press('Enter');
+  await s.waitFor("!!document.querySelector('[data-testid=task-board]') && !!document.querySelector('[data-testid=task-detail]') && !document.querySelector('[data-testid=task-tray]')");
+  assert(await s.eval(`${state}.modal?.kind === 'task_board' && !${state}.modal.tray && ${state}.modal.taskId === ${JSON.stringify((await task('esc')).id)} && [...document.querySelectorAll('[data-testid=task-detail] h3')].some((h) => h.innerText === 'Assign')`), 'Enter on a tray card opens the whole board on that task, with its Assign list');
+  assert(await s.eval(`[...document.querySelectorAll('.tb-col[data-stage=doing] .tb-card')].filter((c) => ${JSON.stringify(rows.map((r) => r.title))}.some((t) => c.innerText.includes(t))).length === 3`), 'and the whole board has the three handed cards in In Progress');
   const assignAll = await sentOf('assign_task');
   assert(assignAll.length === 5 && assignAll.map((m) => m.employeeId).join() === [ana.id, pia.id, ana.id, cleo.id, pia.id].join(), 'over the whole run exactly five assign_task messages left the HUD: Ana, the PO, then the three of the row');
   assert((await s.eval(`${state}.tasks.filter((t) => ['${titles.cross}', '${titles.floor}', '${titles.esc}'].includes(t.title)).every((t) => t.stage === 'todo' && t.runs.length === 0 && t.assignees.length === 0)`)), 'the cards that were cancelled or refused are still untouched in Todo');
+
+  // How the tray ends. Dropping on a person makes it (above); here it is put up directly to check the ways out.
+  const foldTray = async () => {
+    await s.eval(`__office.set({ modal: { kind: 'task_board', blockId: ${JSON.stringify(checkout)}, tray: true } })`);
+    await s.waitFor("!!document.querySelector('[data-testid=task-tray]') && !document.querySelector('[data-testid=task-board]')");
+  };
+  await foldTray();
+  await s.press('Escape');
+  await s.waitFor(`!${state}.modal && !document.querySelector('[data-testid=task-tray]')`);
+  ok('Esc closes the tray and gives the office its keys back');
+  await foldTray();
+  await s.clickOn('[data-testid=tray-close]');
+  await s.waitFor(`!${state}.modal && !document.querySelector('[data-testid=task-tray]')`);
+  ok('the close button closes the tray');
+  await foldTray();
+  await s.clickOn('[data-testid=tasks-chip]');
+  await s.waitFor("!!document.querySelector('[data-testid=task-board]') && !document.querySelector('[data-testid=task-tray]') && !document.querySelector('.scrim.tb-away')");
+  assert(await s.eval(`!${state}.modal.tray`), 'the Tasks chip brings the whole board back from the tray');
+  await foldTray();
+  for (const key of ['esc', 'floor', 'cross']) await send({ type: 'update_task', taskId: (await task(key)).id, stage: 'review' });
+  await s.waitFor(`!${state}.modal && !document.querySelector('[data-testid=task-tray]')`, 8000);
+  ok('with nothing left in Todo the tray closes by itself');
 };
 
 const ok = (msg) => console.log('ok:', msg);
