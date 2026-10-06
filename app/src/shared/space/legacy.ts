@@ -6,7 +6,7 @@ import { applyAll, emptyBuilding } from './story.ts';
 import { wrefKey } from './geom.ts';
 import type { Building, BuildOp, BlockId, EmployeeId, FloorCell, Item, ItemId, Lot, SpaceContext, WallSeg } from './types.ts';
 
-const OWNER_WALLS = 3;
+const OWNER_WALLS = 6;
 const MEETING = { x0: -18, x1: -11, z0: 2, z1: 8, doorZ: [4, 5] } as const;
 
 /** The lobby's default dressing: a seating group on a rug west of the front door, a shelf by the first archway. */
@@ -52,7 +52,7 @@ export function legacyBuilding(
   // Each zone gets its own wall paint: a white street front, a brick lobby on the east side.
   for (const w of [...walls.values()]) {
     if (w.d === 'e' && w.z === lot.z0 + lot.h) wall({ ...w, style: 2 });
-    if (w.d === 's' && w.x === right && w.z >= LOBBY_Z0) wall({ ...w, style: 1 });
+    if (w.d === 's' && w.x === right && w.z >= LOBBY_Z0) wall({ ...w, style: 5 });
   }
   const m = MEETING;
   for (let x = m.x0; x < m.x1; x++) {
@@ -61,10 +61,10 @@ export function legacyBuilding(
   }
   for (let z = m.z0; z < m.z1; z++) wall({ x: m.x1, z, d: 's', style: OWNER_WALLS, ...((m.doorZ as readonly number[]).includes(z) ? { open: 'door' as const } : {}) });
 
-  // A glass partition between the lobby and the workspace, with two three-tile archways: it names the zones and frames the view.
+  // A glass partition between the lobby and the workspace, with a three-tile archway: it names the zones and frames the view.
   const PART_Z = LOBBY_Z0 + 3;
-  for (let x = m.x1; x < right; x++) {
-    const arch = (x >= -6 && x <= -4) || (x >= 5 && x <= 7);
+  for (let x = m.x1; x < Math.min(right, 5); x++) {
+    const arch = x >= -6 && x <= -4;
     wall({ x, z: PART_Z, d: 'e', style: 2, open: arch ? 'arch' : (x - m.x1) % 4 === 3 ? undefined : 'window' });
   }
 

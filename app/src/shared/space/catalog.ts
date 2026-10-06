@@ -29,6 +29,8 @@ export const WALL_STYLES: readonly { name: string; color: string }[] = [
   { name: 'white', color: '#f1efe9' },
   { name: 'wood_panel', color: '#8c6a4a' },
   { name: 'concrete', color: '#9aa0a6' },
+  { name: 'terracotta', color: '#b8694a' },
+  { name: 'walnut', color: '#7d553a' },
 ];
 
 const desk = (id: string, kind: 'bench_desk' | 'po_desk' | 'owner_desk'): ItemDef => ({
