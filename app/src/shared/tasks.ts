@@ -130,6 +130,13 @@ export function patchBoard(board: Board, patch: BoardPatch): BoardResult {
   return { ok: true, board: { ...board, name, sources, logHours: patch.logHours ?? board.logHours } };
 }
 
+// The board a block's task screens show: the first one that pulls from a provider, else the first one it has.
+export const primaryBoard = (boards: readonly Board[], blockId: BlockId): Board | undefined => {
+  const mine = boards.filter((b) => b.blockId === blockId);
+  return mine.find((b) => b.kind !== 'quick') ?? mine[0];
+};
+export const sourcesOf = (board: Board | undefined): TaskBoardSource[] => (board && board.kind !== 'quick' ? board.sources : []);
+
 export const QUICK_BOARD_NAME = 'Quick tasks';
 export const LEGACY_BOARD_NAME = 'Tasks';
 
@@ -308,6 +315,13 @@ export function timeFromSlices(slices: readonly Slice[], at: number): TaskTime {
   const byEmployee = Object.fromEntries([...ms].map(([who, v]) => [who, Math.round(v)])) as Record<EmployeeId, number>;
   return { at, totalMs: Object.values(byEmployee).reduce((a, b) => a + b, 0), byEmployee, running: [...running].map(([employeeId, share]) => ({ employeeId, share })) };
 }
+
+// What a person has on the task at `now`: what was measured, plus the time since for someone still in a turn.
+export const workedMs = (time: TaskTime, who: EmployeeId, now: number): number => {
+  const live = time.running.find((r) => r.employeeId === who);
+  return (time.byEmployee[who] ?? 0) + (live ? Math.max(0, now - time.at) * live.share : 0);
+};
+export const totalWorkedMs = (time: TaskTime, now: number): number => time.running.reduce((sum, r) => sum + Math.max(0, now - time.at) * r.share, time.totalMs);
 
 export function timesOf(tasks: readonly Pick<Task, 'id' | 'runs'>[], log: TurnLog, now: number): Record<TaskId, TaskTime> {
   const slices = sliceTasks(log, tasks, now);

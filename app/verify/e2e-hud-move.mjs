@@ -286,7 +286,7 @@ export default async (s, { launch }) => {
 
   // Every dialog is a movable panel with its own remembered place.
   const blockId = 'b-test';
-  await reopened.eval(`(() => { const c = __office.store.getState().company; __office.store.setState({ company: { ...c, blocks: [{ id: 'b-test', name: 'Test block', cwd: '/tmp', color: '#7aa2ff', slot: 0, githubRepo: 'o/r', linearBoardUrl: 'about:blank', taskBoard: { sources: [] } }] } }); })()`);
+  await reopened.eval(`(() => { const c = __office.store.getState().company; __office.store.setState({ company: { ...c, blocks: [{ id: 'b-test', name: 'Test block', cwd: '/tmp', color: '#7aa2ff', slot: 0, githubRepo: 'o/r', linearBoardUrl: 'about:blank' }] } }); })()`);
   for (const kind of ['whiteboard', 'github', 'task_board', 'linear_board']) {
     await reopened.eval(`__office.store.setState({ modal: { kind: ${JSON.stringify(kind)}, blockId: ${JSON.stringify(blockId)} } })`);
     await reopened.waitFor(`document.querySelector('[data-hud-resize-target="modal-${kind}"]') !== null`, 4000);
