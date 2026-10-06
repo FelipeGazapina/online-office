@@ -8,6 +8,7 @@ import { itemCenter } from '../world.ts';
 import { PodDecor } from './Decor.tsx';
 import { Chair, RoundedPlane } from './Furniture.tsx';
 import { fitText, FONT_BODY, FONT_DISPLAY, ownerComputerTexture, roundRect, useCanvasTexture } from './textures.ts';
+import { carpetSurface } from './surfaceTextures.ts';
 import { useDiagram } from './whiteboard.ts';
 
 // The block presentation is intentionally a light prototype: neutral pods, a visible PO desk, and a small DAILY huddle spot.
@@ -338,15 +339,16 @@ export const BlockView = memo(function BlockView({ block, employees }: { block: 
   const sign = useMemo(() => find(building, 'team_sign', block.id), [building, block.id]);
   const board = useMemo(() => find(building, 'whiteboard', block.id), [building, block.id]);
   const terminal = useMemo(() => find(building, 'board_terminal', block.id), [building, block.id]);
-  const rug = useMemo(() => new Color(block.color).lerp(new Color('#d7dde2'), 0.62).getStyle(), [block.color]);
+  const carpet = useMemo(() => carpetSurface(), []);
+  const rug = useMemo(() => new Color(block.color).lerp(new Color('#f0d6a4'), 0.84).getStyle(), [block.color]);
   const trim = useMemo(() => new Color(block.color).lerp(new Color('#738195'), 0.5).getStyle(), [block.color]);
   const author = block.whiteboard ? employees.find((e) => e.id === block.whiteboard!.by)?.name : undefined;
 
   return (
     <group>
       <group position={[c.x, 0, c.z]}>
-        <RoundedPlane w={RUG_W + 0.5} d={RUG_D + 0.5} r={0.5} color="#d6dbe0" y={0.008} />
-        <RoundedPlane w={RUG_W} d={RUG_D} r={0.35} color={rug} y={0.014} />
+        <RoundedPlane w={RUG_W + 0.5} d={RUG_D + 0.5} r={0.5} color="#cdbfa6" y={0.008} surface={carpet} />
+        <RoundedPlane w={RUG_W} d={RUG_D} r={0.35} color={rug} y={0.014} surface={carpet} />
         <PodBoundary color={trim} />
         <PodDecor />
       </group>
