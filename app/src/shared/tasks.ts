@@ -18,7 +18,10 @@ export type Board = { id: BoardId; blockId: BlockId; name: string } & BoardSpec;
 export type BoardPatch = { name?: string; sources?: TaskBoardSource[]; logHours?: boolean };
 
 export type ProviderOrigin = { kind: TaskProvider; externalId: string; identifier: string; url?: string; priority?: string; providerStatus: string; sourceLabel: string };
-export type TaskOrigin = { kind: 'manual' } | ProviderOrigin;
+// A task made by hand has its own priority. A provider's task keeps the provider's text in `origin.priority`.
+export const PRIORITIES = ['urgent', 'high', 'medium', 'low'] as const;
+export type Priority = (typeof PRIORITIES)[number];
+export type TaskOrigin = { kind: 'manual'; priority?: Priority } | ProviderOrigin;
 
 export type TaskStage = 'todo' | 'doing' | 'review' | 'done';
 export const STAGES: readonly TaskStage[] = ['todo', 'doing', 'review', 'done'];

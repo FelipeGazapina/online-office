@@ -335,9 +335,9 @@ console.log('\n# a task worked by the PO and a delegate');
   const x = taskWorld();
   const quick = x.tasks.boardsOf(B1).find((b) => b.kind === 'quick')!;
   check(!!quick && x.tasks.boardsOf(B2).length === 1, 'every block starts with a quick board');
-  const made = x.tasks.createTask(quick.id, '  Add CSV export ', 'with tests');
+  const made = x.tasks.createTask(quick.id, '  Add CSV export ', { notes: 'with tests' });
   check(made.title === 'Add CSV export' && made.notes === 'with tests' && made.stage === 'todo' && made.origin.kind === 'manual', 'a manual task on a quick board');
-  const inReview = x.tasks.createTask(quick.id, 'Born in review', undefined, 'review');
+  const inReview = x.tasks.createTask(quick.id, 'Born in review', { stage: 'review' });
   check(inReview.stage === 'review' && x.tasks.view(x.now()).tasks.find((y) => y.id === inReview.id)!.stage === 'review', 'a task can be created straight into another column, in one step');
   x.tasks.deleteTask(inReview.id);
 
@@ -418,6 +418,55 @@ console.log('\n# a retried assign never posts twice');
   const retry = new Tasks(x.file, x.host, x.w.persisted);
   retry.assign(made.id, ANA);
   check(requests() === 1 && retry.view(0).tasks[0]!.runs.length === 1 && retry.view(0).tasks[0]!.runs[0] === healed.runs[0], 'a retry that has not seen the run finds the request by its key and links it');
+}
+
+console.log('\n# a task made with its assignee and priority');
+{
+  const x = taskWorld();
+  const quick = x.tasks.boardsOf(B1).find((b) => b.kind === 'quick')!;
+  const refusal = (f: () => unknown) => {
+    try {
+      f();
+    } catch (error) {
+      return error instanceof OfficeError ? error.message : String(error);
+    }
+    return '';
+  };
+  const view = () => x.tasks.view(x.now());
+
+  const alone = x.tasks.createTask(quick.id, 'Sketch the schema', { priority: 'urgent', notes: '  with indexes ' });
+  check(alone.origin.kind === 'manual' && alone.origin.priority === 'urgent' && alone.notes === 'with indexes' && alone.stage === 'todo' && alone.runs.length === 0, 'a task made by hand can carry a priority and notes and starts in todo');
+  check(!('priority' in x.tasks.createTask(quick.id, 'No rush').origin), 'without a priority the origin says none');
+
+  const handed = x.tasks.createTask(quick.id, 'Ship the invoice export', { assignee: ANA, notes: 'CSV, one row per line item', priority: 'high' });
+  x.sync();
+  const mine = view().tasks.find((y) => y.id === handed.id)!;
+  check(mine.stage === 'doing' && mine.assignees.join() === ANA && mine.runs.length === 1, 'made with an assignee, the task starts in doing with one run for them');
+  check(mine.origin.kind === 'manual' && mine.origin.priority === 'high' && mine.notes === 'CSV, one row per line item', 'and keeps its priority and notes');
+  check(x.w.prompts.get(ANA)?.length === 1 && /Ship the invoice export/.test(x.w.prompts.get(ANA)![0]!) && /one row per line item/.test(x.w.prompts.get(ANA)![0]!), 'the person got one request with the title and the notes, at once');
+  check(JSON.stringify(JSON.parse(readFileSync(x.file, 'utf8')).tasks.find((y: Task) => y.id === handed.id).runs) === JSON.stringify(mine.runs), 'the run is on disk with the task');
+
+  const po = x.tasks.createTask(quick.id, 'Plan the quarter', { assignee: PO, stage: 'review' });
+  check(view().tasks.find((y) => y.id === po.id)!.stage === 'doing', 'an assignee wins over the column: handing a task over starts it');
+
+  const before = view().tasks.length;
+  const posted = x.w.room.state.order.length;
+  check(/PO of its block/.test(refusal(() => x.tasks.createTask(quick.id, 'For nobody', { assignee: e('zed') }))), 'an assignee from outside the block is refused');
+  check(view().tasks.length === before && x.w.room.state.order.length === posted, 'and nothing was made and nothing was posted');
+  check(/needs a title/.test(refusal(() => x.tasks.createTask(quick.id, '  ', { assignee: ANA }))) && view().tasks.length === before, 'a blank title is refused before anyone is asked');
+
+  x.tasks.updateTask(alone.id, { priority: 'low' });
+  check(view().tasks.find((y) => y.id === alone.id)!.origin.kind === 'manual' && (view().tasks.find((y) => y.id === alone.id)!.origin as { priority?: string }).priority === 'low', 'the owner can change the priority of a task made by hand');
+  x.tasks.updateTask(alone.id, { priority: null });
+  check(!('priority' in view().tasks.find((y) => y.id === alone.id)!.origin), 'and clear it');
+  x.tasks.updateTask(alone.id, { notes: 'edited' });
+  check(view().tasks.find((y) => y.id === alone.id)!.origin.kind === 'manual', 'an edit that leaves the priority alone leaves the origin alone');
+
+  const board = x.tasks.createBoard(B1, 'Sprint', { kind: 'feature', sources: [{ provider: 'cronospark', projectId: 'p' }], logHours: true });
+  x.provider.cards = [crono(1)];
+  await x.tasks.refresh(board.id);
+  const card = view().tasks.find((y) => y.origin.kind === 'cronospark')!;
+  check(/set in CronoSpark/.test(refusal(() => x.tasks.updateTask(card.id, { priority: 'high' }))) && !('priority' in card.origin), 'a provider task keeps the provider\'s priority: the owner\'s is refused');
 }
 
 console.log('\n# CronoSpark hours');
@@ -693,6 +742,15 @@ console.log('\n# the office, with a scripted harness');
   const idsBefore = new Set(taskNow.company.employees.map((x) => x.id));
   office.handle({ type: 'create_task', boardId: quick.id, title: 'Fix the login bug' });
   const bug = snap().tasks.find((x) => x.title === 'Fix the login bug')!;
+  const anaId = snap().company.employees.find((x) => x.name === 'Ana')!.id;
+  office.handle({ type: 'create_task', boardId: quick.id, title: 'Tidy the changelog', notes: 'newest first', assignee: anaId, priority: 'medium' });
+  const tidy = snap().tasks.find((x) => x.title === 'Tidy the changelog')!;
+  check(tidy.stage === 'doing' && tidy.assignees.join() === anaId && tidy.runs.length === 1 && tidy.origin.kind === 'manual' && tidy.origin.priority === 'medium', 'create_task through the office carries assignee and priority: the task is made and started');
+  check(anaFake.assigned.length === 1 && /Tidy the changelog/.test(anaFake.assigned[0]!) && /newest first/.test(anaFake.assigned[0]!) && snap().company.employees.find((x) => x.id === anaId)!.status.kind === 'working', 'and the person is working on it before the call returns');
+  office.handle({ type: 'update_task', taskId: tidy.id, priority: null });
+  check(!('priority' in snap().tasks.find((x) => x.id === tidy.id)!.origin), 'update_task with a null priority clears it');
+  const count = snap().tasks.length;
+  check(refused({ type: 'create_task', boardId: quick.id, title: 'For a ghost', assignee: 'ghost' as EmployeeId }).includes('PO of its block') && snap().tasks.length === count, 'create_task for someone outside the block is refused and makes no task');
   const desks = taskNow.company.employees.map((x) => x.seat);
   const building = office.buildingState().building;
   const benches = building.stories.flatMap((s) => s.items).filter((i) => i.def === 'bench_desk' && i.blockId === blockId).map((i) => i.id);

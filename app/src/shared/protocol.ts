@@ -4,7 +4,7 @@
 
 import type { Building, BuildOp, ItemId, Violation } from './space/types.ts';
 import type { MailClientMessage, MailServerMessage, MailView } from './mail.ts';
-import type { Board, BoardId, BoardPatch, BoardSpec, BoardSync, Task, TaskId, TaskStage, TaskTime } from './tasks.ts';
+import type { Board, BoardId, BoardPatch, BoardSpec, BoardSync, Priority, Task, TaskId, TaskStage, TaskTime } from './tasks.ts';
 import type { VoiceApi } from './voice.ts';
 
 export type EmployeeId = string & { readonly __brand: 'EmployeeId' };
@@ -244,10 +244,12 @@ export type ClientMessage =
   | { type: 'delete_board'; boardId: BoardId }
   // Pulls the board's sources again. A quick board has none.
   | { type: 'refresh_board'; boardId: BoardId }
-  // `stage` is the column the task starts in, todo when absent.
-  | { type: 'create_task'; boardId: BoardId; title: string; notes?: string; stage?: TaskStage }
-  // `notes: ''` clears the notes. The owner may set any stage, and done is only ever the owner's call.
-  | { type: 'update_task'; taskId: TaskId; title?: string; notes?: string; stage?: TaskStage }
+  // `stage` is the column the task starts in, todo when absent. `assignee` is the block's PO or one of its employees: the task
+  // is made and handed to them in one step, so they start at once and it begins in doing, whatever `stage` says.
+  | { type: 'create_task'; boardId: BoardId; title: string; notes?: string; stage?: TaskStage; assignee?: EmployeeId; priority?: Priority }
+  // `notes: ''` clears the notes and `priority: null` the priority, which only a task made by hand has. The owner may set any
+  // stage, and done is only ever the owner's call.
+  | { type: 'update_task'; taskId: TaskId; title?: string; notes?: string; stage?: TaskStage; priority?: Priority | null }
   // Cancels the runs still open, then drops the task.
   | { type: 'delete_task'; taskId: TaskId }
   // `employeeId` is the block's PO or any employee of the block. Posts one root request to them, so they start at once.
