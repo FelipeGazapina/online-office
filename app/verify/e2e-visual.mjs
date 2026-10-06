@@ -40,7 +40,7 @@ const buildOps = () => [
 // The wheel is how a player zooms; this sends the same event, from the current zoom to `dist` meters (the zoom clamps at 8..48).
 const zoomBy = (s, deltaY) => s.eval(`document.querySelector('canvas').dispatchEvent(new WheelEvent('wheel', { deltaY: ${deltaY} }))`);
 const settle = async (s) => { await s.eval('__office.step(0.2)'); await s.sleep(1400); };
-const firstPerson = async (s, name) => {
+const firstPerson = async (s, name, pose) => {
   await s.press('Tab');
   await s.waitFor('window.__officeCamera && window.__officeCamera.blend >= 0.999', 10000);
   await settle(s);
@@ -50,7 +50,8 @@ const firstPerson = async (s, name) => {
     const now = await s.eval('JSON.stringify(window.__officeCamera, (k, v) => (typeof v === "number" ? Math.round(v * 1000) / 1000 : v))');
     if (now === last) break;
     last = now;
-    await s.eval('__office.step(0.2)');
+    // Holding the owner on the spot keeps the sim from nudging the camera between runs.
+    if (pose) await s.eval(`__office.teleport(${pose.join(', ')})`);
     await s.sleep(400);
   }
   await save(s, name);
@@ -85,10 +86,10 @@ export default async (s) => {
   await save(s, 'site');
 
   await s.eval('__office.teleport(-11.5, 1.5, Math.PI)');
-  await firstPerson(s, 'first-desks');
+  await firstPerson(s, 'first-desks', [-11.5, 1.5, 'Math.PI']);
 
   await s.eval('__office.teleport(-4.5, 5.5, Math.PI)');
-  await firstPerson(s, 'first');
+  await firstPerson(s, 'first', [-4.5, 5.5, 'Math.PI']);
 
   await zoomBy(s, -1200);
   await s.eval('__office.teleport(-12, -4.7, Math.PI)');
