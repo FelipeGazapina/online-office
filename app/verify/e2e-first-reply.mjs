@@ -32,6 +32,7 @@ const TARGET_MAX = 3000;
 const TRIALS = 5;
 const COLD_TRIALS = Number(process.env.FIRST_REPLY_COLD_TRIALS ?? 5);
 // The owner takes a few seconds between a hire and the first message, and a session warmed at hire uses them.
+const GOAL = 'Add a slugify(text) function in src/slug.js (ES module, named export) with tests in test/slug.test.js, and a "slugify" section in README.md documenting it. The bar: node --test passes and slugify handles accents, spaces, punctuation and empty input. Split the work between people, get the function reviewed against the bar, and tell me when it is all done.';
 const HIRE_TO_FIRST_MESSAGE_MS = 8000;
 const KEY_HOPS = ['post_received', 'deliver', 'assign', 'spawn', 'push', 'system_init', 'event_message_start', 'first_delta', 'first_text'];
 
@@ -56,8 +57,9 @@ export default async (s) => {
       const finish = (kind) => { if (done) return; done = true; unsub(); resolve({ start: t0, end: performance.timeOrigin + performance.now(), kind }); };
       const st0 = __office.store.getState();
       const seen = new Set(st0.mail.tail.map((m) => m.id));
+      const stale = st0.streams[id];
       const unsub = __office.store.subscribe((st) => {
-        if (st.streams[id]) finish('stream');
+        if (st.streams[id] && st.streams[id] !== stale) finish('stream');
         else if (st.mail.tail.some((m) => !seen.has(m.id) && m.from === id && m.kind === 'say')) finish('say');
       });
       const t0 = performance.timeOrigin + performance.now();
@@ -76,14 +78,14 @@ export default async (s) => {
       });
   const idle = (id) => s.waitFor(`${company}.employees.find((e) => e.id === ${JSON.stringify(id)}).status.kind === 'idle' && __office.store.getState().mail.open.length === 0`, 180000);
 
-  const trial = async (label, id, clientId, text) => {
+  const trial = async (label, id, clientId, text, settle = true) => {
     const r = await s.eval(`window.__firstReply(${JSON.stringify(id)}, ${JSON.stringify(text)}, ${JSON.stringify(clientId)})`);
     const hops = new Map();
     for (const t of traces()) if ((t.who === id || t.who === clientId) && t.at >= r.start - 50 && !hops.has(t.hop)) hops.set(t.hop, t.at);
     const rel = KEY_HOPS.filter((h) => hops.has(h)).map((h) => `${h} ${Math.round(hops.get(h) - r.start)}`).join(', ');
     const ms = Math.round(r.end - r.start);
     console.log(`${label}: ${ms} ms to the first ${r.kind} | hops since post: ${rel}`);
-    await idle(id);
+    if (settle) await idle(id);
     return { ms, kind: r.kind };
   };
 
@@ -110,6 +112,15 @@ export default async (s) => {
   for (let i = 1; i <= TRIALS; i++) employee.push(await trial(`employee warm ${i}`, eli, `eli-${i}`, task(i, 'eli')));
   for (let i = 1; i <= COLD_TRIALS; i++) poCold.push(await cold(`PO cold ${i}`, pia, i, 'po'));
   for (let i = 1; i <= TRIALS; i++) po.push(await trial(`PO warm ${i}`, pia, `pia-${i}`, task(i, 'po')));
+  // The company scenario's goal to a PO with a fresh session. Only the first bubble is timed, then both sessions restart.
+  const poGoal = [];
+  for (let i = 1; i <= COLD_TRIALS; i++) {
+    await s.eval(`window.office.send({ type: 'fresh_session', employeeId: ${JSON.stringify(eli)} })`);
+    await s.eval(`window.office.send({ type: 'fresh_session', employeeId: ${JSON.stringify(pia)} })`);
+    await s.sleep(HIRE_TO_FIRST_MESSAGE_MS);
+    poGoal.push(await trial(`PO goal cold ${i}`, pia, `pia-goal-${i}`, GOAL, false));
+  }
+  report('PO goal cold', poGoal);
   report('employee cold', employeeCold);
   report('employee warm', employee);
   report('PO cold', poCold);
