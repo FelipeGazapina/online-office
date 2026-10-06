@@ -82,6 +82,12 @@ export default async function (s, { launch }) {
     return undefined;
   };
   const deskPoint = (d) => ({ x: d.x / 2 + 0.75, z: d.z / 2 + 0.5 });
+  // How far the turn disc's middle is from the footprint it turns: 0 when it sits on it, a corner counts.
+  const turnGap = async (pad) => {
+    const mark = await footprint('turn-mark');
+    if (!mark) return Infinity;
+    return Math.hypot(Math.max(pad.x0 - mark.x, 0, mark.x - (pad.x0 + pad.w)), Math.max(pad.z0 - mark.z, 0, mark.z - (pad.z0 + pad.d)));
+  };
 
   // ---- the way in: a button in the top right, in every camera
   const vw = await s.eval('innerWidth');
@@ -165,6 +171,9 @@ export default async function (s, { launch }) {
   await hover(goal.x, goal.z);
   const pad = await footprint('footprint');
   assert(pad?.ok === true && pad.color === GREEN && Math.abs(pad.w - 1.5) < 1e-6, 'it follows the pointer with a green footprint');
+  assert((await turnGap(pad)) <= 0.1, 'the turn disc sits on the ghost itself, not off in the air beside it');
+  const rim = await footprint('ghost-rim');
+  assert(rim?.ok === true, 'the carried piece is outlined in the verdict colour, so it stands out from any floor under it');
   const hints = await s.eval(`[...document.querySelectorAll('.bh-hint > span')].map((x) => ({ key: x.querySelector('kbd').textContent, text: x.textContent.replace(x.querySelector('kbd').textContent, '').trim(), danger: x.querySelector('kbd').classList.contains('danger') }))`);
   const hintOf = (key) => hints.find((h) => h.key === key);
   assert(hintOf('Esc')?.text === 'put it back' && hintOf('Esc').danger === false, 'the hint bar says Esc puts it back');
@@ -181,6 +190,7 @@ export default async function (s, { launch }) {
   const red = await footprint('footprint');
   assert(red?.ok === false && red.color === RED, 'over another desk the footprint is red');
   assert((await s.eval(`${store}.buildCursor.verdict.ok`)) === false, 'and the rules say it does not fit');
+  assert((await footprint('ghost-rim'))?.ok === false && (await footprint('turn-mark'))?.ok === false, 'the outline and the turn disc go red with it');
   const stuck = await at(deskPoint(clash).x, deskPoint(clash).z);
   await s.click(stuck.x, stuck.y);
   await s.sleep(300);
@@ -244,6 +254,7 @@ export default async function (s, { launch }) {
   await save(s, 'block');
   const carry = await footprint('block-footprint');
   assert(carry?.pieces === before.length && carry.color === GREEN && carry.ok === true, `the block follows the pointer with one green footprint around all of it ${JSON.stringify(carry)} ${await s.eval(`JSON.stringify(${store}.buildCursor.verdict)`)}`);
+  assert((await turnGap(carry)) <= 0.1, 'and its turn disc sits on the block, at the corner of that footprint');
 
   const west = byId(original).get('blk-a:bench_desk:01');
   await bring(deskPoint(west).x, deskPoint(west).z);
