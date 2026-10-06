@@ -14,6 +14,7 @@ import { LobbyDecor } from './Decor.tsx';
 import { Environment } from './Environment.tsx';
 import { Exterior } from './Exterior.tsx';
 import { Lights } from './Lighting.tsx';
+import { Staged } from './Staged.tsx';
 import { LobbySun } from './LobbyLight.tsx';
 import { LobbyVoid } from './LobbyVoid.tsx';
 import { BrickWall, PatternRug, Terrazzo } from './LobbyMaterials.tsx';
@@ -287,7 +288,7 @@ export function Office({ company }: { company: Company | null }) {
   const { lot } = world.building;
   const b: Bounds = { x0: lot.x0, x1: lot.x0 + lot.w, z0: lot.z0, z1: lot.z0 + lot.h };
   return (
-    <>
+    <Staged>
       <Lights b={b} slots={(company?.blocks ?? []).map((bl) => bl.slot)} />
       <LobbySun b={b} building={world.building} />
       <Environment b={b} />
@@ -304,6 +305,6 @@ export function Office({ company }: { company: Company | null }) {
         <RoundedPlane w={2.6} d={1.5} r={0.3} color="#6f9a90" y={0.01} />
       </group>
       {ghostSlot !== null && <GhostSlot slot={ghostSlot} />}
-    </>
+    </Staged>
   );
 }

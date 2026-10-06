@@ -1,10 +1,11 @@
 import { useFrame, useThree } from '@react-three/fiber';
 import { useEffect, useLayoutEffect, useMemo, useRef } from 'react';
-import { AdditiveBlending, DirectionalLight, HemisphereLight, Color, CubeCamera, HalfFloatType, Texture, WebGLCubeRenderTarget, InstancedMesh, Matrix4, MeshBasicMaterial, MeshStandardMaterial, Object3D, PlaneGeometry, PMREMGenerator, Quaternion, Vector3 } from 'three';
+import { AdditiveBlending, DirectionalLight, HemisphereLight, Color, CubeCamera, HalfFloatType, Texture, WebGLCubeRenderTarget, InstancedMesh, Matrix4, MeshBasicMaterial, MeshStandardMaterial, Object3D, PlaneGeometry, PMREMGenerator, Quaternion, Scene, Vector3 } from 'three';
 import { blockCenter, DOOR_X } from '../../../shared/space/index.ts';
 import type { Bounds } from './Environment.tsx';
 import { runtime } from '../runtime.ts';
 import { poolTexture } from './textures.ts';
+import { compileScene } from './warmup.ts';
 
 // Pools of lamplight lie on the floor under every zone's lights: one additive decal each, all drawn together. They
 // are the cheap half of the room lighting; a couple of real point lights give the lobby its glow.
@@ -62,10 +63,17 @@ export const reflective = new Map<MeshStandardMaterial, number>();
 
 // The polished floors and the glass reflect the real room: one cube capture from the middle of the office, taken a few
 // frames after load once the scene is built, filtered into an environment map. Taken once, so it costs a single extra render.
+// Both steps are arranged so no draw waits for the GPU to link a program. Until the capture the materials carry the map of an
+// empty room, which adds no light but gives them the program they will use with the real one, so it links with the rest of the
+// office. Drawing into the cube needs programs of its own (a target is linear and not tone mapped), so the capture waits for
+// the GPU to link them while the office keeps drawing.
+const CAPTURE_SIZE = 256;
+
 function useRoomReflections(at: Vector3) {
-  const { gl, scene } = useThree();
-  const target = useRef<{ texture: Texture; dispose: () => void } | null>(null);
-  const frames = useRef(0);
+  const { gl, scene, camera } = useThree();
+  const room = useRef<{ texture: Texture; dispose: () => void } | null>(null);
+  const cube = useRef<WebGLCubeRenderTarget | null>(null);
+  const phase = useRef<'settling' | 'linking' | 'linked' | 'taken'>('settling');
   const apply = (texture: Texture | null) => {
     for (const [material, strength] of reflective) {
       material.envMap = texture;
@@ -73,28 +81,43 @@ function useRoomReflections(at: Vector3) {
       material.needsUpdate = true;
     }
   };
-  useFrame(() => {
-    if (target.current || ++frames.current < 90) return;
-    const cube = new WebGLCubeRenderTarget(256, { type: HalfFloatType });
-    const cam = new CubeCamera(0.1, 220, cube);
-    cam.position.copy(at);
-    apply(null);
-    cam.update(gl, scene);
+  useEffect(() => {
     const pmrem = new PMREMGenerator(gl);
-    const filtered = pmrem.fromCubemap(cube.texture);
+    room.current = pmrem.fromScene(new Scene(), 0, 0.1, 220, { size: CAPTURE_SIZE });
     pmrem.dispose();
-    cube.dispose();
-    target.current = filtered;
+    apply(room.current.texture);
+    return () => {
+      apply(null);
+      cube.current?.dispose();
+      room.current?.dispose();
+      room.current = null;
+    };
+  }, []);
+  useFrame(() => {
+    if (phase.current === 'settling' && gl.info.render.frame >= 90) {
+      phase.current = 'linking';
+      cube.current = new WebGLCubeRenderTarget(CAPTURE_SIZE, { type: HalfFloatType });
+      void compileScene(gl, scene, camera, cube.current).then(() => (phase.current = 'linked'));
+    }
+    if (phase.current !== 'linked' || !cube.current) return;
+    phase.current = 'taken';
+    const cam = new CubeCamera(0.1, 220, cube.current);
+    cam.position.copy(at);
+    // The sun's shadow map is the same from every face, and the last frame drew it, so the six faces reuse it instead of
+    // drawing every caster six more times.
+    const { autoUpdate } = gl.shadowMap;
+    gl.shadowMap.autoUpdate = false;
+    cam.update(gl, scene);
+    gl.shadowMap.autoUpdate = autoUpdate;
+    const pmrem = new PMREMGenerator(gl);
+    const filtered = pmrem.fromCubemap(cube.current.texture);
+    pmrem.dispose();
+    cube.current.dispose();
+    cube.current = null;
+    room.current?.dispose();
+    room.current = filtered;
     apply(filtered.texture);
   });
-  useEffect(
-    () => () => {
-      apply(null);
-      target.current?.dispose();
-      target.current = null;
-    },
-    [],
-  );
 }
 
 // Late afternoon sun through the windows. Its shadows are wide and soft, and the sky and bounce fill is strong enough that
