@@ -2,7 +2,7 @@ import { removeItemOp } from '../../../../shared/space/buildersGesture.ts';
 import { runtime } from '../../runtime.ts';
 import { get } from '../../store.ts';
 import { enterBuild, exitBuild, redo, rotate, sendOps, setLevel, setTool, undo } from './actions.ts';
-import { buildView } from './state.ts';
+import { buildView, modifiers } from './state.ts';
 
 export const PAN_KEYS: readonly string[] = ['KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'];
 
@@ -17,8 +17,8 @@ export function buildKey(e: KeyboardEvent): boolean {
     }
     return false;
   }
-  if (e.metaKey || e.ctrlKey) {
-    if (e.code === 'KeyZ') (e.shiftKey ? redo : undo)();
+  if (e.metaKey || e.ctrlKey || modifiers.ctrl) {
+    if (e.code === 'KeyZ') (e.shiftKey || modifiers.shift ? redo : undo)();
     else if (e.code === 'KeyY') redo();
     else return false;
     e.preventDefault();

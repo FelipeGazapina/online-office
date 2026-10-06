@@ -8,7 +8,7 @@ import { draft } from '../../hud/build/state.ts';
 import { useStore } from '../../store.ts';
 
 const RADIUS = 14;
-const MARGIN = 3;
+const MARGIN = 0;
 
 const vertex = /* glsl */ `
 varying vec2 vW;
@@ -32,9 +32,9 @@ void main() {
   float tileHalo = max(line(vW.x, 3.2), line(vW.y, 3.2));
   float hx = line(vW.x + 0.5, 0.9) * step(0.5, fract(vW.y * 4.0));
   float hz = line(vW.y + 0.5, 0.9) * step(0.5, fract(vW.x * 4.0));
-  float half = max(hx, hz);
+  float mid = max(hx, hz);
   float fade = 1.0 - smoothstep(uRadius * 0.3, uRadius, distance(vW, uCursor));
-  float core = max(tile, half * 0.55);
+  float core = max(tile, mid * 0.55);
   float a = max(core * 0.95, tileHalo * 0.22) * fade;
   vec3 col = mix(vec3(0.09, 0.1, 0.18), vec3(1.0), core);
   gl_FragColor = vec4(col, a);

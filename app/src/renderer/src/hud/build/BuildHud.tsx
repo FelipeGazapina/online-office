@@ -79,7 +79,7 @@ function TeamPick() {
   const tool = useStore((s) => s.build?.tool);
   const blocks = useStore((s) => s.company?.blocks);
   if (tool?.kind !== 'item' || !ITEM_DEFS[tool.def] || !blocks?.length) return null;
-  const teamed = tool.blockId !== null || ['bench_desk', 'po_desk', 'whiteboard', 'board_terminal', 'team_sign'].includes(tool.def);
+  const teamed = tool.blockId !== null || ['bench_desk', 'po_desk'].includes(tool.def);
   if (!teamed) return null;
   return (
     <label className="bh-team">
@@ -125,9 +125,9 @@ function Dock() {
           </label>
           <div className="bh-tabs" role="tablist">
             {TABS.map((t) => (
-              <button key={t.id} role="tab" aria-selected={!search && tab === t.id} className="bh-tab" onClick={() => selectTab(t.id)} title={t.label}>
+              <button key={t.id} role="tab" data-tab={t.id} aria-selected={!search && tab === t.id} className="bh-tab" onClick={() => selectTab(t.id)} title={t.label}>
                 <TabIcon tab={t.id} />
-                <span>{t.label}</span>
+                {!search && tab === t.id && <span>{t.label}</span>}
               </button>
             ))}
           </div>

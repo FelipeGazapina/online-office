@@ -1988,11 +1988,15 @@ html[data-building] .bottom,
 html[data-building] .camera-toggle {
   display: none;
 }
+/* Name tags stay in view but never catch the pointer, so a gesture under one still lands on the floor. */
+html[data-building] .labels,
+html[data-building] .labels * {
+  pointer-events: none !important;
+}
 .bh-top {
   position: absolute;
-  top: 14px;
-  left: 50%;
-  transform: translateX(-50%);
+  top: 76px;
+  left: 12px;
   display: flex;
   align-items: center;
   gap: 6px;

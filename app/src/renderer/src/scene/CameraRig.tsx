@@ -147,7 +147,7 @@ export function CameraRig() {
       const pan = buildView.keys;
       const ix = (pan.has('KeyD') || pan.has('ArrowRight') ? 1 : 0) - (pan.has('KeyA') || pan.has('ArrowLeft') ? 1 : 0) + buildView.edge.x;
       const iz = (pan.has('KeyS') || pan.has('ArrowDown') ? 1 : 0) - (pan.has('KeyW') || pan.has('ArrowUp') ? 1 : 0) + buildView.edge.z;
-      const reach = view.isoDist * 0.7 * dt;
+      const reach = view.isoDist * 0.3 * dt;
       const sy = Math.sin(view.yaw), cy = Math.cos(view.yaw);
       buildView.x += (-cy * ix - sy * iz) * reach;
       buildView.z += (sy * ix - cy * iz) * reach;
