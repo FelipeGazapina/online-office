@@ -8,7 +8,7 @@ import { runtime } from '../../runtime.ts';
 import { get, set, useStore } from '../../store.ts';
 import { walkTo } from '../../sim.ts';
 import { chairOf } from '../../world.ts';
-import { blobShadowTexture, ceilingTexture, codeTexture, plankTexture } from '../textures.ts';
+import { blobShadowTexture, ceilingTexture, codeTexture, plankTexture, wallAoTexture } from '../textures.ts';
 import { detail } from '../shading.ts';
 import { floorGeometry } from './floor.ts';
 import { chairModel, DEFAULT_TINT, DYNAMIC, modelOf, screenGeometry } from './models.ts';
@@ -37,6 +37,8 @@ const fixtureMaterial = new MeshBasicMaterial({ color: '#fff6dc', toneMapped: fa
 const fixtureGeometry = new BoxGeometry(1.3, 0.05, 0.5);
 const blobMaterial = new MeshBasicMaterial({ map: blobShadowTexture(), transparent: true, depthWrite: false, opacity: 0.55, polygonOffset: true, polygonOffsetFactor: -2 });
 const blobGeometry = new PlaneGeometry(1, 1).rotateX(-Math.PI / 2);
+const aoMaterial = new MeshBasicMaterial({ map: wallAoTexture(), transparent: true, depthWrite: false, opacity: 0.9, polygonOffset: true, polygonOffsetFactor: -1 });
+const aoGeometry = new PlaneGeometry(1, 1.1).rotateX(-Math.PI / 2);
 const NO_BLOB: ReadonlySet<string> = new Set(['rug', 'rail', 'stairs']);
 const CEILING_Y = STORY_H - 0.3;
 const screenMaterial = new MeshBasicMaterial({ map: codeTexture(), toneMapped: false });
@@ -161,6 +163,16 @@ function Walls({ geom }: { geom: FloorGeometry }) {
     if (curb.instanceColor) curb.instanceColor.needsUpdate = true;
   };
 
+  // Where each wall meets the floor, a soft shade on both sides of it. One draw for the whole story.
+  const shaded = useMemo(() => [...records.solid, ...records.window], [records]);
+  const fillAo = useMemo(
+    () => (mesh: InstancedMesh) => {
+      const m = new Matrix4();
+      shaded.forEach((r, i) => mesh.setMatrixAt(i, wallMatrix(r, m).setPosition(r.x, 0.016, r.z)));
+    },
+    [shaded],
+  );
+
   const ref = (key: Variant | 'curb' | 'glass' | 'frame') => (m: InstancedMesh | null) => void (refs.current[key] = m);
   return (
     <>
@@ -169,6 +181,7 @@ function Walls({ geom }: { geom: FloorGeometry }) {
       )}
       {records.window.length > 0 && <instancedMesh key={`glass${records.window.length}`} ref={ref('glass')} args={[glassModel(), glassMaterial, records.window.length]} frustumCulled={false} />}
       {records.window.length > 0 && <instancedMesh key={`frame${records.window.length}`} ref={ref('frame')} args={[frameModel(), frameMaterial, records.window.length]} frustumCulled={false} castShadow receiveShadow />}
+      <Instances geometry={aoGeometry} material={aoMaterial} count={shaded.length} fill={fillAo} castShadow={false} receiveShadow={false} />
       {curbCount > 0 && <instancedMesh key={`curb${curbCount}`} userData={{ wall: 'curb' }} ref={ref('curb')} args={[curbModel(), wallMaterial, curbCount]} frustumCulled={false} receiveShadow />}
     </>
   );

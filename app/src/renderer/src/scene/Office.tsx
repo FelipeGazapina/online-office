@@ -10,6 +10,7 @@ import { ownerSeat, worldFor, type World } from '../world.ts';
 import { LobbyDecor } from './Decor.tsx';
 import { Environment } from './Environment.tsx';
 import { Exterior } from './Exterior.tsx';
+import { LightPools, usePools } from './Lighting.tsx';
 import { Chair, Desk, RoundedPlane } from './Furniture.tsx';
 import { fitText, FONT_BODY, FONT_DISPLAY, roundRect, useCanvasTexture } from './textures.ts';
 
@@ -189,34 +190,40 @@ function MeetingRoom({ world }: { world: World }) {
   );
 }
 
-function Lights({ b }: { b: Bounds }) {
+function Lights({ b, slots }: { b: Bounds; slots: readonly number[] }) {
   const cx = (b.x0 + b.x1) / 2;
   const cz = (b.z0 + b.z1) / 2;
-  const ext = Math.max(b.x1 - b.x0, b.z1 - b.z0) * 0.62;
+  const ext = Math.max(b.x1 - b.x0, b.z1 - b.z0) * 0.66;
   const target = useMemo(() => new Object3D(), []);
   useEffect(() => {
     target.position.set(cx, 0, cz);
     target.updateMatrixWorld();
   }, [target, cx, cz]);
+  const pools = usePools(b, slots);
   return (
     <>
-      <hemisphereLight args={['#f4f6ff', '#bba383', 1.15]} />
+      <hemisphereLight args={['#cfdcff', '#c79f78', 0.95]} />
       <directionalLight
         target={target}
         castShadow
-        color="#fff0d6"
-        intensity={2.1}
-        position={[cx + 14, 26, cz + 12]}
-        shadow-mapSize={[1024, 1024]}
-        shadow-bias={-0.0005}
+        color="#ffd7a1"
+        intensity={2.7}
+        position={[cx + 34, 17, cz + 9]}
+        shadow-mapSize={[2048, 2048]}
+        shadow-bias={-0.0004}
         shadow-normalBias={0.03}
+        shadow-radius={3}
         shadow-camera-left={-ext}
         shadow-camera-right={ext}
         shadow-camera-top={ext}
         shadow-camera-bottom={-ext}
         shadow-camera-near={1}
-        shadow-camera-far={80}
+        shadow-camera-far={90}
       />
+      <pointLight position={[cx, 2.6, b.z1 - 3.5]} color="#ffb870" intensity={14} distance={16} decay={1.6} />
+      <pointLight position={[b.x1 - 4, 2.4, b.z1 - 3]} color="#ff9f5a" intensity={9} distance={11} decay={1.6} />
+      <pointLight position={[-14.5, 2.4, 5]} color="#ffb070" intensity={8} distance={10} decay={1.6} />
+      <LightPools pools={pools} />
       <primitive object={target} />
     </>
   );
@@ -235,7 +242,7 @@ export function Office({ company }: { company: Company | null }) {
   const b: Bounds = { x0: lot.x0, x1: lot.x0 + lot.w, z0: lot.z0, z1: lot.z0 + lot.h };
   return (
     <>
-      <Lights b={b} />
+      <Lights b={b} slots={(company?.blocks ?? []).map((bl) => bl.slot)} />
       <Environment b={b} />
       <Exterior b={b} />
       <CompanySign name={company?.name ?? 'Online Office'} b={b} />

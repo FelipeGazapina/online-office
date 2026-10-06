@@ -6,6 +6,7 @@ import { applyAll, emptyBuilding } from './story.ts';
 import { wrefKey } from './geom.ts';
 import type { Building, BuildOp, BlockId, EmployeeId, FloorCell, Item, ItemId, Lot, SpaceContext, WallSeg } from './types.ts';
 
+const OWNER_WALLS = 3;
 const MEETING = { x0: -18, x1: -11, z0: 2, z1: 8, doorZ: [4, 5] } as const;
 
 export type LegacyBlock = { id: BlockId; slot: number };
@@ -36,18 +37,35 @@ export function legacyBuilding(
     if (w.d === 'e' && band(w.x - lot.x0) && (w.z === lot.z0 || Math.abs(w.x - DOOR_X) > 3)) wall({ ...w, open: 'window' });
     if (w.d === 's' && band(w.z - lot.z0) && w.z < LOBBY_Z0 - 1) wall({ ...w, open: 'window' });
   }
+  // Each zone gets its own wall paint: a white street front, a brick lobby on the east side.
+  for (const w of [...walls.values()]) {
+    if (w.d === 'e' && w.z === lot.z0 + lot.h) wall({ ...w, style: 2 });
+    if (w.d === 's' && w.x === right && w.z >= LOBBY_Z0) wall({ ...w, style: 1 });
+  }
   const m = MEETING;
   for (let x = m.x0; x < m.x1; x++) {
-    wall({ x, z: m.z0, d: 'e', style: 0 });
-    wall({ x, z: m.z1, d: 'e', style: 0 });
+    wall({ x, z: m.z0, d: 'e', style: OWNER_WALLS });
+    wall({ x, z: m.z1, d: 'e', style: OWNER_WALLS });
   }
-  for (let z = m.z0; z < m.z1; z++) wall({ x: m.x1, z, d: 's', style: 0, ...((m.doorZ as readonly number[]).includes(z) ? { open: 'door' as const } : {}) });
+  for (let z = m.z0; z < m.z1; z++) wall({ x: m.x1, z, d: 's', style: OWNER_WALLS, ...((m.doorZ as readonly number[]).includes(z) ? { open: 'door' as const } : {}) });
 
   const cells: FloorCell[] = [];
-  for (let z = lot.z0; z < lot.z0 + lot.h; z++) for (let x = lot.x0; x < right; x++) cells.push({ x, z, half: 0, paint: PAINT.woodLight });
+  const bottom = lot.z0 + lot.h;
+  const inBox = (x: number, z: number, x0: number, x1: number, z0: number, z1: number) => x >= x0 && x < x1 && z >= z0 && z < z1;
+  // Floor by zone: the owner suite in dark wood, a tiled kitchen, a gray lounge, a stone entry, a tiled reception.
+  const zonePaint = (x: number, z: number) => {
+    if (inBox(x, z, m.x0, m.x1, m.z0, m.z1)) return PAINT.woodDark;
+    if (inBox(x, z, right - 8, right, bottom - 6, bottom - 3)) return PAINT.tileWhite;
+    if (inBox(x, z, right - 8, right, bottom - 3, bottom)) return PAINT.carpetGray;
+    if (inBox(x, z, DOOR_X - 3, DOOR_X + 3, bottom - 3, bottom)) return PAINT.concrete;
+    if (inBox(x, z, -4, 4, bottom - 3, bottom)) return PAINT.tileDark;
+    return PAINT.woodLight;
+  };
+  for (let z = lot.z0; z < bottom; z++) for (let x = lot.x0; x < right; x++) cells.push({ x, z, half: 0, paint: zonePaint(x, z) });
+  const rugPaints = [PAINT.carpetBlue, PAINT.carpetRed, PAINT.carpetGray];
   for (const b of blocks) {
     const r = rugTiles(b.slot);
-    for (let z = r.z0; z < r.z1; z++) for (let x = r.x0; x < r.x1; x++) cells.push({ x, z, half: 0, paint: PAINT.carpetBlue });
+    for (let z = r.z0; z < r.z1; z++) for (let x = r.x0; x < r.x1; x++) cells.push({ x, z, half: 0, paint: rugPaints[b.slot % rugPaints.length] });
   }
 
   const items: Item[] = [{ id: globalId('owner_desk', 0), def: 'owner_desk', x: -34, z: 9, rot: 1 }, ...plantItems(lot), ...meetingItems(lot)];
