@@ -3,7 +3,8 @@
 // and a click or a release sends exactly the ops the ghost was checked with.
 import { useThree } from '@react-three/fiber';
 import { useEffect } from 'react';
-import { checkOps, ITEM_DEFS, rectWalls, type Building, type BuildOp, type Item, type ItemId, type Vec2 } from '../../../../shared/space/index.ts';
+import { Vector3 } from 'three';
+import { checkOps, ITEM_DEFS, rectWalls, STORY_H, type Building, type BuildOp, type Item, type ItemId, type Vec2 } from '../../../../shared/space/index.ts';
 import {
   floodRoom,
   itemAt,
@@ -28,7 +29,8 @@ import { get, set, useStore, type BuildCursor, type BuildState } from '../../sto
 import { groundPoint, tileOf, vertexOf } from './Picking.ts';
 
 type Drag = { tool: 'wall' | 'room' | 'floor'; a: Vec2; erase: boolean; tiles: Map<string, Vec2>; flood: boolean; lastTile: Vec2 | null };
-type Plan = { ops: BuildOp[]; ghost: (ok: boolean) => Ghost | null; readout: string | null };
+// `anchor` pins the readout to a spot of the floor, like the edge being dragged, instead of the pointer.
+type Plan = { ops: BuildOp[]; ghost: (ok: boolean) => Ghost | null; readout: string | null; anchor?: Vec2 };
 type Verdict = { ok: boolean; text: string };
 
 const CLICK_PX = 5;
@@ -63,6 +65,7 @@ function plan(b: Building, build: BuildState, p: Vec2, drag: Drag | null, shift:
         ops: op ? [op] : [],
         ghost: (ok) => ({ kind: 'run', refs, start: drag.a, end: runEnd(drag.a, v), erase: drag.erase, ok }),
         readout: refs.length ? `${drag.erase ? 'Delete ' : ''}${refs.length} m` : null,
+        anchor: { x: (drag.a.x + runEnd(drag.a, v).x) / 2, z: (drag.a.z + runEnd(drag.a, v).z) / 2 },
       };
     }
     case 'room': {
@@ -71,7 +74,7 @@ function plan(b: Building, build: BuildState, p: Vec2, drag: Drag | null, shift:
       const rect = roomRect(drag.a, v);
       if (!rect) return { ops: [], ghost: () => ({ kind: 'vertex', at: v }), readout: null };
       const ops = drag.erase ? [wallOp(level, [], wallsToDelete(story, rectWalls(rect)))].filter((o): o is BuildOp => !!o) : roomOps(b, story, level, rect, build.style, build.paint || 1);
-      return { ops, ghost: (ok) => ({ kind: 'room', rect, ok }), readout: `${rect.w} × ${rect.h} m` };
+      return { ops, ghost: (ok) => ({ kind: 'room', rect, ok }), readout: `${rect.w} × ${rect.h} m`, anchor: { x: rect.x + (v.x > drag.a.x ? rect.w / 2 : rect.w / 2), z: v.z } };
     }
     case 'floor': {
       const here = tileOf(p);
@@ -142,6 +145,12 @@ export function BuildInput() {
       set({ buildCursor: next });
     };
 
+    const screenOf = (at: Vec2, level: number) => {
+      const r = el.getBoundingClientRect();
+      const p = new Vector3(at.x, level * STORY_H, at.z).project(camera);
+      return { x: r.left + ((p.x + 1) / 2) * r.width, y: r.top + ((1 - p.y) / 2) * r.height };
+    };
+
     const current = () => {
       const s = get();
       if (!s.build || !s.building || !last) return null;
@@ -170,7 +179,10 @@ export function BuildInput() {
         ghost = pl.ghost(v.ok);
         if (ghost) verdict = { ok: v.ok, text: v.text };
         const text = !v.ok ? v.text : pl.readout;
-        if (text && last) readout = { text, x: last.x, y: last.y, bad: !v.ok };
+        if (text && last) {
+          const spot = drag && pl.anchor ? screenOf(pl.anchor, build.level) : null;
+          readout = spot ? { text, x: spot.x, y: spot.y, bad: !v.ok, anchored: true } : { text, x: last.x, y: last.y, bad: !v.ok };
+        }
       }
       if (!ghost && build.tool.kind === 'select' && hover && story) {
         const item = story.items.find((i) => i.id === hover);

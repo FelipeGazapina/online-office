@@ -168,9 +168,18 @@ export default async function (s) {
   await clickSel('[data-tab="walls"]');
   await clickSel('[data-entry="room"]');
   assert((await ui(s)).tool.kind === 'room', 'the Room card puts the room tool in hand');
+  const activeBg = await s.eval(`getComputedStyle(document.querySelector('.bh-card[aria-pressed="true"]')).backgroundColor`);
+  assert(activeBg !== 'rgb(255, 255, 255)' && activeBg !== 'rgba(0, 0, 0, 0)', `the active tool card is filled (${activeBg})`);
+  await hover(rv.a.x, rv.a.z);
+  const startDot = await s.eval(`__office.probe('snap-dot')`);
+  assert(startDot.length === 1 && startDot[0].x === rv.a.x && startDot[0].z === rv.a.z, `before dragging, a snapping dot sits on the grid corner under the mouse (${startDot[0]?.x}, ${startDot[0]?.z})`);
   await dragTo(rv.a, rv.b, 0, async () => {
     const c = await cursor(s);
-    assert(c.readout?.text === '5 × 4 m', `mid-drag the cursor reads the room size (${c.readout?.text})`);
+    assert(c.readout?.text === '5 × 4 m' && c.readout.anchored === true, `mid-drag the room size reads on the edge being dragged (${c.readout?.text})`);
+    const edges = await s.eval(`[...document.querySelectorAll('[data-testid="edge-length"]')].map((e) => e.textContent.trim()).sort()`);
+    assert(edges.join('|') === '4 m|4 m|5 m|5 m', `and every edge of the room shows its length (${edges.join(', ')})`);
+    const corners = await s.eval(`__office.probe('corner-dot').length + __office.probe('snap-dot').length`);
+    assert(corners === 4, `with a dot on each of the four corners (${corners})`);
     await save(s, 's4-room-drag');
   });
   await waitBuilding(`b.stories[0].walls.length === ${before.stories[0].walls.length + 18}`, 'the room did not arrive');
@@ -231,6 +240,9 @@ export default async function (s) {
   const wallsBefore = (await building(s)).stories[0].walls.length;
   await dragTo({ x: room.x - 2, z: room.z - 1 }, { x: room.x + 2, z: room.z - 1 }, 0, async () => {
     assert((await cursor(s)).readout?.text === '4 m', 'mid-drag the wall tool reads its length: 4 m');
+    const label = await s.eval(`[...document.querySelectorAll('[data-testid="edge-length"]')].map((e) => e.textContent.trim())`);
+    assert(label.length === 1 && label[0] === '4 m', `and the wall carries its own length label (${label})`);
+    assert((await s.eval(`__office.probe('snap-dot').length`)) === 2, 'with a ring on its start and on its end');
   });
   await waitBuilding(`b.stories[0].walls.length === ${wallsBefore + 4}`, 'the wall did not arrive');
   assert(true, 'releasing the drag built four wall segments');

@@ -155,7 +155,7 @@ function Readout() {
   const r = useStore((s) => s.buildCursor.readout);
   if (!r) return null;
   return (
-    <div className={`bh-readout${r.bad ? ' bad' : ''}`} style={{ left: r.x + 18, top: r.y + 20 }} data-testid="build-readout">
+    <div className={`bh-readout${r.bad ? ' bad' : ''}${r.anchored ? ' anchored' : ''}`} style={r.anchored ? { left: r.x, top: r.y } : { left: r.x + 18, top: r.y + 20 }} data-testid="build-readout">
       {r.text}
     </div>
   );

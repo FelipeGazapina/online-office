@@ -2,9 +2,9 @@
 // tiles about to be painted, the wall about to get a door, or the furniture with its footprint and a front arrow.
 // Green means the building's own rules accept it, red means they do not. Nothing here decides; BuildInput does.
 import { useFrame } from '@react-three/fiber';
-import { Edges } from '@react-three/drei';
+import { Edges, Html } from '@react-three/drei';
 import { useMemo, useState } from 'react';
-import { BufferGeometry, DoubleSide, Float32BufferAttribute, MeshBasicMaterial, MeshStandardMaterial, RingGeometry, Shape } from 'three';
+import { BufferGeometry, CircleGeometry, DoubleSide, Float32BufferAttribute, MeshBasicMaterial, MeshStandardMaterial, RingGeometry, Shape } from 'three';
 import { ITEM_DEFS, STORY_H, WALL_HALF, YAW, footprint, rotateLocal, type Item, type Vec2 } from '../../../../shared/space/index.ts';
 import { draft, type Ghost } from '../../hud/build/state.ts';
 import { useStore } from '../../store.ts';
@@ -13,13 +13,19 @@ import { modelOf } from './models.ts';
 const GREEN = '#2fe06a';
 const RED = '#ff4d4d';
 const WHITE = '#ffffff';
+const DRAW = '#2d9cff';
 const tone = (ok: boolean) => (ok ? GREEN : RED);
 
 // The footprint and the arrow draw through walls and furniture: a ghost inside a room has to stay readable from outside.
 const basic = (color: string, opacity: number, depthTest = true) => new MeshBasicMaterial({ color, transparent: true, opacity, depthWrite: false, depthTest, side: DoubleSide });
 const MATERIALS = {
-  wall: basic(WHITE, 0.4),
+  wall: basic('#9fd0ff', 0.42),
   wallErase: basic(RED, 0.5),
+  cap: basic(DRAW, 1, false),
+  capRed: basic(RED, 1, false),
+  rail: basic(DRAW, 0.95, false),
+  railRed: basic(RED, 0.95, false),
+  dot: basic(WHITE, 1, false),
   wallGreen: basic(GREEN, 0.5),
   wallRed: basic(RED, 0.5),
   fillWhite: basic(WHITE, 0.28),
@@ -42,13 +48,53 @@ const XRAY_BAD = ghostModel(false, false);
 
 const T = WALL_HALF * 2 + 0.04;
 
-function WallBox({ a, b, material }: { a: Vec2; b: Vec2; material: MeshBasicMaterial }) {
+function WallBox({ a, b, material, bad = false }: { a: Vec2; b: Vec2; material: MeshBasicMaterial; bad?: boolean }) {
+  const len = Math.hypot(b.x - a.x, b.z - a.z);
+  const yaw = Math.atan2(-(b.z - a.z), b.x - a.x);
+  const mid: [number, number, number] = [(a.x + b.x) / 2, STORY_H / 2, (a.z + b.z) / 2];
+  return (
+    <>
+      <mesh position={mid} rotation-y={yaw} material={material} renderOrder={6}>
+        <boxGeometry args={[len + T, STORY_H, T]} />
+        <Edges color="#e8f4ff" threshold={20} />
+      </mesh>
+      <mesh position={[mid[0], STORY_H + 0.04, mid[2]]} rotation-y={yaw} material={bad ? MATERIALS.capRed : MATERIALS.cap} renderOrder={9}>
+        <boxGeometry args={[len + T + 0.06, 0.1, T + 0.1]} />
+      </mesh>
+    </>
+  );
+}
+
+/** A colored band flat on the floor along a wall's line: where the wall will stand, readable from any angle. */
+function Strip({ a, b, bad }: { a: Vec2; b: Vec2; bad: boolean }) {
   const len = Math.hypot(b.x - a.x, b.z - a.z);
   return (
-    <mesh position={[(a.x + b.x) / 2, STORY_H / 2, (a.z + b.z) / 2]} rotation-y={Math.atan2(-(b.z - a.z), b.x - a.x)} material={material} renderOrder={6}>
-      <boxGeometry args={[len + T, STORY_H, T]} />
-      <Edges color="white" threshold={20} />
+    <mesh position={[(a.x + b.x) / 2, 0.08, (a.z + b.z) / 2]} rotation={[-Math.PI / 2, 0, Math.atan2(b.z - a.z, b.x - a.x)]} material={bad ? MATERIALS.railRed : MATERIALS.rail} renderOrder={10}>
+      <planeGeometry args={[len + 0.2, 0.24]} />
     </mesh>
+  );
+}
+
+const dotGeo = new CircleGeometry(0.2, 20);
+const ringGeo = new RingGeometry(0.3, 0.4, 28);
+
+/** A corner dot, or with `ring` the snapping cursor: a ring around a dot on the grid vertex the pointer is closest to. */
+function Dot({ at, ring = false, bad = false }: { at: Vec2; ring?: boolean; bad?: boolean }) {
+  return (
+    <group position={[at.x, 0.1, at.z]} rotation-x={-Math.PI / 2}>
+      <mesh geometry={dotGeo} material={bad ? MATERIALS.railRed : MATERIALS.dot} renderOrder={13} userData={{ probe: ring ? 'snap-dot' : 'corner-dot', x: at.x, z: at.z }} />
+      {ring && <mesh geometry={ringGeo} material={bad ? MATERIALS.railRed : MATERIALS.rail} renderOrder={12} />}
+    </group>
+  );
+}
+
+function EdgeLabel({ a, b, meters, bad = false }: { a: Vec2; b: Vec2; meters: number; bad?: boolean }) {
+  return (
+    <Html position={[(a.x + b.x) / 2, 0.25, (a.z + b.z) / 2]} center zIndexRange={[20, 0]} style={{ pointerEvents: 'none' }}>
+      <div className={`bh-edge${bad ? ' bad' : ''}`} data-testid="edge-length">
+        {meters} m
+      </div>
+    </Html>
   );
 }
 
@@ -185,20 +231,38 @@ function ItemGhost({ item, ok, outline }: { item: Item; ok: boolean; outline: bo
 function Shown({ g }: { g: Ghost }) {
   switch (g.kind) {
     case 'vertex':
-      return <Post at={g.at} />;
-    case 'run': {
-      if (!g.refs.length) return <Post at={g.end} />;
-      const mat = g.erase || !g.ok ? MATERIALS.wallErase : MATERIALS.wall;
       return (
         <>
-          <WallBox a={g.start} b={g.end} material={mat} />
+          <Dot at={g.at} ring />
+          <Post at={g.at} />
+        </>
+      );
+    case 'run': {
+      if (!g.refs.length) {
+        return (
+          <>
+            <Dot at={g.end} ring />
+            <Post at={g.end} />
+          </>
+        );
+      }
+      const bad = g.erase || !g.ok;
+      const mat = bad ? MATERIALS.wallErase : MATERIALS.wall;
+      return (
+        <>
+          <Strip a={g.start} b={g.end} bad={bad} />
+          <WallBox a={g.start} b={g.end} material={mat} bad={bad} />
+          <Dot at={g.start} ring bad={bad} />
+          <Dot at={g.end} ring bad={bad} />
           <Post at={g.end} />
+          <EdgeLabel a={g.start} b={g.end} meters={g.refs.length} bad={bad} />
         </>
       );
     }
     case 'room': {
       const { x, z, w, h } = g.rect;
       const mat = g.ok ? MATERIALS.wall : MATERIALS.wallErase;
+      const bad = !g.ok;
       const a = { x, z };
       const b = { x: x + w, z };
       const c = { x: x + w, z: z + h };
@@ -206,10 +270,15 @@ function Shown({ g }: { g: Ghost }) {
       return (
         <>
           <Tiles tiles={Array.from({ length: w * h }, (_, i) => ({ x: x + (i % w), z: z + Math.floor(i / w) }))} material={g.ok ? MATERIALS.fillWhite : MATERIALS.fillRed} />
-          <WallBox a={a} b={b} material={mat} />
-          <WallBox a={b} b={c} material={mat} />
-          <WallBox a={c} b={d} material={mat} />
-          <WallBox a={d} b={a} material={mat} />
+          {[[a, b, w], [b, c, h], [c, d, w], [d, a, h]].map(([p, q, n]) => (
+            <group key={`${(p as Vec2).x},${(p as Vec2).z}`}>
+              <Strip a={p as Vec2} b={q as Vec2} bad={bad} />
+              <WallBox a={p as Vec2} b={q as Vec2} material={mat} bad={bad} />
+              <EdgeLabel a={p as Vec2} b={q as Vec2} meters={n as number} bad={bad} />
+            </group>
+          ))}
+          {[a, b, d].map((p) => <Dot key={`${p.x},${p.z}`} at={p} bad={bad} />)}
+          <Dot at={c} ring bad={bad} />
           <Post at={c} />
         </>
       );

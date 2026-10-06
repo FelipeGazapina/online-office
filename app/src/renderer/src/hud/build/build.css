@@ -311,8 +311,19 @@ html[data-building] .labels * {
 }
 .bh-card[aria-pressed='true'] {
   border-color: var(--moss);
-  background: #f2fbf6;
-  box-shadow: 0 0 0 3px rgba(47, 158, 110, 0.2);
+  background: var(--moss);
+  color: white;
+  box-shadow: 0 0 0 3px rgba(47, 158, 110, 0.25);
+}
+.bh-card[aria-pressed='true'] .bh-thumb {
+  color: white;
+}
+.bh-card[aria-pressed='true'] .bh-thumb img {
+  background: white;
+  border-radius: 10px;
+}
+.bh-card[aria-pressed='true'] .bh-sub {
+  color: rgba(255, 255, 255, 0.8);
 }
 .bh-swatch {
   width: 86px;
@@ -401,4 +412,27 @@ html[data-building] .labels * {
 .bh-turn:focus-visible {
   outline: 2px solid var(--moss);
   outline-offset: 2px;
+}
+.bh-readout.anchored {
+  transform: translate(-50%, -190%);
+  padding: 5px 12px;
+  font-size: 14px;
+  background: #1d7fe0;
+  box-shadow: 0 4px 14px rgba(24, 18, 44, 0.4), 0 0 0 2px white;
+}
+.bh-readout.anchored.bad {
+  background: var(--tomato);
+}
+.bh-edge {
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.92);
+  color: #1d5fa8;
+  font: 700 12px/1.4 var(--body);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  box-shadow: 0 1px 4px rgba(24, 18, 44, 0.3);
+}
+.bh-edge.bad {
+  color: #b8322f;
 }

@@ -44,7 +44,7 @@ export type BuildTool =
 export type WallsMode = 'up' | 'cutaway' | 'down';
 export type BuildState = { tool: BuildTool; tab: string; search: string; paint: PaintId; style: number; wallsMode: WallsMode; level: number };
 // What the pointer is over, for the tooltip next to it. `verdict` is the rule check of the ghost, null when there is no ghost.
-export type BuildCursor = { readout: { text: string; x: number; y: number; bad: boolean } | null; verdict: { ok: boolean; text: string } | null; hover: ItemId | null };
+export type BuildCursor = { readout: { text: string; x: number; y: number; bad: boolean; anchored?: boolean } | null; verdict: { ok: boolean; text: string } | null; hover: ItemId | null };
 
 export type LogLine = { line: string; at: number };
 // A post the owner just sent, shown at once. The mail view takes over when it carries the same `clientId` as its key.
