@@ -6,8 +6,9 @@ import { STAGE_LABEL, boardFor, boardsOf, columnsOf, fmtAgo, fmtClock, isRunning
 import { send, set, useStore } from '../../store.ts';
 import { useNow } from '../hooks.ts';
 import { actionOf, toneOf } from '../../deskDrop.ts';
-import { createTaskIn, dropOnDesk, moveTask, openBoard, pickBoard } from './actions.ts';
+import { dropOnDesk, moveTask, openBoard, pickBoard } from './actions.ts';
 import { Card } from './Card.tsx';
+import { Composer } from './Composer.tsx';
 import { Detail } from './Detail.tsx';
 import { useCardDrag } from './drag.ts';
 import { Alert, Close, Plus, Sliders, StageIcon, Sync, Whiteboard } from './icons.tsx';
@@ -31,36 +32,6 @@ function SyncStatus({ board, sync, now }: { board: Board; sync: BoardSync | unde
   );
 }
 
-// A card made inline. Enter saves it and the field stays for the next one; Esc or leaving it empty puts it away.
-function Composer({ board, stage, onDone }: { board: Board; stage: TaskStage; onDone: () => void }) {
-  const [text, setText] = useState('');
-  return (
-    <div className="tb-composer" data-testid="composer">
-      <input
-        autoFocus
-        className="tb-composer-input"
-        aria-label={`New task in ${STAGE_LABEL[stage]}`}
-        placeholder="Task title"
-        value={text}
-        onChange={(e) => setText(e.target.value)}
-        onBlur={() => !text.trim() && onDone()}
-        onKeyDown={(e) => {
-          if (e.key === 'Escape') {
-            e.stopPropagation();
-            onDone();
-          } else if (e.key === 'Enter' && !e.nativeEvent.isComposing) {
-            e.preventDefault();
-            if (!text.trim()) return;
-            createTaskIn(board, stage, text);
-            setText('');
-          }
-        }}
-      />
-      <small><kbd>Enter</kbd> adds · <kbd>Esc</kbd> cancels</small>
-    </div>
-  );
-}
-
 type ColumnProps = {
   column: Column;
   board: Board;
@@ -70,6 +41,7 @@ type ColumnProps = {
   selected: TaskId | undefined;
   times: ReturnType<typeof useStore.getState>['taskTime'];
   people: ReadonlyMap<EmployeeId, Employee>;
+  team: readonly Employee[];
   now: number;
   open: (task: Task) => void;
   compose: (stage: TaskStage | null) => void;
@@ -78,7 +50,7 @@ type ColumnProps = {
   onKey: (task: Task, stage: TaskStage, e: KeyboardEvent<HTMLElement>) => void;
 };
 
-function ColumnView({ column, board, composing, dragOver, dragging, selected, times, people, now, open, compose, press, wasDragged, onKey }: ColumnProps) {
+function ColumnView({ column, board, composing, dragOver, dragging, selected, times, people, team, now, open, compose, press, wasDragged, onKey }: ColumnProps) {
   return (
     <section className={`tb-col ${dragOver ? 'over' : ''}`} data-stage={column.stage} aria-label={`${column.label}, ${column.tasks.length} tasks`}>
       <header className="tb-col-head">
@@ -91,7 +63,7 @@ function ColumnView({ column, board, composing, dragOver, dragging, selected, ti
         </button>
       </header>
       <div className="tb-col-body">
-        {composing && <Composer board={board} stage={column.stage} onDone={() => compose(null)} />}
+        {composing && <Composer board={board} stage={column.stage} team={team} onDone={() => compose(null)} />}
         {column.tasks.map((task) => (
           <Card
             key={task.id}
@@ -321,6 +293,7 @@ export function TaskBoardModal({ blockId }: { blockId: BlockId }) {
                 selected={selected?.id}
                 times={times}
                 people={people}
+                team={team}
                 now={now}
                 open={open}
                 compose={setComposing}

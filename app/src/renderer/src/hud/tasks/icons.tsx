@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
 import type { TaskProvider } from '../../../../shared/protocol.ts';
-import type { Board, TaskStage } from '../../../../shared/tasks.ts';
+import type { Board, Priority, TaskStage } from '../../../../shared/tasks.ts';
 
 type P = { size?: number };
 const Svg = ({ size = 16, children, className }: P & { children: ReactNode; className?: string }) => (
@@ -63,3 +63,24 @@ export const Check = ({ size }: P) => <Svg size={size}><path d="M3.5 8.4l3 3 6-6
 export const Alert = ({ size }: P) => <Svg size={size}><path d="M8 2.2L14 13H2z" /><path d="M8 6.6v3M8 11.3v.2" /></Svg>;
 export const Whiteboard = ({ size }: P) => <Svg size={size}><rect x="2" y="2.5" width="12" height="8" rx="1.2" /><path d="M8 10.5v3M5.5 13.5h5" /></Svg>;
 export const Clock = ({ size }: P) => <Svg size={size}><circle cx="8" cy="8" r="5.6" /><path d="M8 4.8V8l2.1 1.4" /></Svg>;
+export const Notes = ({ size }: P) => <Svg size={size}><path d="M3 4.5h10M3 8h10M3 11.5h6" /></Svg>;
+export const Chevron = ({ size }: P) => <Svg size={size}><path d="M4.5 6.5L8 10l3.5-3.5" /></Svg>;
+
+// Bars for how pressing it is, the way a tracker draws it. Urgent is a red square with a mark. No priority is three faint bars.
+export function PriorityIcon({ priority, size = 15 }: P & { priority: Priority | undefined }) {
+  if (priority === 'urgent')
+    return (
+      <svg width={size} height={size} viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+        <rect x="1.5" y="1.5" width="13" height="13" rx="3.4" fill="#e5484d" />
+        <path d="M8 4.6v4.2M8 11.2v.1" stroke="#fff" strokeWidth="1.8" strokeLinecap="round" />
+      </svg>
+    );
+  const level = priority ? { high: 3, medium: 2, low: 1 }[priority] : 0;
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+      {[4, 7.5, 11].map((x, i) => (
+        <rect key={x} x={x - 1.4} y={11.5 - (i + 1) * 3.1} width="2.8" height={(i + 1) * 3.1} rx="0.9" fill={i < level ? '#2a2c47' : '#cfd0de'} />
+      ))}
+    </svg>
+  );
+}
