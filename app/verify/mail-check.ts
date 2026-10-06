@@ -110,7 +110,11 @@ console.log('\n# delegation and settling');
   ids(early.room.post(ask(PO, 'Ana', 'backend')));
   const refused = early.room.reply(PO, earlyRoot, { outcome: 'done', text: 'all shipped' });
   check(!refused.ok && refused.reason === 'open_children' && !replyTo(early, earlyRoot), 'a done reply is refused while a request the replier made is still open');
-  check(early.room.reply(PO, earlyRoot, { outcome: 'blocked', text: 'stuck' }).ok && replyTo(early, earlyRoot)?.outcome === 'blocked', 'a blocked reply is still allowed with open children');
+  const blockedEarly = early.room.reply(PO, earlyRoot, { outcome: 'blocked', text: 'stuck' });
+  check(!blockedEarly.ok && blockedEarly.reason === 'open_children' && !replyTo(early, earlyRoot), 'a blocked reply is refused while a request the replier made is still open (G2: PO replied blocked over an open piece)');
+  const earlyChild = [...early.room.state.unsettled].find((i) => early.room.state.messages.get(i)?.parentId === earlyRoot)!;
+  early.room.cancel(PO, earlyChild);
+  check(early.room.reply(PO, earlyRoot, { outcome: 'blocked', text: 'stuck' }).ok && replyTo(early, earlyRoot)?.outcome === 'blocked', 'a blocked reply goes through once the open request is cancelled explicitly');
   const late = world();
   const lateRoot = ids(late.room.post(owner('po', 'ship it')));
   ids(late.room.post(ask(PO, 'Ana', 'backend')));
@@ -298,6 +302,94 @@ console.log('\n# done means done');
   po.room.turnEnded(PO, 'CSV export shipped', true);
   const final = replyTo(po, root);
   check(final?.outcome === 'done' && final.artifact?.join() === 'api.ts,ui.tsx', 'the PO final reply carries the union of its children artifacts, no files of its own needed');
+}
+
+console.log('\n# a piece that came back blocked (G2)');
+{
+  // A README piece sent while the code it documents did not exist yet: the writer says blocked. Replying blocked to the owner
+  // over it ended three real runs with the README undone.
+  const w = world();
+  const root = ids(w.room.post(owner('po', 'ship slugify and document it')));
+  const code = ids(w.room.post(ask(PO, 'Ana', 'code')));
+  const docs = ids(w.room.post(ask(PO, 'Bruno', 'readme')));
+  w.room.turnEnded(PO, 'split', true);
+  w.room.turnEnded(ANA, 'code done', true);
+  w.room.reply(BRUNO, docs, { outcome: 'blocked', text: 'slug.js does not exist yet' });
+  w.room.turnEnded(BRUNO, 'slug.js does not exist yet', true);
+  check(replyTo(w, code)?.outcome === 'done' && replyTo(w, docs)?.outcome === 'blocked', 'setup: code done, readme blocked');
+  const done = w.room.reply(PO, root, { outcome: 'done', text: 'all shipped', artifact: ['out.txt'] });
+  check(!done.ok && done.reason === 'piece_blocked' && /Bruno/.test(done.detail ?? ''), 'a done reply is refused over a piece that came back blocked, naming who');
+  const giveUp = w.room.reply(PO, root, { outcome: 'blocked', text: 'readme blocked' });
+  check(!giveUp.ok && giveUp.reason === 'piece_blocked' && /new request to the same person/.test(giveUp.detail ?? ''), 'a blocked reply is refused until the piece was sent again once');
+  const again = w.room.post(ask(PO, 'Bruno', 'readme again, slug.js exists now'));
+  check(again.ok, 'sending the blocked piece to the same person again is allowed even though they hold a piece');
+  const midway = w.room.reply(PO, root, { outcome: 'done', text: 'all shipped' });
+  check(!midway.ok && midway.reason === 'open_children', 'the retry is an open request like any other');
+  w.room.turnEnded(BRUNO, 'readme done', true);
+  const finished = w.room.reply(PO, root, { outcome: 'done', text: 'all shipped' });
+  check(finished.ok && replyTo(w, root)?.outcome === 'done' && (replyTo(w, root)?.artifact?.length ?? 0) > 0, 'once the retry is done the PO settles done and its reply carries its children artifacts');
+
+  const stuck = world();
+  const sroot = ids(stuck.room.post(owner('po', 'ship it')));
+  ids(stuck.room.post(ask(PO, 'Ana', 'code')));
+  stuck.room.turnEnded(PO, 'split', true);
+  stuck.room.reply(ANA, requestIn(lastPrompt(stuck, ANA)), { outcome: 'blocked', text: 'cannot' });
+  stuck.room.turnEnded(ANA, 'cannot', true);
+  ids(stuck.room.post(ask(PO, 'Ana', 'code again')));
+  stuck.room.reply(ANA, requestIn(lastPrompt(stuck, ANA)), { outcome: 'blocked', text: 'still cannot' });
+  check(stuck.room.reply(PO, sroot, { outcome: 'blocked', text: 'Ana could not do it twice' }).ok, 'after the piece was sent again once and came back blocked, the PO may reply blocked');
+  const autoW = world();
+  const aroot = ids(autoW.room.post(owner('po', 'ship it')));
+  ids(autoW.room.post(ask(PO, 'Ana', 'code')));
+  autoW.room.turnEnded(PO, 'split', true);
+  autoW.room.reply(ANA, requestIn(lastPrompt(autoW, ANA)), { outcome: 'blocked', text: 'cannot' });
+  autoW.room.turnEnded(PO, 'all good', true);
+  check(replyTo(autoW, aroot)?.outcome === 'blocked', 'a turn that ends with a blocked piece unretried settles blocked, never done');
+}
+
+console.log('\n# stale waiting text (G2)');
+{
+  const w = world();
+  const root = ids(w.room.post(owner('po', 'ship it')));
+  ids(w.room.post(ask(PO, 'Ana', 'code')));
+  w.room.turnEnded(PO, 'split', true);
+  w.room.turnEnded(ANA, 'code done', true);
+  const stale = w.room.reply(PO, root, { outcome: 'blocked', text: 'Waiting for Ana to finish the code.' });
+  check(!stale.ok && stale.reason === 'still_waiting', 'a blocked reply that says it is waiting is refused when every request it made is settled');
+  w.fresh.add('out.txt');
+  const stillDone = w.room.reply(PO, root, { outcome: 'done', text: 'Ana is done, standing by for nothing else.', artifact: ['out.txt'] });
+  check(!stillDone.ok && stillDone.reason === 'still_waiting', 'a done reply that says it is waiting is refused even when every request it made is settled (G2: PO closed with "Waiting for Alex")');
+  check(w.room.reply(PO, root, { outcome: 'done', text: 'Ana is done and checked.', artifact: ['out.txt'] }).ok && replyTo(w, root)?.outcome === 'done', 'the same reply without waiting words settles done');
+  const lone = world();
+  const lroot = ids(lone.room.post(owner('ana', 'task')));
+  lone.room.turnEnded(ANA, 'Waiting for the build to finish.', true);
+  check(replyTo(lone, lroot)?.outcome === 'blocked', 'a worker with no children whose final text says waiting still settles blocked');
+}
+
+console.log('\n# pieces go to different people (G2)');
+{
+  const w = world();
+  ids(w.room.post(owner('po', 'ship it')));
+  ids(w.room.post(ask(PO, 'Ana', 'code')));
+  const second = w.room.post(ask(PO, 'Ana', 'docs'));
+  check(!second.ok && second.reason === 'bad_request' && /Bruno and Cleo have none/.test(second.detail) && /Send this one to Bruno/.test(second.detail), 'a second piece for the same person is refused while teammates have none, naming them');
+  check(w.room.post(ask(PO, 'Bruno', 'docs')).ok, 'the same piece to a teammate with none goes through');
+  const help = world();
+  ids(help.room.post(owner('po', 'ship it')));
+  ids(help.room.post(ask(PO, 'Ana', 'code')));
+  check(help.room.post({ from: PO, to: 'Ana', body: { kind: 'request', text: 'quick question', intent: 'help' } }).ok, 'a help question is not a piece');
+  const all = world();
+  ids(all.room.post(owner('po', 'ship it')));
+  ids(all.room.post(ask(PO, 'Ana', 'code')));
+  ids(all.room.post(ask(PO, 'Bruno', 'docs')));
+  ids(all.room.post(ask(PO, 'Cleo', 'tests')));
+  check(all.room.post(ask(PO, 'Ana', 'more')).ok, 'when everyone holds a piece a second one queues on a teammate as before');
+  const busy = world();
+  ids(busy.room.post(owner('po', 'ship it')));
+  ids(busy.room.post(ask(PO, 'Ana', 'code')));
+  busy.room.post(owner('bruno', 'something else'));
+  busy.room.post(owner('cleo', 'something else too'));
+  check(busy.room.post(ask(PO, 'Ana', 'docs')).ok, 'teammates already busy with other work do not count as free');
 }
 
 console.log('\n# hiring');
