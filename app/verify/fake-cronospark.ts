@@ -7,7 +7,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { z } from 'zod';
 
-export type FakeTask = { _id: string; code: string; title: string; status: string; priority?: number };
+export type FakeTask = { _id: string; code: string; title: string; status: string; priority?: number; url?: string };
 export type HoursRecord = { taskId: string; hours: number; date: string; description?: string };
 
 export async function startFakeCronoSpark(a: { tasks: FakeTask[] }) {

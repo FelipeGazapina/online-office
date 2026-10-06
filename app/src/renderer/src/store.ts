@@ -14,6 +14,7 @@ import type {
   UpdateState,
 } from '../../shared/protocol.ts';
 import type { Board, BoardId, BoardSync, Task, TaskId, TaskTime } from '../../shared/tasks.ts';
+import type { StageHolds } from './boardView.ts';
 import { emptyMailView, type MailView, type Message, type MessageId } from '../../shared/mail.ts';
 import type { Building, ItemId, PaintId, Rot, Vec2 } from '../../shared/space/index.ts';
 import type { Language, VoiceQuality } from '../../shared/voice.ts';
@@ -30,7 +31,7 @@ export const LANGS: Record<Lang, { stt: Language; tts: 'en-US' | 'pt-BR' }> = {
   // Whisper's json answer does not say which language it heard, so the employees keep an English voice.
   auto: { stt: 'auto', tts: 'en-US' },
 };
-export type Modal = null | { kind: 'hire'; bypassLimit?: boolean } | { kind: 'block' } | { kind: 'whiteboard'; blockId: BlockId } | { kind: 'github'; blockId: BlockId } | { kind: 'github_setup'; blockId: BlockId } | { kind: 'task_board'; blockId: BlockId; taskId?: TaskId } | { kind: 'linear_board'; blockId: BlockId };
+export type Modal = null | { kind: 'hire'; bypassLimit?: boolean } | { kind: 'block' } | { kind: 'whiteboard'; blockId: BlockId } | { kind: 'github'; blockId: BlockId } | { kind: 'github_setup'; blockId: BlockId } | { kind: 'task_board'; blockId: BlockId; taskId?: TaskId; settings?: boolean } | { kind: 'linear_board'; blockId: BlockId };
 
 // A whole block in hand: turned `quarter` quarter turns since it was picked up. `grab` is where the pointer holds it, in
 // cells from the middle of its bounding box, turned along with it so the block keeps hanging off the same point.
@@ -91,6 +92,9 @@ type State = Settings & {
   boardSync: Record<BoardId, BoardSync>;
   taskTime: Record<TaskId, TaskTime>;
   taskConnections: Record<'linear' | 'cronospark', TaskConnectionState>;
+  // Task screens only: the board each block shows, and stages the owner just chose that the snapshot has not confirmed yet.
+  boardPick: Record<string, BoardId>;
+  stageHold: StageHolds;
   logs: Record<string, LogLine[]>;
   // Chat panel: the request whose chain is open (null is the person's own thread), whether the composer targets the PO, and the details view.
   chatSub: MessageId | null;
@@ -143,6 +147,8 @@ export const useStore = create<State>()(() => ({
   boardSync: {},
   taskTime: {},
   taskConnections: { linear: { kind: 'needs_auth' }, cronospark: { kind: 'needs_auth' } },
+  boardPick: {},
+  stageHold: {},
   logs: {},
   chatSub: null,
   chatToPo: false,

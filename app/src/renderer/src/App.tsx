@@ -8,6 +8,7 @@ import { UpdateChip } from './hud/UpdateControl.tsx';
 import { ComputerMenu, MacPortal } from './hud/MacPortal.tsx';
 import { CameraToggle } from './hud/CameraToggle.tsx';
 import { Clock } from './hud/Clock.tsx';
+import { TasksChip } from './hud/tasks/TasksChip.tsx';
 import { ResizableHud } from './hud/ResizableHud.tsx';
 import { Scene } from './scene/Scene.tsx';
 import { useStore } from './store.ts';
@@ -29,6 +30,7 @@ export function App() {
       </div>
       <div className="hud" style={{ display: portalMode ? 'none' : undefined }}>
         <CameraToggle />
+        <TasksChip />
         <BuildHud />
         <ResizableHud itemKey="clock"><Clock /></ResizableHud>
         <ResizableHud itemKey="waiting-meter"><WaitingMeter /></ResizableHud>

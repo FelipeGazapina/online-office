@@ -4,7 +4,8 @@
 // routes planned on the nav grid, so the walls of the meeting room are in the way of employees as much as of the owner.
 import { Vector3 } from 'three';
 import type { BlockId, Company, Employee, EmployeeId } from '../../shared/protocol.ts';
-import { primaryBoard, sourcesOf, type Board } from '../../shared/tasks.ts';
+import type { Board, Task } from '../../shared/tasks.ts';
+import { blocksWithTasks } from './boardView.ts';
 import { announceArrival, cancelSpeech, LISTEN_RADIUS } from './audio.ts';
 import { KEYS_INTENT, runtime, STEER_KEYS, type AvatarRT, type OwnerIntent, type WalkGoal } from './runtime.ts';
 import { get, set, toast, waitingQueue } from './store.ts';
@@ -77,10 +78,11 @@ function fallbackSeat(world: World): SeatPose {
   };
 }
 
-export function taskBoardTarget(company: Company, boards: readonly Board[], world: World, pos: Vector3, floor: number): BlockId | null {
+export function taskBoardTarget(company: Company, boards: readonly Board[], tasks: readonly Task[], world: World, pos: Vector3, floor: number): BlockId | null {
   let nearest: { id: BlockId; distance: number } | undefined;
+  const withTasks = blocksWithTasks(boards, tasks);
   for (const block of company.blocks) {
-    if (!sourcesOf(primaryBoard(boards, block.id)).length && !block.linearBoardUrl) continue;
+    if (!withTasks.has(block.id) && !block.linearBoardUrl) continue;
     const board = whiteboardAt(world, block.id);
     if (!board || board.floor !== floor) continue;
     const distance = dist2(pos, board.at);
@@ -496,7 +498,7 @@ export function stepSim(rawDt: number) {
       const stand = terminalStand(world, block.id);
       return !!stand && stand.floor === runtime.owner.floor && dist2(runtime.owner.pos, stand.at) < 1.75;
     })?.id ?? null;
-  const nearTaskBoard = taskBoardTarget(company, state.boards, world, runtime.owner.pos, runtime.owner.floor);
+  const nearTaskBoard = taskBoardTarget(company, state.boards, state.tasks, world, runtime.owner.pos, runtime.owner.floor);
   const talkingTo = nearestInRange(company, state.talkingTo, nearbyIds);
   const story = runtime.owner.climb ? Math.min(runtime.owner.climb.from.floor, runtime.owner.climb.to.floor) : runtime.owner.floor;
 

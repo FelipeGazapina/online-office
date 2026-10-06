@@ -1,6 +1,6 @@
 // Helpers the end-to-end scripts share. They drive the built app through the CDP driver in cdp.mjs.
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, realpathSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -70,4 +70,35 @@ export async function diagnoseClaude(s, shotName) {
   const state = await s.eval(`JSON.stringify({ status: ${status}, activity: ${claude}.activity, logs: (__office.store.getState().logs[${claude}.id] ?? []).slice(-8).map(l => l.line) }, null, 1)`);
   console.log('employee at failure:', state);
   await s.shot(shotName);
+}
+
+// What a person reading company.mail.jsonl would work out, with no code of the app: for every turn that was handed a message
+// of these request chains, the time from its first delivery to its turn_end, per person. An open turn counts to now.
+export function wallTime(ledgerFile, rootIds, now = Date.now()) {
+  const lines = existsSync(ledgerFile) ? readFileSync(ledgerFile, 'utf8').split('\n').filter(Boolean) : [];
+  const rootOf = new Map();
+  const turns = new Map();
+  for (const line of lines) {
+    let e;
+    try {
+      e = JSON.parse(line);
+    } catch {
+      continue;
+    }
+    if (e.t === 'post') rootOf.set(e.msg.id, e.msg.rootId);
+    else if (e.t === 'deliver') {
+      const turn = turns.get(e.turn) ?? { to: e.to, start: e.at, end: null, roots: new Set() };
+      turns.set(e.turn, turn);
+      for (const id of e.ids) turn.roots.add(rootOf.get(id));
+    } else if (e.t === 'turn_end') {
+      const turn = turns.get(e.turn);
+      if (turn && turn.end === null) turn.end = e.at;
+    }
+  }
+  const total = {};
+  for (const turn of turns.values()) {
+    if (![...turn.roots].some((r) => rootIds.includes(r))) continue;
+    total[turn.to] = (total[turn.to] ?? 0) + ((turn.end ?? now) - turn.start);
+  }
+  return total;
 }
