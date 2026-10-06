@@ -250,7 +250,7 @@ function MeetingRoom({ world }: { world: World }) {
         <boxGeometry args={along === 'z' ? [0.12, 2.5, span * 2] : [span * 2, 2.5, 0.12]} />
         <meshStandardMaterial color={doorOpen ? '#63b996' : '#d95d63'} roughness={0.72} transparent opacity={doorOpen ? 0.42 : 0.92} />
       </mesh>
-      <Html position={[doorAt.x - (along === 'z' ? 0.2 : 0), 2.75, doorAt.z]} rotation-y={along === 'z' ? Math.PI / 2 : 0} transform pointerEvents="none">
+      <Html position={[doorAt.x - (along === 'z' ? 0.2 : 0), 2.75, doorAt.z]} rotation-y={along === 'z' ? Math.PI / 2 : 0} transform scale={0.55} pointerEvents="none">
         <div className={`meeting-door-label ${doorOpen ? 'open' : 'closed'}`}>
           <b>Meeting room</b>
           <span>{doorOpen ? 'OPEN · E to close' : 'CLOSED · E to open'}</span>

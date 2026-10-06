@@ -11,7 +11,11 @@ import { STORY_H } from '../../../shared/space/index.ts';
 
 const ISO_PITCH = 0.58;
 const FOV_ISO = 26;
-const FOV_FIRST = 70;
+const FOV_FIRST = 65;
+// Where the head points on entering first person: a little below level, so the ceiling does not take a third of the frame.
+const FP_PITCH = -0.1;
+// The live camera opens at a Sims-like mid zoom: the owner's room and its neighbors fill the frame. The wheel still zooms out to the whole plan.
+const ISO_START = 27;
 const EYE = 1.6;
 // Seconds the camera takes to fly between the overview and the owner's eyes.
 const FLIGHT = 0.8;
@@ -41,6 +45,8 @@ export function CameraRig() {
   const locked = useRef(false);
   const scratch = useRef({ iso: new Vector3(), isoPos: new Vector3(), isoLook: new Vector3(), eye: new Vector3(), eyeLook: new Vector3(), look: new Vector3(), want: new Vector3() });
 
+  useEffect(() => { runtime.view.isoDist = ISO_START; }, []);
+
   useEffect(() => {
     const { view } = runtime;
     if (mode === 'iso') {
@@ -48,7 +54,7 @@ export function CameraRig() {
       // Land the overview on a 90 degree step, the way Q and E do, so it never rests crooked.
       view.isoYawTarget = Math.round((view.yaw + (3 * Math.PI) / 4) / (Math.PI / 2)) * (Math.PI / 2) - (3 * Math.PI) / 4;
     } else {
-      view.fpPitch = 0;
+      view.fpPitch = FP_PITCH;
       view.isoYawTarget = view.yaw;
     }
   }, [gl, mode]);
