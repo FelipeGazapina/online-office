@@ -65,6 +65,11 @@ export default async (s) => {
   await s.eval('__office.teleport(-8, -6.4, Math.PI)');
   await s.sleep(2500);
   await save(s, 'close-working');
+  await zoomBy(s, -1200);
+  await s.eval('__office.teleport(-12, -4.7, Math.PI)');
+  await s.sleep(2500);
+  await save(s, 'people-closeup');
+  await zoomBy(s, 1200);
   await zoomBy(s, 1200);
   await s.eval('__office.teleport(-10.4, 4.6, Math.PI)');
   await s.sleep(2500);

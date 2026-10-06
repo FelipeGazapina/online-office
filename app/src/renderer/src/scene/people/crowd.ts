@@ -8,8 +8,12 @@ export type Joints = {
   head: Object3D;
   armL: Object3D;
   armR: Object3D;
+  elbowL: Object3D;
+  elbowR: Object3D;
   legL: Object3D;
   legR: Object3D;
+  kneeL: Object3D;
+  kneeR: Object3D;
 };
 
 // What the instanced renderer needs to draw one person. Person owns the entry for as long as it is mounted.
