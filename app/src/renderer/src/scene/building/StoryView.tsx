@@ -44,7 +44,7 @@ const frameMaterial = new MeshStandardMaterial({ vertexColors: true, roughness: 
 const railMaterial = new MeshStandardMaterial({ color: '#c9cdd8', roughness: 0.5, metalness: 0.3 });
 const ceilingMap = ceilingTexture();
 ceilingMap.repeat.set(6.5, 6.5);
-const ceilingMaterial = new MeshStandardMaterial({ map: ceilingMap, roughness: 0.95, side: BackSide, color: '#cdbfae', emissive: '#fff0d8', emissiveIntensity: 0.22 });
+const ceilingMaterial = new MeshStandardMaterial({ map: ceilingMap, roughness: 0.95, side: BackSide, color: '#e6d8c4', emissive: '#fff0d8', emissiveIntensity: 0.14 });
 const slabMaterial = new MeshStandardMaterial({ color: '#cdbfa9', roughness: 0.95 });
 const fixtureMaterial = new MeshBasicMaterial({ vertexColors: true, toneMapped: false });
 // A pendant: a dark cross beam on the ceiling, a cord, a brass drum shade and the glowing disc inside it.

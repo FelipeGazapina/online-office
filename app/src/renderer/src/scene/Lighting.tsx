@@ -8,7 +8,7 @@ import { poolTexture } from './textures.ts';
 
 // Pools of lamplight lie on the floor under every zone's lights: one additive decal each, all drawn together. They
 // are the cheap half of the room lighting; a couple of real point lights give the lobby its glow.
-const poolMaterial = new MeshBasicMaterial({ map: poolTexture(), transparent: true, depthWrite: false, blending: AdditiveBlending, opacity: 0.16, fog: false, polygonOffset: true, polygonOffsetFactor: -3 });
+const poolMaterial = new MeshBasicMaterial({ map: poolTexture(), transparent: true, depthWrite: false, blending: AdditiveBlending, opacity: 0.24, fog: false, polygonOffset: true, polygonOffsetFactor: -3 });
 const poolGeometry = new PlaneGeometry(1, 1).rotateX(-Math.PI / 2);
 const q = new Quaternion();
 const m = new Matrix4();
@@ -98,17 +98,17 @@ export function Lights({ b, slots }: { b: Bounds; slots: readonly number[] }) {
   const pools = usePools(b, slots);
   return (
     <>
-      <hemisphereLight args={['#c3d2f0', '#d3a273', 0.95]} />
+      <hemisphereLight args={['#b9cdf2', '#caa27a', 0.62]} />
       <directionalLight
         target={target}
         castShadow
-        color="#ffc88a"
-        intensity={3.0}
+        color="#ffc98c"
+        intensity={4.6}
         position={[cx + 38, 12, cz + 14]}
         shadow-mapSize={[2048, 2048]}
         shadow-bias={-0.0004}
         shadow-normalBias={0.03}
-        shadow-radius={5}
+        shadow-radius={2.5}
         shadow-camera-left={-ext}
         shadow-camera-right={ext}
         shadow-camera-top={ext}

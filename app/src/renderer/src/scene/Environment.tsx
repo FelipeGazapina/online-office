@@ -263,7 +263,7 @@ export function Environment({ b }: { b: Bounds }) {
   const grass = useMemo(() => grassTexture(), []);
   const pavers = useMemo(() => paverTexture(), []);
   const g = useMemo(() => garden(b), [b.x0, b.x1, b.z0, b.z1]);
-  const grassMat = useMemo(() => new MeshStandardMaterial({ map: grass, roughness: 1, vertexColors: true }), [grass]);
+  const grassMat = useMemo(() => new MeshStandardMaterial({ map: grass, roughness: 1, vertexColors: true, emissive: '#ffffff', emissiveMap: grass, emissiveIntensity: 0.22 }), [grass]);
   const ground = useMemo(() => groundGeometry(b), [b.x0, b.x1, b.z0, b.z1]);
   const edgingMat = useMemo(() => new MeshStandardMaterial({ vertexColors: true, roughness: 0.9 }), []);
   const apron = useMemo(() => {
