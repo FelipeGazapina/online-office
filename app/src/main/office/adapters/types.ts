@@ -98,6 +98,9 @@ export interface EmployeeSession {
   // `session/prompt` during a turn). With no turn running, put it in front of the next task. With no harness process
   // running, do nothing, because the next start reads `host.rules()`.
   rulesChanged(text: string): void;
+  // Start the harness process now, so the first `assign` does not pay for it. Optional, and a no-op when it is running.
+  // A process that dies while only warm is not an error: the next `assign` starts a new one.
+  warm?(): void;
   stop(): void;
 }
 

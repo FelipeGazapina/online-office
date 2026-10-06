@@ -49,6 +49,7 @@ import { mailTools } from './mail-tools.ts';
 import type { OfficeMcp } from './mcp.ts';
 import type { MemoryStore } from './memory.ts';
 import { TaskBoardService } from './task-board.ts';
+import { trace } from './trace.ts';
 
 const XP_PER_TASK = 10;
 const XP_PER_QUICK_ANSWER = 3;
@@ -332,6 +333,7 @@ export class Office {
         e.activity = 'Back from a break (app restarted)';
       }
       this.startSession(e);
+      if (e.role === 'orchestrator') this.sessionOf(e).warm?.();
     }
     save(dataFile, this.company, this.building);
     for (const block of this.company.blocks) if (block.taskBoard?.sources.length) void this.refreshTaskBoard(block.id);
@@ -389,6 +391,7 @@ export class Office {
   // A turn starts. The prompt is the chat transcript of what is waiting. A missing folder throws, and the mailroom settles those requests failed.
   private deliver(id: EmployeeId, prompt: string, title: string) {
     const e = this.employee(id);
+    trace(id, 'deliver');
     try {
       this.assertFolderExists(e);
     } catch (err) {
@@ -402,7 +405,9 @@ export class Office {
     }
     delete e.completedAt;
     this.lastSaid.delete(id);
-    this.sessionOf(e).assign(this.syncNote(e) + prompt, title);
+    const note = this.syncNote(e);
+    trace(id, 'assign');
+    this.sessionOf(e).assign(note + prompt, title);
   }
 
   // Every request starts from the block's latest integrated work. A conflict is left in the worktree and told to the employee.
@@ -538,6 +543,7 @@ export class Office {
   }
 
   private postFromOwner(msg: Extract<ClientMessage, { type: 'post' }>) {
+    trace(msg.clientId, 'post_received');
     const target = this.mail.resolve('owner', msg.to, msg.blockId);
     if (!target.ok) throw new OfficeError(target.detail);
     if (target.id === 'owner' || target.id === 'mailroom') throw new OfficeError('Pick someone on a block to talk to.');
@@ -855,6 +861,7 @@ export class Office {
     };
     company.employees.push(employee);
     this.startSession(employee);
+    this.sessions.get(employee.id)?.warm?.();
     this.commit();
     return employee;
   }
@@ -1045,6 +1052,7 @@ export class Office {
     e.activity = 'Started a fresh session';
     this.events.log(id, 'Started a fresh session', Date.now());
     this.startSession(e);
+    this.sessionOf(e).warm?.();
     // What it was serving is over. Anything queued behind goes to the new session.
     this.mail.turnEnded(id, 'The session was restarted before this finished.', false);
     this.commit();
