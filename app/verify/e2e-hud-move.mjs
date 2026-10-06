@@ -82,11 +82,11 @@ export default async (s, { launch }) => {
   assert(!overlaps(gripBox, home), `the grip overlaps no panel pixel (grip ${gripBox.left.toFixed(0)},${gripBox.top.toFixed(0)} panel ${home.left.toFixed(0)},${home.top.toFixed(0)})`);
   assert(await s.eval(`document.elementFromPoint(${home.left + 4}, ${home.top + 4})?.closest('.clock-bar') !== null`), 'the panel corner is still clickable while the grip shows');
   assert((await s.eval(`document.querySelector('[aria-label="Move World clock"]').dataset.side`)) !== 'inside', 'the grip finds a gutter beside the clock');
-  // An instant tooltip, not the slow native title.
-  const tip = await s.eval(`(() => { const e = document.querySelector('[aria-label="Move World clock"]'); const a = getComputedStyle(e, '::after'); return { title: e.hasAttribute('title'), content: a.content, opacity: a.opacity }; })()`);
-  await s.sleep(150);
-  const tip2 = await s.eval(`(() => { const a = getComputedStyle(document.querySelector('[aria-label="Move World clock"]'), '::after'); return { content: a.content, opacity: a.opacity }; })()`);
-  assert(!tip.title && tip2.content === '"Drag to move · double-click to reset"' && tip2.opacity === '1', `hovering the grip shows the short tooltip (${tip2.content}, ${tip2.opacity})`);
+  // An instant tooltip, not the slow native title: no title attribute, and a fade of under 100 ms with no delay. The fade
+  // runs on the page clock, so the script waits for it to end instead of reading it a fixed time after the hover.
+  const tip = await s.eval(`(() => { const e = document.querySelector('[aria-label="Move World clock"]'); const a = getComputedStyle(e, '::after'); return { title: e.hasAttribute('title'), content: a.content, fade: parseFloat(a.transitionDuration), delay: parseFloat(a.transitionDelay) }; })()`);
+  await s.waitFor(`getComputedStyle(document.querySelector('[aria-label="Move World clock"]'), '::after').opacity === '1'`, 4000);
+  assert(!tip.title && tip.content === '"Drag to move · double-click to reset"' && tip.fade <= 0.1 && tip.delay === 0, `hovering the grip shows the short tooltip at once (${tip.content}, fade ${tip.fade}s, delay ${tip.delay}s)`);
   await shoot(s, 'hud-move-tooltip');
 
   // The gap between panel and grip is bridged, and the grip waits a moment before hiding, so overshooting is safe.
@@ -96,10 +96,18 @@ export default async (s, { launch }) => {
   await s.mouse('mouseMoved', gapPoint.x, gapPoint.y);
   await s.sleep(250);
   assert((await gripState(s, 'World clock')) === 'peek', 'crossing the gap between panel and grip keeps the grip');
+  // The grace is a page timer, so it is read on the page clock: a call over the DevTools socket that a busy machine holds up
+  // for more than 150 ms would see the grip hidden even though the page waited the full grace.
+  await s.eval(`(() => {
+    const grip = document.querySelector('[aria-label="Move World clock"]');
+    window.__grace = { leftAt: 0, hiddenAt: 0 };
+    document.addEventListener('pointermove', () => { window.__grace.leftAt = performance.now(); window.__grace.hiddenAt = 0; }, { capture: true });
+    new MutationObserver(() => { if (grip.dataset.moveState === 'idle' && !window.__grace.hiddenAt) window.__grace.hiddenAt = performance.now(); }).observe(grip, { attributes: true, attributeFilter: ['data-move-state'] });
+  })()`);
   await s.mouse('mouseMoved', 640, 560);
-  await s.sleep(60);
-  assert((await gripState(s, 'World clock')) === 'peek', 'the grip waits a moment after the pointer leaves');
   await waitGrip(s, 'World clock', 'idle');
+  const grace = await s.eval('window.__grace');
+  assert(grace.hiddenAt - grace.leftAt >= 145, `the grip waits a moment after the pointer leaves (${(grace.hiddenAt - grace.leftAt).toFixed(0)} ms on the page clock, grace 150)`);
   // Hovering the resize corner shows the move grip too: they read as one family.
   const corner = await grip(s, 'Resize', 'World clock');
   await s.mouse('mouseMoved', home.left + home.width / 2, home.top + home.height / 2);
@@ -251,15 +259,19 @@ export default async (s, { launch }) => {
   // A dialog on top of the scrim: its grip is reachable and the drag does not dismiss it.
   await reopened.eval(`__office.store.setState({ helpOpen: true })`);
   await reopened.waitFor(`document.querySelector('[aria-label="Move Help dialog"]') !== null`);
-  await reopened.sleep(600);
+  // The dialog slips in over 0.3 s of page time, and a busy page starts that late, so its home is read once no animation runs.
+  await reopened.waitFor(`document.querySelector('.modal.help').getAnimations().length === 0`, 8000);
   const dialogHome = await rect(reopened, '.modal.help');
   const dialogAt = await reach(reopened, 'Help dialog', '.modal.help');
   const onTop = await reopened.eval(`document.elementFromPoint(${dialogAt.x}, ${dialogAt.y})?.closest('[aria-label="Move Help dialog"]') !== null`);
   assert(onTop, 'the dialog grip sits above the scrim');
-  await dragBy(reopened, dialogAt, 180, 90);
+  // The clamp keeps a dialog inside the window, so a drag asks only for the room the dialog has left under it.
+  const dialogDy = Math.floor(Math.min(90, 800 - MARGIN - dialogHome.bottom));
+  assert(dialogDy >= 40, `the help dialog leaves room to drag it (${dialogDy}px below it)`);
+  await dragBy(reopened, dialogAt, 180, dialogDy);
   await settle(reopened);
   const dialogMoved = await rect(reopened, '.modal.help');
-  assert(near(dialogMoved.left, dialogHome.left + 180) && near(dialogMoved.top, dialogHome.top + 90), `the dialog moves with its grip (${(dialogMoved.left - dialogHome.left).toFixed(1)}, ${(dialogMoved.top - dialogHome.top).toFixed(1)})`);
+  assert(near(dialogMoved.left, dialogHome.left + 180) && near(dialogMoved.top, dialogHome.top + dialogDy), `the dialog moves with its grip (${(dialogMoved.left - dialogHome.left).toFixed(1)}, ${(dialogMoved.top - dialogHome.top).toFixed(1)} of 180, ${dialogDy})`);
   assert(await reopened.eval(`__office.store.getState().helpOpen === true`), 'dragging the dialog grip does not dismiss it');
   await shoot(reopened, 'hud-move-dialog');
   await reopened.eval(`__office.store.setState({ helpOpen: false })`);

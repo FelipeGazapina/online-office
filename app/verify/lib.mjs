@@ -31,6 +31,44 @@ export async function sceneReady(s, quietMs = 2500) {
   await s.waitFor(`performance.now() - window.__lastStall > ${quietMs} && (__office.state().owner.x !== 0 || __office.state().owner.z !== 0)`, 30000);
 }
 
+// A click acts on the first clickable thing at its pixel (a desk top, the new-project lot, a sign), so a hard-coded world
+// point can sit under one and start no walk. This returns the floor point nearest the screen center whose pixel and the four
+// pixels half a meter around it all raycast to bare floor, so a small camera shift keeps it floor. `min` and `max` bound the
+// distance from the owner, `bends` the waypoints of the route to it, `margin` how far inside the viewport the pixel is.
+export async function findFloorClick(s, { min = 0, max = 10, bends = 1, margin = 60 } = {}) {
+  const found = await s.eval(`(() => {
+    const { owner } = __office.state();
+    const y = owner.floor * 3.2;
+    const w = innerWidth;
+    const h = innerHeight;
+    const floorAt = (x, z) => {
+      const at = __office.project(x, y, z);
+      if (at.x < ${margin} || at.y < ${margin} || at.x > w - ${margin} || at.y > h - ${margin}) return null;
+      if (document.elementFromPoint(at.x, at.y)?.tagName !== 'CANVAS') return null;
+      const hit = __office.pick(at.x, at.y);
+      if (hit.kind !== 'floor' || Math.hypot(hit.point.x - x, hit.point.z - z) > 0.25 || !hit.walk) return null;
+      return { at, hit };
+    };
+    let best = null;
+    for (let dx = -${max}; dx <= ${max}; dx += 0.5) {
+      for (let dz = -${max}; dz <= ${max}; dz += 0.5) {
+        const away = Math.hypot(dx, dz);
+        if (away < ${min} || away > ${max}) continue;
+        const x = owner.x + dx;
+        const z = owner.z + dz;
+        const here = floorAt(x, z);
+        if (!here || here.hit.walk.waypoints < ${bends}) continue;
+        if (![[0.5, 0], [-0.5, 0], [0, 0.5], [0, -0.5]].every(([ax, az]) => floorAt(x + ax, z + az))) continue;
+        const off = Math.hypot(here.at.x - w / 2, here.at.y - h / 2);
+        if (!best || off < best.off) best = { x, z, off, away, waypoints: here.hit.walk.waypoints };
+      }
+    }
+    return best;
+  })()`);
+  if (!found) throw new Error(`no floor point to click: none within ${min} to ${max} m of the owner is clear floor in the viewport with a route of ${bends} waypoints or more`);
+  return found;
+}
+
 // A data dir for the app and a git repo for the block. realpath so the path equals the canonical one the app stores
 // (macOS tmp is a symlink).
 export function scratch() {
