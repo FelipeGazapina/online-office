@@ -186,10 +186,10 @@ export function LobbyDecor({ cx, z1, right, doorX }: DecorSpec) {
 // Behind the whiteboard: a walnut slat wall with two framed pictures, so the board stands against a finished wall and not against glass.
 function boardWall(): BufferGeometry[] {
   const z = -4.45;
-  const out: BufferGeometry[] = [box(7.2, 3.0, 0.04, 0.25, 1.5, z - 0.02, '#4a3624'), box(7.3, 0.08, 0.1, 0.25, 3.02, z - 0.05, '#2b2e38'), box(7.3, 0.1, 0.1, 0.25, 0.05, z - 0.05, '#2b2e38')];
+  const out: BufferGeometry[] = [box(6.4, 2.8, 0.04, 0.25, 1.4, z - 0.02, '#7a5a3e'), box(6.5, 0.08, 0.1, 0.25, 2.84, z - 0.05, '#2b2e38'), box(6.5, 0.1, 0.1, 0.25, 0.05, z - 0.05, '#2b2e38')];
   const tones = ['#c08a5a', '#b27a4c', '#cb9768', '#a96f42'];
-  for (let i = 0; i < 46; i++) out.push(box(0.09, 2.88, 0.06 + (i % 3) * 0.015, 0.25 - 3.45 + i * 0.15, 1.5, z - 0.07, tones[i % 4]));
-  out.push(...art(-2.95, 1.7, z + 0.02, 0.8, 1.1, 1, 2), ...art(3.45, 1.7, z + 0.02, 0.8, 1.1, 1, 3));
+  for (let i = 0; i < 42; i++) out.push(box(0.09, 2.7, 0.06 + (i % 3) * 0.015, 0.25 - 3.1 + i * 0.15, 1.4, z - 0.07, tones[i % 4]));
+  out.push(...art(-2.65, 1.7, z + 0.02, 0.6, 0.9, 1, 2), ...art(3.15, 1.7, z + 0.02, 0.6, 0.9, 1, 3));
   return out;
 }
 
