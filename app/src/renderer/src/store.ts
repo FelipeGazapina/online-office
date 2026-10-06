@@ -5,6 +5,7 @@ import type {
   Company,
   Employee,
   EmployeeId,
+  EmployeeRole,
   HarnessStatus,
   InterruptStyle,
   MeetingDoor,
@@ -32,7 +33,14 @@ export const LANGS: Record<Lang, { stt: Language; tts: 'en-US' | 'pt-BR' }> = {
   // Whisper's json answer does not say which language it heard, so the employees keep an English voice.
   auto: { stt: 'auto', tts: 'en-US' },
 };
-export type Modal = null | { kind: 'hire'; bypassLimit?: boolean } | { kind: 'block' } | { kind: 'whiteboard'; blockId: BlockId } | { kind: 'github'; blockId: BlockId } | { kind: 'github_setup'; blockId: BlockId } | { kind: 'task_board'; blockId: BlockId; taskId?: TaskId; settings?: boolean } | { kind: 'linear_board'; blockId: BlockId };
+// A hire opened by dropping a task on an empty desk: the block and the desk are the owner's choice already, the desk says the
+// role, and the new hire starts the task.
+export type HireFor = { taskId: TaskId; blockId: BlockId; deskId: ItemId; role: EmployeeRole };
+export type Modal = null | { kind: 'hire'; bypassLimit?: boolean; for?: HireFor } | { kind: 'block' } | { kind: 'whiteboard'; blockId: BlockId } | { kind: 'github'; blockId: BlockId } | { kind: 'github_setup'; blockId: BlockId } | { kind: 'task_board'; blockId: BlockId; taskId?: TaskId; settings?: boolean } | { kind: 'linear_board'; blockId: BlockId };
+
+// Where dismissing a dialog goes: out of the way, except a hire that a dropped card opened, which goes back to the board the
+// card came from.
+export const dismissed = (m: Modal): Modal => (m?.kind === 'hire' && m.for ? { kind: 'task_board', blockId: m.for.blockId } : null);
 
 // A whole block in hand: turned `quarter` quarter turns since it was picked up. `grab` is where the pointer holds it, in
 // cells from the middle of its bounding box, turned along with it so the block keeps hanging off the same point.

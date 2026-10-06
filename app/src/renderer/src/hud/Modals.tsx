@@ -9,21 +9,22 @@ import {
   type Provider,
 } from '../../../shared/protocol.ts';
 import { useDiagram } from '../scene/whiteboard.ts';
-import { send, set, useStore } from '../store.ts';
+import { dismissed, send, set, useStore } from '../store.ts';
 import { tailPath } from './hooks.ts';
 import { TaskBoardModal } from './tasks/TaskBoard.tsx';
 
 const close = () => set({ modal: null });
+const leave = () => set((s) => ({ modal: dismissed(s.modal) }));
 
 function Modal({ kind, title, children }: { kind: string; title: string; children: ReactNode }) {
   return (
-    <div className="scrim" onMouseDown={close}>
+    <div className="scrim" onMouseDown={leave}>
       <div
         className="modal"
         data-hud-resize-target={`modal-${kind}`}
         onMouseDown={(e) => e.stopPropagation()}
         onKeyDown={(e) => {
-          if (e.key === 'Escape') close();
+          if (e.key === 'Escape') leave();
         }}
       >
         <h2>{title}</h2>
@@ -47,14 +48,19 @@ function harnessNote(h: HarnessStatus): string {
   }
 }
 
+// A desk's name for the owner: bench desks count from 1 in the order they were put down.
+const deskName = (id: string, role: 'employee' | 'orchestrator') => (role === 'orchestrator' ? 'PO desk' : `Desk ${Number(id.slice(id.lastIndexOf(':') + 1)) + 1}`);
+
 function HireModal() {
   const company = useStore((s) => s.company);
   const bypassLimit = useStore((s) => s.modal?.kind === 'hire' && s.modal.bypassLimit === true);
+  const dropped = useStore((s) => (s.modal?.kind === 'hire' ? s.modal.for : undefined));
+  const droppedTask = useStore((s) => s.tasks.find((t) => t.id === dropped?.taskId));
   const harnesses = useStore((s) => s.harnesses);
   const [provider, setProvider] = useState<Provider>(() => PROVIDER_LIST.find((p) => harnesses?.[p].kind === 'ready') ?? 'claude-code');
-  const [blockId, setBlockId] = useState<BlockId | ''>(company?.blocks[0]?.id ?? '');
+  const [blockId, setBlockId] = useState<BlockId | ''>(dropped?.blockId ?? company?.blocks[0]?.id ?? '');
   const [name, setName] = useState('');
-  const [role, setRole] = useState<'employee' | 'orchestrator'>('employee');
+  const [role, setRole] = useState<'employee' | 'orchestrator'>(dropped?.role ?? 'employee');
   const [model, setModel] = useState<ModelId | ''>('');
   const catalogs = useStore((s) => s.catalogs);
   const catalog = catalogs?.[provider];
@@ -73,9 +79,25 @@ function HireModal() {
   const used = (id: BlockId) => company.employees.filter((e) => e.blockId === id).length;
   const ready = harnesses[provider].kind === 'ready';
   const unlimited = bypassLimit || !Number.isFinite(headcountCap(company.level));
+  const droppedBlock = dropped && company.blocks.find((b) => b.id === dropped.blockId);
 
   return (
-    <Modal kind="hire" title="Hire someone">
+    <Modal kind="hire" title={dropped ? 'Hire for this desk' : 'Hire someone'}>
+      {dropped && (
+        <div className="hire-for" data-testid="hire-for">
+          <p>
+            Starts <b>{droppedTask ? `"${droppedTask.title}"` : 'the task'}</b> as soon as they sit down.
+          </p>
+          <dl>
+            <dt>Block</dt>
+            <dd data-testid="hire-for-block">{droppedBlock?.name ?? 'This block'}</dd>
+            <dt>Desk</dt>
+            <dd data-testid="hire-for-desk">{deskName(dropped.deskId, dropped.role)}</dd>
+            <dt>Role</dt>
+            <dd>{dropped.role === 'orchestrator' ? 'Block orchestrator / PO' : 'Employee'}</dd>
+          </dl>
+        </div>
+      )}
       <div className="providers">
         {PROVIDER_LIST.map((p) => {
           const h = harnesses[p];
@@ -94,7 +116,7 @@ function HireModal() {
           );
         })}
       </div>
-      {company.blocks.length === 0 ? (
+      {dropped ? null : company.blocks.length === 0 ? (
         <p className="muted">
           There is no block to sit in yet.{' '}
           <button type="button" className="link" onClick={() => set({ modal: { kind: 'block' } })}>
@@ -131,13 +153,15 @@ function HireModal() {
           <span className="muted">Using the provider default model</span>
         )}
       </label>
-      <label className="field">
-        <span>Role</span>
-        <select value={role} onChange={(e) => setRole(e.target.value as 'employee' | 'orchestrator')}>
-          <option value="employee">Employee</option>
-          <option value="orchestrator">Block orchestrator / PO</option>
-        </select>
-      </label>
+      {!dropped && (
+        <label className="field">
+          <span>Role</span>
+          <select value={role} onChange={(e) => setRole(e.target.value as 'employee' | 'orchestrator')}>
+            <option value="employee">Employee</option>
+            <option value="orchestrator">Block orchestrator / PO</option>
+          </select>
+        </label>
+      )}
       <label className="field">
         <span>
           Name <span className="muted">optional</span>
@@ -145,7 +169,7 @@ function HireModal() {
         <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Leave empty for a fresh name" />
       </label>
       <div className="actions">
-        <button className="btn ghost" onClick={close}>
+        <button className="btn ghost" onClick={leave}>
           Cancel
         </button>
         <button
@@ -153,7 +177,16 @@ function HireModal() {
           disabled={!blockId || !ready}
           onClick={() => {
             if (!blockId) return;
-            send({ type: 'hire', provider, blockId, role, ...(bypassLimit && { bypassLimit: true }), ...(name.trim() && { name: name.trim() }), ...(model && { model }) });
+            send({
+              type: 'hire',
+              provider,
+              blockId,
+              role,
+              ...(bypassLimit && { bypassLimit: true }),
+              ...(name.trim() && { name: name.trim() }),
+              ...(model && { model }),
+              ...(dropped && { deskId: dropped.deskId, taskId: dropped.taskId }),
+            });
             close();
           }}
         >
