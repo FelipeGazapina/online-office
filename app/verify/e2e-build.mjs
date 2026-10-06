@@ -387,6 +387,14 @@ export default async function (s) {
   await s.sleep(500);
   assert((await seated()) === 4, 'everyone is back at their desks after building');
   assert((await s.eval(`${store}.story`)) === 0, 'and the scene is back on the owner\'s own floor');
+  const foot = { x: stairsItem.x / 2 + 0.5, z: stairsItem.z / 2 + 0.5 - 1.1 };
+  await s.eval(`__office.teleport(${foot.x}, ${foot.z}); __office.hold('KeyS', true); __office.step(8)`);
+  await s.eval(`__office.hold('KeyS', false)`);
+  const climbed = (await s.eval('__office.state()')).owner;
+  assert(climbed.floor === 1 && Math.abs(climbed.y - 3.2) < 0.05, `walking into the foot of the new stairs with the keys climbs them (floor ${climbed.floor}, ${climbed.y.toFixed(2)} m)`);
+  await s.eval(`__office.walkTo(0, ${owner.x}, ${owner.z})`);
+  for (let i = 0; i < 200 && (await s.eval('__office.state()')).owner.floor !== 0; i++) await s.eval('__office.step(0.5)');
+  assert((await s.eval('__office.state()')).owner.floor === 0, 'and the owner walks back down them');
   const rooms = (await building(s)).stories[0].walls.length;
   assert(rooms === after.stories[0].walls.length, 'the saved building kept the room');
   const saved = JSON.parse(readFileSync(join(dataDir, 'company.json'), 'utf8'));

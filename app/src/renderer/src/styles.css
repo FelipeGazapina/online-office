@@ -2286,6 +2286,9 @@ html[data-building] .labels * {
   text-align: center;
   transition: transform 0.1s, border-color 0.1s, box-shadow 0.1s;
 }
+.bh-card:focus-visible {
+  outline-color: var(--moss);
+}
 .bh-card:hover {
   transform: translateY(-2px);
   box-shadow: 0 6px 14px rgba(24, 18, 44, 0.16);

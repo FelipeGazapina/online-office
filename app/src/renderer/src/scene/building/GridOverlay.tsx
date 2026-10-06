@@ -35,7 +35,7 @@ void main() {
   float mid = max(hx, hz);
   float fade = 1.0 - smoothstep(uRadius * 0.3, uRadius, distance(vW, uCursor));
   float core = max(tile, mid * 0.55);
-  float a = max(core * 0.95, tileHalo * 0.22) * fade;
+  float a = max(core * 0.8, tileHalo * 0.16) * fade;
   vec3 col = mix(vec3(0.09, 0.1, 0.18), vec3(1.0), core);
   gl_FragColor = vec4(col, a);
 }`;
