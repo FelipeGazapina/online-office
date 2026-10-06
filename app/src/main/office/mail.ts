@@ -240,7 +240,8 @@ export const renderBatch = (batch: readonly Message[], redelivered: boolean, nam
       case 'reply': {
         const verdict = m.verdict ? `\nVerdict: ${m.verdict.pass ? 'PASS' : 'FAIL'}${m.verdict.findings.length ? `\nFindings:\n${bullets(m.verdict.findings)}` : ''}` : '';
         const artifact = m.artifact?.length ? `\nArtifacts:\n${bullets(m.artifact)}` : '';
-        return `[Reply from ${nameOf(m.from)} to your request ${m.requestId}: ${m.outcome}]\n${m.text}${verdict}${artifact}`;
+        const retry = m.outcome === 'blocked' || m.outcome === 'failed' ? `\nThis piece is NOT done and ${nameOf(m.from)} stopped. A message alone does not restart them: send a new request with what was missing, or do the piece yourself. Do not reply done to your own requester while it is open.` : '';
+        return `[Reply from ${nameOf(m.from)} to your request ${m.requestId}: ${m.outcome}]\n${m.text}${verdict}${artifact}${retry}`;
       }
       case 'event':
         return `[Office] ${m.text}`;
