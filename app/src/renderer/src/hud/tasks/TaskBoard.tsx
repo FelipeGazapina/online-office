@@ -205,7 +205,19 @@ export function TaskBoardModal({ blockId }: { blockId: BlockId }) {
     [open],
   );
 
-  if (!block || !board) return null;
+  if (!block) return null;
+  if (!board)
+    return (
+      <div className="scrim" onMouseDown={close}>
+        <div className="modal tb tb-bare" role="dialog" aria-label={`${block.name} task board`} data-hud-resize-target="modal-task_board" onMouseDown={(e) => e.stopPropagation()}>
+          <header className="tb-head">
+            <h2>{block.name}</h2>
+            <button type="button" className="tb-icon" aria-label="Close the board" onClick={close}><Close /></button>
+          </header>
+          <p className="tb-hint tb-bare-note">This block has no board yet. Boards appear as soon as the office has set the block up.</p>
+        </div>
+      </div>
+    );
   const empty = board.kind !== 'quick' && board.sources.length === 0;
   const linearWithoutLogin = board.kind !== 'quick' && board.sources.some((s) => s.provider === 'linear') && connections.linear.kind !== 'ready';
 
