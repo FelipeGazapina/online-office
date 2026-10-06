@@ -1,7 +1,8 @@
 import { Html } from '@react-three/drei';
 import { useMemo } from 'react';
 import { MeshStandardMaterial, type BufferGeometry } from 'three';
-import { box, cyl, merge } from './building/models.ts';
+import { box, cyl, leafMass, merge } from './building/models.ts';
+import { bbox } from './building/parts.ts';
 import { detail } from './shading.ts';
 import type { Company } from '../../../shared/protocol.ts';
 import { BLOCK_D, BLOCK_W, blockCenter, DOOR_X } from '../../../shared/space/index.ts';
@@ -141,11 +142,22 @@ function SharedMeetingRoom({ x, z }: { x: number; z: number }) {
   </group>;
 }
 
+// A walnut counter with a slatted front, a stone top that overhangs it and a warm light under the edge, with a screen, a lamp and a small plant on top.
+const receptionGeometry = (): BufferGeometry => {
+  const parts: BufferGeometry[] = [bbox(4.1, 0.95, 0.5, 0, 0.475, 0, '#6a4a30', 0.03), bbox(4.3, 0.06, 0.74, 0, 1.0, 0.04, '#efe6d6', 0.025), box(4.0, 0.04, 0.03, 0, 0.08, 0.27, '#ffd9a0')];
+  for (let i = 0; i < 26; i++) parts.push(box(0.07, 0.8, 0.04, -1.95 + i * 0.156, 0.5, 0.27, i % 2 ? '#8c6038' : '#a77a52'));
+  parts.push(bbox(0.62, 0.38, 0.04, -1.2, 1.32, -0.08, '#1c1f27', 0.015), box(0.05, 0.25, 0.05, -1.2, 1.15, -0.08, '#2b2e38'), cyl(0.12, 0.15, 0.04, 1.3, 1.05, 0, '#2b2e38'), cyl(0.012, 0.012, 0.34, 1.3, 1.22, 0, '#2b2e38', 6), cyl(0.12, 0.2, 0.18, 1.3, 1.45, 0, '#fff0c8'));
+  parts.push(cyl(0.08, 0.06, 0.14, 1.85, 1.1, 0.05, '#f1ebe0'), leafMass(0.14, 1.85, 1.28, 0.05, '#5f9f6c'), leafMass(0.1, 1.92, 1.36, 0.02, '#78b97a'));
+  return merge(parts);
+};
+const receptionMaterial = detail(new MeshStandardMaterial({ vertexColors: true, roughness: 0.55 }), 'furniture');
+
 function Reception({ x, z }: { x: number; z: number }) {
+  const geometry = useMemo(receptionGeometry, []);
   return <group position={[x, 0, z]}>
     <RoundedPlane w={6.3} d={1.8} r={0.3} color="#e7ddd0" y={0.018} />
-    <mesh castShadow position={[0, 0.62, 0]}><boxGeometry args={[4.2, 1.05, 0.6]} /><meshStandardMaterial color="#b8865e" roughness={0.8} /></mesh>
-    <FacilitySign text="RECEPTION" sub="welcome" color="#52687a" width={4.2} z={0.62} />
+    <mesh castShadow receiveShadow geometry={geometry} material={receptionMaterial} rotation-y={Math.PI} />
+    <FacilitySign text="RECEPTION" sub="welcome" color="#52687a" width={4.2} z={-0.9} />
   </group>;
 }
 

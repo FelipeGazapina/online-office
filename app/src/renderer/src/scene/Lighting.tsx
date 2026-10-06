@@ -144,6 +144,8 @@ export function Lights({ b, slots }: { b: Bounds; slots: readonly number[] }) {
         shadow-camera-near={1}
         shadow-camera-far={110}
       />
+      {/* The bounce off the lawn and the far walls: a cool-warm fill from the shaded side, so walls that face away from the sun keep their paint colour. */}
+      <directionalLight color="#ffe2c4" intensity={2} position={[cx - 30, 14, cz - 22]} />
       <LightPools pools={pools} />
       <primitive object={target} />
     </>

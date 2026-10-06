@@ -9,15 +9,27 @@ import type { Building, BuildOp, BlockId, EmployeeId, FloorCell, Item, ItemId, L
 const OWNER_WALLS = 6;
 const MEETING = { x0: -18, x1: -11, z0: 2, z1: 8, doorZ: [4, 5] } as const;
 
-/** The lobby's default dressing: a seating group on a rug west of the front door, a shelf by the first archway. */
+/**
+ * The lobby's default dressing: the bookshelf by the first archway and a lounge in the middle of the hall, two leather sofas
+ * and two armchairs around a coffee table with a lamp and plants, so the first look down the hall ends in a furnished room.
+ */
 function lobbyItems(lot: Lot): Item[] {
   if (lot.x0 > -18 || lot.w < 24) return [];
   const put = (def: string, n: number, x: number, z: number, rot: 0 | 1 | 2 | 3 = 0): Item => ({ id: globalId(def, 50 + n), def, x, z, rot });
   return [
-    put('rug', 0, -19, 8),
-    put('sofa', 0, -19, 5),
-    put('sofa', 1, -19, 12, 2),
     put('bookshelf', 0, -21, 4),
+    put('sofa', 0, 1, 6),
+    put('sofa', 1, 1, 10, 2),
+    put('armchair', 0, -2, 8, 3),
+    put('armchair', 1, 6, 8, 1),
+    put('coffee_table', 0, 2, 8),
+    put('lamp_floor', 0, -1, 5),
+    put('plant_large', 0, 7, 5),
+    put('plant_large', 1, -3, 12),
+    put('side_table', 0, 7, 12),
+    put('armchair', 2, -21, 5),
+    put('armchair', 3, -18, 5),
+    put('side_table', 1, -19, 5),
   ];
 }
 
@@ -74,6 +86,7 @@ export function legacyBuilding(
   // Floor by zone: the owner suite in dark wood, a tiled kitchen, a gray lounge, a stone entry, a tiled reception.
   const zonePaint = (x: number, z: number) => {
     if (inBox(x, z, m.x0, m.x1, m.z0, m.z1)) return PAINT.woodDark;
+    if (inBox(x, z, -3, 6, 3, 7)) return PAINT.carpetBlue;
     if (inBox(x, z, right - 8, right, bottom - 6, bottom - 3)) return PAINT.tileWhite;
     if (inBox(x, z, right - 8, right, bottom - 3, bottom)) return PAINT.carpetGray;
     if (inBox(x, z, DOOR_X - 3, DOOR_X + 3, bottom - 3, bottom)) return PAINT.concrete;

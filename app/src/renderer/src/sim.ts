@@ -283,10 +283,10 @@ function stepOwner(dt: number, world: World, talkingTo: EmployeeId | null) {
   if (!owner.placed) {
     owner.placed = true;
     owner.floor = world.entry.floor;
-    // A few steps in from the door and off to the side, so the first look down the hall is not a wall or the door's own frame.
-    // The ceiling pendants hang on a 4 m grid; standing level with one row and between two columns keeps the nearest lamp out of the first frame.
-    const x = Math.round((world.entry.x + 6 - 3.5) / 4) * 4 + 3.5;
-    const z = Math.round((world.entry.z - 1.4 - 1.5) / 4) * 4 + 1.5;
+    // Just inside the door and clear of its frame. The first look east (CameraRig) runs the length of the lobby to the lounge.
+    // The ceiling pendants hang on a 4 m grid; standing between two columns keeps the nearest lamp out of the first frame.
+    const x = Math.round((world.entry.x + 1.5 - 3.5) / 4) * 4 + 3.5;
+    const z = world.entry.z - 2.7;
     owner.pos.set(x, floorBase(owner.floor), z);
     const spot = standable(world, owner.floor, owner.pos);
     if (spot) owner.pos.set(spot.x, owner.pos.y, spot.z);

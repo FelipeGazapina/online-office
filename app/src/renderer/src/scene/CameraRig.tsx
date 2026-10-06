@@ -17,6 +17,9 @@ const FP_PITCH = -0.05;
 // The live camera opens at a Sims-like mid zoom: the owner's room and its neighbors fill the frame. The wheel still zooms out to the whole plan.
 const ISO_START = 27;
 const EYE = 1.6;
+// A new owner who steps into first person at the spawn faces east, down the lobby to the lounge, not at the wall behind the camera's overview heading.
+const SPAWN_LOOK = Math.PI / 2;
+const SPAWN_REACH = 0.3;
 // Seconds the camera takes to fly between the overview and the owner's eyes.
 const FLIGHT = 0.8;
 const MAX_DT = 1 / 20;
@@ -42,6 +45,9 @@ export function CameraRig() {
   const focus = useRef(new Vector3());
   const snap = useRef(true);
   const placed = useRef(false);
+  const spawn = useRef<{ x: number; z: number } | null>(null);
+  // The overview heading to go back to if the owner leaves first person without ever turning the head from the spawn look.
+  const isoBefore = useRef<number | null>(null);
   const drag = useRef<{ x: number; y: number; ox: number; oy: number; far: boolean } | null>(null);
   const locked = useRef(false);
   const scratch = useRef({ iso: new Vector3(), isoPos: new Vector3(), isoLook: new Vector3(), eye: new Vector3(), eyeLook: new Vector3(), look: new Vector3(), want: new Vector3() });
@@ -53,8 +59,16 @@ export function CameraRig() {
     if (mode === 'iso') {
       if (document.pointerLockElement === gl.domElement) document.exitPointerLock();
       // Land the overview on a 90 degree step, the way Q and E do, so it never rests crooked.
-      view.isoYawTarget = Math.round((view.yaw + (3 * Math.PI) / 4) / (Math.PI / 2)) * (Math.PI / 2) - (3 * Math.PI) / 4;
+      if (isoBefore.current !== null && view.yaw === SPAWN_LOOK) view.isoYawTarget = isoBefore.current;
+      else view.isoYawTarget = Math.round((view.yaw + (3 * Math.PI) / 4) / (Math.PI / 2)) * (Math.PI / 2) - (3 * Math.PI) / 4;
+      isoBefore.current = null;
     } else {
+      const at = spawn.current;
+      if (at && Math.hypot(runtime.owner.pos.x - at.x, runtime.owner.pos.z - at.z) < SPAWN_REACH) {
+        isoBefore.current = view.isoYawTarget;
+        view.yaw = SPAWN_LOOK;
+      }
+      spawn.current = null;
       view.fpPitch = FP_PITCH;
       view.isoYawTarget = view.yaw;
     }
@@ -148,7 +162,7 @@ export function CameraRig() {
     const t = smooth(view.blend);
 
     // The owner is put at the door once the building is here, and the camera starts there, not at the origin.
-    if (owner.placed && !placed.current) { placed.current = true; snap.current = true; }
+    if (owner.placed && !placed.current) { placed.current = true; snap.current = true; spawn.current = { x: owner.pos.x, z: owner.pos.z }; }
     // The overview pose, eased the way it always was.
     const build = get().build;
     if (build) {

@@ -75,28 +75,6 @@ function shelf(x: number, z: number, len: number, n: number): BufferGeometry[] {
   return out;
 }
 
-function reception(): BufferGeometry[] {
-  return move(
-    [
-      box(4.2, 1.9, 0.3, 0, 0.95, -0.95, '#8c6a4a'),
-      ...[0.5, 1.0, 1.5].flatMap((y, i) => [box(3.9, 0.04, 0.26, 0, y, -0.94, '#6a4d34'), box(3.9 - i * 0.2, 0.3, 0.2, 0, y + 0.17, -0.94, ['#b85c4a', '#4f7ea3', '#d9b45a'][i])]),
-      box(0.5, 0.04, 0.4, -1.4, 1.09, 0, '#2b2e38'),
-      box(0.5, 0.32, 0.03, -1.4, 1.27, -0.1, '#1c1f27'),
-      cyl(0.09, 0.09, 0.05, 0.8, 1.1, 0.05, '#d9b45a'),
-      cyl(0.05, 0.08, 0.2, 1.4, 1.2, -0.05, '#fbf6ec'),
-      blob(0.16, 1.4, 1.38, -0.05, '#78b97a'),
-      ...pottedPlant(-2.7, -0.3),
-      ...pottedPlant(2.7, -0.3),
-      box(0.9, 0.42, 0.7, -3.3, 0.21, 0.5, '#7c9c92'),
-      box(0.9, 0.34, 0.14, -3.3, 0.55, 0.18, '#6d8d83'),
-      box(0.9, 0.42, 0.7, 3.3, 0.21, 0.5, '#7c9c92'),
-      box(0.9, 0.34, 0.14, 3.3, 0.55, 0.18, '#6d8d83'),
-    ],
-    0,
-    0,
-  );
-}
-
 function kitchen(): BufferGeometry[] {
   return [
     box(0.85, 1.85, 0.75, 2.85, 0.93, -0.1, '#e8ecee'),
@@ -161,16 +139,26 @@ function meeting(): BufferGeometry[] {
   ];
 }
 
+// The wall behind the lounge: vertical walnut slats over a dark backing, lit from a groove along the top, with two large pictures.
+function slatWall(cx: number, z: number, w: number): BufferGeometry[] {
+  const out: BufferGeometry[] = [box(w, 2.7, 0.04, cx, 1.35, z - 0.02, '#3a2a1e'), box(w + 0.1, 0.06, 0.1, cx, 2.72, z - 0.05, '#2b2e38'), box(w + 0.1, 0.1, 0.1, cx, 0.05, z - 0.05, '#2b2e38')];
+  const tones = ['#9a6c47', '#8c6038', '#a77a52', '#835a39'];
+  for (let i = 0; i < Math.floor(w / 0.15); i++) out.push(box(0.09, 2.6, 0.06 + (i % 3) * 0.015, cx - w / 2 + 0.1 + i * 0.15, 1.35, z - 0.07, tones[i % tones.length]));
+  return out;
+}
+
 function lobby(cx: number, z1: number, doorX: number): BufferGeometry[] {
   const out: BufferGeometry[] = [
-    box(6.6, 0.02, 3.0, cx, 0.012, 4.9, '#d9c9ad'),
-    box(6.0, 0.024, 2.4, cx, 0.014, 4.9, '#9a6a4c'),
-    box(5.6, 0.028, 2.0, cx, 0.016, 4.9, '#c58f68'),
-    ...[-6.5, -2.5, 8, 16].flatMap((px) => pottedPlant(px, 2.6, 1)),
+    ...pottedPlant(-6.5, 2.6, 1),
+    ...pottedPlant(doorX - 2.4, z1 - 0.8, 1.2),
+    ...pottedPlant(doorX + 2.4, z1 - 0.8, 1.2),
+    ...slatWall(cx + 1.5, z1, 7.5),
+    ...art(cx - 0.6, 1.55, z1 - 0.13, 1.5, 1.0, -1, 0),
+    ...art(cx + 3.6, 1.55, z1 - 0.13, 1.1, 1.5, -1, 1),
+    ...art(doorX + 14.5, 1.75, z1 - 0.13, 0.8, 1.1, -1, 3),
+    box(2.4, 0.46, 0.5, -15.6, 0.23, z1 - 0.6, '#8c6a4a'),
+    box(2.4, 0.06, 0.55, -15.6, 0.48, z1 - 0.6, '#c59e73'),
   ];
-  out.push(...pottedPlant(doorX - 2.4, z1 - 0.8, 1.2), ...pottedPlant(doorX + 2.4, z1 - 0.8, 1.2));
-  [-12, -8, 8, 12, 16].forEach((dx, n) => out.push(...art(doorX + dx, 1.75, z1 - 0.13, n % 2 ? 1.1 : 0.8, n % 2 ? 0.8 : 1.1, -1, n)));
-  out.push(box(2.4, 0.46, 0.5, -15.6, 0.23, z1 - 0.6, '#8c6a4a'), box(2.4, 0.06, 0.55, -15.6, 0.48, z1 - 0.6, '#c59e73'));
   return out;
 }
 
@@ -179,7 +167,6 @@ export type DecorSpec = { cx: number; z1: number; right: number; doorX: number }
 export function LobbyDecor({ cx, z1, right, doorX }: DecorSpec) {
   const { geo, plants } = useMemo(() => {
     const rooms = [
-      move(reception(), cx, z1 - 1.25),
       move(kitchen(), right, z1 - 4.15),
       move(lounge(), right, z1 - 1.75),
       move(meeting(), cx, -0.45),
