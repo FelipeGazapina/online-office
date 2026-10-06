@@ -5,6 +5,7 @@ import { PROVIDERS, type Employee } from '../../../../shared/protocol.ts';
 import { ITEM_DEFS, STORY_H, WALL_STYLES, YAW, type FloorGeometry, type ItemId } from '../../../../shared/space/index.ts';
 import { hasFloorAt, tileIndex } from '../../../../shared/space/geom.ts';
 import { runtime } from '../../runtime.ts';
+import { draft } from '../../hud/build/state.ts';
 import { get, set, useStore } from '../../store.ts';
 import { walkTo } from '../../sim.ts';
 import { chairOf } from '../../world.ts';
@@ -12,7 +13,7 @@ import { blobShadowTexture, ceilingTexture, codeTexture, plankTexture, poolTextu
 import { detail } from '../shading.ts';
 import { floorGeometry } from './floor.ts';
 import { box, chairModel, cyl, merge, DEFAULT_TINT, DYNAMIC, modelOf, screenGeometry } from './models.ts';
-import { curbModel, facesCamera, frameModel, glassModel, octantOf, VARIANTS, wallMatrix, wallModel, wallRecords, ZERO, type Variant } from './walls.ts';
+import { curbModel, facesCamera, frameModel, glassModel, occludes, octantOf, VARIANTS, wallMatrix, wallModel, wallRecords, ZERO, type Variant, type WallRecord } from './walls.ts';
 
 const up = new Vector3(0, 1, 0);
 const q = new Quaternion();
@@ -111,17 +112,17 @@ const ALL_DOWN = -3;
 function Walls({ geom }: { geom: FloorGeometry }) {
   const records = useMemo(() => wallRecords(geom), [geom]);
   const refs = useRef<Partial<Record<Variant | 'curb' | 'glass' | 'frame', InstancedMesh | null>>>({});
-  const seen = useRef(-2);
+  const seen = useRef('');
   const curbCount = records.solid.length + records.window.length;
 
-  const apply = (cutYaw: number | null, all: boolean) => {
+  const apply = (isCut: (r: WallRecord) => boolean) => {
     const m = new Matrix4();
     let curbs = 0;
     for (const v of VARIANTS) {
       const mesh = refs.current[v];
       if (!mesh) continue;
       records[v].forEach((r, i) => {
-        const cut = all || (cutYaw !== null && facesCamera(r, cutYaw));
+        const cut = isCut(r);
         if (cut && (v === 'solid' || v === 'window')) refs.current.curb?.setMatrixAt(curbs++, wallMatrix(r, m));
         mesh.setMatrixAt(i, cut ? ZERO : wallMatrix(r, m));
         if (v === 'window') {
@@ -150,7 +151,7 @@ function Walls({ geom }: { geom: FloorGeometry }) {
       if (mesh?.instanceColor) mesh.instanceColor.needsUpdate = true;
     }
     // The curb takes the color of the wall it replaces, so it is colored when the cutaway fills it.
-    seen.current = -2;
+    seen.current = '';
   }, [records]);
 
   // The cutaway is decided per camera octant, never per frame. First person shows every wall at full height. While
@@ -159,20 +160,25 @@ function Walls({ geom }: { geom: FloorGeometry }) {
     const iso = runtime.view.blend < 0.5;
     const mode = get().build?.wallsMode ?? 'cutaway';
     const key = !iso || mode === 'up' ? -1 : mode === 'down' ? ALL_DOWN : octantOf(runtime.view.yaw);
-    if (key === seen.current) return;
-    seen.current = key;
-    apply(key >= 0 ? key * (Math.PI / 4) : null, key === ALL_DOWN);
-    colorCurbs(key);
+    // While furniture is being placed on this floor, the walls between the camera and it step out of the way too.
+    const f = iso && mode !== 'down' && draft.focus?.level === geom.index ? draft.focus : null;
+    const yaw = runtime.view.yaw;
+    const stamp = `${key}|${f ? `${Math.round(f.x * 2)},${Math.round(f.z * 2)},${octantOf(yaw)}` : ''}`;
+    if (stamp === seen.current) return;
+    seen.current = stamp;
+    const cutYaw = key * (Math.PI / 4);
+    const isCut = (r: WallRecord) => key === ALL_DOWN || (key >= 0 && facesCamera(r, cutYaw)) || (!!f && occludes(r, yaw, f));
+    apply(isCut);
+    colorCurbs(isCut);
   });
 
-  const colorCurbs = (key: number) => {
+  const colorCurbs = (isCut: (r: WallRecord) => boolean) => {
     const curb = refs.current.curb;
     if (!curb) return;
     let n = 0;
-    const yaw = key * (Math.PI / 4);
     for (const v of ['solid', 'window'] as const) {
       for (const r of records[v]) {
-        if (key === ALL_DOWN || (key >= 0 && facesCamera(r, yaw))) curb.setColorAt(n++, color.set(WALL_STYLES[r.style]?.color ?? WALL_STYLES[0].color));
+        if (isCut(r)) curb.setColorAt(n++, color.set(WALL_STYLES[r.style]?.color ?? WALL_STYLES[0].color));
       }
     }
     if (curb.instanceColor) curb.instanceColor.needsUpdate = true;

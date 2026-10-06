@@ -59,7 +59,60 @@ const defs: ItemDef[] = [
   { id: 'bookshelf', kind: 'decor', w: 4, d: 1, height: 2.0, walkable: false },
   { id: 'stairs', kind: 'stairs', w: 2, d: 8, height: 3.2, walkable: false, stairs: { rise: 1, holeLen: 3 } },
 ];
-export const ITEM_DEFS: Readonly<Record<string, ItemDef>> = Object.freeze(Object.fromEntries(defs.map((d) => [d.id, d])));
+
+// The rest of the build catalog, in half-meter cells. These are furnishings: nobody sits at them, and only the rugs can be walked over.
+const piece = (id: string, kind: ItemDef['kind'], w: number, d: number, height: number, walkable = false): ItemDef => ({ id, kind, w, d, height, walkable });
+
+const more: ItemDef[] = [
+  // desks
+  piece('standing_desk', 'table', 3, 2, 1.1),
+  piece('l_desk', 'table', 4, 4, 0.75),
+  piece('corner_desk', 'table', 4, 4, 0.75),
+  piece('meeting_pod', 'table', 6, 6, 1.5),
+  piece('reception_desk', 'table', 6, 2, 1.25),
+  piece('pair_desk', 'table', 6, 2, 1.1),
+  // seating
+  piece('armchair', 'seat', 2, 2, 0.95),
+  piece('bench', 'seat', 4, 1, 0.5),
+  piece('beanbag', 'seat', 2, 2, 0.7),
+  piece('stool', 'seat', 1, 1, 0.7),
+  piece('loveseat', 'seat', 3, 2, 0.85),
+  piece('ottoman', 'seat', 1, 1, 0.45),
+  // tables
+  piece('meeting_round', 'table', 4, 4, 0.8),
+  piece('meeting_long', 'table', 8, 3, 0.8),
+  piece('coffee_table', 'table', 2, 2, 0.45),
+  piece('side_table', 'table', 1, 1, 0.55),
+  piece('high_table', 'table', 3, 2, 1.1),
+  piece('cafe_table', 'table', 2, 2, 0.8),
+  piece('folding_table', 'table', 4, 2, 0.8),
+  // decor
+  piece('rug_small', 'decor', 4, 3, 0.03, true),
+  piece('rug_round', 'decor', 4, 4, 0.03, true),
+  piece('lamp_floor', 'decor', 1, 1, 1.7),
+  piece('lamp_desk', 'decor', 1, 1, 0.5),
+  piece('wall_art', 'decor', 2, 1, 1.4),
+  piece('clock', 'decor', 1, 1, 1.75),
+  piece('divider', 'decor', 4, 1, 1.65),
+  // plants
+  piece('plant_small', 'decor', 1, 1, 0.55),
+  piece('plant_large', 'decor', 1, 1, 1.9),
+  piece('plant_tree', 'decor', 2, 2, 2.5),
+  piece('plant_cactus', 'decor', 1, 1, 0.85),
+  piece('plant_fern', 'decor', 1, 1, 0.85),
+  piece('plant_planter', 'decor', 3, 1, 0.8),
+  piece('plant_hedge', 'decor', 4, 1, 1.15),
+  // storage
+  piece('cabinet', 'decor', 2, 1, 1.2),
+  piece('lockers', 'decor', 4, 1, 1.8),
+  piece('filing', 'decor', 1, 1, 1.3),
+  piece('shelf_low', 'decor', 4, 1, 0.95),
+  piece('wardrobe', 'decor', 3, 1, 2.0),
+  piece('sideboard', 'decor', 4, 1, 0.9),
+  piece('cubby', 'decor', 3, 1, 1.1),
+];
+
+export const ITEM_DEFS: Readonly<Record<string, ItemDef>> = Object.freeze(Object.fromEntries([...defs, ...more].map((d) => [d.id, d])));
 
 export const YAW: readonly number[] = [0, -Math.PI / 2, Math.PI, Math.PI / 2];
 

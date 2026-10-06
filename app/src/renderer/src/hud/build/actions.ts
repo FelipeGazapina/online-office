@@ -4,7 +4,7 @@ import { get, send, set, setSetting, useStore, type BuildState, type BuildTool }
 import { ENTRIES, type Entry, type TabId } from './catalog.ts';
 import { BUILD_DIST, buildView, modifiers, setGhost } from './state.ts';
 
-const FRESH: Omit<BuildState, 'level'> = { tool: { kind: 'select' }, tab: 'desks', search: '', paint: 1, style: 0, wallsMode: 'cutaway' };
+const FRESH: Omit<BuildState, 'level'> = { tool: { kind: 'select' }, tab: 'desks', search: '', searching: false, peek: null, fill: false, paint: 1, style: 0, wallsMode: 'cutaway' };
 
 export function patchBuild(patch: Partial<BuildState>) {
   const build = get().build;
@@ -39,8 +39,11 @@ export function setTool(tool: BuildTool) {
   patchBuild({ tool });
 }
 
+/** The furniture card under the pointer, or null once it leaves: the scene draws it as the cursor ghost. */
+export const peek = (def: string | null) => patchBuild({ peek: def });
+
 export function selectTab(tab: TabId) {
-  patchBuild({ tab, search: '' });
+  patchBuild({ tab, search: '', searching: false });
 }
 
 export function chooseEntry(entry: Entry) {
