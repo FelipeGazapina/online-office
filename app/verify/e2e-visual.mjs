@@ -40,10 +40,20 @@ const buildOps = () => [
 // The wheel is how a player zooms; this sends the same event, from the current zoom to `dist` meters (the zoom clamps at 8..48).
 const zoomBy = (s, deltaY) => s.eval(`document.querySelector('canvas').dispatchEvent(new WheelEvent('wheel', { deltaY: ${deltaY} }))`);
 const settle = async (s) => { await s.eval('__office.step(0.2)'); await s.sleep(1400); };
-const firstPerson = async (s, name) => {
+const firstPerson = async (s, name, pose) => {
   await s.press('Tab');
   await s.waitFor('window.__officeCamera && window.__officeCamera.blend >= 0.999', 10000);
   await settle(s);
+  // The camera eases into place; shoot once it has not moved for a while, so two runs frame the same picture.
+  let last = '';
+  for (let i = 0; i < 40; i++) {
+    const now = await s.eval('JSON.stringify(window.__officeCamera, (k, v) => (typeof v === "number" ? Math.round(v * 1000) / 1000 : v))');
+    if (now === last) break;
+    last = now;
+    // Holding the owner on the spot keeps the sim from nudging the camera between runs.
+    if (pose) await s.eval(`__office.teleport(${pose.join(', ')})`);
+    await s.sleep(400);
+  }
   await save(s, name);
   await s.press('Tab');
   await s.waitFor('window.__officeCamera && window.__officeCamera.blend <= 0.001', 10000);
@@ -56,6 +66,7 @@ export default async (s) => {
 
   // Where a new owner stands: first person, no teleport.
   await firstPerson(s, 'first-spawn');
+  if (process.env.OFFICE_SHOT_ONLY === 'spawn') return;
 
   // Matched framing for the bar: the live camera as a player gets it, the owner at the workspace.
   await s.eval('__office.teleport(-10.6, -1.2, Math.PI)');
@@ -75,10 +86,10 @@ export default async (s) => {
   await save(s, 'site');
 
   await s.eval('__office.teleport(-11.5, 1.5, Math.PI)');
-  await firstPerson(s, 'first-desks');
+  await firstPerson(s, 'first-desks', [-11.5, 1.5, 'Math.PI']);
 
   await s.eval('__office.teleport(-4.5, 5.5, Math.PI)');
-  await firstPerson(s, 'first');
+  await firstPerson(s, 'first', [-4.5, 5.5, 'Math.PI']);
 
   await zoomBy(s, -1200);
   await s.eval('__office.teleport(-12, -4.7, Math.PI)');
