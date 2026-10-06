@@ -20,8 +20,9 @@ function desk(po: boolean) {
     box(1.3, 0.4, 0.03, 0, 0.5, 0.4, PANEL),
     box(0.5, 0.025, 0.16, 0, 0.755, -0.12, '#2b2e38'),
     cyl(0.05, 0.045, 0.1, 0.58, 0.8, -0.12, '#fbf6ec', 12),
-    box(0.06, 0.1, 0.06, 0, 0.86, 0.2, '#2b2e38'),
-    box(0.72, 0.44, 0.04, 0, 1.1, 0.2, '#1c1f27'),
+    // A low, slim monitor: its top stays under a seated sitter's eyes, so faces read across the desk.
+    box(0.06, 0.1, 0.06, 0, 0.8, 0.2, '#2b2e38'),
+    box(0.7, 0.38, 0.04, 0, 0.98, 0.2, '#1c1f27'),
     ...[-1, 1].flatMap((sx) => [-1, 1].map((sz) => box(0.06, 0.7, 0.06, sx * 0.67, 0.35, sz * 0.42, DARK))),
   ];
   parts.push(
@@ -41,8 +42,8 @@ function desk(po: boolean) {
     box(0.055, 0.025, 0.09, 0.36, 0.775, -0.12, '#e8e6e0'),
     box(0.22, 0.012, 0.3, -0.42, 0.77, -0.2, '#f7f4ec'),
     box(0.2, 0.012, 0.28, -0.4, 0.782, -0.16, '#e3ecf5'),
-    box(0.07, 0.07, 0.006, -0.3, 1.22, 0.172, '#f7d94c'),
-    box(0.06, 0.06, 0.006, -0.22, 1.16, 0.172, '#f29bb5'),
+    box(0.07, 0.07, 0.006, -0.3, 1.1, 0.172, '#f7d94c'),
+    box(0.06, 0.06, 0.006, -0.22, 1.04, 0.172, '#f29bb5'),
     box(0.02, 0.02, 0.42, 0.1, 0.74, 0.42, '#1c1f27'),
     box(0.02, 0.62, 0.02, 0.1, 0.4, 0.62, '#1c1f27'),
     cyl(0.05, 0.04, 0.07, -0.58, 0.8, 0.0, '#c9a77c', 8),
@@ -149,8 +150,8 @@ export const DYNAMIC: ReadonlySet<string> = new Set(['owner_desk', 'board_termin
 export const DEFAULT_TINT: Readonly<Record<string, number>> = { chair: 0x5c7892 };
 
 export const screenGeometry = (): BufferGeometry => {
-  const g = new PlaneGeometry(0.64, 0.36);
+  const g = new PlaneGeometry(0.62, 0.31);
   g.rotateY(Math.PI);
-  g.translate(0, 1.1, 0.2 - 0.022);
+  g.translate(0, 0.98, 0.2 - 0.022);
   return g;
 };
