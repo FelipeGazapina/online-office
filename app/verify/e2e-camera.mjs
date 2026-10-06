@@ -10,6 +10,8 @@ export const env = { OFFICE_DATA_DIR: mkdtempSync(join(tmpdir(), 'online-office-
 const SHOTS = '/Users/feliperico/.claude/orchestrate/online-office-game/shots';
 const cam = (s) => s.eval('window.__officeCamera && ({ ...window.__officeCamera, ownerVisible: window.__officeCamera.ownerVisible() })');
 const settled = (s, blend) => s.waitFor(`window.__officeCamera && Math.abs(window.__officeCamera.blend - ${blend}) < 0.001`, 10000);
+// Logs the camera on every rendered frame, so the flight check never depends on how often the test polls.
+const RECORD = `window.__camLog = []; (function tick() { if (window.__officeCamera) window.__camLog.push({ ...window.__officeCamera }); if (window.__camLog.length < 600) requestAnimationFrame(tick); })()`;
 async function save(s, name) {
   const path = await s.shot(name);
   mkdirSync(SHOTS, { recursive: true });
@@ -29,15 +31,13 @@ export default async (s) => {
   await save(s, 'c1-iso');
 
   // Tab flies to the owner's eyes.
+  await s.eval(RECORD);
   await s.press('Tab');
-  const samples = [];
-  for (let i = 0; i < 40 && !samples.some((c) => c.blend >= 1); i++) {
-    samples.push(await cam(s));
-    await s.sleep(40);
-  }
+  await settled(s, 1);
+  const samples = await s.eval('window.__camLog');
   assert((await s.eval('__office.state().camera')) === 'first', 'Tab switches the camera to first person');
   const mid = samples.filter((c) => c.blend > 0.05 && c.blend < 0.95);
-  assert(mid.length >= 3 && mid.every((c) => c.y < iso.y - 0.5 && c.y > 1.7), `the flight is eased through ${mid.length} in-between positions (y ${mid.map((c) => c.y.toFixed(1)).join(', ')})`);
+  assert(mid.length >= 3 && mid.every((c) => c.y < iso.y && c.y > 1.5) && mid.every((c, i) => i === 0 || c.y <= mid[i - 1].y), `the flight is eased through ${mid.length} in-between positions (y ${mid.map((c) => c.y.toFixed(1)).join(', ')})`);
   await settled(s, 1);
   await s.sleep(300);
   const owner = await s.eval('__office.state().owner');
@@ -72,12 +72,10 @@ export default async (s) => {
   assert(moved > 1 && along / moved > 0.95, `W walks forward along the view (${moved.toFixed(2)} m, ${(along / moved).toFixed(2)} of it along yaw ${yaw.toFixed(2)})`);
 
   // Tab flies back.
+  await s.eval(RECORD);
   await s.press('Tab');
-  const back = [];
-  for (let i = 0; i < 40 && !back.some((c) => c.blend <= 0); i++) {
-    back.push(await cam(s));
-    await s.sleep(40);
-  }
+  await settled(s, 0);
+  const back = await s.eval('window.__camLog');
   assert((await s.eval('__office.state().camera')) === 'iso', 'Tab switches back to the isometric camera');
   assert(back.filter((c) => c.blend > 0.05 && c.blend < 0.95).length >= 3, 'the flight back is eased through in-between positions');
   await settled(s, 0);

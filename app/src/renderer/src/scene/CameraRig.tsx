@@ -15,6 +15,7 @@ const FOV_FIRST = 70;
 const EYE = 1.6;
 // Seconds the camera takes to fly between the overview and the owner's eyes.
 const FLIGHT = 0.8;
+const MAX_DT = 1 / 20;
 const LOOK_SPEED = 0.0024;
 const DRAG_PX = 6;
 const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
@@ -125,7 +126,8 @@ export function CameraRig() {
     };
   }, [gl]);
 
-  useFrame((state, dt) => {
+  useFrame((state, rawDt) => {
+    const dt = Math.min(rawDt, MAX_DT);
     const cam = state.camera as PerspectiveCamera;
     const { view, owner, keys } = runtime;
     const { iso, isoPos, isoLook, eye, eyeLook, look, want } = scratch.current;
