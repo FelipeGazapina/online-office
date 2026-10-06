@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
-import type { Employee } from '../../../../shared/protocol.ts';
+import type { Employee, EmployeeId } from '../../../../shared/protocol.ts';
 import { PRIORITIES, type Board, type Priority, type TaskStage } from '../../../../shared/tasks.ts';
 import { PRIORITY_LABEL, STAGE_LABEL, assigneeOf, landingStage, listStep, nextDraft, presenceOf, type Draft } from '../../boardView.ts';
 import { isPo } from '../chat/model.ts';
@@ -63,7 +63,7 @@ function PersonOption({ person }: { person: Employee }) {
   );
 }
 
-const noOne = (stage: TaskStage): Option<string | undefined> => ({
+const noOne = (stage: TaskStage): Option<EmployeeId | undefined> => ({
   key: 'none',
   value: undefined,
   node: (
@@ -76,7 +76,7 @@ const noOne = (stage: TaskStage): Option<string | undefined> => ({
 
 const priorityOptions: Option<Priority | undefined>[] = [
   { key: 'none', value: undefined, node: <><PriorityIcon priority={undefined} /><span className="tb-opt-name"><b>No priority</b></span></> },
-  ...PRIORITIES.map((p) => ({ key: p, value: p as Priority | undefined, node: <><PriorityIcon priority={p} /><span className="tb-opt-name"><b>{PRIORITY_LABEL[p]}</b></span></> })),
+  ...PRIORITIES.map((p) => ({ key: p, value: p, node: <><PriorityIcon priority={p} /><span className="tb-opt-name"><b>{PRIORITY_LABEL[p]}</b></span></> })),
 ];
 
 type Props = { board: Board; stage: TaskStage; team: readonly Employee[]; onDone: () => void };
@@ -238,8 +238,8 @@ export function Composer({ board, stage, team, onDone }: Props) {
           <Menu
             label="Assignee"
             current={who?.id}
-            options={[noOne(stage), ...team.map((p) => ({ key: p.id, value: p.id as string | undefined, node: <PersonOption person={p} /> }))]}
-            onPick={(id) => pick({ assignee: id as Draft['assignee'] })}
+            options={[noOne(stage), ...team.map((p) => ({ key: p.id, value: p.id, node: <PersonOption person={p} /> }))]}
+            onPick={(id) => pick({ assignee: id })}
             onShut={shut('assignee')}
           >
             {team.length === 0 && <p className="tb-menu-note">Hire someone in this block to hand them work.</p>}
