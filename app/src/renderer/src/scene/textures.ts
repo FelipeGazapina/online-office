@@ -225,13 +225,17 @@ export function skyTexture(horizon: string) {
   c.width = 1024;
   c.height = 512;
   const g = c.getContext('2d')!;
-  // The sphere's v runs from the nadir (0) to the zenith (1): ground haze below the horizon, blue above.
+  // The sphere's v runs from the nadir (0) to the zenith (1): blue above the horizon (canvas top), peach haze at and below it.
   const grad = g.createLinearGradient(0, 0, 0, 512);
-  grad.addColorStop(0, horizon);
-  grad.addColorStop(0.5, horizon);
-  grad.addColorStop(0.58, '#f1cfa6');
-  grad.addColorStop(0.7, '#b8cde0');
-  grad.addColorStop(1, '#4d82cc');
+  // The first ten degrees above the horizon are what a window shows from the floor, so the blue arrives quickly.
+  grad.addColorStop(0, '#2f68b8');
+  grad.addColorStop(0.28, '#4a86d0');
+  grad.addColorStop(0.45, '#6aa0e0');
+  grad.addColorStop(0.472, '#9cc4ee');
+  grad.addColorStop(0.489, '#cfe0ee');
+  grad.addColorStop(0.5, '#f6dcb6');
+  grad.addColorStop(0.53, horizon);
+  grad.addColorStop(1, horizon);
   g.fillStyle = grad;
   g.fillRect(0, 0, 1024, 512);
   const r = noise(5);
