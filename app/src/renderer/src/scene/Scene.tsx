@@ -70,6 +70,7 @@ function AdaptiveQuality() {
   }, [gl]);
 
   useFrame((_, dt) => {
+    if (!performance.getEntriesByName('office-first-frame').length) performance.mark('office-first-frame');
     const state = quality.current;
     state.total += Math.min(dt, 0.1);
     if (++state.samples < 30) return;

@@ -1,4 +1,4 @@
-import type { MeshStandardMaterial } from 'three';
+import type { MeshStandardMaterial, Texture } from 'three';
 import { STORY_H } from '../../../shared/space/index.ts';
 
 // Cheap material depth without extra draw calls: every shader sees the fragment's world position and adds grain,
@@ -17,11 +17,6 @@ float vnoise(vec2 p) {
 // derivatives. Plaster is fine and mottled; furniture gets a laminate grain plus a woven fabric pattern. The relief fades out
 // when a pixel covers a centimetre or more, so far surfaces stay calm instead of shimmering.
 const RELIEF: Partial<Record<Surface, { height: string; strength: string; rough: string }>> = {
-  wall: {
-    height: 'vnoise(vWPos.xy * 46.0 + vWPos.zz * 46.0) * 0.6 + vnoise(vWPos.xy * 11.0 + vWPos.zz * 11.0) * 0.4',
-    strength: '0.9',
-    rough: 'vnoise(vWPos.xz * 5.0 + vWPos.yy * 3.0)',
-  },
   furniture: {
     height: 'vnoise(vec2(vWPos.x + vWPos.z, vWPos.y) * vec2(70.0, 9.0)) * 0.5 + (sin(vWPos.x * 420.0) * sin(vWPos.z * 420.0 + vWPos.y * 420.0)) * 0.1 + vnoise(vWPos.xz * 30.0) * 0.4',
     strength: '0.7',
@@ -55,7 +50,38 @@ const BODY: Record<Surface, string> = {
   `,
 };
 
-export function detail<M extends MeshStandardMaterial>(material: M, surface: Surface): M {
+/** The textures the wall shader samples, projected in world space so a wall of any length and every instanced segment line up without UVs. `mean` is the colour map's average, divided out so paint keeps its own hue. */
+export type WallTextures = { map: Texture; normalMap: Texture; armMap: Texture; mean: [number, number, number]; metresPerRepeat: number };
+
+const WALL_PARS = /* glsl */ `
+uniform sampler2D uWallMap;
+uniform sampler2D uWallNor;
+uniform sampler2D uWallArm;
+uniform vec3 uWallMean;
+uniform float uWallScale;
+vec3 wallAxis;
+vec2 wallUv;
+`;
+const WALL_UV = /* glsl */ `
+    wallAxis = abs(vNorm.x) > 0.5 ? vec3(0.0, 0.0, 1.0) : vec3(1.0, 0.0, 0.0);
+    wallUv = (abs(vNorm.y) > 0.7 ? vWPos.xz : vec2(dot(vWPos, wallAxis), vWPos.y)) * uWallScale;
+`;
+const WALL_COLOR = /* glsl */ `
+    diffuseColor.rgb *= texture2D(uWallMap, wallUv).rgb / uWallMean * mix(1.0, texture2D(uWallArm, wallUv).r, 0.75);
+`;
+const WALL_ROUGH = /* glsl */ `roughnessFactor = clamp(roughnessFactor * (0.55 + 0.7 * texture2D(uWallArm, wallUv).g), 0.05, 1.0);`;
+const WALL_NORMAL = /* glsl */ `
+  {
+    vec3 tn = texture2D(uWallNor, wallUv).xyz * 2.0 - 1.0;
+    vec3 n = normalize(vNorm);
+    vec3 tu = abs(n.y) > 0.7 ? vec3(1.0, 0.0, 0.0) : wallAxis;
+    vec3 tv = abs(n.y) > 0.7 ? vec3(0.0, 0.0, 1.0) : vec3(0.0, 1.0, 0.0);
+    vec3 wn = normalize(n + (tu * tn.x + tv * tn.y) * 0.9);
+    normal = normalize((viewMatrix * vec4(wn, 0.0)).xyz) * faceDirection;
+  }
+`;
+
+export function detail<M extends MeshStandardMaterial>(material: M, surface: Surface, wallTextures?: WallTextures): M {
   material.onBeforeCompile = (shader) => {
     shader.vertexShader = shader.vertexShader
       .replace('#include <common>', '#include <common>\nvarying vec3 vWPos;\nvarying vec3 vNorm;')
@@ -73,7 +99,18 @@ export function detail<M extends MeshStandardMaterial>(material: M, surface: Sur
       );
     shader.fragmentShader = shader.fragmentShader
       .replace('#include <common>', `#include <common>\nvarying vec3 vWPos;\nvarying vec3 vNorm;\n${GLSL}`)
-      .replace('#include <color_fragment>', `#include <color_fragment>\n${BODY[surface]}`);
+      .replace('#include <color_fragment>', `#include <color_fragment>\n${wallTextures ? WALL_UV + WALL_COLOR : ''}${BODY[surface]}`);
+    if (wallTextures) {
+      shader.uniforms.uWallMap = { value: wallTextures.map };
+      shader.uniforms.uWallNor = { value: wallTextures.normalMap };
+      shader.uniforms.uWallArm = { value: wallTextures.armMap };
+      shader.uniforms.uWallMean = { value: wallTextures.mean };
+      shader.uniforms.uWallScale = { value: 1 / wallTextures.metresPerRepeat };
+      shader.fragmentShader = shader.fragmentShader
+        .replace('#include <common>', `#include <common>\n${WALL_PARS}`)
+        .replace('#include <roughnessmap_fragment>', `#include <roughnessmap_fragment>\n${WALL_ROUGH}`)
+        .replace('#include <normal_fragment_maps>', `#include <normal_fragment_maps>\n${WALL_NORMAL}`);
+    }
     const relief = RELIEF[surface];
     if (relief) {
       shader.fragmentShader = shader.fragmentShader
@@ -100,6 +137,6 @@ export function detail<M extends MeshStandardMaterial>(material: M, surface: Sur
         );
     }
   };
-  material.customProgramCacheKey = () => `detail-${surface}`;
+  material.customProgramCacheKey = () => `detail-${surface}${wallTextures ? '-tex' : ''}`;
   return material;
 }

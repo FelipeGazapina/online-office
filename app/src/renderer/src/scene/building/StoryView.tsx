@@ -9,8 +9,8 @@ import { draft } from '../../hud/build/state.ts';
 import { get, set, useStore } from '../../store.ts';
 import { walkTo } from '../../sim.ts';
 import { chairOf } from '../../world.ts';
-import { blobShadowTexture, ceilingTexture, codeTexture, plankCanvas, poolTexture, wallAoTexture } from '../textures.ts';
-import { carpetSurface, concreteSurface, tileSurface, woodSurface, type Surface } from '../surfaceTextures.ts';
+import { blobShadowTexture, ceilingTexture, codeTexture, poolTexture, wallAoTexture } from '../textures.ts';
+import { carpetSurface, concreteSurface, PLASTER_MEAN, PLASTER_METRES, plasterSurface, tileSurface, woodSurface, type Surface } from '../surfaceTextures.ts';
 import { detail } from '../shading.ts';
 import { reflective } from '../Lighting.tsx';
 import { floorGeometry } from './floor.ts';
@@ -24,19 +24,21 @@ const one = new Vector3(1, 1, 1);
 const s3 = new Vector3();
 const color = new Color();
 
-const floorMaterial = (surface: Surface, roughness: number, normalScale: number, extra: Partial<ConstructorParameters<typeof MeshStandardMaterial>[0]> = {}) =>
-  detail(new MeshStandardMaterial({ map: surface.map, normalMap: surface.normalMap, roughnessMap: surface.roughnessMap, normalScale: new Vector2(normalScale, normalScale), vertexColors: true, roughness, ...extra }), 'floor');
+// `gain` lifts a texture whose real photographed albedo is darker than the stylised light the scene is lit for.
+const floorMaterial = (surface: Surface, roughness: number, normalScale: number, gain: number, extra: Partial<ConstructorParameters<typeof MeshStandardMaterial>[0]> = {}) =>
+  detail(new MeshStandardMaterial({ map: surface.map, normalMap: surface.normalMap, roughnessMap: surface.armMap, aoMap: surface.armMap, normalScale: new Vector2(normalScale, normalScale), vertexColors: true, color: new Color(gain, gain, gain), roughness, ...extra }), 'floor');
 // In the order of FLOOR_FAMILIES.
 const floorMaterials = [
-  floorMaterial(woodSurface(plankCanvas(), 1 / 4), 0.6, 0.9),
-  floorMaterial(carpetSurface(), 1, 0.7),
-  floorMaterial(tileSurface(), 0.4, 0.8),
-  floorMaterial(concreteSurface(), 1, 0.8),
+  floorMaterial(woodSurface(), 0.6, 0.9, 1.45),
+  floorMaterial(carpetSurface(), 1, 0.7, 1.1),
+  floorMaterial(tileSurface(), 0.4, 0.8, 1.9),
+  floorMaterial(concreteSurface(), 1, 0.8, 1.8),
 ];
 reflective.set(floorMaterials[0], 0.3);
 reflective.set(floorMaterials[2], 1.2);
 const furnitureMaterial = detail(new MeshStandardMaterial({ vertexColors: true, roughness: 0.75 }), 'furniture');
-const wallMaterial = detail(new MeshStandardMaterial({ vertexColors: true, roughness: 0.95 }), 'wall');
+const plaster = plasterSurface();
+const wallMaterial = detail(new MeshStandardMaterial({ vertexColors: true, roughness: 0.95 }), 'wall', { ...plaster, mean: PLASTER_MEAN, metresPerRepeat: PLASTER_METRES });
 // Clear glass: the sky, the lawn and the trees show through it, with a faint cool tint and a sheen of the room on it.
 const glassMaterial = new MeshStandardMaterial({ color: '#dcefff', emissive: '#a8d4ff', emissiveIntensity: 0.06, roughness: 0.06, transparent: true, opacity: 0.16, depthWrite: false, side: DoubleSide });
 reflective.set(glassMaterial, 0.9);

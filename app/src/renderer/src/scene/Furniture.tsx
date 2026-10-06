@@ -237,7 +237,7 @@ export function RoundedPlane({ w, d, r, color, y, opacity = 1, surface }: { w: n
   }, [w, d, r]);
   return (
     <mesh geometry={geo} rotation-x={-Math.PI / 2} position={[0, y, 0]} receiveShadow>
-      <meshStandardMaterial color={color} roughness={1} transparent={opacity < 1} opacity={opacity} map={surface?.map} normalMap={surface?.normalMap} normalScale={RUG_NORMAL} roughnessMap={surface?.roughnessMap} />
+      <meshStandardMaterial color={color} roughness={1} transparent={opacity < 1} opacity={opacity} map={surface?.map} normalMap={surface?.normalMap} normalScale={RUG_NORMAL} roughnessMap={surface?.armMap} aoMap={surface?.armMap} />
     </mesh>
   );
 }

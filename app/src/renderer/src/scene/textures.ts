@@ -51,39 +51,6 @@ const noise = (seed: number) => {
   return () => ((s = (Math.imul(s, 1664525) + 1013904223) >>> 0) / 4294967296);
 };
 
-let plank: HTMLCanvasElement | null = null;
-/** The honey plank floor, drawn once. Surface textures turn it into colour, normal and roughness maps. */
-export function plankCanvas() {
-  if (plank) return plank;
-  const c = document.createElement('canvas');
-  c.width = c.height = 1024;
-  const g = c.getContext('2d')!;
-  const r = noise(3);
-  const rows = 16;
-  const rh = 1024 / rows;
-  for (let row = 0; row < rows; row++) {
-    // Staggered seams, each plank a slightly different honey tone, with grain streaks along its length.
-    let x = -((row * 173) % 400);
-    while (x < 1024) {
-      const len = 380 + r() * 340;
-      const l = 63 + r() * 7;
-      g.fillStyle = `hsl(${30 + r() * 4}, ${46 + r() * 8}%, ${l}%)`;
-      g.fillRect(x, row * rh, len, rh);
-      for (let k = 0; k < 7; k++) {
-        g.fillStyle = r() < 0.5 ? 'rgba(120,70,30,0.10)' : 'rgba(255,235,200,0.10)';
-        g.fillRect(x, row * rh + r() * rh, len * (0.4 + r() * 0.6), 1 + r() * 2);
-      }
-      g.fillStyle = 'rgba(80,45,20,0.35)';
-      g.fillRect(x, row * rh, 2, rh);
-      x += len;
-    }
-    g.fillStyle = 'rgba(80,45,20,0.32)';
-    g.fillRect(0, row * rh, 1024, 2);
-  }
-  plank = c;
-  return c;
-}
-
 let code: CanvasTexture | null = null;
 export function codeTexture() {
   if (code) return code;
