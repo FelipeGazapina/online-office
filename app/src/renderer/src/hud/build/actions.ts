@@ -2,7 +2,7 @@ import type { BuildOp, Item, ItemId, Rot } from '../../../../shared/space/index.
 import { runtime } from '../../runtime.ts';
 import { get, send, set, setSetting, useStore, type BuildState, type BuildTool } from '../../store.ts';
 import { ENTRIES, type Entry, type TabId } from './catalog.ts';
-import { buildView, modifiers, setGhost } from './state.ts';
+import { BUILD_DIST, buildView, modifiers, setGhost } from './state.ts';
 
 const FRESH: Omit<BuildState, 'level'> = { tool: { kind: 'select' }, tab: 'desks', search: '', paint: 1, style: 0, wallsMode: 'cutaway' };
 
@@ -19,6 +19,8 @@ export function enterBuild() {
   buildView.x = runtime.owner.pos.x;
   buildView.z = runtime.owner.pos.z;
   runtime.keys.clear();
+  buildView.dist = runtime.view.isoDist;
+  runtime.view.isoDist = Math.min(runtime.view.isoDist, BUILD_DIST);
   set({ build: { ...FRESH, level }, story: level, selectedId: null, menu: null });
 }
 
@@ -26,6 +28,7 @@ export function exitBuild() {
   if (!get().build) return;
   setGhost(null);
   buildView.keys.clear();
+  runtime.view.isoDist = buildView.dist || runtime.view.isoDist;
   set({ build: null, buildCursor: { readout: null, verdict: null, hover: null } });
 }
 

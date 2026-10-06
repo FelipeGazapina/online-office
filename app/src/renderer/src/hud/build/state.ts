@@ -27,7 +27,9 @@ export function setGhost(g: Ghost | null) {
 export const modifiers = { shift: false, ctrl: false };
 
 // Where the build camera looks. Panning moves it; the camera rig eases toward it.
-export const buildView = { x: 0, z: 0, keys: new Set<string>(), edge: { x: 0, z: 0 } };
+// `dist` remembers how far out the overview was, so leaving build mode puts the camera back.
+export const buildView = { x: 0, z: 0, dist: 0, keys: new Set<string>(), edge: { x: 0, z: 0 } };
+export const BUILD_DIST = 34;
 
 export function spaceContext(company: Company | null): SpaceContext {
   return {

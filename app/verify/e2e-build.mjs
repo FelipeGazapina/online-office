@@ -99,12 +99,18 @@ export default async function (s) {
     if (solids.some((o) => o.x0 < r.x1 && o.x1 > r.x0 && o.z0 < r.z1 && o.z1 > r.z0)) return false;
     return !b0.stories[0].walls.some((w2) => w2.x >= r.x0 - 1 && w2.x <= r.x1 && w2.z >= r.z0 - 1 && w2.z <= r.z1);
   };
-  const reachable = async (x, z, w, h) => {
-    for (const [px, pz] of [[x, z], [x + w, z], [x, z + h], [x + w, z + h], [x + w / 2, z + h / 2]]) {
-      const p = await at(px, pz);
-      if (p.x < 150 || p.x > 1150 || p.y < 130 || p.y > 600) return false;
+  // Pans the build camera with the real WASD keys until a point of the office sits in the middle of the screen.
+  const bring = async (x, z, level = 0) => {
+    for (let i = 0; i < 40; i++) {
+      const p = await at(x, z, level);
+      const key = p.x > 1000 ? ['KeyD', 'd'] : p.x < 300 ? ['KeyA', 'a'] : p.y > 500 ? ['KeyS', 's'] : p.y < 200 ? ['KeyW', 'w'] : null;
+      if (!key) return p;
+      await hold(...key);
+      await s.sleep(Math.min(400, 120 + Math.abs(p.x > 1000 || p.x < 300 ? p.x - 650 : p.y - 350) / 3));
+      await release(...key);
+      await s.sleep(350);
     }
-    return true;
+    throw new Error(`could not bring ${x}, ${z} into view`);
   };
   const findFree = async (w, h, margin, not = []) => {
     const cand = [];
@@ -115,8 +121,9 @@ export default async function (s) {
       }
     }
     cand.sort((a, c) => a.d - c.d);
-    for (const c of cand) if (await reachable(c.x, c.z, w, h)) return { x: c.x, z: c.z, w, h };
-    throw new Error(`no free ${w} x ${h} ground in reach`);
+    if (!cand.length) throw new Error(`no free ${w} x ${h} ground`);
+    await bring(cand[0].x + w / 2, cand[0].z + h / 2);
+    return { x: cand[0].x, z: cand[0].z, w, h };
   };
 
   // ---- enter build mode
@@ -155,7 +162,7 @@ export default async function (s) {
   await s.sleep(900);
 
   // ---- room tool: a 5 x 4 room
-  const room = await findFree(5, 4, 1);
+  const room = await findFree(5, 4, 2);
   const rv = { a: { x: room.x, z: room.z }, b: { x: room.x + 5, z: room.z + 4 } };
   const before = await building(s);
   await clickSel('[data-tab="walls"]');
@@ -177,14 +184,13 @@ export default async function (s) {
 
   // ---- paint the floor: Shift fills the whole room
   await clickSel('[data-tab="floors"]');
-  await s.sleep(400);
-  await save(s, 's3-paint');
   await clickSel('[data-entry="floor:6"]');
   assert((await ui(s)).tool.kind === 'floor' && (await ui(s)).paint === 6, 'a floor swatch puts the paint tool in hand');
   await hold('ShiftLeft', 'Shift');
   await hover(room.x + 2.5, room.z + 2.5);
   const fill = await cursor(s);
   assert(fill.readout?.text === '20 m²', `with Shift held the ghost covers the room (${fill.readout?.text})`);
+  await save(s, 's3-paint');
   await clickAt(room.x + 2.5, room.z + 2.5);
   await release('ShiftLeft', 'Shift');
   await waitBuilding(`b.stories[0].paint[${paintIndex(b0, 0, room.x + 2, room.z + 2)}] === 6`, 'the floor paint did not arrive');
@@ -202,15 +208,55 @@ export default async function (s) {
   await waitBuilding(`b.stories[0].walls.some((w) => w.d === 'e' && w.x === ${doorRef.x} && w.z === ${doorRef.z} && w.open === 'door')`, 'the door did not arrive');
   assert(true, `the south wall of the room has a door at x ${doorRef.x}`);
 
+  // ---- a window, then paint the walls: one wall, then the whole room with Shift
+  await choose('openings', 'window');
+  await clickAt(room.x + 2.5, room.z);
+  await waitBuilding(`b.stories[0].walls.some((w) => w.d === 'e' && w.x === ${room.x + 2} && w.z === ${room.z} && w.open === 'window')`, 'the window did not arrive');
+  assert(true, 'a window went into the north wall');
+  await choose('walls', 'style:1');
+  await clickAt(room.x + 5, room.z + 1.5);
+  await waitBuilding(`b.stories[0].walls.find((w) => w.d === 's' && w.x === ${room.x + 5} && w.z === ${room.z + 1})?.style === 1`, 'the wall paint did not arrive');
+  const styled = (await building(s)).stories[0].walls.filter((w) => w.style === 1);
+  assert(styled.length === 1, 'a click paints one wall segment brick');
+  await choose('walls', 'style:3');
+  await hold('ShiftLeft', 'Shift');
+  await clickAt(room.x + 5, room.z + 1.5);
+  await release('ShiftLeft', 'Shift');
+  await waitBuilding(`b.stories[0].walls.filter((w) => w.style === 3).length === 18`, 'the room walls were not all painted');
+  const ring = (await building(s)).stories[0].walls.filter((w) => w.style === 3);
+  assert(ring.some((w) => w.open === 'door') && ring.some((w) => w.open === 'window'), 'Shift paints all 18 walls of the room, doors and windows included');
+
+  // ---- the wall tool: a 4 m wall with its readout, then Ctrl-drag takes it away
+  await choose('walls', 'wall');
+  const wallsBefore = (await building(s)).stories[0].walls.length;
+  await dragTo({ x: room.x - 2, z: room.z - 1 }, { x: room.x + 2, z: room.z - 1 }, 0, async () => {
+    assert((await cursor(s)).readout?.text === '4 m', 'mid-drag the wall tool reads its length: 4 m');
+  });
+  await waitBuilding(`b.stories[0].walls.length === ${wallsBefore + 4}`, 'the wall did not arrive');
+  assert(true, 'releasing the drag built four wall segments');
+  await hold('ControlLeft', 'Control');
+  await dragTo({ x: room.x - 2, z: room.z - 1 }, { x: room.x + 2, z: room.z - 1 }, 0, async () => {
+    assert((await cursor(s)).readout?.text === 'Delete 4 m', 'Ctrl-drag reads Delete 4 m');
+  });
+  await release('ControlLeft', 'Control');
+  await waitBuilding(`b.stories[0].walls.length === ${wallsBefore}`, 'the wall was not deleted');
+  assert(true, 'and Ctrl-drag over it took the walls away again');
+
   // ---- furniture: a desk inside, then one on top of it
   await choose('desks', 'bench_desk');
   assert((await ui(s)).tool.kind === 'item' && (await ui(s)).tool.blockId, 'the desk is in hand, meant for a team');
   const deskAt = { x: room.x + 2.5, z: room.z + 2 };
+  await hover(room.x - 1.6, room.z + 2);
+  assert((await cursor(s)).verdict?.ok === true, 'the desk ghost is green on bare floor beside the room');
+  await save(s, 's3-ghost-green');
+  await hover(room.x - 0.4, room.z + 2);
+  const wallRed = await cursor(s);
+  assert(wallRed.verdict?.ok === false && wallRed.readout?.bad, `and red across the new wall, with the reason (${wallRed.verdict?.text})`);
+  await save(s, 's3-ghost-red');
   const desksBefore = itemsOf(await building(s), 0, 'bench_desk').length;
   await hover(deskAt.x, deskAt.z);
   const green = await cursor(s);
   assert(green.verdict?.ok === true, 'the desk ghost is green on bare floor inside the room');
-  await save(s, 's3-ghost-green');
   await clickAt(deskAt.x, deskAt.z);
   await waitBuilding(`b.stories[0].items.filter((i) => i.def === 'bench_desk').length === ${desksBefore + 1}`, 'the desk did not arrive');
   const placed = itemsOf(await building(s), 0, 'bench_desk').find((i) => !before.stories[0].items.some((o) => o.id === i.id));
@@ -220,7 +266,6 @@ export default async function (s) {
   await hover(deskAt.x + 0.5, deskAt.z);
   const red = await cursor(s);
   assert(red.verdict?.ok === false && red.readout?.bad === true, `a second desk overlapping it is red and says why (${red.verdict?.text})`);
-  await save(s, 's3-ghost-red');
   await clickAt(deskAt.x + 0.5, deskAt.z);
   await s.sleep(400);
   assert(itemsOf(await building(s), 0, 'bench_desk').length === desksBefore + 1, 'and clicking it adds nothing');
@@ -242,14 +287,20 @@ export default async function (s) {
   assert(moved.rot === 1 && moved.blockId === placed.blockId, `the desk was turned and moved (${moved.x / 2}, ${moved.z / 2}) and kept its team`);
   assert(itemsOf(await building(s), 0, 'bench_desk').length === desksBefore + 1, 'one desk, not two');
 
+  // ---- the eyedropper copies what is under the cursor, and Shift + wheel turns what is in hand
+  await s.press('Escape');
+  await hover(moveTo.x, moveTo.z);
+  await s.press('KeyE', 'e');
+  const dropped = await ui(s);
+  assert(dropped.tool.kind === 'item' && dropped.tool.def === 'bench_desk' && dropped.tool.carry === null && dropped.tool.rot === 1, 'E copies the desk under the cursor, turned the same way');
+  await s.eval(`document.querySelector('canvas').dispatchEvent(new WheelEvent('wheel', { deltaY: 100, shiftKey: true, bubbles: true, cancelable: true }))`);
+  assert((await ui(s)).tool.rot === 2, 'Shift + wheel turns it');
+  await s.press('Escape');
+
   // ---- delete a plant
   const plants = itemsOf(await building(s), 0, 'plant');
-  let target;
-  for (const pl of plants) {
-    const p = await at(pl.x / 2 + 0.25, pl.z / 2 + 0.25);
-    if (p.x > 160 && p.x < 1150 && p.y > 140 && p.y < 600) target = pl;
-  }
-  assert(target, 'a plant is on screen to delete');
+  const target = plants[0];
+  await bring(target.x / 2 + 0.25, target.z / 2 + 0.25);
   await hover(target.x / 2 + 0.25, target.z / 2 + 0.25);
   const hov = await cursor(s);
   assert(hov.hover === target.id, `the cursor knows the plant is under it (${hov.hover} vs ${target.id} at ${target.x},${target.z})`);
@@ -282,15 +333,15 @@ export default async function (s) {
   await s.waitFor(`${store}.build.level === 1 && ${store}.story === 1`, 4000);
   assert(true, 'Add floor adds floor 2 and switches to it');
   await s.sleep(1400);
-  const stairs = await findFree(1, 7, 0, [room]);
+  const stairs = await findFree(7, 8, 0, [room]);
   const hole = { x: stairs.x, z: stairs.z };
   // The run is four tiles from the base at +z, the first three open the stairwell, the fourth is the landing.
   const landing = { x: hole.x, z: hole.z + 3 };
-  await choose('floors', 'floor:1');
-  for (const row of [0.5, 1.5, 2.5]) await dragTo({ x: landing.x - 0.5, z: landing.z + row }, { x: landing.x + 2.5, z: landing.z + row }, 1);
-  await waitBuilding(`b.stories[1].paint.filter((p) => p > 0).length >= 12`, 'floor 2 did not get its floor');
-  await save(s, 's3-levels');
-  assert((await s.eval(`${store}.building.stories[1].paint.filter((p) => p > 0).length`)) >= 12, 'floor 2 has a patch of floor over the landing');
+  await bring(landing.x + 3, landing.z + 2, 1);
+  await choose('walls', 'room');
+  await dragTo({ x: landing.x, z: landing.z }, { x: landing.x + 6, z: landing.z + 4 }, 1);
+  await waitBuilding(`b.stories[1].walls.length === 20 && b.stories[1].paint.filter((p) => p > 0).length === 24`, 'the room on floor 2 did not arrive');
+  assert(true, 'floor 2 holds a 6 x 4 room whose corner is the stairs landing');
   await clickSel('[aria-label="Floor down"]');
   await s.waitFor(`${store}.build.level === 0`, 4000);
   await s.sleep(1200);
@@ -307,6 +358,11 @@ export default async function (s) {
   const walk = (await s.eval('__office.state()')).intent;
   assert(walk.kind === 'walk' && walk.legs === 2 && walk.floor === 1, `a route from the ground floor up the new stairs exists (${walk.legs} legs)`);
   await s.eval('__office.teleport(' + owner.x + ', ' + owner.z + ')');
+  await s.press('PageUp');
+  await s.waitFor(`${store}.build.level === 1 && ${store}.story === 1`, 4000);
+  await bring(landing.x + 3, landing.z + 2, 1);
+  await s.sleep(900);
+  await save(s, 's3-levels');
 
   // ---- walls up, cutaway, down
   await s.sleep(500);

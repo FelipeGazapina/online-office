@@ -10,12 +10,13 @@ import { draft, type Ghost } from '../../hud/build/state.ts';
 import { useStore } from '../../store.ts';
 import { modelOf } from './models.ts';
 
-const GREEN = '#35d46a';
+const GREEN = '#2fe06a';
 const RED = '#ff4d4d';
 const WHITE = '#ffffff';
 const tone = (ok: boolean) => (ok ? GREEN : RED);
 
-const basic = (color: string, opacity: number) => new MeshBasicMaterial({ color, transparent: true, opacity, depthWrite: false, side: DoubleSide });
+// The footprint and the arrow draw through walls and furniture: a ghost inside a room has to stay readable from outside.
+const basic = (color: string, opacity: number, depthTest = true) => new MeshBasicMaterial({ color, transparent: true, opacity, depthWrite: false, depthTest, side: DoubleSide });
 const MATERIALS = {
   wall: basic(WHITE, 0.4),
   wallErase: basic(RED, 0.5),
@@ -24,14 +25,18 @@ const MATERIALS = {
   fillWhite: basic(WHITE, 0.28),
   fillGreen: basic(GREEN, 0.4),
   fillRed: basic(RED, 0.42),
+  padGreen: basic(GREEN, 0.5, false),
+  padRed: basic(RED, 0.52, false),
   post: basic(WHITE, 0.95),
-  arrowGreen: basic(GREEN, 0.9),
-  arrowRed: basic(RED, 0.9),
+  arrowGreen: basic(GREEN, 0.95, false),
+  arrowRed: basic(RED, 0.95, false),
 };
-const ghostModel = (ok: boolean) =>
-  new MeshStandardMaterial({ vertexColors: true, transparent: true, opacity: 0.8, emissive: ok ? GREEN : RED, emissiveIntensity: 0.35, depthWrite: false });
-const MODEL_OK = ghostModel(true);
-const MODEL_BAD = ghostModel(false);
+const ghostModel = (ok: boolean, depthTest: boolean) =>
+  new MeshStandardMaterial({ vertexColors: true, transparent: true, opacity: depthTest ? 0.85 : 0.28, emissive: ok ? GREEN : RED, emissiveIntensity: 0.35, depthWrite: false, depthTest });
+const MODEL_OK = ghostModel(true, true);
+const MODEL_BAD = ghostModel(false, true);
+const XRAY_OK = ghostModel(true, false);
+const XRAY_BAD = ghostModel(false, false);
 
 const T = WALL_HALF * 2 + 0.04;
 
@@ -72,21 +77,28 @@ function Tiles({ tiles, material }: { tiles: readonly Vec2[]; material: MeshBasi
   return <mesh geometry={geo} material={material} renderOrder={6} />;
 }
 
+const BORDER = 0.06;
+
 function Rect({ x0, z0, x1, z1, color, fill }: { x0: number; z0: number; x1: number; z1: number; color: string; fill: MeshBasicMaterial | null }) {
-  const pts = useMemo(() => new Float32Array([x0, 0.06, z0, x1, 0.06, z0, x1, 0.06, z1, x0, 0.06, z1]), [x0, z0, x1, z1]);
+  const edge = useMemo(() => new MeshBasicMaterial({ color, transparent: true, opacity: 0.95, depthWrite: false, depthTest: false }), [color]);
+  const w = x1 - x0;
+  const d = z1 - z0;
+  const bar = (x: number, z: number, bw: number, bd: number) => (
+    <mesh position={[x, 0.07, z]} rotation-x={-Math.PI / 2} material={edge} renderOrder={10}>
+      <planeGeometry args={[bw, bd]} />
+    </mesh>
+  );
   return (
     <group>
       {fill && (
         <mesh position={[(x0 + x1) / 2, 0.05, (z0 + z1) / 2]} rotation-x={-Math.PI / 2} material={fill} renderOrder={6}>
-          <planeGeometry args={[x1 - x0, z1 - z0]} />
+          <planeGeometry args={[w, d]} />
         </mesh>
       )}
-      <lineLoop renderOrder={7}>
-        <bufferGeometry>
-          <bufferAttribute attach="attributes-position" args={[pts, 3]} />
-        </bufferGeometry>
-        <lineBasicMaterial color={color} depthWrite={false} />
-      </lineLoop>
+      {bar((x0 + x1) / 2, z0, w + BORDER, BORDER)}
+      {bar((x0 + x1) / 2, z1, w + BORDER, BORDER)}
+      {bar(x0, (z0 + z1) / 2, BORDER, d)}
+      {bar(x1, (z0 + z1) / 2, BORDER, d)}
     </group>
   );
 }
@@ -109,9 +121,9 @@ function frontOf(item: Item): { at: Vec2; yaw: number } {
 
 const arrowShape = (() => {
   const s = new Shape();
-  s.moveTo(0.28, 0);
-  s.lineTo(-0.16, 0.22);
-  s.lineTo(-0.16, -0.22);
+  s.moveTo(0.34, 0);
+  s.lineTo(-0.2, 0.3);
+  s.lineTo(-0.2, -0.3);
   s.closePath();
   return s;
 })();
@@ -127,10 +139,11 @@ function ItemGhost({ item, ok, outline }: { item: Item; ok: boolean; outline: bo
   const color = outline ? WHITE : tone(ok);
   return (
     <>
-      <Rect x0={x0} z0={z0} x1={x1} z1={z1} color={color} fill={outline ? null : ok ? MATERIALS.fillGreen : MATERIALS.fillRed} />
+      <Rect x0={x0} z0={z0} x1={x1} z1={z1} color={color} fill={outline ? null : ok ? MATERIALS.padGreen : MATERIALS.padRed} />
       {!outline && (
         <>
-          <mesh geometry={modelOf(item.def)} material={ok ? MODEL_OK : MODEL_BAD} position={[(x0 + x1) / 2, 0, (z0 + z1) / 2]} rotation-y={YAW[item.rot]} renderOrder={8} />
+          <mesh geometry={modelOf(item.def)} material={ok ? XRAY_OK : XRAY_BAD} position={[(x0 + x1) / 2, 0, (z0 + z1) / 2]} rotation-y={YAW[item.rot]} renderOrder={8} />
+          <mesh geometry={modelOf(item.def)} material={ok ? MODEL_OK : MODEL_BAD} position={[(x0 + x1) / 2, 0, (z0 + z1) / 2]} rotation-y={YAW[item.rot]} renderOrder={9} />
           <mesh position={[front.at.x, 0.07, front.at.z]} rotation={[-Math.PI / 2, 0, front.yaw]} material={ok ? MATERIALS.arrowGreen : MATERIALS.arrowRed} renderOrder={7}>
             <shapeGeometry args={[arrowShape]} />
           </mesh>

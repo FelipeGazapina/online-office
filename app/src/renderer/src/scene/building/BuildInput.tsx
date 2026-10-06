@@ -84,7 +84,11 @@ function plan(b: Building, build: BuildState, p: Vec2, drag: Drag | null, shift:
     case 'wallpaint': {
       const w = nearestWall(story, p);
       if (!w) return { ops: [], ghost: () => null, readout: null };
-      const room = shift ? floodRoom(b, story, tileOf(p)) : null;
+      const sides: Vec2[] = w.d === 'e' ? [{ x: w.x, z: w.z - 1 }, { x: w.x, z: w.z }] : [{ x: w.x - 1, z: w.z }, { x: w.x, z: w.z }];
+      // The cursor's side of the wall, or the smaller room when the cursor is on the wall itself.
+      const off = w.d === 'e' ? p.z - w.z : p.x - w.x;
+      const rooms = shift ? sides.map((t) => floodRoom(b, story, t)) : [];
+      const room = Math.abs(off) > 0.15 && rooms[off < 0 ? 0 : 1] ? rooms[off < 0 ? 0 : 1] : (rooms.filter((r): r is Vec2[] => !!r).sort((x, y) => x.length - y.length)[0] ?? null);
       const walls = room ? wallsAround(story, room) : [w];
       const op = paintWallsOp(level, walls.length ? walls : [w], build.style);
       return { ops: op ? [op] : [], ghost: (ok) => ({ kind: 'walls', walls: walls.length ? walls : [w], ok }), readout: null };

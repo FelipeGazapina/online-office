@@ -61,7 +61,7 @@ function Card({ entry, thumb, search }: { entry: Entry; thumb: string | undefine
   const swatch = entry.kind === 'floor' || entry.kind === 'style';
   const sub = search ? tab : entry.kind === 'item' ? footprintText(entry.def) : entry.kind === 'tool' ? '' : '';
   return (
-    <button className={`bh-card${swatch ? ' swatch' : ''}`} aria-pressed={active} onClick={() => chooseEntry(entry)} title={entry.name} data-entry={entry.id}>
+    <button className={`bh-card${swatch ? ' bh-swatch' : ''}`} aria-pressed={active} onClick={() => chooseEntry(entry)} title={entry.name} data-entry={entry.id}>
       <span className="bh-thumb">
         {entry.kind === 'item' && (thumb ? <img src={thumb} alt="" draggable={false} /> : <i className="bh-thumb-wait" />)}
         {entry.kind === 'tool' && <ToolIcon icon={entry.icon} />}

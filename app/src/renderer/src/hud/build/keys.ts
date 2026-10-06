@@ -41,7 +41,6 @@ export function buildKey(e: KeyboardEvent): boolean {
     case 'Escape':
       if (s.helpOpen || s.menu) return false;
       if (build.tool.kind !== 'select') setTool({ kind: 'select' });
-      else exitBuild();
       return taken();
     case 'PageUp':
       setLevel(level + 1);

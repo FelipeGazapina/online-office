@@ -2267,6 +2267,8 @@ html[data-building] .labels * {
   padding: 10px 12px 12px;
   border-top: 1px solid var(--line);
   overflow-x: auto;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(35, 38, 64, 0.25) transparent;
   min-height: 138px;
 }
 .bh-card {
@@ -2292,6 +2294,9 @@ html[data-building] .labels * {
   border-color: var(--moss);
   background: #f2fbf6;
   box-shadow: 0 0 0 3px rgba(47, 158, 110, 0.2);
+}
+.bh-swatch {
+  width: 86px;
 }
 .bh-thumb {
   display: grid;
