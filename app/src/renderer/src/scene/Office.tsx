@@ -14,6 +14,7 @@ import { LobbyDecor } from './Decor.tsx';
 import { Environment } from './Environment.tsx';
 import { Exterior } from './Exterior.tsx';
 import { Lights } from './Lighting.tsx';
+import { LobbySun } from './LobbyLight.tsx';
 import { Chair, Desk, RoundedPlane } from './Furniture.tsx';
 import { fitText, FONT_BODY, FONT_DISPLAY, roundRect, useCanvasTexture } from './textures.ts';
 
@@ -286,6 +287,7 @@ export function Office({ company }: { company: Company | null }) {
   return (
     <>
       <Lights b={b} slots={(company?.blocks ?? []).map((bl) => bl.slot)} />
+      <LobbySun b={b} building={world.building} />
       <Environment b={b} />
       <Exterior b={b} />
       <CompanySign name={company?.name ?? 'Online Office'} b={b} />

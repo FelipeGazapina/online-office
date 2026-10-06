@@ -56,6 +56,7 @@ export default async (s) => {
 
   // Where a new owner stands: first person, no teleport.
   await firstPerson(s, 'first-spawn');
+  if (process.env.OFFICE_SHOT_ONLY === 'spawn') return;
 
   // Matched framing for the bar: the live camera as a player gets it, the owner at the workspace.
   await s.eval('__office.teleport(-10.6, -1.2, Math.PI)');
