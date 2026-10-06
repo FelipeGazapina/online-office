@@ -5,6 +5,7 @@ import { addFloor, chooseEntry, exitBuild, isActive, patchBuild, redo, selectTab
 import { footprintText, TABS, visibleEntries, type Entry } from './catalog.ts';
 import { Redo, Search, TabIcon, ToolIcon, Undo, WALL_MODES, WallsIcon } from './icons.tsx';
 import { useThumbs } from './thumbs.ts';
+import './build.css';
 
 const HINTS: Record<BuildTool['kind'], (t: BuildTool) => string[][]> = {
   select: () => [['Click', 'pick up furniture'], ['E', 'copy it'], ['Delete', 'remove it']],
