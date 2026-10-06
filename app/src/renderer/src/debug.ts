@@ -1,13 +1,16 @@
 // Verification hooks: the render loop can be throttled in background tabs, so tests advance the sim by hand.
 import { _roots } from '@react-three/fiber';
 import { Vector3 } from 'three';
+import type { Building } from '../../shared/space/index.ts';
 import type { BlockId, Employee, EmployeeId, ModelId, ProjectBlock } from '../../shared/protocol.ts';
 import { DESKS_PER_BLOCK } from '../../shared/protocol.ts';
-import { legacyBuilding } from '../../shared/space/index.ts';
+import { applyOps, legacyBuilding, rectWalls, type BuildOp, type Item, type ItemId, type SpaceContext, type WallSeg } from '../../shared/space/index.ts';
+import { benchItem } from '../../shared/space/kit.ts';
 import { applyServerMessage } from './office.ts';
 import { loadMailFixture } from './hud/chat/fixture.ts';
 import { renders } from './hud/chat/renders.ts';
 import { KEYS_INTENT, runtime } from './runtime.ts';
+import { floorBase } from './world.ts';
 import { stepSim, tripEnd, walkTo } from './sim.ts';
 import { get, sendTap, set, setSetting, useStore } from './store.ts';
 
@@ -20,7 +23,7 @@ const intentState = () => {
 
 // Test-only: replaces the company in the renderer store with `count` fake employees spread over as many blocks as they
 // need, two thirds of them working so their avatars animate. Main never hears about them, so no snapshot may arrive after.
-function injectFake(count: number) {
+function injectFake(count: number, floors = 1) {
   const company = get().company;
   if (!company) throw new Error('no company yet');
   const colors = ['#e07a5f', '#3d85c6', '#81b29a', '#f2cc8f'];
@@ -32,7 +35,8 @@ function injectFake(count: number) {
     slot,
   }));
   const desks = Array.from({ length: count }, (_, i) => ({ id: `fake-emp-${i}`, blockId: blocks[Math.floor(i / DESKS_PER_BLOCK)].id, desk: i % DESKS_PER_BLOCK, orchestrator: false }));
-  const { building, seats } = legacyBuilding(blocks.map((b) => ({ id: b.id, slot: b.slot })), desks);
+  const legacy = legacyBuilding(blocks.map((b) => ({ id: b.id, slot: b.slot })), desks);
+  const { building, seats } = floors > 1 ? stackStories(legacy.building, legacy.seats, desks, blocks, floors) : legacy;
   const employees: Employee[] = Array.from({ length: count }, (_, i) => ({
     id: `fake-emp-${i}` as EmployeeId,
     name: `Fake ${i}`,
@@ -49,11 +53,64 @@ function injectFake(count: number) {
   set({ company: { ...company, blocks, employees }, building });
 }
 
-// Test-only: real frame times over `ms` of requestAnimationFrame, plus the renderer's draw-call counters.
+// Test-only: the legacy office with `floors - 1` stories on top, each lot-wide with its own windows, an inner wall, stairs
+// up from the story below, decor, and bench desks that take an even share of the employees off the ground floor.
+function stackStories(ground: Building, groundSeats: Map<string, ItemId>, desks: { id: string; blockId: string }[], blocks: ProjectBlock[], floors: number) {
+  const lot = ground.lot;
+  const seats = new Map(groundSeats);
+  const ops: BuildOp[] = [{ t: 'stories', count: floors }, { t: 'items', story: 0, put: [{ id: 'stairs:00' as ItemId, def: 'stairs', x: 16, z: 4, rot: 0 }], del: [] }];
+  const share = Math.ceil(desks.length / floors);
+  for (let story = 1; story < floors; story++) {
+    const cells = Array.from({ length: lot.w * lot.h }, (_, i) => ({ x: lot.x0 + (i % lot.w), z: lot.z0 + Math.floor(i / lot.w), half: 0 as const, paint: story + 1 }));
+    const walls: WallSeg[] = rectWalls({ x: lot.x0, z: lot.z0, w: lot.w, h: lot.h }, 2).map((w, i) => (i % 6 >= 1 && i % 6 <= 4 ? { ...w, open: 'window' as const } : w));
+    for (let i = 0; i < 12; i++) walls.push({ x: -6 + i, z: -2, d: 'e', style: 2, ...(i === 5 ? { open: 'door' as const } : {}) });
+    const items: Item[] = desks.slice(story * share, (story + 1) * share).map((d, n) => {
+      const slot = blocks.findIndex((b) => b.id === d.blockId);
+      const item = { ...benchItem(d.blockId, slot, n), id: `${d.blockId}:bench_desk:${story}${n}` as ItemId };
+      seats.set(d.id, item.id);
+      return item;
+    });
+    const put = (def: string, x: number, z: number): Item => ({ id: `${def}:${story}0` as ItemId, def, x, z, rot: 0 });
+    items.push(put('plant', -30, -30), put('sofa', 20, 10), put('bookshelf', -34, -38), put('meeting_table', 20, -20));
+    if (story < floors - 1) items.push({ id: `stairs:0${story}` as ItemId, def: 'stairs', x: 30, z: 4, rot: 0 });
+    ops.push({ t: 'floor', story, cells }, { t: 'walls', story, put: walls, del: [] }, { t: 'items', story, put: items, del: [] });
+  }
+  const ctx: SpaceContext = {
+    blocks: new Set(blocks.map((b) => b.id)),
+    employees: new Map(desks.map((d) => [d.id, { blockId: d.blockId, orchestrator: false }])),
+    seats,
+  };
+  const built = applyOps(ground, ops, ctx);
+  if (!built.ok) throw new Error(`the ${floors}-story fixture is illegal: ${JSON.stringify(built.violations)}`);
+  return { building: built.building, seats };
+}
+
+// Test-only: real frame times over `ms` of requestAnimationFrame, plus the renderer's draw-call counters and the frame
+// budget, which holds still when the machine is busy: CPU ms spent inside gl.render per frame, and GPU ms per frame from
+// timer queries where the driver offers them (the mean of the resolved frames, null when it does not).
 function measureFrames(ms: number) {
   const root = _roots.values().next().value;
   if (!root) throw new Error('no canvas');
-  const info = root.store.getState().gl.info;
+  const { gl } = root.store.getState();
+  const info = gl.info;
+  const ctx = gl.getContext() as WebGL2RenderingContext;
+  const ext = ctx.getExtension('EXT_disjoint_timer_query_webgl2');
+  const queries: WebGLQuery[] = [];
+  let cpu = 0;
+  let renders = 0;
+  const render = gl.render.bind(gl);
+  gl.render = (scene, camera) => {
+    const q = ext ? ctx.createQuery() : null;
+    if (q) ctx.beginQuery(ext!.TIME_ELAPSED_EXT, q);
+    const t0 = performance.now();
+    render(scene, camera);
+    cpu += performance.now() - t0;
+    renders++;
+    if (q) {
+      ctx.endQuery(ext!.TIME_ELAPSED_EXT);
+      queries.push(q);
+    }
+  };
   return new Promise((resolve) => {
     const deltas: number[] = [];
     let drawCalls = 0;
@@ -66,8 +123,13 @@ function measureFrames(ms: number) {
       last = t;
       drawCalls = Math.max(drawCalls, info.render.calls);
       triangles = Math.max(triangles, info.render.triangles);
-      if (t - start < ms) requestAnimationFrame(tick);
-      else resolve({ deltas, drawCalls, triangles });
+      if (t - start < ms) return void requestAnimationFrame(tick);
+      gl.render = render;
+      setTimeout(() => {
+        const gpu = queries.filter((q) => ctx.getQueryParameter(q, ctx.QUERY_RESULT_AVAILABLE)).map((q) => ctx.getQueryParameter(q, ctx.QUERY_RESULT) / 1e6);
+        const disjoint = ext ? ctx.getParameter(ext.GPU_DISJOINT_EXT) : true;
+        resolve({ deltas, drawCalls, triangles, cpuMs: cpu / Math.max(1, renders), gpuMs: gpu.length && !disjoint ? gpu.reduce((a, b) => a + b, 0) / gpu.length : null });
+      }, 300);
     };
     requestAnimationFrame(tick);
   });
@@ -136,6 +198,12 @@ export function installDebug() {
       const { camera, size } = root.store.getState();
       const p = new Vector3(x, y, z).project(camera);
       return { x: size.left + ((p.x + 1) / 2) * size.width, y: size.top + ((1 - p.y) / 2) * size.height };
+    },
+    // Test-only: stands the owner on another story at once, so the overview draws every story up to it.
+    ownerTo(floor: number, x: number, z: number) {
+      runtime.owner.floor = floor;
+      runtime.owner.pos.set(x, floorBase(floor), z);
+      runtime.owner.intent = KEYS_INTENT;
     },
     wallStats,
     probe,
