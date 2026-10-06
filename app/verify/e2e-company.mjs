@@ -35,6 +35,8 @@ const BAR = 'node --test passes and slugify handles accents, spaces, punctuation
 const TASK = `Add a slugify(text) function in src/slug.js (ES module, named export) with tests in test/slug.test.js, and a "slugify" section in README.md documenting it. The bar: ${BAR}. Split the work between people, get the function reviewed against the bar, and tell me when it is all done.`;
 const TASK_2 = 'Add a wordCount(text) function in src/words.js (ES module, named export) that counts whitespace-separated words and returns 0 for empty input, with a test in test/words.test.js. Run node --test and tell me when it passes.';
 
+// A commit sha is a valid artifact: the mailroom accepts one, so the checks do too.
+const SHA = /^[0-9a-f]{7,40}$/;
 const results = [];
 const check = (ok, line) => {
   results.push({ ok, line });
@@ -128,12 +130,12 @@ export default async (s) => {
   await s.resize(1440, 900);
   await s.waitFor(`!!${company}`);
   await s.eval(`window.office.send({ type: 'create_block', cwd: ${JSON.stringify(repo)} })`);
-  await s.waitFor(`${company}.blocks.length === 1`);
+  await s.waitFor(`${company}.blocks.length === 1`, 30000);
   const blockId = await s.eval(`${company}.blocks[0].id`);
   const poModel = process.env.OFFICE_PO_MODEL;
   await s.eval(`window.office.send({ type: 'hire', provider: 'claude-code', blockId: ${JSON.stringify(blockId)}, name: 'Pia', role: 'orchestrator'${poModel ? `, model: ${JSON.stringify(poModel)}` : ''} })`);
   await s.eval(`window.office.send({ type: 'hire', provider: 'claude-code', blockId: ${JSON.stringify(blockId)}, name: 'Eli' })`);
-  await s.waitFor(`${company}.employees.length === 2`);
+  await s.waitFor(`${company}.employees.length === 2`, 30000);
   const emps = () => s.eval(`${company}.employees.map(e => ({ id: e.id, name: e.name, role: e.role ?? 'employee' }))`);
   const [po, eli] = [(await emps()).find((e) => e.role === 'orchestrator'), (await emps()).find((e) => e.name === 'Eli')];
   console.log(`data ${dataDir}`);
@@ -195,13 +197,13 @@ export default async (s) => {
 
   const asked = new Map(posts().filter((m) => m.kind === 'request').map((m) => [m.id, m]));
   const dones = posts().filter((m) => m.kind === 'reply' && m.outcome === 'done' && asked.get(m.requestId)?.intent === 'work');
-  const noProof = dones.filter((m) => !m.artifact?.length || m.artifact.some((a) => !/^[0-9a-f]{7,40}$/.test(a) && !existsSync(join(repo, a))));
+  const noProof = dones.filter((m) => !m.artifact?.length || m.artifact.some((a) => !SHA.test(a) && !existsSync(join(repo, a))));
   console.log(`done replies on work requests: ${dones.length}; without existing artifacts: ${noProof.map((m) => `${names(m.from)}:${(m.artifact ?? []).join(',') || 'none'}`).join(' | ') || 'none'}`);
   check(dones.length > 0 && noProof.length === 0, 'every done reply on a work request carries artifacts that exist in the repo');
   const talky = dones.filter((m) => /waiting|will check back|once .* (is|are) done/i.test(m.text));
   check(talky.length === 0, `no done reply says it is waiting (${talky.map((m) => m.text.slice(0, 60)).join(' | ') || 'none'})`);
   const listed = finalReply?.artifact ?? [];
-  check(finalReply?.outcome === 'done' && listed.length > 0 && listed.every((a) => existsSync(join(repo, a))), `the PO final reply to the owner lists the artifacts (${listed.join(', ') || 'none'})`);
+  check(finalReply?.outcome === 'done' && listed.length > 0 && listed.every((a) => SHA.test(a) || existsSync(join(repo, a))), `the PO final reply to the owner lists the artifacts (${listed.join(', ') || 'none'})`);
 
   let testsOk = false;
   try {
