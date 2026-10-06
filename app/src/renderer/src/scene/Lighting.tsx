@@ -5,7 +5,7 @@ import { blockCenter, DOOR_X } from '../../../shared/space/index.ts';
 import type { Bounds } from './Environment.tsx';
 import { runtime } from '../runtime.ts';
 import { poolTexture } from './textures.ts';
-import { compileSceneInto } from './warmup.ts';
+import { compileScene } from './warmup.ts';
 
 // Pools of lamplight lie on the floor under every zone's lights: one additive decal each, all drawn together. They
 // are the cheap half of the room lighting; a couple of real point lights give the lobby its glow.
@@ -98,13 +98,18 @@ function useRoomReflections(at: Vector3) {
     if (phase.current === 'settling' && ++frames.current >= 90) {
       phase.current = 'linking';
       cube.current = new WebGLCubeRenderTarget(CAPTURE_SIZE, { type: HalfFloatType });
-      void compileSceneInto(gl, cube.current, scene, camera).then(() => (phase.current = 'linked'));
+      void compileScene(gl, scene, camera, cube.current).then(() => (phase.current = 'linked'));
     }
     if (phase.current !== 'linked' || !cube.current) return;
     phase.current = 'taken';
     const cam = new CubeCamera(0.1, 220, cube.current);
     cam.position.copy(at);
+    // The sun's shadow map is the same from every face, and the last frame drew it, so the six faces reuse it instead of
+    // drawing every caster six more times.
+    const { autoUpdate } = gl.shadowMap;
+    gl.shadowMap.autoUpdate = false;
     cam.update(gl, scene);
+    gl.shadowMap.autoUpdate = autoUpdate;
     const pmrem = new PMREMGenerator(gl);
     const filtered = pmrem.fromCubemap(cube.current.texture);
     pmrem.dispose();
