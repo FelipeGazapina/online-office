@@ -725,6 +725,80 @@ console.log('\n# the mailroom, end to end with scripted employees');
   for (const c of [asPo, asAnna, asBenj]) await c.c.close().catch(() => undefined);
 }
 
+console.log('\n# the owner\'s words: a question or a work order');
+{
+  type Triage = Promise<'work' | 'help' | undefined> | undefined;
+  const answers = new Map<string, Triage>();
+  const asked: string[] = [];
+  const desk = { warm() {}, ack: () => undefined, stop() {}, triage: (text: string): Triage => (asked.push(text), answers.get(text)) };
+  const trouble: string[] = [];
+  const statuses = { 'claude-code': { kind: 'ready' as const, version: 'fake' }, codex: { kind: 'missing' as const }, hermes: { kind: 'missing' as const } };
+  const o = new Office(join(dir, 'ask-company.json'), statuses, { ...noBuild, changed() {}, said() {}, log() {}, error: (m) => void trouble.push(m) }, { mcp, memory, acker: desk });
+  o.handle({ type: 'create_block', cwd: repo });
+  const block = o.snapshot().company.blocks[0]!.id;
+  const hireInto = (name: string) => {
+    const before = fakes.length;
+    o.handle({ type: 'hire', provider: 'claude-code', blockId: block, name });
+    return { fake: fakes[before]!, id: o.snapshot().company.employees.find((e) => e.name === name)!.id };
+  };
+  const ana = hireInto('Zoe');
+  const tell = (text: string, id = `ask${++posts}`) => o.handle({ type: 'post', to: ana.id, clientId: id, as: 'request', text });
+  const ownerRequests = () => o.snapshot().mail.tail.filter((m) => m.kind === 'request' && m.from === 'owner');
+  const intentOf = (text: string) => ownerRequests().find((m) => m.kind === 'request' && m.text === text);
+  const finish1 = () => finishTurn(ana.fake, 'ok');
+
+  tell('Add a logout button to the header');
+  check(asked.length === 0 && intentOf('Add a logout button to the header')?.kind === 'request' && (intentOf('Add a logout button to the header') as { intent: string }).intent === 'work', 'a plain order is posted as work at once, without asking the model');
+  await finish1();
+
+  answers.set('which file handles login?', Promise.resolve('help'));
+  tell('which file handles login?');
+  check(ownerRequests().length === 1, 'a message that is not a plain order waits for the model before it is posted');
+  await sleep(10);
+  check((intentOf('which file handles login?') as { intent: string } | undefined)?.intent === 'help' && /, help\]/.test(ana.fake.assigned.at(-1) ?? ''), 'a message the model calls a question is posted as help, and the employee is handed it as help');
+  await finish1();
+
+  answers.set('hey, can you wire the nav?', Promise.resolve('work'));
+  tell('hey, can you wire the nav?');
+  await sleep(10);
+  check((intentOf('hey, can you wire the nav?') as { intent: string } | undefined)?.intent === 'work', 'a message the model calls work is posted as work');
+  await finish1();
+
+  tell('no model is listening');
+  check((intentOf('no model is listening') as { intent: string } | undefined)?.intent === 'work', 'with no model to ask, the message is posted as work at once');
+  await finish1();
+
+  answers.set('the model gave up', Promise.resolve(undefined));
+  tell('the model gave up');
+  await sleep(10);
+  check((intentOf('the model gave up') as { intent: string } | undefined)?.intent === 'work', 'a model that gives no answer leaves the message as work');
+  await finish1();
+
+  answers.set('the model blew up', Promise.reject(new Error('spawn failed')));
+  tell('the model blew up');
+  await sleep(10);
+  check((intentOf('the model blew up') as { intent: string } | undefined)?.intent === 'work' && trouble.length === 0, 'a model call that throws leaves the message as work and tells the owner nothing');
+  await finish1();
+
+  let release!: (v: 'help') => void;
+  answers.set('which branch is this?', new Promise<'help'>((r) => (release = r)));
+  tell('which branch is this?');
+  tell('Rename the helper to something clearer');
+  check(ownerRequests().length === 6, 'a later order waits behind an earlier message that is still being asked about');
+  release('help');
+  await sleep(10);
+  const texts = ownerRequests().map((m) => (m.kind === 'request' ? m.text : ''));
+  check(texts.slice(-2).join('|') === 'which branch is this?|Rename the helper to something clearer', 'and both are posted in the order the owner sent them');
+  let late!: (v: 'help') => void;
+  answers.set('which commit is this?', new Promise<'help'>((r) => (late = r)));
+  tell('which commit is this?');
+  const sessions = fakes.length;
+  o.shutdown();
+  late('help');
+  await sleep(10);
+  check(!o.snapshot().mail.tail.some((m) => m.kind === 'request' && m.text === 'which commit is this?') && fakes.length === sessions, 'an answer that arrives after shutdown posts nothing and starts no session')
+}
+
 office.shutdown();
 check(fc.stopped, 'shutdown stops the sessions');
 check((await fetch(urlC, { method: 'POST', headers: { 'content-type': 'application/json', accept: 'application/json, text/event-stream' }, body: '{}' })).status === 404, 'shutdown detaches their MCP URLs');
