@@ -62,7 +62,7 @@ export default async (s) => {
   await s.sleep(2500);
   await save(s, 'iso-mid');
   await zoomBy(s, -600);
-  await s.eval('__office.teleport(-11.2, -3.6, Math.PI)');
+  await s.eval('__office.teleport(-7.2, -3.6, Math.PI)');
   await s.sleep(2500);
   await save(s, 'close-working');
   await zoomBy(s, 1200);
@@ -74,7 +74,7 @@ export default async (s) => {
   await s.sleep(2500);
   await save(s, 'site');
 
-  await s.eval('__office.teleport(-11.6, -0.4, Math.PI)');
+  await s.eval('__office.teleport(-12.5, -2.5, Math.PI)');
   await firstPerson(s, 'first-desks');
 
   await s.eval('__office.teleport(-4.5, 5.5, Math.PI)');
