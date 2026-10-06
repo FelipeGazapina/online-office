@@ -17,6 +17,7 @@ const which = arg('set', 'A');
 const cands = arg('cand', 'h,l').split(',');
 const N = Number(arg('n', '3'));
 const PAR = Number(arg('par', '6'));
+const PROBE = arg('probe', '');
 const MODEL = process.env.OFFICE_ACK_MODEL ?? 'claude-haiku-4-5-20251001';
 
 const sets: Record<string, readonly Labeled[]> = { A: SET_A };
@@ -100,6 +101,17 @@ const show = (name: string, rows: Row[]) => {
   if (ms.length) console.log(`  latency ms: p50 ${ms[Math.floor(ms.length * 0.5)]!.toFixed(0)}  p95 ${ms[Math.floor(ms.length * 0.95)]!.toFixed(0)}  max ${ms.at(-1)!.toFixed(0)}`);
 };
 
+if (PROBE) {
+  const { readFileSync } = await import('node:fs');
+  const texts: string[] = JSON.parse(readFileSync(PROBE, 'utf8'));
+  const jobs = texts.flatMap((t) => Array.from({ length: N }, () => t));
+  const calls = await pool(jobs, PAR, (t) => askModel(t));
+  for (const t of texts) {
+    const mine = calls.filter((_, k) => jobs[k] === t);
+    console.log(`${mine.map((c) => (c.kind === 'question' ? 'Q' : c.kind === 'work' ? 'W' : '?')).join('')}  ${t}`);
+  }
+  process.exit(0);
+}
 for (const set of which.split('').filter((c) => c === 'A' || c === 'B')) {
   const mine = items.filter((i) => i.set === set);
   if (cands.includes('h')) {
