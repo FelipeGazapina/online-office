@@ -1,7 +1,6 @@
-import { useThree } from '@react-three/fiber';
+import { useFrame, useThree } from '@react-three/fiber';
 import { useEffect, useLayoutEffect, useMemo, useRef } from 'react';
-import { AdditiveBlending, Color, InstancedMesh, Matrix4, MeshBasicMaterial, MeshStandardMaterial, Object3D, PlaneGeometry, PMREMGenerator, Quaternion, Vector3 } from 'three';
-import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
+import { AdditiveBlending, Color, CubeCamera, HalfFloatType, Texture, WebGLCubeRenderTarget, InstancedMesh, Matrix4, MeshBasicMaterial, MeshStandardMaterial, Object3D, PlaneGeometry, PMREMGenerator, Quaternion, Vector3 } from 'three';
 import { blockCenter, DOOR_X } from '../../../shared/space/index.ts';
 import type { Bounds } from './Environment.tsx';
 import { poolTexture } from './textures.ts';
@@ -60,27 +59,41 @@ export function usePools(b: Bounds, slots: readonly number[]) {
 // also act as ambient light and flatten the sun, but on a glossy floor it reads as a faint sheen of the room above it.
 export const reflective = new Map<MeshStandardMaterial, number>();
 
-function useRoomReflections() {
-  const { gl } = useThree();
-  useEffect(() => {
-    const pmrem = new PMREMGenerator(gl);
-    const room = new RoomEnvironment();
-    const target = pmrem.fromScene(room, 0.04);
+// The polished floors and the glass reflect the real room: one cube capture from the middle of the office, taken a few
+// frames after load once the scene is built, filtered into an environment map. Taken once, so it costs a single extra render.
+function useRoomReflections(at: Vector3) {
+  const { gl, scene } = useThree();
+  const target = useRef<{ texture: Texture; dispose: () => void } | null>(null);
+  const frames = useRef(0);
+  const apply = (texture: Texture | null) => {
     for (const [material, strength] of reflective) {
-      material.envMap = target.texture;
+      material.envMap = texture;
       material.envMapIntensity = strength;
       material.needsUpdate = true;
     }
-    return () => {
-      for (const material of reflective.keys()) {
-        material.envMap = null;
-        material.needsUpdate = true;
-      }
-      target.dispose();
-      pmrem.dispose();
-      room.dispose();
-    };
-  }, [gl]);
+  };
+  useFrame(() => {
+    if (target.current || ++frames.current < 90) return;
+    const cube = new WebGLCubeRenderTarget(256, { type: HalfFloatType });
+    const cam = new CubeCamera(0.1, 220, cube);
+    cam.position.copy(at);
+    apply(null);
+    cam.update(gl, scene);
+    const pmrem = new PMREMGenerator(gl);
+    const filtered = pmrem.fromCubemap(cube.texture);
+    pmrem.dispose();
+    cube.dispose();
+    target.current = filtered;
+    apply(filtered.texture);
+  });
+  useEffect(
+    () => () => {
+      apply(null);
+      target.current?.dispose();
+      target.current = null;
+    },
+    [],
+  );
 }
 
 // Late afternoon sun through the windows. Its shadows are wide and soft, and the sky and bounce fill is strong enough that
@@ -94,7 +107,7 @@ export function Lights({ b, slots }: { b: Bounds; slots: readonly number[] }) {
     target.position.set(cx, 0, cz);
     target.updateMatrixWorld();
   }, [target, cx, cz]);
-  useRoomReflections();
+  useRoomReflections(useMemo(() => new Vector3(cx, 1.5, cz), [cx, cz]));
   const pools = usePools(b, slots);
   return (
     <>

@@ -28,13 +28,13 @@ const floorMaterial = (surface: Surface, roughness: number, normalScale: number,
   detail(new MeshStandardMaterial({ map: surface.map, normalMap: surface.normalMap, roughnessMap: surface.roughnessMap, normalScale: new Vector2(normalScale, normalScale), vertexColors: true, roughness, ...extra }), 'floor');
 // In the order of FLOOR_FAMILIES.
 const floorMaterials = [
-  floorMaterial(woodSurface(plankCanvas(), 1 / 4), 1, 0.9),
+  floorMaterial(woodSurface(plankCanvas(), 1 / 4), 0.6, 0.9),
   floorMaterial(carpetSurface(), 1, 0.7),
-  floorMaterial(tileSurface(), 1, 0.8),
+  floorMaterial(tileSurface(), 0.4, 0.8),
   floorMaterial(concreteSurface(), 1, 0.8),
 ];
-reflective.set(floorMaterials[0], 0.25);
-reflective.set(floorMaterials[2], 0.7);
+reflective.set(floorMaterials[0], 0.3);
+reflective.set(floorMaterials[2], 1.2);
 const furnitureMaterial = detail(new MeshStandardMaterial({ vertexColors: true, roughness: 0.75 }), 'furniture');
 const wallMaterial = detail(new MeshStandardMaterial({ vertexColors: true, roughness: 0.95 }), 'wall');
 // Clear glass: the sky, the lawn and the trees show through it, with a faint cool tint and a sheen of the room on it.
