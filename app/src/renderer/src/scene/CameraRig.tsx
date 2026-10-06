@@ -6,6 +6,8 @@ import { runtime } from '../runtime.ts';
 import { get, useStore } from '../store.ts';
 import { stepSim } from '../sim.ts';
 import { crowd } from './people/crowd.ts';
+import { buildView } from '../hud/build/state.ts';
+import { STORY_H } from '../../../shared/space/index.ts';
 
 const ISO_PITCH = 0.58;
 const FOV_ISO = 26;
@@ -92,10 +94,11 @@ export function CameraRig() {
       const d = drag.current; if (!d) return;
       const dx = e.clientX - d.x; d.x = e.clientX; d.y = e.clientY;
       d.far ||= Math.hypot(e.clientX - d.ox, e.clientY - d.oy) >= DRAG_PX;
-      if (d.far) view.isoYawTarget -= dx * 0.006;
+      // The left button belongs to the build tools; the right and middle buttons turn the view.
+      if (d.far && (!get().build || (e.buttons & 6) !== 0)) view.isoYawTarget -= dx * 0.006;
     };
     const up = () => { drag.current = null; };
-    const wheel = (e: WheelEvent) => { if (get().camera === 'iso') runtime.view.isoDist = clamp(runtime.view.isoDist + e.deltaY * 0.03, 8, 48); };
+    const wheel = (e: WheelEvent) => { if (get().camera === 'iso') runtime.view.isoDist = clamp(runtime.view.isoDist + e.deltaY * 0.03, 8, get().build ? 90 : 48); };
     const blur = () => { if (document.pointerLockElement === el) document.exitPointerLock(); };
     el.addEventListener('pointerdown', down);
     el.addEventListener('click', blockClick, true);
@@ -139,7 +142,25 @@ export function CameraRig() {
     // The owner is put at the door once the building is here, and the camera starts there, not at the origin.
     if (owner.placed && !placed.current) { placed.current = true; snap.current = true; }
     // The overview pose, eased the way it always was.
-    focus.current.lerp(iso.set(owner.pos.x, owner.pos.y + 0.6, owner.pos.z), ease(dt, snap.current ? 100 : 5));
+    const build = get().build;
+    if (build) {
+      const pan = buildView.keys;
+      const ix = (pan.has('KeyD') || pan.has('ArrowRight') ? 1 : 0) - (pan.has('KeyA') || pan.has('ArrowLeft') ? 1 : 0) + buildView.edge.x;
+      const iz = (pan.has('KeyS') || pan.has('ArrowDown') ? 1 : 0) - (pan.has('KeyW') || pan.has('ArrowUp') ? 1 : 0) + buildView.edge.z;
+      const reach = view.isoDist * 0.3 * dt;
+      const sy = Math.sin(view.yaw), cy = Math.cos(view.yaw);
+      buildView.x += (-cy * ix - sy * iz) * reach;
+      buildView.z += (sy * ix - cy * iz) * reach;
+      const lot = get().building?.lot;
+      if (lot) {
+        buildView.x = clamp(buildView.x, lot.x0 - 4, lot.x0 + lot.w + 4);
+        buildView.z = clamp(buildView.z, lot.z0 - 4, lot.z0 + lot.h + 4);
+      }
+      iso.set(buildView.x, build.level * STORY_H + 0.6, buildView.z);
+    } else {
+      iso.set(owner.pos.x, owner.pos.y + 0.6, owner.pos.z);
+    }
+    focus.current.lerp(iso, ease(dt, snap.current ? 100 : 5));
     const fx = Math.sin(view.yaw), fz = Math.cos(view.yaw), c = Math.cos(ISO_PITCH);
     isoLook.copy(focus.current);
     want.set(isoLook.x - fx * c * view.isoDist, isoLook.y + Math.sin(ISO_PITCH) * view.isoDist, isoLook.z - fz * c * view.isoDist);

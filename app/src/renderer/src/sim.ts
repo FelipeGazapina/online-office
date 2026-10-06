@@ -260,6 +260,24 @@ function slide(world: World, floor: number, pos: Vector3, nx: number, nz: number
   else if (openAt(world, floor, pos.x, nz)) pos.z = nz;
 }
 
+// The keys carry the owner onto a staircase when they walk into its foot, up from below or down from the landing.
+function startKeyClimb(world: World) {
+  const { owner } = runtime;
+  const speed = Math.hypot(owner.vel.x, owner.vel.z);
+  if (owner.intent.kind !== 'keys' || speed < 1) return;
+  for (const up of world.links) {
+    for (const link of [up, { ...up, from: up.to, to: up.from }]) {
+      if (link.from.floor !== owner.floor || dist2(owner.pos, link.from.at) > 0.5) continue;
+      const dx = link.to.at.x - link.from.at.x;
+      const dz = link.to.at.z - link.from.at.z;
+      if ((owner.vel.x * dx + owner.vel.z * dz) / (Math.hypot(dx, dz) * speed) > 0.5) {
+        owner.climb = link;
+        return;
+      }
+    }
+  }
+}
+
 function stepOwner(dt: number, world: World, talkingTo: EmployeeId | null) {
   const { owner, view, keys } = runtime;
   if (!owner.placed) {
@@ -290,6 +308,7 @@ function stepOwner(dt: number, world: World, talkingTo: EmployeeId | null) {
       owner.climb = null;
     }
   } else {
+    startKeyClimb(world);
     if (!openAt(world, owner.floor, owner.pos.x, owner.pos.z)) {
       const spot = standable(world, owner.floor, owner.pos);
       if (spot) owner.pos.set(spot.x, owner.pos.y, spot.z);
@@ -499,10 +518,12 @@ export function stepSim(rawDt: number) {
   const askerId = meetingDoor === 'open' && front && front.status.kind === 'blocked_on_owner' && runtime.arrived.get(front.id) === front.status.question.id ? front.id : null;
 
   const nearbyChanged = nearbyIds.length !== state.nearbyIds.length || nearbyIds.some((id, i) => id !== state.nearbyIds[i]);
-  if (story !== state.story || talkingTo !== state.talkingTo || askerId !== state.askerId || nearbyChanged || nearComputer !== state.nearComputer || nearProjectComputer !== state.nearProjectComputer || nearTaskBoard !== state.nearTaskBoard) {
+  // While the owner builds, the story on screen is the one they chose, not the one they stand on.
+  const shown = get().build ? state.story : story;
+  if (shown !== state.story || talkingTo !== state.talkingTo || askerId !== state.askerId || nearbyChanged || nearComputer !== state.nearComputer || nearProjectComputer !== state.nearProjectComputer || nearTaskBoard !== state.nearTaskBoard) {
     if (talkingTo !== state.talkingTo) cancelSpeech();
     set({
-      story,
+      story: shown,
       talkingTo,
       nearbyIds,
       askerId,
