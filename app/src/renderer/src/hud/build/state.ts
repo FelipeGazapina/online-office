@@ -1,7 +1,7 @@
 // Mutable build-mode state that changes every pointer move and must not re-render React: the ghost under the cursor, the
 // modifier keys held, and where the build camera looks. Anything the HUD shows lives in the store instead.
 import type { Company } from '../../../../shared/protocol.ts';
-import type { Item, SpaceContext, TileRect, Vec2, ViolationKind, WallRef, WallSeg } from '../../../../shared/space/index.ts';
+import { footprint, ITEM_DEFS, type Item, type SpaceContext, type TileRect, type Vec2, type ViolationKind, type WallRef, type WallSeg } from '../../../../shared/space/index.ts';
 
 export type Ghost =
   | { kind: 'run'; refs: readonly WallRef[]; start: Vec2; end: Vec2; erase: boolean; ok: boolean }
@@ -17,10 +17,19 @@ export const draft = {
   // Bumped whenever `ghost` is replaced, so the scene redraws it without React state on the pointer path.
   version: 0,
   cursor: { x: 0, z: 0, valid: false },
+  // Where the furniture ghost stands in meters and on which floor. The walls between it and the camera step out of the way.
+  focus: null as { x: number; z: number; level: number } | null,
 };
 
-export function setGhost(g: Ghost | null) {
+/** Center of an item's footprint in meters. */
+export function centerOf(item: Item): Vec2 {
+  const f = footprint(ITEM_DEFS[item.def], item.rot);
+  return { x: item.x / 2 + f.w / 4, z: item.z / 2 + f.d / 4 };
+}
+
+export function setGhost(g: Ghost | null, level = 0) {
   draft.ghost = g;
+  draft.focus = g?.kind === 'item' ? { ...centerOf(g.item), level } : null;
   draft.version++;
 }
 

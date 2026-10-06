@@ -4,7 +4,7 @@
 import { useFrame } from '@react-three/fiber';
 import { Edges } from '@react-three/drei';
 import { useMemo, useState } from 'react';
-import { BufferGeometry, DoubleSide, Float32BufferAttribute, MeshBasicMaterial, MeshStandardMaterial, Shape } from 'three';
+import { BufferGeometry, DoubleSide, Float32BufferAttribute, MeshBasicMaterial, MeshStandardMaterial, RingGeometry, Shape } from 'three';
 import { ITEM_DEFS, STORY_H, WALL_HALF, YAW, footprint, rotateLocal, type Item, type Vec2 } from '../../../../shared/space/index.ts';
 import { draft, type Ghost } from '../../hud/build/state.ts';
 import { useStore } from '../../store.ts';
@@ -25,8 +25,10 @@ const MATERIALS = {
   fillWhite: basic(WHITE, 0.28),
   fillGreen: basic(GREEN, 0.34, false),
   fillRed: basic(RED, 0.38, false),
-  padGreen: basic(GREEN, 0.5, false),
-  padRed: basic(RED, 0.52, false),
+  padGreen: basic(GREEN, 0.7, false),
+  padRed: basic(RED, 0.72, false),
+  turnDisc: basic('#232640', 0.85, false),
+  turnArrow: basic(WHITE, 1, false),
   post: basic(WHITE, 0.95),
   arrowGreen: basic(GREEN, 0.95, false),
   arrowRed: basic(RED, 0.95, false),
@@ -78,8 +80,9 @@ function Tiles({ tiles, material }: { tiles: readonly Vec2[]; material: MeshBasi
 }
 
 const BORDER = 0.06;
+const ITEM_BORDER = 0.15;
 
-function Rect({ x0, z0, x1, z1, color, fill }: { x0: number; z0: number; x1: number; z1: number; color: string; fill: MeshBasicMaterial | null }) {
+function Rect({ x0, z0, x1, z1, color, fill, border = BORDER, probe }: { x0: number; z0: number; x1: number; z1: number; color: string; fill: MeshBasicMaterial | null; border?: number; probe?: Record<string, unknown> }) {
   const edge = useMemo(() => new MeshBasicMaterial({ color, transparent: true, opacity: 0.95, depthWrite: false, depthTest: false }), [color]);
   const w = x1 - x0;
   const d = z1 - z0;
@@ -91,14 +94,14 @@ function Rect({ x0, z0, x1, z1, color, fill }: { x0: number; z0: number; x1: num
   return (
     <group>
       {fill && (
-        <mesh position={[(x0 + x1) / 2, 0.05, (z0 + z1) / 2]} rotation-x={-Math.PI / 2} material={fill} renderOrder={6}>
+        <mesh position={[(x0 + x1) / 2, 0.05, (z0 + z1) / 2]} rotation-x={-Math.PI / 2} material={fill} renderOrder={6} userData={probe}>
           <planeGeometry args={[w, d]} />
         </mesh>
       )}
-      {bar((x0 + x1) / 2, z0, w + BORDER, BORDER)}
-      {bar((x0 + x1) / 2, z1, w + BORDER, BORDER)}
-      {bar(x0, (z0 + z1) / 2, BORDER, d)}
-      {bar(x1, (z0 + z1) / 2, BORDER, d)}
+      {bar((x0 + x1) / 2, z0, w + border, border)}
+      {bar((x0 + x1) / 2, z1, w + border, border)}
+      {bar(x0, (z0 + z1) / 2, border, d)}
+      {bar(x1, (z0 + z1) / 2, border, d)}
     </group>
   );
 }
@@ -128,6 +131,31 @@ const arrowShape = (() => {
   return s;
 })();
 
+const turnRing = new RingGeometry(0.16, 0.24, 28, 1, 0.5, Math.PI * 1.45);
+const turnHead = (() => {
+  const t = new Shape();
+  t.moveTo(0.2, -0.02);
+  t.lineTo(0.37, 0.1);
+  t.lineTo(0.06, 0.16);
+  t.closePath();
+  return t;
+})();
+
+// The curved arrow that says this piece turns: the keys , and . and the Turn button do it.
+function TurnMark({ at }: { at: Vec2 }) {
+  return (
+    <group position={[at.x, 0.09, at.z]} rotation-x={-Math.PI / 2} scale={1.35}>
+      <mesh material={MATERIALS.turnDisc} renderOrder={11}>
+        <circleGeometry args={[0.46, 24]} />
+      </mesh>
+      <mesh geometry={turnRing} material={MATERIALS.turnArrow} renderOrder={12} />
+      <mesh material={MATERIALS.turnArrow} renderOrder={12}>
+        <shapeGeometry args={[turnHead]} />
+      </mesh>
+    </group>
+  );
+}
+
 function ItemGhost({ item, ok, outline }: { item: Item; ok: boolean; outline: boolean }) {
   const def = ITEM_DEFS[item.def];
   const f = footprint(def, item.rot);
@@ -139,9 +167,10 @@ function ItemGhost({ item, ok, outline }: { item: Item; ok: boolean; outline: bo
   const color = outline ? WHITE : tone(ok);
   return (
     <>
-      <Rect x0={x0} z0={z0} x1={x1} z1={z1} color={color} fill={outline ? null : ok ? MATERIALS.padGreen : MATERIALS.padRed} />
+      <Rect x0={x0} z0={z0} x1={x1} z1={z1} color={color} fill={outline ? null : ok ? MATERIALS.padGreen : MATERIALS.padRed} border={ITEM_BORDER} probe={{ probe: 'footprint', ok, w: x1 - x0, d: z1 - z0 }} />
       {!outline && (
         <>
+          {ITEM_DEFS[item.def].kind !== 'stairs' && <TurnMark at={{ x: x1 + 0.45, z: z0 - 0.45 }} />}
           <mesh geometry={modelOf(item.def)} material={ok ? XRAY_OK : XRAY_BAD} position={[(x0 + x1) / 2, 0, (z0 + z1) / 2]} rotation-y={YAW[item.rot]} renderOrder={8} />
           <mesh geometry={modelOf(item.def)} material={ok ? MODEL_OK : MODEL_BAD} position={[(x0 + x1) / 2, 0, (z0 + z1) / 2]} rotation-y={YAW[item.rot]} renderOrder={9} />
           <mesh position={[front.at.x, 0.07, front.at.z]} rotation={[-Math.PI / 2, 0, front.yaw]} material={ok ? MATERIALS.arrowGreen : MATERIALS.arrowRed} renderOrder={7}>

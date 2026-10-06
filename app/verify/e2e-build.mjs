@@ -133,7 +133,7 @@ export default async function (s) {
   assert(await s.eval(`!!document.querySelector('.bh-dock') && !!document.querySelector('.bh-top') && !!document.querySelector('.bh-levels')`), 'the build bar, the catalog and the level widget are on screen');
   assert(await s.eval(`document.querySelector('.bottom') === null || getComputedStyle(document.querySelector('.bottom')).display === 'none'`), 'the conversation bar steps aside');
   await s.sleep(1200);
-  await save(s, 's3-catalog');
+  await save(s, 's4-catalog');
   const cardCount = await s.eval(`document.querySelectorAll('.bh-card').length`);
   assert(cardCount >= 2, `the catalog lists its desks (${cardCount} cards)`);
   assert(await s.eval(`[...document.querySelectorAll('.bh-card img')].every((i) => i.src.startsWith('data:image/png'))`), 'every furniture card shows a rendered thumbnail');
@@ -171,7 +171,7 @@ export default async function (s) {
   await dragTo(rv.a, rv.b, 0, async () => {
     const c = await cursor(s);
     assert(c.readout?.text === '5 × 4 m', `mid-drag the cursor reads the room size (${c.readout?.text})`);
-    await save(s, 's3-room-drag');
+    await save(s, 's4-room-drag');
   });
   await waitBuilding(`b.stories[0].walls.length === ${before.stories[0].walls.length + 18}`, 'the room did not arrive');
   const after = await building(s);
@@ -190,7 +190,7 @@ export default async function (s) {
   await hover(room.x + 2.5, room.z + 2.5);
   const fill = await cursor(s);
   assert(fill.readout?.text === '20 m²', `with Shift held the ghost covers the room (${fill.readout?.text})`);
-  await save(s, 's3-paint');
+  await save(s, 's4-paint');
   await clickAt(room.x + 2.5, room.z + 2.5);
   await release('ShiftLeft', 'Shift');
   await waitBuilding(`b.stories[0].paint[${paintIndex(b0, 0, room.x + 2, room.z + 2)}] === 6`, 'the floor paint did not arrive');
@@ -248,11 +248,33 @@ export default async function (s) {
   const deskAt = { x: room.x + 2.5, z: room.z + 2 };
   await hover(room.x - 1.6, room.z + 2);
   assert((await cursor(s)).verdict?.ok === true, 'the desk ghost is green on bare floor beside the room');
-  await save(s, 's3-ghost-green');
+  const pad = await s.eval(`__office.probe('footprint')`);
+  assert(pad.length === 1 && pad[0].ok === true && pad[0].w === 1.5 && pad[0].d === 1, `the footprint rectangle covers the desk's full 1.5 x 1 m (${pad[0]?.w} x ${pad[0]?.d})`);
+  assert(pad[0].color === '#2fe06a', `and it is green (${pad[0].color})`);
+  await save(s, 's4-ghost-green');
   await hover(room.x - 0.4, room.z + 2);
   const wallRed = await cursor(s);
   assert(wallRed.verdict?.ok === false && wallRed.readout?.bad, `and red across the new wall, with the reason (${wallRed.verdict?.text})`);
-  await save(s, 's3-ghost-red');
+  const redPad = await s.eval(`__office.probe('footprint')`);
+  assert(redPad.length === 1 && redPad[0].ok === false && redPad[0].color === '#ff4d4d', `the footprint turns red where the desk is blocked (${redPad[0]?.color})`);
+  await save(s, 's4-ghost-red');
+  await hover(room.x - 1.6, room.z + 2);
+  const rot0 = (await ui(s)).tool.rot;
+  await clickSel('[data-testid="rotate-handle"]');
+  assert((await ui(s)).tool.rot === (rot0 + 1) % 4, 'the Turn handle rotates the ghost a quarter');
+  await clickSel('[data-testid="rotate-handle"]');
+  await clickSel('[data-testid="rotate-handle"]');
+  await clickSel('[data-testid="rotate-handle"]');
+  assert((await ui(s)).tool.rot === rot0, 'four turns come back round');
+  await clickSel('[aria-label="Walls up"]');
+  await s.sleep(300);
+  const upBefore = await s.eval('__office.wallStats()');
+  await hover(room.x + 2.5, room.z + 2);
+  await s.sleep(300);
+  const upAfter = await s.eval('__office.wallStats()');
+  assert(upAfter.curbs > upBefore.curbs, `with the walls up, the ones between the camera and the ghost drop to curbs while placing (${upBefore.curbs} -> ${upAfter.curbs})`);
+  await clickSel('[aria-label="Cutaway"]');
+  await s.sleep(300);
   const desksBefore = itemsOf(await building(s), 0, 'bench_desk').length;
   await hover(deskAt.x, deskAt.z);
   const green = await cursor(s);
@@ -362,7 +384,7 @@ export default async function (s) {
   await s.waitFor(`${store}.build.level === 1 && ${store}.story === 1`, 4000);
   await bring(landing.x + 3, landing.z + 2, 1);
   await s.sleep(900);
-  await save(s, 's3-levels');
+  await save(s, 's4-levels');
 
   // ---- walls up, cutaway, down
   await s.sleep(500);

@@ -1,9 +1,9 @@
 import { useEffect, useRef } from 'react';
 import { ITEM_DEFS } from '../../../../shared/space/index.ts';
 import { get, useStore, type BuildTool } from '../../store.ts';
-import { addFloor, chooseEntry, exitBuild, isActive, patchBuild, redo, selectTab, setLevel, undo } from './actions.ts';
+import { addFloor, chooseEntry, exitBuild, isActive, patchBuild, redo, rotate, selectTab, setLevel, undo } from './actions.ts';
 import { footprintText, TABS, visibleEntries, type Entry } from './catalog.ts';
-import { Redo, Search, TabIcon, ToolIcon, Undo, WALL_MODES, WallsIcon } from './icons.tsx';
+import { Redo, Search, TabIcon, ToolIcon, Turn, Undo, WALL_MODES, WallsIcon } from './icons.tsx';
 import { useThumbs } from './thumbs.ts';
 import './build.css';
 
@@ -116,6 +116,11 @@ function Dock() {
         {hint.map(([k, v]) => (
           <span key={k}><kbd>{k}</kbd> {v}</span>
         ))}
+        {tool.kind === 'item' && ITEM_DEFS[tool.def]?.kind !== 'stairs' && (
+          <button type="button" className="bh-turn" data-testid="rotate-handle" onClick={() => rotate(1)} title="Turn it a quarter (. key)" aria-label="Turn it">
+            <Turn /> Turn
+          </button>
+        )}
       </div>
       <div className="bh-panel">
         <div className="bh-head">

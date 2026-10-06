@@ -153,3 +153,9 @@ export const Search = () => (
     <path d="M15 15l5 5" />
   </Svg>
 );
+
+export const Turn = () => (
+  <Svg size={15}>
+    <path d="M20 12a8 8 0 1 1-2.6-5.9M20 4v5h-5" />
+  </Svg>
+);

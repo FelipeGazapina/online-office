@@ -176,7 +176,7 @@ export function BuildInput() {
         const item = story.items.find((i) => i.id === hover);
         if (item) ghost = { kind: 'outline', item };
       }
-      setGhost(ghost);
+      setGhost(ghost, build.level);
       publish({ readout, verdict, hover });
     };
 
