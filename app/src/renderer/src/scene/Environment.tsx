@@ -8,7 +8,8 @@ import { grassTexture, paverTexture, skyTexture, blobShadowTexture } from './tex
 export type Bounds = { x0: number; x1: number; z0: number; z1: number };
 
 export const GROUND_Y = -0.62;
-const HORIZON = '#d6e8f2';
+// Late afternoon: a peach haze at the horizon that the fog fades distant hills into.
+const HORIZON = '#f1d9bd';
 
 const smooth01 = (a: number, b: number, v: number) => {
   const t = Math.min(1, Math.max(0, (v - a) / (b - a)));
