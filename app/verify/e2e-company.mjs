@@ -210,7 +210,8 @@ export default async (s) => {
   const slugOk = existsSync(join(repo, 'src/slug.js')) && existsSync(join(repo, 'test/slug.test.js'));
   check(testsOk && slugOk, 'node --test passes in the repo with src/slug.js and test/slug.test.js');
   const readme = readFileSync(join(repo, 'README.md'), 'utf8');
-  check(/^#{1,6}\s.*slugify/im.test(readme), 'README.md has a slugify section');
+  const readmeChanged = git('status', '--porcelain', 'README.md').trim() !== '' || git('log', '--oneline', '--', 'README.md').trim().split('\n').length > 1;
+  check(readmeChanged && /slugify\(|^#{1,6}\s.*slugify/im.test(readme), 'README.md was edited and documents slugify');
   console.log(`README headings: ${readme.split('\n').filter((l) => l.startsWith('#')).join(' | ')}`);
   await chatShot(s, po.id, 'g1-chat-after');
   const thread1 = await s.eval(`[...document.querySelectorAll('.thread .msg')].map((m) => m.innerText.replace(/\\n+/g, ' ')).join('\\n')`);
