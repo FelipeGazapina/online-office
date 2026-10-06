@@ -39,7 +39,7 @@ function Sign({ name, cwd, color }: { name: string; cwd: string; color: string }
     g.fillText('Project lead · ' + (cwd.length > 32 ? `…${cwd.slice(-31)}` : cwd), 214, 236);
   }, [name, cwd, color]);
   return (
-    <group scale={0.68}>
+    <group scale={0.46}>
       <mesh castShadow position={[0, 0.35, -0.05]}>
         <boxGeometry args={[0.12, 0.7, 0.12]} />
         <meshStandardMaterial color="#3a3f4e" />
