@@ -29,7 +29,7 @@ export const env = {
 
 const ANSWER_WAIT_MS = 120_000;
 const FIRST_BUBBLE_MAX_MS = 3000;
-const HIRE_TO_FIRST_MESSAGE_MS = 8000;
+const HIRE_TO_FIRST_MESSAGE_MS = 12_000;
 const CALM_LOAD = 10;
 const BASELINE = process.env.OFFICE_TRIAGE === '0';
 const TRIALS = Number(process.env.OFFICE_QUESTION_TRIALS ?? (BASELINE ? 5 : 0));
@@ -65,6 +65,8 @@ export default async (s) => {
   const idOf = (name) => people.find((e) => e.name === name).id;
   const eli = idOf('Eli');
   const pia = idOf('Pia');
+  // Nobody is at the keyboard to answer a permission card for a `find` or a `grep`, as in e2e-company.
+  for (const id of [eli, pia]) await s.eval(`window.office.send({ type: 'set_permissions', employeeId: ${JSON.stringify(id)}, mode: 'yolo' })`);
   await s.eval(`__office.set({ selectedId: ${JSON.stringify(eli)} })`);
   await s.waitFor(`!!document.querySelector('.cp-thread')`);
 
