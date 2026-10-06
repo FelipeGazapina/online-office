@@ -82,8 +82,11 @@ export type OfficeEvents = {
   error?(message: string): void;
 };
 
+// What the office needs from the acknowledger. Without `triage` every owner message is work.
+type Acker = Pick<Acknowledger, 'warm' | 'ack' | 'stop'> & Partial<Pick<Acknowledger, 'triage'>>;
+
 // The things every session leans on, started before the first employee so a session can connect the moment it is built.
-export type OfficeServices = { mcp: OfficeMcp; memory: MemoryStore; taskBoards?: TaskBoardService; acker?: Pick<Acknowledger, 'warm' | 'ack' | 'stop'> & Partial<Pick<Acknowledger, 'triage'>> };
+export type OfficeServices = { mcp: OfficeMcp; memory: MemoryStore; taskBoards?: TaskBoardService; acker?: Acker };
 
 // Where a blocked employee goes when the last question is answered. The adapter keeps reporting while the card is up
 // (a subagent finishes, the turn ends), and those reports land here so the card stays put.
@@ -314,7 +317,7 @@ export class Office {
   private readonly tasks: Tasks;
   private readonly ledgerFile: string;
   private mail!: Mailroom;
-  private readonly acker: Pick<Acknowledger, 'warm' | 'ack' | 'stop'> & Partial<Pick<Acknowledger, 'triage'>>;
+  private readonly acker: Acker;
   // Owner posts that wait for a triage answer, and the end of the line they keep their order in.
   private ownerPosts = { waiting: 0, tail: Promise.resolve(), closed: false };
   // The last thing each employee said in the turn they are on. It is the reply when the harness gives no final text.
