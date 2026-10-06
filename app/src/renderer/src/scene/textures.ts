@@ -263,7 +263,7 @@ export function blobShadowTexture() {
   const g = c.getContext('2d')!;
   const grad = g.createRadialGradient(32, 32, 0, 32, 32, 32);
   grad.addColorStop(0, 'rgba(0,0,0,0.85)');
-  grad.addColorStop(0.55, 'rgba(0,0,0,0.35)');
+  grad.addColorStop(0.7, 'rgba(0,0,0,0.5)');
   grad.addColorStop(1, 'rgba(0,0,0,0)');
   g.fillStyle = grad;
   g.fillRect(0, 0, 64, 64);
