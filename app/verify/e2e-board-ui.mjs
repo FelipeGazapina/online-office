@@ -435,6 +435,7 @@ export default async (s) => {
   await s.clickOn('.tb-card', 'CS-701');
   await s.waitFor("!!document.querySelector('[data-testid=task-detail]')");
   assert(await s.eval("!document.querySelector('[data-testid=task-detail] select[aria-label=Priority]') && document.querySelector('[data-testid=task-detail]').innerText.includes('P2')"), 'a CronoSpark task shows the provider\'s own priority and offers no priority to change');
+  assert(await s.eval("(() => { const b = document.querySelector('[data-testid=send-hours]'); return !!b && b.disabled && b.innerText.trim() === 'Send hours to CronoSpark' && document.querySelector('[data-testid=send-hours-reason]')?.innerText.includes('Nothing to send yet'); })()"), 'a CronoSpark task nobody worked on shows a disabled Send hours button and says why');
   await s.press('Escape');
   await s.waitFor("!document.querySelector('[data-testid=task-detail]')");
   await s.clickOn('[role=tab]', 'Quick tasks');
@@ -519,6 +520,42 @@ export default async (s) => {
   const totalText = await s.eval("document.querySelector('[data-testid=task-total]').innerText.trim()");
   const mmss = (ms) => `${Math.floor(ms / 60000)}:${String(Math.floor(ms / 1000) % 60).padStart(2, '0')}`;
   assert(totalText === mmss(final.time.totalMs) && final.time.totalMs === Object.values(final.time.byEmployee).reduce((a, b) => a + b, 0), `the total reads ${totalText}, the sum of both people's time`);
+
+  // ── hours leave only on the owner's click ──
+  assert(await s.eval("!document.querySelector('[data-testid=send-hours]') && !document.querySelector('[data-testid=task-send-hours]')"), 'a task made by hand has no Send hours button');
+  await s.press('Escape');
+  await s.waitFor("!document.querySelector('[data-testid=task-detail]')");
+  await s.clickOn('[role=tab]', 'Sprint');
+  await s.waitFor("document.querySelector('[role=tab][aria-selected=true]')?.innerText.includes('Sprint')");
+  const csTask = await s.eval(taskByTitle('Write the changelog entry'));
+  await s.eval(`window.office.send({ type: 'update_task', taskId: ${JSON.stringify(csTask.id)}, notes: 'Write a file named changelog.txt in the project folder whose only line is: hello from the changelog. Reply done naming it.' })`);
+  await s.clickOn('.tb-card', 'CS-701');
+  await s.waitFor("!!document.querySelector('[data-testid=task-detail]')");
+  await s.clickOn(`.tb-people li[data-employee="${ana}"] button`);
+  const csDone = `(() => { const t = ${state}.tasks.find((x) => x.id === ${JSON.stringify(csTask.id)}); const time = ${state}.taskTime[t.id]; return t.runs.length === 1 && !!t.lastOutcome && time.running.length === 0 && (time.unsent?.[${JSON.stringify(ana)}] ?? 0) > 0; })()`;
+  const csWait = Date.now();
+  while (Date.now() - csWait < WAIT_MS && !(await s.eval(csDone))) {
+    await unattended(s);
+    await s.sleep(2500);
+  }
+  assert(await s.eval(csDone), 'Ana worked on the CronoSpark task and her closed time is reported as not sent');
+  await s.sleep(1500);
+  assert(fake.calls.length === 0, 'the work and the task moving on posted no hours to CronoSpark');
+  const owed = await s.eval(`${state}.taskTime[${JSON.stringify(csTask.id)}].unsent[${JSON.stringify(ana)}]`);
+  const csRuns = await s.eval(`${state}.tasks.find((x) => x.id === ${JSON.stringify(csTask.id)}).runs`);
+  const csWall = wallTime(ledgerFile, csRuns)[ana];
+  assert(Math.abs(owed - csWall) <= 2000, `the unsent time is ${owed} ms, mail.jsonl says ${csWall} ms`);
+  assert(await s.eval(`(() => { const b = document.querySelector('[data-testid=send-hours]'); return !!b && !b.disabled && document.querySelector('[data-testid=hours-unsent]')?.innerText.includes('Ana') && !document.querySelector('[data-testid=send-hours-reason]'); })()`), 'the detail lists what is not sent per person and offers an enabled Send button');
+  assert(await s.eval(`!!document.querySelector('.tb-card[data-task-id=${JSON.stringify(csTask.id)}] [data-testid=unsent-chip]')`), 'the card carries a small chip with the time to send');
+  const markSend = await sentCount();
+  await s.clickOn('[data-testid=send-hours]');
+  assert((await sentSince(markSend)).filter((m) => m.type === 'send_hours').length === 1, 'the click sends one send_hours');
+  await s.waitFor(`document.querySelector('[data-testid=send-hours]')?.disabled === true && document.querySelector('[data-testid=send-hours-reason]')?.innerText.includes('Nothing to send yet')`, 15000);
+  const csDay = new Date();
+  assert(fake.calls.length === 1 && fake.calls[0].taskId === 'fake-task-701' && fake.calls[0].description.startsWith('Ana') && Math.abs(fake.calls[0].hours - owed / 3_600_000) < 0.0002 && fake.calls[0].date === `${csDay.getFullYear()}-${String(csDay.getMonth() + 1).padStart(2, '0')}-${String(csDay.getDate()).padStart(2, '0')}`, 'CronoSpark got one call for Ana with exactly the unsent time', JSON.stringify(fake.calls));
+  assert(await s.eval("document.querySelector('[data-testid=hours-sent]').innerText.includes('Sent to CronoSpark: Ana') && !document.querySelector('[data-testid=hours-unsent]') && !document.querySelector('[data-testid=unsent-chip]')"), 'the detail now says it was sent, and the card chip is gone');
+  await s.sleep(2500);
+  assert(fake.calls.length === 1, 'nothing else was posted');
 
   // ── F at the 3D board ──
   await s.press('Escape');
