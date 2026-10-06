@@ -7,16 +7,11 @@
 // node verify/startup-profile.mjs --analyze <file.cpuprofile>   reports a profile that was already taken.
 // The page is held at its first instruction by Target.setAutoAttach, so the profile covers the whole load. A busy stretch is
 // a run of samples with no idle gap over 5 ms; the page's own long-task list is printed beside it to match them by order.
-import { spawn } from 'node:child_process';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { createRequire } from 'node:module';
 import { loadavg } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
-import { startupDataDir } from './startup-fixture.mjs';
+import { dirname } from 'node:path';
+import { launchHeld, RECORD_LONG_TASKS } from './startup-launch.mjs';
 
-const APP_DIR = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const minMs = Number(process.env.OFFICE_PROFILE_MIN_MS ?? 50);
 const topN = Number(process.env.OFFICE_PROFILE_TOP ?? 16);
 
@@ -64,80 +59,24 @@ export function report(profile, stalls = []) {
 }
 
 async function profileLaunch() {
-  const fixture = process.env.OFFICE_STALLS_FIXTURE ?? 'default';
-  const visible = process.env.OFFICE_STALLS_VISIBLE === '1';
-  const port = Number(process.env.OFFICE_CDP_PORT ?? 9333);
-  const dataDir = process.env.OFFICE_STALLS_DATA_DIR ?? startupDataDir(fixture).dataDir;
-  const electron = createRequire(import.meta.url)('electron');
-  const entry = process.env.OFFICE_OUT_DIR ? join(resolve(APP_DIR, process.env.OFFICE_OUT_DIR), 'main', 'index.js') : '.';
-  const { ELECTRON_RUN_AS_NODE: _, ...inherited } = process.env;
-  const proc = spawn(electron, [entry, `--remote-debugging-port=${port}`], {
-    cwd: APP_DIR,
-    env: { ...inherited, OFFICE_DATA_DIR: dataDir, OFFICE_ACK: '0', OFFICE_TEST_RUN: visible ? '' : '1' },
-    stdio: 'ignore',
-    detached: true,
+  let result;
+  const { fixture, visible } = await launchHeld({
+    attach: (call, page) => [
+      call('Profiler.enable', {}, page),
+      call('Profiler.setSamplingInterval', { interval: 200 }, page),
+      call('Profiler.start', {}, page),
+      call('Page.addScriptToEvaluateOnNewDocument', { source: RECORD_LONG_TASKS }, page),
+    ],
+    finish: async (call, page, _events, stalls) => {
+      const { profile } = await call('Profiler.stop', {}, page);
+      const out = process.env.OFFICE_PROFILE_OUT ?? '/tmp/office-shots/startup.cpuprofile';
+      mkdirSync(dirname(out), { recursive: true });
+      writeFileSync(out, JSON.stringify(profile));
+      result = { profile, stalls, out };
+    },
   });
-  try {
-    let version;
-    for (let i = 0; i < 4000 && !version; i++) {
-      version = await fetch(`http://127.0.0.1:${port}/json/version`).then((r) => r.json(), () => undefined);
-      if (!version) await sleep(5);
-    }
-    if (!version) throw new Error('the app never opened its DevTools port');
-    const ws = new WebSocket(version.webSocketDebuggerUrl);
-    await new Promise((r) => (ws.onopen = r));
-    let id = 0;
-    const pending = new Map();
-    let pageSession;
-    const call = (method, params = {}, sessionId) => new Promise((resolve, reject) => {
-      pending.set(++id, { resolve, reject });
-      ws.send(JSON.stringify({ id, method, params, sessionId }));
-    });
-    // Everything for the page goes out at once and the page is resumed last. A paused page answers nothing until it runs.
-    ws.onmessage = (ev) => {
-      const m = JSON.parse(ev.data);
-      if (m.id && pending.has(m.id)) {
-        const p = pending.get(m.id);
-        pending.delete(m.id);
-        m.error ? p.reject(new Error(JSON.stringify(m.error))) : p.resolve(m.result);
-      } else if (m.method === 'Target.attachedToTarget' && m.params.targetInfo.type === 'page' && !pageSession) {
-        pageSession = m.params.sessionId;
-        const sent = [
-          call('Profiler.enable', {}, pageSession),
-          call('Profiler.setSamplingInterval', { interval: 200 }, pageSession),
-          call('Profiler.start', {}, pageSession),
-          call('Page.addScriptToEvaluateOnNewDocument', { source: `window.__stalls = []; new PerformanceObserver((l) => window.__stalls.push(...l.getEntries().map((e) => [Math.round(e.startTime), Math.round(e.duration)]))).observe({ type: 'longtask', buffered: true })` }, pageSession),
-          call('Runtime.runIfWaitingForDebugger', {}, pageSession),
-        ];
-        void Promise.all(sent);
-      }
-    };
-    await call('Target.setAutoAttach', { autoAttach: true, waitForDebuggerOnStart: true, flatten: true });
-    for (let i = 0; i < 400 && !pageSession; i++) await sleep(50);
-    if (!pageSession) throw new Error('the app opened no page');
-    await sleep(500);
-    for (let i = 0; i < 400; i++) {
-      const now = await call('Runtime.evaluate', { expression: 'performance.now()', returnByValue: true }, pageSession).then((r) => r.result.value, () => 0);
-      if (now > 10_500) break;
-      await sleep(250);
-    }
-    const stalls = (await call('Runtime.evaluate', { expression: 'window.__stalls', returnByValue: true }, pageSession)).result.value ?? [];
-    const { profile } = await call('Profiler.stop', {}, pageSession);
-    const out = process.env.OFFICE_PROFILE_OUT ?? '/tmp/office-shots/startup.cpuprofile';
-    mkdirSync(dirname(out), { recursive: true });
-    writeFileSync(out, JSON.stringify(profile));
-    console.log(`fixture ${fixture}, window ${visible ? 'shown' : 'hidden'}, load ${loadavg().map((l) => l.toFixed(1)).join(' ')}, profile ${out}`);
-    report(profile, stalls.filter(([s]) => s < 10_000));
-    ws.close();
-  } finally {
-    // The app is its own process group, so this takes its helpers with it and nothing else.
-    for (const signal of ['SIGTERM', 'SIGKILL']) {
-      try {
-        process.kill(-proc.pid, signal);
-      } catch {}
-      await sleep(1000);
-    }
-  }
+  console.log(`fixture ${fixture}, window ${visible ? 'shown' : 'hidden'}, load ${loadavg().map((l) => l.toFixed(1)).join(' ')}, profile ${result.out}`);
+  report(result.profile, result.stalls.filter(([s]) => s < 10_000));
 }
 
 if (process.argv[2] === '--analyze') report(JSON.parse(readFileSync(process.argv[3], 'utf8')));
