@@ -34,22 +34,23 @@ import {
   type QuestionId,
   type Snapshot,
   type Subagent,
-  type TaskBoardConfig,
-  type TaskBoardState,
-  type TaskProvider,
+  type TaskBoardSource,
 } from '../../shared/protocol.ts';
+import type { LegacySources } from '../../shared/tasks.ts';
 import { applyOps, BuildHistory, deskOf, encodeBuilding, freeDesk, legacyBuilding, parseBuilding, placeDesk, teamKit, ITEM_DEFS } from '../../shared/space/index.ts';
 import type { Building, BuildOp, EmployeeId as SpaceEmployeeId, ItemId, SpaceContext, Violation } from '../../shared/space/index.ts';
 import type { ActorId, ConvoKey, LedgerEntry, MailView, MessageId } from '../../shared/mail.ts';
 import { HARNESSES } from './adapters/index.ts';
 import type { EmployeeSession, SessionHost } from './adapters/types.ts';
 import { logger } from './debug.ts';
+import { OfficeError } from './error.ts';
 import { Inbox, type Left } from './inbox.ts';
 import { defaultIds, Mailroom, type HireSpec, type Hired, type Member } from './mail.ts';
 import { mailTools } from './mail-tools.ts';
 import type { OfficeMcp } from './mcp.ts';
 import type { MemoryStore } from './memory.ts';
 import { TaskBoardService } from './task-board.ts';
+import { Tasks } from './tasks.ts';
 import { trace } from './trace.ts';
 
 const XP_PER_TASK = 10;
@@ -65,8 +66,6 @@ const FIRST_NAMES = [
 ];
 
 const BLOCK_COLORS = ['#5b8def', '#f2a541', '#4fb286', '#c77dd4', '#ef6f6c', '#3fb8c9', '#d4b483', '#8b9cf0'];
-
-export class OfficeError extends Error {}
 
 export type OfficeEvents = {
   changed(): void;
@@ -90,6 +89,8 @@ export type OfficeServices = { mcp: OfficeMcp; memory: MemoryStore; taskBoards?:
 type Resume = { status: EmployeeStatus; activity: string; activityReported: boolean };
 
 const debug = logger('office');
+
+type HireRequest = { provider: Provider; blockId: BlockId; name?: string; model?: ModelId; role?: EmployeeRole; bypassLimit?: boolean; deskId?: ItemId };
 
 const short = (s: string, n: number) => {
   const t = s.trim().replace(/\s+/g, ' ');
@@ -157,13 +158,15 @@ function seed(): Loaded {
     blocks: [],
     employees: [],
   };
-  return { company, building: legacyBuilding([], []).building };
+  return { company, building: legacyBuilding([], []).building, legacy: [] };
 }
 
 // What company.json can hold: a company from before models, permissions and settings existed, or from after.
 type StoredEmployee = Omit<Employee, 'model' | 'permissions' | 'subagents' | 'role' | 'seat'> &
   Partial<Pick<Employee, 'model' | 'permissions' | 'role' | 'seat'>> & { desk?: number };
-type StoredCompany = Omit<Company, 'settings' | 'employees'> & { settings?: Partial<CompanySettings>; employees: StoredEmployee[]; building?: unknown };
+// A block of the old kind kept its task sources on itself. They are a board's now (shared/tasks.ts ensureBoards).
+type StoredBlock = ProjectBlock & { taskBoard?: { sources?: TaskBoardSource[] } };
+type StoredCompany = Omit<Company, 'settings' | 'employees' | 'blocks'> & { blocks: StoredBlock[]; settings?: Partial<CompanySettings>; employees: StoredEmployee[]; building?: unknown };
 
 // Every field added after the first release gets its default here and nowhere else, so an old file and a new one
 // load to the same company, and saving what this returns is the same file again.
@@ -176,7 +179,7 @@ function migrate(c: StoredCompany): Company {
   return {
     ...c,
     settings,
-    blocks: c.blocks.map((b) => ({ ...b, githubRepo: b.githubRepo ?? githubRemote(b.cwd) })),
+    blocks: c.blocks.map(({ taskBoard: _, ...b }) => ({ ...b, githubRepo: b.githubRepo ?? githubRemote(b.cwd) })),
     employees: c.employees.map(({ desk: _desk, ...e }) => ({
       ...e,
       seat: e.seat ?? null,
@@ -226,7 +229,7 @@ function seatEveryone(company: Company, building: Building, grow = true): Buildi
   return b;
 }
 
-type Loaded = { company: Company; building: Building };
+type Loaded = { company: Company; building: Building; legacy: LegacySources[] };
 
 // A company.json from before the building keeps its desks: the static office becomes a building and every employee
 // sits where the old desk index put them. Saving the result and loading it again changes nothing.
@@ -259,7 +262,8 @@ function load(file: string): Loaded | undefined {
     building = legacy.building;
     for (const e of company.employees) e.seat = legacy.seats.get(e.id) ?? null;
   }
-  return { company, building: seatEveryone(company, building) };
+  const legacy = stored.blocks.flatMap((b) => (b.taskBoard?.sources?.length ? [{ blockId: b.id, sources: b.taskBoard.sources }] : []));
+  return { company, building: seatEveryone(company, building), legacy };
 }
 
 // Subagents belong to a running session, so they are never written.
@@ -306,7 +310,7 @@ export class Office {
   private readonly harnesses: Record<Provider, HarnessStatus>;
   private readonly events: OfficeEvents;
   private readonly services: OfficeServices & { taskBoards: TaskBoardService };
-  private readonly taskBoards = new Map<BlockId, TaskBoardState>();
+  private readonly tasks: Tasks;
   private readonly ledgerFile: string;
   private mail!: Mailroom;
   private readonly acker: Pick<Acknowledger, 'warm' | 'ack' | 'stop'>;
@@ -321,15 +325,29 @@ export class Office {
     this.services = { ...services, taskBoards: services.taskBoards ?? new TaskBoardService() };
     this.services.taskBoards.setOnChange(() => {
       this.events.changed();
-      for (const block of this.company.blocks) {
-        if (block.taskBoard?.sources.some((source) => source.provider === 'linear')) void this.refreshTaskBoard(block.id);
-      }
+      this.tasks.refreshWhere((board) => board.sources.some((source) => source.provider === 'linear'));
     });
     const loaded = load(dataFile) ?? seed();
     this.company = loaded.company;
     this.building = loaded.building;
     this.ledgerFile = dataFile.replace(/\.json$/, '') + '.mail.jsonl';
-    this.mail = this.openMail(readLedger(this.ledgerFile));
+    const ledger = readLedger(this.ledgerFile);
+    this.tasks = new Tasks(
+      join(dirname(dataFile), 'tasks.json'),
+      {
+        now: () => Date.now(),
+        newId: () => randomUUID(),
+        mail: () => this.mail,
+        blocks: () => this.company.blocks.map((b) => b.id),
+        members: () => this.company.employees.map((e) => ({ id: e.id, name: e.name, blockId: e.blockId })),
+        provider: this.services.taskBoards,
+        changed: () => this.events.changed(),
+      },
+      ledger,
+    );
+    this.mail = this.openMail(ledger);
+    // The boards are written before company.json drops the old per-block sources they came from.
+    this.tasks.recover(this.company.blocks.map((b) => b.id), loaded.legacy);
     for (const e of this.company.employees) {
       if (e.status.kind === 'working' || e.status.kind === 'blocked_on_owner') {
         e.status = { kind: 'idle' };
@@ -340,9 +358,10 @@ export class Office {
       if (e.provider === 'claude-code') this.acker.warm();
     }
     save(dataFile, this.company, this.building);
-    for (const block of this.company.blocks) if (block.taskBoard?.sources.length) void this.refreshTaskBoard(block.id);
+    this.tasks.refreshWhere((board) => board.sources.length > 0);
     // Sessions exist now, so whatever a crash left half delivered can go out again.
     this.mail.recoverOnStart();
+    this.tasks.pushHours();
   }
 
   private openMail(ledger: LedgerEntry[]): Mailroom {
@@ -379,9 +398,11 @@ export class Office {
         persist: (entry) => {
           mkdirSync(dirname(this.ledgerFile), { recursive: true });
           appendFileSync(this.ledgerFile, `${JSON.stringify(entry)}\n`);
+          this.tasks.observe(entry);
         },
         changed: (view) => {
           this.events.mail?.(view);
+          this.tasks.onMail();
           this.events.changed();
         },
         stream: (employeeId, replyingTo, delta, done) => this.events.stream?.(employeeId, replyingTo, delta, done),
@@ -475,7 +496,7 @@ export class Office {
   snapshot(): Snapshot {
     return {
       type: 'snapshot', company: this.company, harnesses: this.harnesses, catalogs: this.catalogs, meetingDoor: this.meetingDoor, buildingRev: this.buildingRev,
-      taskBoards: Object.fromEntries(this.taskBoards), taskConnections: this.services.taskBoards.connectionStates(), mail: this.mail.view(),
+      ...this.tasks.view(Date.now()), taskConnections: this.services.taskBoards.connectionStates(), mail: this.mail.view(),
     };
   }
 
@@ -491,9 +512,13 @@ export class Office {
 
   handle(msg: ClientMessage): void {
     switch (msg.type) {
-      case 'hire':
-        this.hire(msg.provider, msg.blockId, msg.name, msg.model, msg.role, msg.bypassLimit);
+      case 'hire': {
+        const { type: _, taskId, ...request } = msg;
+        if (taskId) this.tasks.assertOfBlock(taskId, msg.blockId);
+        const hired = this.hire(request);
+        if (taskId) this.tasks.assign(taskId, hired.id);
         return;
+      }
       case 'fire':
         return this.fire(msg.employeeId);
       case 'create_block':
@@ -502,12 +527,32 @@ export class Office {
         return this.updateBlock(msg.blockId, msg.name, msg.cwd, msg.githubRepo);
       case 'remove_block':
         return this.removeBlock(msg.blockId);
-      case 'configure_task_board':
-        return this.configureTaskBoard(msg.blockId, msg.config);
       case 'configure_linear_board':
         return this.configureLinearBoard(msg.blockId, msg.url);
-      case 'refresh_task_board':
-        return void this.refreshTaskBoard(msg.blockId);
+      case 'create_board':
+        this.block(msg.blockId);
+        this.tasks.createBoard(msg.blockId, msg.name, msg.spec);
+        return this.events.changed();
+      case 'update_board':
+        this.tasks.updateBoard(msg.boardId, { ...(msg.name !== undefined ? { name: msg.name } : {}), ...(msg.sources !== undefined ? { sources: msg.sources } : {}), ...(msg.logHours !== undefined ? { logHours: msg.logHours } : {}) });
+        return this.events.changed();
+      case 'delete_board':
+        this.tasks.deleteBoard(msg.boardId);
+        return this.events.changed();
+      case 'refresh_board':
+        return void this.tasks.refresh(msg.boardId);
+      case 'create_task':
+        this.tasks.createTask(msg.boardId, msg.title, msg.notes);
+        return this.events.changed();
+      case 'update_task':
+        this.tasks.updateTask(msg.taskId, { ...(msg.title !== undefined ? { title: msg.title } : {}), ...(msg.notes !== undefined ? { notes: msg.notes } : {}), ...(msg.stage ? { stage: msg.stage } : {}) });
+        return this.events.changed();
+      case 'delete_task':
+        this.tasks.deleteTask(msg.taskId);
+        return this.events.changed();
+      case 'assign_task':
+        this.tasks.assign(msg.taskId, msg.employeeId);
+        return this.events.changed();
       case 'connect_task_provider':
         this.services.taskBoards.connect(msg.provider);
         this.events.changed();
@@ -624,37 +669,12 @@ export class Office {
     return b;
   }
 
-  private configureTaskBoard(blockId: BlockId, config: TaskBoardConfig) {
-    const block = this.block(blockId);
-    const sources = config.sources.map((source) => ({ provider: source.provider, projectId: source.projectId.trim(), ...(source.label?.trim() ? { label: source.label.trim() } : {}) }));
-    if (sources.some((source) => !source.projectId)) throw new OfficeError('Each task board source needs a project id');
-    const seen = new Set<string>();
-    if (sources.some((source) => { const key = `${source.provider}:${source.projectId}`; if (seen.has(key)) return true; seen.add(key); return false; })) throw new OfficeError('A task board source is duplicated');
-    block.taskBoard = { sources };
-    this.commit();
-    void this.refreshTaskBoard(blockId);
-  }
-
   private configureLinearBoard(blockId: BlockId, url: string) {
     const block = this.block(blockId);
     const parsed = new URL(url.trim());
     if (!/^(www\.)?linear\.app$/i.test(parsed.hostname)) throw new OfficeError('Linear board URL must be on linear.app');
     block.linearBoardUrl = parsed.toString();
     this.commit();
-  }
-
-  private async refreshTaskBoard(blockId: BlockId) {
-    const block = this.block(blockId);
-    const previous = this.taskBoards.get(blockId);
-    this.taskBoards.set(blockId, { kind: 'loading', cards: previous?.cards ?? [], ...(previous && 'lastFetchedAt' in previous && previous.lastFetchedAt ? { lastFetchedAt: previous.lastFetchedAt } : {}) });
-    this.events.changed();
-    const result = await this.services.taskBoards.fetchSources(block.taskBoard?.sources ?? []);
-    if (!this.company.blocks.includes(block)) return;
-    const now = Date.now();
-    this.taskBoards.set(blockId, result.errors.length && !result.cards.length
-      ? { kind: 'error', cards: result.cards, message: result.errors.join(' ') }
-      : { kind: 'ready', cards: result.cards, lastFetchedAt: now });
-    this.events.changed();
   }
 
   private sessionOf(e: Employee): EmployeeSession {
@@ -836,7 +856,7 @@ export class Office {
     this.commit();
   }
 
-  private hire(provider: Provider, blockId: BlockId, requestedName?: string, requestedModel?: ModelId, role: EmployeeRole = 'employee', bypassLimit = false): Employee {
+  private hire({ provider, blockId, name: requestedName, model: requestedModel, role = 'employee', bypassLimit = false, deskId }: HireRequest): Employee {
     const { company } = this;
     const block = this.block(blockId);
     const harness = this.harnesses[provider];
@@ -851,7 +871,7 @@ export class Office {
       throw new OfficeError(`Headcount cap reached (${cap} at level ${company.level}). Earn XP to grow the company.`);
     }
     const orchestrator = role === 'orchestrator';
-    let desk = freeDesk(this.building, seatsOf(company), blockId, orchestrator);
+    let desk = (deskId && this.deskToTake(deskId, blockId, orchestrator)) || freeDesk(this.building, seatsOf(company), blockId, orchestrator);
     if (!desk) {
       if (!bypassLimit && Number.isFinite(cap)) throw new OfficeError(`${block.name} has no free desk at this level`);
       const put = placeDesk(this.building, blockId, orchestrator, this.ctx());
@@ -881,11 +901,20 @@ export class Office {
     return employee;
   }
 
+  // The desk the owner asked for, when it is a free one of the right kind in the block.
+  private deskToTake(deskId: ItemId, blockId: BlockId, orchestrator: boolean) {
+    const probe = 'desk-probe' as SpaceEmployeeId;
+    const item = deskOf(this.building, new Map([[probe, deskId]]), probe);
+    const taken = seatsOf(this.company);
+    const free = ![...taken.values()].includes(deskId);
+    return item && free && item.blockId === blockId && ITEM_DEFS[item.def]?.kind === (orchestrator ? 'po_desk' : 'bench_desk') ? item : null;
+  }
+
   // The one place a PO's hire becomes an employee, so the seat model can change it in one spot.
   private hireFor(from: EmployeeId, spec: HireSpec): Hired {
     const po = this.employee(from);
     try {
-      const hired = this.hire(po.provider, po.blockId, spec.name, undefined, 'employee');
+      const hired = this.hire({ provider: po.provider, blockId: po.blockId, name: spec.name, role: 'employee' });
       return { ok: true, id: hired.id, name: hired.name };
     } catch (err) {
       if (err instanceof OfficeError) return { ok: false, reason: err.message };
@@ -908,6 +937,7 @@ export class Office {
   }
 
   private dismiss(e: Employee) {
+    this.tasks.rememberPerson(e.id, e.name);
     this.mail.employeeFired(e.id);
     this.stopSession(e.id);
     const block = this.company.blocks.find((b) => b.id === e.blockId);
@@ -922,7 +952,7 @@ export class Office {
     for (const e of this.company.employees.filter((x) => x.blockId === blockId)) this.dismiss(e);
     this.company.blocks = this.company.blocks.filter((b) => b !== block);
     this.dropItems(blockId);
-    this.taskBoards.delete(blockId);
+    this.tasks.dropBlock(blockId);
     this.commit();
   }
 
@@ -947,6 +977,7 @@ export class Office {
     const repo = githubRepo?.trim().replace(/\/$/, '') || githubRemote(cwd);
     const block: ProjectBlock = { id: newId<BlockId>(), name: name?.trim() || basename(cwd), cwd, color, slot, ...(repo && { githubRepo: repo }) };
     blocks.push(block);
+    this.tasks.addBlock();
     this.apply(teamKit(this.building, block.id, slot));
     this.commit();
   }
@@ -1080,6 +1111,7 @@ export class Office {
     this.history = new BuildHistory();
     this.setBuilding(fresh.building);
     rmSync(this.ledgerFile, { force: true });
+    this.tasks.reset();
     this.mail = this.openMail([]);
     this.meetingDoor = 'open';
     this.commit();
