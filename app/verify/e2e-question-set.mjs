@@ -77,6 +77,8 @@ export default async (s) => {
     const reply = await until(() => posts().find((p) => p.kind === 'reply' && p.requestId === req.id), `the reply to "${m.text}"`);
     rows.push({ ...m, posted: req.intent, outcome: reply.outcome, artifact: reply.artifact?.length ?? 0, answer: reply.text });
     console.log(`${m.is.padEnd(8)} posted as ${req.intent.padEnd(4)} settled ${reply.outcome.padEnd(9)} load ${loadavg()[0].toFixed(1).padStart(5)} | ${m.text}`);
+    // A cancelled order does not stop the turn that already started on it, so a fresh session ends it before the next message.
+    if (m.is === 'work') await s.eval(`window.office.send({ type: 'fresh_session', employeeId: ${JSON.stringify(eli)} })`);
     await idle();
   }
 
