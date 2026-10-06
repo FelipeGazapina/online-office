@@ -1,5 +1,6 @@
 import { MeshStandardMaterial, NoColorSpace, SRGBColorSpace, TextureLoader, type BufferGeometry, type Mesh, type Texture } from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+import { showAo } from './shading.ts';
 
 // Hero props baked from CC0 models (see assets/bake/bake-props.mjs and app/assets-LICENSES.md): each is one mesh with one material,
 // origin at the middle of its footprint, standing on y = 0 and facing +z, so a prop stays one instanced draw call.
@@ -14,7 +15,7 @@ const fileOf = (name: string) => {
 export type PropName = 'armchair' | 'bookshelf' | 'chair' | 'desk' | 'lamp' | 'plant_ficus' | 'plant_succulent' | 'plant_syngonium' | 'plant_tall' | 'sofa';
 const NAMES: readonly PropName[] = ['armchair', 'bookshelf', 'chair', 'desk', 'lamp', 'plant_ficus', 'plant_succulent', 'plant_syngonium', 'plant_tall', 'sofa'];
 // The photographed albedo of dark woods and leather is lower than the stylised light the scene is lit for; a gain lifts it.
-const GAIN: Partial<Record<PropName, number>> = { desk: 1.6, sofa: 1.2, bookshelf: 1.4, armchair: 1.6 };
+const GAIN: Partial<Record<PropName, number>> = { desk: 1.6, sofa: 1.2, bookshelf: 1.4, armchair: 1.6, lamp: 1.7 };
 export type Prop = { geometry: BufferGeometry; material: MeshStandardMaterial };
 
 const loaded = new Map<PropName, Prop>();
@@ -66,6 +67,7 @@ async function load(name: PropName): Promise<Prop> {
       ? { map: map(fileOf(`${name}-diff.jpg`), true), normalMap: map(fileOf(`${name}-nor.jpg`), false), roughnessMap: arm, metalnessMap: arm, aoMap: arm, side }
       : { vertexColors: true, roughness: 0.6, side },
   );
+  if (textured) showAo(material);
   const gain = GAIN[name];
   if (gain) material.color.setScalar(gain);
   return { geometry: mesh.geometry, material };

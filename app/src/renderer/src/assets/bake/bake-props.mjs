@@ -24,9 +24,9 @@ mkdirSync(out, { recursive: true });
 const SPECS = [
   { name: 'sofa', from: 'sofa_03/sofa_03.gltf', size: [1.9, 0.82, 0.95], uniform: 'w', slot: 1024, maxTris: 3000 },
   { name: 'armchair', from: 'modern_arm_chair_01/modern_arm_chair_01.gltf', size: [0.9, 1, 0.9], uniform: 'w', slot: 512, maxTris: 2500 },
-  { name: 'plant_ficus', from: 'potted_plant_01/potted_plant_01.gltf', size: [0.6, 1.1, 0.6], uniform: 'h', slot: 512, maxTris: 3500, error: 0.5, doubleSided: true },
-  { name: 'plant_tall', from: 'potted_plant_01/potted_plant_01.gltf', size: [0.9, 1.6, 0.9], uniform: 'h', slot: 512, maxTris: 4000, error: 0.5, doubleSided: true },
-  { name: 'plant_syngonium', from: 'potted_plant_02/potted_plant_02.gltf', size: [0.7, 1.3, 0.7], uniform: 'w', slot: 512, maxTris: 4000, doubleSided: true },
+  { name: 'plant_ficus', from: 'potted_plant_01/potted_plant_01.gltf', size: [0.6, 1.1, 0.6], uniform: 'h', slot: 512, maxTris: 1, groups: { _pot: { tris: 1500, flags: ['LockBorder'] }, _leaves: { tris: 2500, error: 1, flags: [] } }, doubleSided: true },
+  { name: 'plant_tall', from: 'potted_plant_01/potted_plant_01.gltf', size: [0.9, 1.6, 0.9], uniform: 'h', slot: 512, maxTris: 1, groups: { _pot: { tris: 1500, flags: ['LockBorder'] }, _leaves: { tris: 3000, error: 1, flags: [] } }, doubleSided: true },
+  { name: 'plant_syngonium', from: 'potted_plant_02/potted_plant_02.gltf', size: [0.7, 1.3, 0.7], uniform: 'w', slot: 512, maxTris: 1, groups: { _pot: { tris: 1200, flags: ['LockBorder'] }, _leaves: { tris: 2600, error: 1, flags: [] } }, doubleSided: true },
   { name: 'plant_succulent', from: 'potted_plant_04/potted_plant_04.gltf', size: [0.3, 0.42, 0.3], uniform: 'h', slot: 512, maxTris: 3000 },
   { name: 'bookshelf', from: 'wooden_bookshelf_worn/wooden_bookshelf_worn.gltf', size: [1.96, 2, 0.46], slot: 1024, maxTris: 3000 },
   { name: 'desk', from: 'wooden_table_02/wooden_table_02.gltf', size: [1.46, 0.72, 0.94], slot: 1024, rotY: 0 },
@@ -61,7 +61,7 @@ for (const spec of SPECS) {
   const doc = await io.read(join(src, spec.from));
   const root = doc.getRoot();
   const mats = root.listMaterials();
-  const pos = [], nor = [], uv = [], col = [], idx = [];
+  const pos = [], nor = [], uv = [], col = [], idx = [], triMat = [];
   const kenney = spec.from.startsWith('kenney');
   for (const node of root.listNodes()) {
     const mesh = node.getMesh();
@@ -82,6 +82,7 @@ for (const spec of SPECS) {
       }
       const I = prim.getIndices();
       for (let i = 0; i < I.getCount(); i++) idx.push(base + I.getScalar(i));
+      for (let i = 0; i < I.getCount() / 3; i++) triMat.push(prim.getMaterial().getName());
     }
   }
   // normals back to unit length after the node matrices
@@ -119,9 +120,19 @@ for (const spec of SPECS) {
   let indices = Uint32Array.from(idx), posF = Float32Array.from(pos);
   let tris = idx.length / 3;
   if (spec.maxTris && tris > spec.maxTris) {
+    // `groups` budgets each material on its own, so a pot keeps its shape while the leaves lose most of theirs.
+    const groups = spec.groups ?? { '': { tris: spec.maxTris } };
     const attrs = Float32Array.from(uv.filter((_, i) => i % 3 < 2)); // u, v only
-    const [simp] = MeshoptSimplifier.simplifyWithAttributes(indices, posF, 3, attrs, 2, [0.5, 0.5], null, spec.maxTris * 3, spec.error ?? 0.1, []);
-    indices = simp;
+    const out = [];
+    for (const [name, g] of Object.entries(groups)) {
+      const work = [];
+      for (let t = 0; t < idx.length / 3; t++) if (!name || triMat[t].includes(name)) work.push(idx[t * 3], idx[t * 3 + 1], idx[t * 3 + 2]);
+      const [simp] = g.plain
+        ? MeshoptSimplifier.simplify(Uint32Array.from(work), posF, 3, g.tris * 3, g.error ?? 0.1, g.flags ?? [])
+        : MeshoptSimplifier.simplifyWithAttributes(Uint32Array.from(work), posF, 3, attrs, 2, [0.5, 0.5], null, g.tris * 3, g.error ?? 0.1, g.flags ?? []);
+      out.push(...simp);
+    }
+    indices = Uint32Array.from(out);
     tris = indices.length / 3;
   }
   // compact

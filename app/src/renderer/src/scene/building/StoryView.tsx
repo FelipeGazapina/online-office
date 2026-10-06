@@ -11,7 +11,7 @@ import { walkTo } from '../../sim.ts';
 import { chairOf } from '../../world.ts';
 import { blobShadowTexture, ceilingTexture, codeTexture, poolTexture, wallAoTexture } from '../textures.ts';
 import { carpetSurface, concreteSurface, PLASTER_MEAN, PLASTER_METRES, plasterSurface, tileSurface, woodSurface, type Surface } from '../surfaceTextures.ts';
-import { detail } from '../shading.ts';
+import { detail, showAo } from '../shading.ts';
 import { reflective } from '../Lighting.tsx';
 import { floorGeometry } from './floor.ts';
 import { propOf } from '../props.ts';
@@ -27,7 +27,7 @@ const color = new Color();
 
 // `gain` lifts a texture whose real photographed albedo is darker than the stylised light the scene is lit for.
 const floorMaterial = (surface: Surface, roughness: number, normalScale: number, gain: number, extra: Partial<ConstructorParameters<typeof MeshStandardMaterial>[0]> = {}) =>
-  detail(new MeshStandardMaterial({ map: surface.map, normalMap: surface.normalMap, roughnessMap: surface.armMap, aoMap: surface.armMap, normalScale: new Vector2(normalScale, normalScale), vertexColors: true, color: new Color(gain, gain, gain), roughness, ...extra }), 'floor');
+  showAo(detail(new MeshStandardMaterial({ map: surface.map, normalMap: surface.normalMap, roughnessMap: surface.armMap, aoMap: surface.armMap, normalScale: new Vector2(normalScale, normalScale), vertexColors: true, color: new Color(gain, gain, gain), roughness, ...extra }), 'floor'), 0.8);
 // In the order of FLOOR_FAMILIES.
 const floorMaterials = [
   floorMaterial(woodSurface(), 0.6, 0.9, 1.45),

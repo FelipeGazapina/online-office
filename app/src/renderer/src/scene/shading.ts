@@ -140,3 +140,18 @@ export function detail<M extends MeshStandardMaterial>(material: M, surface: Sur
   material.customProgramCacheKey = () => `detail-${surface}${wallTextures ? '-tex' : ''}`;
   return material;
 }
+
+/**
+ * Three applies a material's aoMap to indirect light only, which in this sun-lit scene barely shows. This also folds the
+ * map into the albedo, so the creases and undersides baked into a prop's or floor's occlusion map read in direct light too.
+ */
+export function showAo<M extends MeshStandardMaterial>(material: M, strength = 0.7): M {
+  const previous = material.onBeforeCompile;
+  material.onBeforeCompile = (shader, renderer) => {
+    previous?.call(material, shader, renderer);
+    shader.fragmentShader = shader.fragmentShader.replace('#include <map_fragment>', `#include <map_fragment>\n#ifdef USE_AOMAP\ndiffuseColor.rgb *= mix(1.0, texture2D(aoMap, vAoMapUv).r, ${strength.toFixed(2)});\n#endif`);
+  };
+  const key = material.customProgramCacheKey.bind(material);
+  material.customProgramCacheKey = () => `${key()}-ao${strength}`;
+  return material;
+}
