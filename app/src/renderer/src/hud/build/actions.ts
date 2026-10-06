@@ -1,7 +1,9 @@
-import type { BuildOp, Item, ItemId, Rot } from '../../../../shared/space/index.ts';
+import { blockItems, cellBounds, CELL, ITEM_DEFS, type BuildOp, type Item, type ItemId, type Rot, type Vec2 } from '../../../../shared/space/index.ts';
+import { leaveComputer } from '../../computer.ts';
 import { runtime } from '../../runtime.ts';
 import { get, send, set, setSetting, useStore, type BuildState, type BuildTool } from '../../store.ts';
 import { ENTRIES, type Entry, type TabId } from './catalog.ts';
+import { reseatSeated } from './reseat.ts';
 import { BUILD_DIST, buildView, modifiers, setGhost } from './state.ts';
 
 const FRESH: Omit<BuildState, 'level'> = { tool: { kind: 'select' }, tab: 'desks', search: '', searching: false, peek: null, fill: false, paint: 1, style: 0, wallsMode: 'cutaway' };
@@ -13,7 +15,9 @@ export function patchBuild(patch: Partial<BuildState>) {
 
 export function enterBuild() {
   const s = get();
-  if (s.build || !s.building || s.portalMode || s.computerState === 'seated' || s.modal) return;
+  if (s.build || !s.building || s.portalMode || s.modal) return;
+  // Sitting at the owner's computer is not a reason to refuse: the Build button must always do something.
+  if (s.computerState === 'seated') leaveComputer();
   if (s.camera !== 'iso') setSetting('camera', 'iso');
   const level = Math.min(s.story, s.building.stories.length - 1);
   buildView.x = runtime.owner.pos.x;
@@ -33,6 +37,21 @@ export function exitBuild() {
 }
 
 export const toggleBuild = () => (get().build ? exitBuild() : enterBuild());
+
+/** Esc and a right click. A block in hand goes back and the block tool stays, so the next block is one click away. */
+export function stepBack() {
+  const tool = get().build?.tool;
+  if (tool?.kind === 'block' && tool.carry) setTool({ kind: 'block', carry: null });
+  else if (tool && tool.kind !== 'select') setTool({ kind: 'select' });
+}
+
+export function pickUpBlock(blockId: string, at: Vec2): boolean {
+  const s = get();
+  const box = s.build && s.building ? cellBounds(blockItems(s.building.stories[s.build.level], blockId)) : null;
+  if (!box) return false;
+  setTool({ kind: 'block', carry: { blockId, quarter: 0, grab: { x: at.x / CELL - (box.x0 + box.x1) / 2, z: at.z / CELL - (box.z0 + box.z1) / 2 } } });
+  return true;
+}
 
 export function setTool(tool: BuildTool) {
   setGhost(null);
@@ -94,8 +113,9 @@ export function setLevel(level: number) {
   const next = Math.max(0, Math.min(s.building.stories.length - 1, level));
   if (next === s.build.level) return;
   setGhost(null);
-  // A moved item belongs to the story it was picked up on.
-  const tool: BuildTool = s.build.tool.kind === 'item' && s.build.tool.carry ? { kind: 'select' } : s.build.tool;
+  // A moved item or block belongs to the story it was picked up on.
+  const t = s.build.tool;
+  const tool: BuildTool = t.kind === 'item' && t.carry ? { kind: 'select' } : t.kind === 'block' && t.carry ? { kind: 'block', carry: null } : t;
   set({ build: { ...s.build, level: next, tool }, story: next });
 }
 
@@ -107,16 +127,29 @@ export function addFloor() {
   send({ type: 'build', ops: [{ t: 'stories', count: b.stories.length + 1 }] });
 }
 useStore.subscribe((s, prev) => {
+  if (s.building !== prev.building) reseatSeated();
   if (wantNewFloor && s.build && s.building && prev.building && s.building.stories.length > prev.building.stories.length) {
     wantNewFloor = false;
     setLevel(s.building.stories.length - 1);
   }
 });
 
+const turned = (rot: Rot, step: 1 | -1) => (((rot + step) % 4) + 4) % 4 as Rot;
+
+export const canTurn = (tool: BuildTool) => (tool.kind === 'item' && ITEM_DEFS[tool.def]?.kind !== 'stairs') || (tool.kind === 'block' && !!tool.carry);
+
 export function rotate(step: 1 | -1) {
   const tool = get().build?.tool;
+  if (tool?.kind === 'block' && tool.carry) {
+    const { grab } = tool.carry;
+    // The hold point turns with the block, by the same quarter turn the pieces make.
+    const held = step === 1 ? { x: -grab.z, z: grab.x } : { x: grab.z, z: -grab.x };
+    patchBuild({ tool: { kind: 'block', carry: { ...tool.carry, quarter: turned(tool.carry.quarter, step), grab: held } } });
+    setGhost(null);
+    return;
+  }
   if (tool?.kind !== 'item') return;
-  patchBuild({ tool: { ...tool, rot: (((tool.rot + step) % 4) + 4) % 4 as Rot } });
+  patchBuild({ tool: { ...tool, rot: turned(tool.rot, step) } });
   setGhost(null);
 }
 

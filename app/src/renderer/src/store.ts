@@ -15,7 +15,7 @@ import type {
 } from '../../shared/protocol.ts';
 import type { Board, BoardId, BoardSync, Task, TaskId, TaskTime } from '../../shared/tasks.ts';
 import { emptyMailView, type MailView, type Message, type MessageId } from '../../shared/mail.ts';
-import type { Building, ItemId, PaintId, Rot } from '../../shared/space/index.ts';
+import type { Building, ItemId, PaintId, Rot, Vec2 } from '../../shared/space/index.ts';
 import type { Language, VoiceQuality } from '../../shared/voice.ts';
 import { initialVoice, type VoiceState } from './voice/chip.ts';
 
@@ -32,6 +32,9 @@ export const LANGS: Record<Lang, { stt: Language; tts: 'en-US' | 'pt-BR' }> = {
 };
 export type Modal = null | { kind: 'hire'; bypassLimit?: boolean } | { kind: 'block' } | { kind: 'whiteboard'; blockId: BlockId } | { kind: 'github'; blockId: BlockId } | { kind: 'github_setup'; blockId: BlockId } | { kind: 'task_board'; blockId: BlockId; taskId?: TaskId } | { kind: 'linear_board'; blockId: BlockId };
 
+// A whole block in hand: turned `quarter` quarter turns since it was picked up. `grab` is where the pointer holds it, in
+// cells from the middle of its bounding box, turned along with it so the block keeps hanging off the same point.
+export type BlockCarry = { blockId: string; quarter: Rot; grab: Vec2 };
 // What the owner is doing in build mode. `carry` is the placed item being moved, null for a new one.
 export type BuildTool =
   | { kind: 'select' }
@@ -40,7 +43,8 @@ export type BuildTool =
   | { kind: 'floor' }
   | { kind: 'wallpaint' }
   | { kind: 'opening'; open: 'door' | 'window' | 'arch' }
-  | { kind: 'item'; def: string; rot: Rot; carry: ItemId | null; blockId: string | null };
+  | { kind: 'item'; def: string; rot: Rot; carry: ItemId | null; blockId: string | null }
+  | { kind: 'block'; carry: BlockCarry | null };
 export type WallsMode = 'up' | 'cutaway' | 'down';
 // `searching` is the search box having focus: the catalog lists everything. `peek` is the furniture card under the pointer, drawn as the cursor ghost.
 export type BuildState = { tool: BuildTool; tab: string; search: string; searching: boolean; peek: string | null; fill: boolean; paint: PaintId; style: number; wallsMode: WallsMode; level: number };

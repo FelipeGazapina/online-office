@@ -11,3 +11,5 @@ export { parseBuilding, encodeBuilding } from './codec.ts';
 export { legacyBuilding, legacyLot } from './legacy.ts';
 export { rectWalls, paintRect, drawRoom, removeWalls } from './builders.ts';
 export type { TileRect } from './builders.ts';
+export { blockItems, cellBounds, turnBlock, placeBlock, blockPose, moveBlockOp, blockAt } from './blocks.ts';
+export type { BlockPose } from './blocks.ts';

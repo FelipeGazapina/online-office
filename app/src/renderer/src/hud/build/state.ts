@@ -1,7 +1,7 @@
 // Mutable build-mode state that changes every pointer move and must not re-render React: the ghost under the cursor, the
 // modifier keys held, and where the build camera looks. Anything the HUD shows lives in the store instead.
 import type { Company } from '../../../../shared/protocol.ts';
-import { footprint, ITEM_DEFS, type Item, type SpaceContext, type TileRect, type Vec2, type ViolationKind, type WallRef, type WallSeg } from '../../../../shared/space/index.ts';
+import { cellBounds, footprint, ITEM_DEFS, type Item, type SpaceContext, type TileRect, type Vec2, type ViolationKind, type WallRef, type WallSeg } from '../../../../shared/space/index.ts';
 
 export type Ghost =
   | { kind: 'run'; refs: readonly WallRef[]; start: Vec2; end: Vec2; erase: boolean; ok: boolean }
@@ -10,7 +10,9 @@ export type Ghost =
   | { kind: 'walls'; walls: readonly WallSeg[]; ok: boolean; color?: string }
   | { kind: 'vertex'; at: Vec2 }
   | { kind: 'item'; item: Item; ok: boolean }
-  | { kind: 'outline'; item: Item };
+  | { kind: 'outline'; item: Item }
+  | { kind: 'block'; items: readonly Item[]; ok: boolean }
+  | { kind: 'blockSelect'; items: readonly Item[] };
 
 export const draft = {
   ghost: null as Ghost | null,
@@ -30,6 +32,10 @@ export function centerOf(item: Item): Vec2 {
 export function setGhost(g: Ghost | null, level = 0) {
   draft.ghost = g;
   if (g?.kind === 'item') draft.focus = { ...centerOf(g.item), level };
+  else if (g?.kind === 'block' || g?.kind === 'blockSelect') {
+    const box = cellBounds(g.items);
+    draft.focus = box ? { x: (box.x0 + box.x1) / 4, z: (box.z0 + box.z1) / 4, level } : null;
+  }
   else if (g?.kind === 'tiles' && g.tiles.length) draft.focus = { x: g.tiles.reduce((n, t) => n + t.x + 0.5, 0) / g.tiles.length, z: g.tiles.reduce((n, t) => n + t.z + 0.5, 0) / g.tiles.length, level };
   else draft.focus = null;
   draft.version++;
