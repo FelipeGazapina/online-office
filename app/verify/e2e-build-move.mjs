@@ -130,6 +130,12 @@ export default async function (s, { launch }) {
   const chair0 = chairOf(desk0);
   const avatar = async (id) => (await s.eval('__office.state()')).avatars.find((a) => a.id === id);
   const near = (a, p) => !!a && Math.hypot(a.x - p.x, a.z - p.z) < 0.1;
+  // The sim moves a seated person on its next frame after the building changes, so this waits for her to be on the chair.
+  const sits = async (id, chair, why) => {
+    await s.waitFor(`(() => { const a = __office.state().avatars.find((a) => a.id === '${id}'); return !!a && a.seated && Math.hypot(a.x - ${chair.x}, a.z - ${chair.z}) < 0.1; })()`, 4000).catch(() => {});
+    const a = await avatar(id);
+    assert(near(a, chair) && a.seated, why);
+  };
   const seatOf = (id) => s.eval(`${store}.company.employees.find((e) => e.id === '${id}').seat`);
   assert(near(await avatar(dana), chair0) && (await avatar(dana)).seated, `Dana sits at her desk (${chair0.x}, ${chair0.z})`);
   await enterByButton();
@@ -176,8 +182,7 @@ export default async function (s, { launch }) {
   assert(desk1.blockId === 'blk-b' && desk1.rot === desk0.rot && desk1.id === desk0.id, `the desk moved (${desk1.x / 2}, ${desk1.z / 2}) and kept its id and team`);
   assert((await seatOf(dana)) === desk0.id, 'Dana is still assigned to that desk');
   const chair1 = chairOf(desk1);
-  await s.waitFor(`(() => { const a = __office.state().avatars.find((a) => a.id === '${dana}'); return Math.hypot(a.x - ${chair1.x}, a.z - ${chair1.z}) < 0.1 && a.seated; })()`, 4000);
-  assert(true, `and she sits at its new chair (${chair1.x}, ${chair1.z}), not in the air where it was`);
+  await sits(dana, chair1, `and she sits at its new chair (${chair1.x}, ${chair1.z}), not in the air where it was`);
 
   const dragFrom = await bring(deskPoint(desk1).x, deskPoint(desk1).z);
   const dragTo = await at(goal.x + 3, goal.z + 1);
@@ -185,13 +190,13 @@ export default async function (s, { launch }) {
   await s.sleep(300);
   const desk2 = byId(await building(s)).get(desk0.id);
   assert(desk2.x !== desk1.x && (await tool(s)).kind === 'select', `dragging the desk moves it and lets go on release, with no second click (${desk2.x / 2}, ${desk2.z / 2})`);
-  assert(near(await avatar(dana), chairOf(desk2)), 'Dana follows it again');
+  await sits(dana, chairOf(desk2), 'Dana follows it again');
 
   const undoBtn = await s.center('[aria-label="Undo"]');
   await s.click(undoBtn.x, undoBtn.y);
   await s.click(undoBtn.x, undoBtn.y);
   await waitBuilding(`b.stories[0].items.find((i) => i.id === ${JSON.stringify(desk0.id)}).x === ${desk0.x}`, 'undo did not return the desk');
-  assert(near(await avatar(dana), chair0), 'two undos put the desk back and Dana sits at her first chair again');
+  await sits(dana, chair0, 'two undos put the desk back and Dana sits at her first chair again');
   const original = await building(s);
 
   // ---- a whole block
@@ -248,8 +253,7 @@ export default async function (s, { launch }) {
   const seatsAfter = await s.eval(`${store}.company.employees.map((e) => [e.id, e.seat])`);
   assert(JSON.stringify(seatsAfter) === JSON.stringify(seatsBefore) && (await seatOf(dana)) === desk0.id, 'every employee keeps the same desk id');
   const movedDesk = byId(await building(s)).get(desk0.id);
-  await s.waitFor(`(() => { const a = __office.state().avatars.find((a) => a.id === '${dana}'); return Math.hypot(a.x - ${chairOf(movedDesk).x}, a.z - ${chairOf(movedDesk).z}) < 0.1 && a.seated; })()`, 4000);
-  assert(true, 'and the one sitting in this block went with it, seated at the new chair');
+  await sits(dana, chairOf(movedDesk), 'and the one sitting in this block went with it, seated at the new chair');
   assert(near(await avatar('e1'), chairOf(byId(await building(s)).get('blk-a:po_desk:00'))), 'while the other team did not move');
 
   // Shift-click picks a block from the furniture tool, and the turn keys turn the whole thing.
@@ -281,18 +285,17 @@ export default async function (s, { launch }) {
   assert(turned.length === before.length && turned.every((i, n) => i.id === before[n].id), 'all pieces are still there with their ids');
   const spun = byId(await building(s)).get(desk0.id);
   assert((await seatOf(dana)) === desk0.id, 'Dana still has her desk');
-  await s.waitFor(`(() => { const a = __office.state().avatars.find((a) => a.id === '${dana}'); return Math.hypot(a.x - ${chairOf(spun).x}, a.z - ${chairOf(spun).z}) < 0.1 && a.seated; })()`, 4000);
-  assert(true, `and she sits at the turned desk's chair (${chairOf(spun).x}, ${chairOf(spun).z})`);
+  await sits(dana, chairOf(spun), `and she sits at the turned desk's chair (${chairOf(spun).x}, ${chairOf(spun).z})`);
   const spunBuilding = await building(s);
 
   await s.clickOn('[aria-label="Undo"]');
   await s.clickOn('[aria-label="Undo"]');
   await waitBuilding(`JSON.stringify(b.stories[0].items) === ${JSON.stringify(JSON.stringify(original.stories[0].items))}`, 'two undos did not restore the building');
-  assert(near(await avatar(dana), chair0), 'two undos bring the whole block back and Dana with it');
+  await sits(dana, chair0, 'two undos bring the whole block back and Dana with it');
   await s.clickOn('[aria-label="Redo"]');
   await s.clickOn('[aria-label="Redo"]');
   await waitBuilding(`JSON.stringify(b.stories[0].items) === ${JSON.stringify(JSON.stringify(spunBuilding.stories[0].items))}`, 'two redos did not restore the turned block');
-  assert(near(await avatar(dana), chairOf(spun)), 'two redos put it back turned');
+  await sits(dana, chairOf(spun), 'two redos put it back turned');
 
   // A block can be dragged too: press on it, drag, let go, and it drops where the pointer ends.
   await s.clickOn('[data-testid="mode-block"]');
@@ -306,7 +309,7 @@ export default async function (s, { launch }) {
   const ddz = dragged[0].z - turned[0].z;
   assert(dragged.every((i, n) => i.id === turned[n].id && i.x - turned[n].x === ddx && i.z - turned[n].z === ddz && i.rot === turned[n].rot), `dragging the block moves every piece by the same ${ddx / 2} m, ${ddz / 2} m`);
   assert(Math.abs(ddz - 4) <= 1 && Math.abs(ddx) <= 1 && (await tool(s)).kind === 'block' && (await tool(s)).carry === null, 'to where the pointer was let go, with the block tool left empty-handed');
-  assert(near(await avatar(dana), chairOf(byId(await building(s)).get(desk0.id))), 'and Dana went with it');
+  await sits(dana, chairOf(byId(await building(s)).get(desk0.id)), 'and Dana went with it');
   const stood = dragged;
   await leaveByButton();
 

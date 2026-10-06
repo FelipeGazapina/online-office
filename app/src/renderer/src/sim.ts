@@ -49,6 +49,8 @@ const REROUTE = 0.5;
 const TASK_BOARD_RADIUS = 1.75;
 // A climb ends this close to the top of the stairs.
 const CLIMB_DONE = 0.2;
+// A seated avatar further than this from its chair has had the desk moved from under it.
+const SEATED_DRIFT = 0.05;
 
 const dist2 = (a: Vec2, b: Vec2) => Math.hypot(a.x - b.x, a.z - b.z);
 const ease = (dt: number, rate: number) => 1 - Math.exp(-dt * rate);
@@ -388,6 +390,13 @@ function stepAvatar(
   } else {
     av.leaving = false;
     target = (av.seated || (av.floor === seat.floor && dist2(av.pos, seat.chair) < 1.4)) ? at(seat.floor, seat.chair) : at(seat.floor, seat.exit);
+  }
+
+  // A seated avatar never walks, so a desk that moves (or a floor that changes) takes its sitter along here.
+  if (av.seated && (av.floor !== seat.floor || dist2(av.pos, seat.chair) > SEATED_DRIFT)) {
+    av.floor = seat.floor;
+    av.climb = av.route = null;
+    av.pos.set(seat.chair.x, floorBase(seat.floor), seat.chair.z);
   }
 
   const level = av.floor === target.floor && !av.climb;
