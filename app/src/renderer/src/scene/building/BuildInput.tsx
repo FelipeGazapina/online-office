@@ -1,0 +1,304 @@
+// Turns the pointer into build gestures. Every tool answers the same two questions for the current pointer and drag: what
+// would this change (`ops`), and what does the ghost look like. The ghost's colour is main's own verdict (`checkOps`),
+// and a click or a release sends exactly the ops the ghost was checked with.
+import { useThree } from '@react-three/fiber';
+import { useEffect } from 'react';
+import { checkOps, ITEM_DEFS, rectWalls, type Building, type BuildOp, type Item, type ItemId, type Vec2 } from '../../../../shared/space/index.ts';
+import {
+  floodRoom,
+  itemAt,
+  itemOrigin,
+  nearestWall,
+  openingOp,
+  paintFloorOp,
+  paintWallsOp,
+  putItemOp,
+  roomOps,
+  roomRect,
+  runEnd,
+  wallOp,
+  wallRun,
+  wallsAround,
+  wallsToDelete,
+  wallsToPut,
+} from '../../../../shared/space/buildersGesture.ts';
+import { rotate, sendOps, setTool, toolItem } from '../../hud/build/actions.ts';
+import { buildView, draft, modifiers, setGhost, spaceContext, VIOLATION_TEXT, type Ghost } from '../../hud/build/state.ts';
+import { get, set, useStore, type BuildCursor, type BuildState } from '../../store.ts';
+import { groundPoint, tileOf, vertexOf } from './Picking.ts';
+
+type Drag = { tool: 'wall' | 'room' | 'floor'; a: Vec2; erase: boolean; tiles: Map<string, Vec2>; flood: boolean; lastTile: Vec2 | null };
+type Plan = { ops: BuildOp[]; ghost: (ok: boolean) => Ghost | null; readout: string | null };
+type Verdict = { ok: boolean; text: string };
+
+const CLICK_PX = 5;
+const EDGE_PX = 6;
+const same = (a: Vec2, b: Vec2) => a.x === b.x && a.z === b.z;
+const tkey = (t: Vec2) => `${t.x},${t.z}`;
+
+function lineTiles(a: Vec2, b: Vec2): Vec2[] {
+  const n = Math.max(Math.abs(b.x - a.x), Math.abs(b.z - a.z), 1);
+  return Array.from({ length: n + 1 }, (_, i) => ({ x: Math.round(a.x + ((b.x - a.x) * i) / n), z: Math.round(a.z + ((b.z - a.z) * i) / n) }));
+}
+
+function storyItem(b: Building, level: number, id: ItemId | null): Item | null {
+  return id ? (b.stories[level]?.items.find((i) => i.id === id) ?? null) : null;
+}
+
+function plan(b: Building, build: BuildState, p: Vec2, drag: Drag | null, shift: boolean, ctrl: boolean): Plan | null {
+  const level = build.level;
+  const story = b.stories[level];
+  if (!story) return null;
+  const tool = build.tool;
+  const kind = drag?.tool ?? (tool.kind === 'room' && shift ? 'wall' : tool.kind);
+  switch (kind) {
+    case 'select':
+      return { ops: [], ghost: () => null, readout: null };
+    case 'wall': {
+      const v = vertexOf(p);
+      if (!drag) return { ops: [], ghost: () => ({ kind: 'vertex', at: v }), readout: null };
+      const refs = wallRun(drag.a, v);
+      const op = drag.erase ? wallOp(level, [], wallsToDelete(story, refs)) : wallOp(level, wallsToPut(story, refs, build.style), []);
+      return {
+        ops: op ? [op] : [],
+        ghost: (ok) => ({ kind: 'run', refs, start: drag.a, end: runEnd(drag.a, v), erase: drag.erase, ok }),
+        readout: refs.length ? `${drag.erase ? 'Delete ' : ''}${refs.length} m` : null,
+      };
+    }
+    case 'room': {
+      const v = vertexOf(p);
+      if (!drag) return { ops: [], ghost: () => ({ kind: 'vertex', at: v }), readout: null };
+      const rect = roomRect(drag.a, v);
+      if (!rect) return { ops: [], ghost: () => ({ kind: 'vertex', at: v }), readout: null };
+      const ops = drag.erase ? [wallOp(level, [], wallsToDelete(story, rectWalls(rect)))].filter((o): o is BuildOp => !!o) : roomOps(b, story, level, rect, build.style, build.paint || 1);
+      return { ops, ghost: (ok) => ({ kind: 'room', rect, ok }), readout: `${rect.w} × ${rect.h} m` };
+    }
+    case 'floor': {
+      const here = tileOf(p);
+      let tiles: Vec2[];
+      if (drag && !drag.flood) tiles = [...drag.tiles.values()];
+      else tiles = (shift ? floodRoom(b, story, here) : null) ?? [here];
+      const op = paintFloorOp(b, story, level, tiles, build.paint);
+      return { ops: op ? [op] : [], ghost: (ok) => ({ kind: 'tiles', tiles, ok }), readout: tiles.length > 1 ? `${tiles.length} m²` : null };
+    }
+    case 'wallpaint': {
+      const w = nearestWall(story, p);
+      if (!w) return { ops: [], ghost: () => null, readout: null };
+      const sides: Vec2[] = w.d === 'e' ? [{ x: w.x, z: w.z - 1 }, { x: w.x, z: w.z }] : [{ x: w.x - 1, z: w.z }, { x: w.x, z: w.z }];
+      // The cursor's side of the wall, or the smaller room when the cursor is on the wall itself.
+      const off = w.d === 'e' ? p.z - w.z : p.x - w.x;
+      const rooms = shift ? sides.map((t) => floodRoom(b, story, t)) : [];
+      const room = Math.abs(off) > 0.15 && rooms[off < 0 ? 0 : 1] ? rooms[off < 0 ? 0 : 1] : (rooms.filter((r): r is Vec2[] => !!r).sort((x, y) => x.length - y.length)[0] ?? null);
+      const walls = room ? wallsAround(story, room) : [w];
+      const op = paintWallsOp(level, walls.length ? walls : [w], build.style);
+      return { ops: op ? [op] : [], ghost: (ok) => ({ kind: 'walls', walls: walls.length ? walls : [w], ok }), readout: null };
+    }
+    case 'opening': {
+      const w = nearestWall(story, p);
+      if (tool.kind !== 'opening' || !w) return { ops: [], ghost: () => null, readout: null };
+      const op = openingOp(story, level, w, tool.open);
+      return { ops: op ? [op] : [], ghost: (ok) => ({ kind: 'walls', walls: [w], ok }), readout: null };
+    }
+    case 'item': {
+      if (tool.kind !== 'item') return null;
+      const at = itemOrigin(tool.def, tool.rot, p);
+      const item = toolItem(tool, at, storyItem(b, level, tool.carry));
+      return { ops: [putItemOp(level, item)], ghost: (ok) => ({ kind: 'item', item, ok }), readout: null };
+    }
+  }
+}
+
+export function BuildInput() {
+  const { gl, camera } = useThree();
+  const on = useStore((s) => !!s.build);
+
+  useEffect(() => {
+    if (!on) return;
+    const el = gl.domElement;
+    let last: { x: number; y: number } | null = null;
+    let drag: Drag | null = null;
+    let down: { x: number; y: number; button: number } | null = null;
+    let verdictKey = '';
+    let verdictValue: Verdict = { ok: true, text: '' };
+
+    const verdictOf = (b: Building, ops: BuildOp[]): Verdict => {
+      if (!ops.length) return { ok: true, text: '' };
+      const key = `${b.stories.map((s) => s.rev).join('.')}|${JSON.stringify(ops)}`;
+      if (key !== verdictKey) {
+        const found = checkOps(b, ops, spaceContext(get().company));
+        verdictKey = key;
+        verdictValue = found.length ? { ok: false, text: VIOLATION_TEXT[found[0].kind] } : { ok: true, text: '' };
+      }
+      return verdictValue;
+    };
+
+    const publish = (next: BuildCursor) => {
+      const cur = get().buildCursor;
+      const r = cur.readout;
+      const n = next.readout;
+      const sameReadout = r === n || (!!r && !!n && r.text === n.text && r.x === n.x && r.y === n.y && r.bad === n.bad);
+      const sameVerdict = cur.verdict === next.verdict || (!!cur.verdict && !!next.verdict && cur.verdict.ok === next.verdict.ok && cur.verdict.text === next.verdict.text);
+      if (sameReadout && sameVerdict && cur.hover === next.hover) return;
+      set({ buildCursor: next });
+    };
+
+    const current = () => {
+      const s = get();
+      if (!s.build || !s.building || !last) return null;
+      const p = groundPoint(camera, el, last.x, last.y, s.build.level);
+      return p ? { s, build: s.build, b: s.building, p } : null;
+    };
+
+    const refresh = () => {
+      const c = current();
+      if (!c) {
+        draft.cursor.valid = false;
+        setGhost(null);
+        publish({ readout: null, verdict: null, hover: null });
+        return;
+      }
+      const { build, b, p } = c;
+      draft.cursor = { x: p.x, z: p.z, valid: true };
+      const story = b.stories[build.level];
+      const hover = story ? (itemAt(story, p)?.id ?? null) : null;
+      const pl = plan(b, build, p, drag, modifiers.shift, modifiers.ctrl);
+      let ghost: Ghost | null = null;
+      let verdict: BuildCursor['verdict'] = null;
+      let readout: BuildCursor['readout'] = null;
+      if (pl) {
+        const v = verdictOf(b, pl.ops);
+        ghost = pl.ghost(v.ok);
+        if (ghost) verdict = { ok: v.ok, text: v.text };
+        const text = !v.ok ? v.text : pl.readout;
+        if (text && last) readout = { text, x: last.x, y: last.y, bad: !v.ok };
+      }
+      if (!ghost && build.tool.kind === 'select' && hover && story) {
+        const item = story.items.find((i) => i.id === hover);
+        if (item) ghost = { kind: 'outline', item };
+      }
+      setGhost(ghost);
+      publish({ readout, verdict, hover });
+    };
+
+    const track = (e: PointerEvent) => {
+      last = { x: e.clientX, y: e.clientY };
+      modifiers.shift = e.shiftKey || modifiers.shift;
+      const r = el.getBoundingClientRect();
+      buildView.edge.x = e.clientX - r.left < EDGE_PX ? -1 : r.right - e.clientX < EDGE_PX ? 1 : 0;
+      buildView.edge.z = e.clientY - r.top < EDGE_PX ? -1 : r.bottom - e.clientY < EDGE_PX ? 1 : 0;
+    };
+
+    const onDown = (e: PointerEvent) => {
+      track(e);
+      down = { x: e.clientX, y: e.clientY, button: e.button };
+      if (e.button !== 0) return;
+      const c = current();
+      if (!c) return;
+      const kind = c.build.tool.kind === 'room' && modifiers.shift ? 'wall' : c.build.tool.kind;
+      if (kind === 'wall' || kind === 'room') {
+        drag = { tool: kind, a: vertexOf(c.p), erase: modifiers.ctrl, tiles: new Map(), flood: false, lastTile: null };
+      } else if (kind === 'floor') {
+        const t = tileOf(c.p);
+        drag = { tool: 'floor', a: t, erase: false, tiles: new Map([[tkey(t), t]]), flood: modifiers.shift, lastTile: t };
+      }
+      refresh();
+    };
+
+    const onMove = (e: PointerEvent) => {
+      track(e);
+      const c = current();
+      if (drag?.lastTile && c) {
+        const t = tileOf(c.p);
+        if (!same(t, drag.lastTile)) {
+          for (const x of lineTiles(drag.lastTile, t)) drag.tiles.set(tkey(x), x);
+          drag.lastTile = t;
+        }
+      }
+      refresh();
+    };
+
+    const onUp = (e: PointerEvent) => {
+      const start = down;
+      down = null;
+      if (!start) return;
+      const moved = Math.hypot(e.clientX - start.x, e.clientY - start.y) >= CLICK_PX;
+      if (start.button === 2) {
+        if (!moved && get().build?.tool.kind !== 'select') setTool({ kind: 'select' });
+        return;
+      }
+      if (start.button !== 0) return;
+      track(e);
+      const c = current();
+      const finished = drag;
+      drag = null;
+      if (!c) return;
+      const { build, b, p } = c;
+      const tool = build.tool;
+      if (tool.kind === 'select') {
+        if (moved) return;
+        const item = itemAt(b.stories[build.level], p);
+        const def = item && ITEM_DEFS[item.def];
+        if (item && def) setTool({ kind: 'item', def: item.def, rot: item.rot, carry: item.id, blockId: item.blockId ?? null });
+        refresh();
+        return;
+      }
+      if ((tool.kind === 'wall' || tool.kind === 'room' || tool.kind === 'floor') && !finished) return;
+      if (finished && finished.tool !== 'floor' && !moved) {
+        refresh();
+        return;
+      }
+      const pl = plan(b, build, p, finished, modifiers.shift, modifiers.ctrl);
+      if (pl && pl.ops.length && verdictOf(b, pl.ops).ok) {
+        sendOps(pl.ops);
+        if (tool.kind === 'item' && tool.carry) setTool({ kind: 'select' });
+      }
+      refresh();
+    };
+
+    const onWheel = (e: WheelEvent) => {
+      if (!e.shiftKey && !modifiers.shift) return;
+      const tool = get().build?.tool;
+      if (tool?.kind !== 'item') return;
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      rotate((e.deltaY || e.deltaX) > 0 ? 1 : -1);
+    };
+
+    const onLeave = () => {
+      buildView.edge.x = buildView.edge.z = 0;
+      if (drag) return;
+      last = null;
+      refresh();
+    };
+
+    // The scene's own click handlers walk the owner and pick furniture. In build mode a click is a build gesture only.
+    const eatClick = (e: MouseEvent) => e.stopImmediatePropagation();
+    const onKey = () => refresh();
+    const unsub = useStore.subscribe((s, prev) => {
+      if (s.build !== prev.build || s.building !== prev.building) refresh();
+    });
+
+    el.addEventListener('pointerdown', onDown);
+    el.addEventListener('pointermove', onMove);
+    el.addEventListener('pointerleave', onLeave);
+    el.addEventListener('click', eatClick, true);
+    el.addEventListener('wheel', onWheel, { passive: false, capture: true });
+    window.addEventListener('pointerup', onUp);
+    window.addEventListener('keydown', onKey);
+    window.addEventListener('keyup', onKey);
+    return () => {
+      unsub();
+      el.removeEventListener('pointerdown', onDown);
+      el.removeEventListener('pointermove', onMove);
+      el.removeEventListener('pointerleave', onLeave);
+      el.removeEventListener('click', eatClick, true);
+      el.removeEventListener('wheel', onWheel, true);
+      window.removeEventListener('pointerup', onUp);
+      window.removeEventListener('keydown', onKey);
+      window.removeEventListener('keyup', onKey);
+      buildView.edge.x = buildView.edge.z = 0;
+      setGhost(null);
+    };
+  }, [on, gl, camera]);
+  return null;
+}

@@ -15,7 +15,7 @@ import type {
   UpdateState,
 } from '../../shared/protocol.ts';
 import { emptyMailView, type MailView, type Message, type MessageId } from '../../shared/mail.ts';
-import type { Building, ItemId } from '../../shared/space/index.ts';
+import type { Building, ItemId, PaintId, Rot } from '../../shared/space/index.ts';
 import type { Language, VoiceQuality } from '../../shared/voice.ts';
 import { initialVoice, type VoiceState } from './voice/chip.ts';
 
@@ -31,6 +31,20 @@ export const LANGS: Record<Lang, { stt: Language; tts: 'en-US' | 'pt-BR' }> = {
   auto: { stt: 'auto', tts: 'en-US' },
 };
 export type Modal = null | { kind: 'hire'; bypassLimit?: boolean } | { kind: 'block' } | { kind: 'whiteboard'; blockId: BlockId } | { kind: 'github'; blockId: BlockId } | { kind: 'github_setup'; blockId: BlockId } | { kind: 'task_board'; blockId: BlockId; taskId?: string } | { kind: 'linear_board'; blockId: BlockId };
+
+// What the owner is doing in build mode. `carry` is the placed item being moved, null for a new one.
+export type BuildTool =
+  | { kind: 'select' }
+  | { kind: 'wall' }
+  | { kind: 'room' }
+  | { kind: 'floor' }
+  | { kind: 'wallpaint' }
+  | { kind: 'opening'; open: 'door' | 'window' | 'arch' }
+  | { kind: 'item'; def: string; rot: Rot; carry: ItemId | null; blockId: string | null };
+export type WallsMode = 'up' | 'cutaway' | 'down';
+export type BuildState = { tool: BuildTool; tab: string; search: string; paint: PaintId; style: number; wallsMode: WallsMode; level: number };
+// What the pointer is over, for the tooltip next to it. `verdict` is the rule check of the ghost, null when there is no ghost.
+export type BuildCursor = { readout: { text: string; x: number; y: number; bad: boolean } | null; verdict: { ok: boolean; text: string } | null; hover: ItemId | null };
 
 export type LogLine = { line: string; at: number };
 // A post the owner just sent, shown at once. The mail view takes over when it carries the same `clientId` as its key.
@@ -61,6 +75,9 @@ type State = Settings & {
   avatarFloors: Record<string, number>;
   // The last furniture clicked, for the build tools.
   pickedItem: ItemId | null;
+  // Null in live mode. The build tools and the story the owner builds on, which the scene draws while it is set.
+  build: BuildState | null;
+  buildCursor: BuildCursor;
   harnesses: Record<Provider, HarnessStatus> | null;
   meetingDoor: MeetingDoor;
   catalogs: Record<Provider, ModelCatalog> | null;
@@ -108,6 +125,8 @@ export const useStore = create<State>()(() => ({
   story: 0,
   avatarFloors: {},
   pickedItem: null,
+  build: null,
+  buildCursor: { readout: null, verdict: null, hover: null },
   harnesses: null,
   meetingDoor: 'open',
   catalogs: null,

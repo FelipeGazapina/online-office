@@ -1,3 +1,4 @@
+import { BuildHud } from './hud/build/BuildHud.tsx';
 import { Drawer } from './hud/Drawer.tsx';
 import { EmployeeMenu } from './hud/EmployeeMenu.tsx';
 import { Modals } from './hud/Modals.tsx';
@@ -28,6 +29,7 @@ export function App() {
       </div>
       <div className="hud" style={{ display: portalMode ? 'none' : undefined }}>
         <CameraToggle />
+        <BuildHud />
         <ResizableHud itemKey="clock"><Clock /></ResizableHud>
         <ResizableHud itemKey="waiting-meter"><WaitingMeter /></ResizableHud>
         <ResizableHud itemKey="update-chip"><UpdateChip /></ResizableHud>

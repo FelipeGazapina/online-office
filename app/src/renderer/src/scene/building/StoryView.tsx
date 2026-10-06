@@ -92,20 +92,22 @@ function Floor({ geom }: { geom: FloorGeometry }) {
 
 // ---------------------------------------------------------------- walls
 
+const ALL_DOWN = -3;
+
 function Walls({ geom }: { geom: FloorGeometry }) {
   const records = useMemo(() => wallRecords(geom), [geom]);
   const refs = useRef<Partial<Record<Variant | 'curb' | 'glass', InstancedMesh | null>>>({});
   const seen = useRef(-2);
   const curbCount = records.solid.length + records.window.length;
 
-  const apply = (cutYaw: number | null) => {
+  const apply = (cutYaw: number | null, all: boolean) => {
     const m = new Matrix4();
     let curbs = 0;
     for (const v of VARIANTS) {
       const mesh = refs.current[v];
       if (!mesh) continue;
       records[v].forEach((r, i) => {
-        const cut = cutYaw !== null && facesCamera(r, cutYaw);
+        const cut = all || (cutYaw !== null && facesCamera(r, cutYaw));
         if (cut && (v === 'solid' || v === 'window')) refs.current.curb?.setMatrixAt(curbs++, wallMatrix(r, m));
         mesh.setMatrixAt(i, cut ? ZERO : wallMatrix(r, m));
         if (v === 'window') refs.current.glass?.setMatrixAt(i, cut ? ZERO : wallMatrix(r, m));
@@ -133,13 +135,15 @@ function Walls({ geom }: { geom: FloorGeometry }) {
     seen.current = -2;
   }, [records]);
 
-  // The cutaway is decided per camera octant, never per frame. First person shows every wall at full height.
+  // The cutaway is decided per camera octant, never per frame. First person shows every wall at full height. While
+  // building, the owner picks walls up (everything standing), down (everything a curb) or the cutaway.
   useFrame(() => {
     const iso = runtime.view.blend < 0.5;
-    const key = iso ? octantOf(runtime.view.yaw) : -1;
+    const mode = get().build?.wallsMode ?? 'cutaway';
+    const key = !iso || mode === 'up' ? -1 : mode === 'down' ? ALL_DOWN : octantOf(runtime.view.yaw);
     if (key === seen.current) return;
     seen.current = key;
-    apply(iso ? key * (Math.PI / 4) : null);
+    apply(key >= 0 ? key * (Math.PI / 4) : null, key === ALL_DOWN);
     colorCurbs(key);
   });
 
@@ -150,7 +154,7 @@ function Walls({ geom }: { geom: FloorGeometry }) {
     const yaw = key * (Math.PI / 4);
     for (const v of ['solid', 'window'] as const) {
       for (const r of records[v]) {
-        if (key >= 0 && facesCamera(r, yaw)) curb.setColorAt(n++, color.set(WALL_STYLES[r.style]?.color ?? WALL_STYLES[0].color));
+        if (key === ALL_DOWN || (key >= 0 && facesCamera(r, yaw))) curb.setColorAt(n++, color.set(WALL_STYLES[r.style]?.color ?? WALL_STYLES[0].color));
       }
     }
     if (curb.instanceColor) curb.instanceColor.needsUpdate = true;
