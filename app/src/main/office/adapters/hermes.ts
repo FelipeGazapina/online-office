@@ -359,7 +359,7 @@ export class HermesSession implements EmployeeSession {
       // Read once per process: a note saved while it runs shows up in the next one.
       const digest = this.host.memoryDigest();
       debug(`session start for ${employee.name}, memory digest:\n${digest || '(no notes yet)'}`);
-      const intro = persona({ name: employee.name, company: companyName, block: block.name, role: employee.role, digest, rules: this.host.rules() });
+      const intro = persona({ name: employee.name, company: companyName, block: block.name, role: employee.role, branch: employee.workspace?.branch, digest, rules: this.host.rules() });
       parts.push(link.resumed ? `[You are back at your desk after a break. Your standing instructions changed while you were away, and these replace the earlier ones]\n\n${intro}` : intro);
       // The persona has today's rules, so a notice about a change made before it is out of date.
       this.notices = [];

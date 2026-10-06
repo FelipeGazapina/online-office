@@ -420,7 +420,7 @@ export class ClaudeSession implements EmployeeSession {
         systemPrompt: {
           type: 'preset',
           preset: 'claude_code',
-          append: persona({ name: employee.name, company: companyName, block: block.name, role: employee.role, digest, rules }),
+          append: persona({ name: employee.name, company: companyName, block: block.name, role: employee.role, branch: employee.workspace?.branch, digest, rules }),
         },
         // The office server every harness shares. alwaysLoad keeps ask_owner in the prompt instead of behind tool search.
         mcpServers: { [mcp.name]: { type: 'http', url: mcp.url, timeout: OFFICE_MCP_TIMEOUT_MS, alwaysLoad: true } },

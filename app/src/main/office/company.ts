@@ -1,9 +1,10 @@
 import { boardPage } from './board.ts';
 import { folderArtifacts } from './mail-artifacts.ts';
+import { commitsAhead, createWorkspace, integrate, isGitRepo, removeWorkspace, syncWorkspace, workspaceArtifacts } from './workspace.ts';
 import { randomUUID } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { appendFileSync, existsSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
-import { basename, dirname, isAbsolute } from 'node:path';
+import { basename, dirname, isAbsolute, join } from 'node:path';
 import { ALLOW_ANSWER, covers, isAllow, ruleFor, sameRule, type PermissionBody } from '../../shared/permissions.ts';
 import {
   MAX_LEVEL,
@@ -347,10 +348,23 @@ export class Office {
         deliver: (to, prompt, title) => this.deliver(to, prompt, title),
         steer: (to, text, style) => this.steer(to, text, style),
         hire: (from, spec) => this.hireFor(from, spec),
-        artifacts: folderArtifacts((who) => {
+        artifacts: workspaceArtifacts(
+          (who) => {
+            const e = this.company.employees.find((x) => x.id === who);
+            const block = e && this.company.blocks.find((b) => b.id === e.blockId);
+            return e?.workspace && block ? { blockCwd: block.cwd, ws: e.workspace } : undefined;
+          },
+          folderArtifacts((who) => {
+            const e = this.company.employees.find((x) => x.id === who);
+            return e ? this.company.blocks.find((b) => b.id === e.blockId)?.cwd : undefined;
+          }),
+        ),
+        integrate: (who, title) => this.integrateWork(who, title),
+        branchOf: (who) => {
           const e = this.company.employees.find((x) => x.id === who);
-          return e ? this.company.blocks.find((b) => b.id === e.blockId)?.cwd : undefined;
-        }),
+          const block = e && this.company.blocks.find((b) => b.id === e.blockId);
+          return e?.workspace && block ? { branch: e.workspace.branch, ahead: commitsAhead(block.cwd, e.workspace) } : undefined;
+        },
         persist: (entry) => {
           mkdirSync(dirname(this.ledgerFile), { recursive: true });
           appendFileSync(this.ledgerFile, `${JSON.stringify(entry)}\n`);
@@ -376,9 +390,58 @@ export class Office {
       this.events.error?.(err instanceof Error ? err.message : String(err));
       throw err;
     }
+    // A worktree the owner deleted is rebuilt, and the session that stood in it restarts with it.
+    if (e.workspace && !existsSync(e.workspace.path)) {
+      this.stopSession(id);
+      this.startSession(e);
+    }
     delete e.completedAt;
     this.lastSaid.delete(id);
-    this.sessionOf(e).assign(prompt, title);
+    this.sessionOf(e).assign(this.syncNote(e) + prompt, title);
+  }
+
+  // Every request starts from the block's latest integrated work. A conflict is left in the worktree and told to the employee.
+  private syncNote(e: Employee): string {
+    if (!e.workspace) return '';
+    const block = this.block(e.blockId);
+    const sync = syncWorkspace(block.cwd, e.workspace, e.name);
+    if (sync.kind === 'conflict') {
+      this.events.log(e.id, `Merging the block's latest code into ${e.workspace.branch} conflicts in ${sync.paths.join(', ')}`, Date.now());
+      return `[Office note. The block folder moved on, and merging its latest code into your branch ${e.workspace.branch} conflicts in: ${sync.paths.join(', ')}. The merge is open in your worktree. Resolve those files and commit before anything else.]\n\n`;
+    }
+    if (sync.kind === 'skipped') return `[Office note. The block's latest code could not be merged into your branch (${sync.reason}). Work from what you have.]\n\n`;
+    return '';
+  }
+
+  // The employee's own git worktree, made at hire (or on the first session of someone hired before worktrees). Not a git
+  // repo, or git refusing, keeps the shared folder, and the log says so.
+  private ensureWorkspace(e: Employee, block: ProjectBlock) {
+    if (!existsSync(block.cwd)) return;
+    if (!isGitRepo(block.cwd)) {
+      this.events.log(e.id, `${block.name}'s folder is not a git repository, so ${e.name} works in the shared folder`, Date.now());
+      return;
+    }
+    const had = e.workspace;
+    try {
+      e.workspace = createWorkspace(block.cwd, join(dirname(this.dataFile), 'worktrees', e.id), e.name);
+    } catch (err) {
+      delete e.workspace;
+      this.events.log(e.id, `${err instanceof Error ? err.message : String(err)}. ${e.name} works in the shared folder`, Date.now());
+      return;
+    }
+    // A harness session is stored per directory, so one from the shared folder cannot resume in the worktree.
+    if (!had || had.path !== e.workspace.path) delete e.sessionId;
+  }
+
+  private integrateWork(id: EmployeeId, title: string) {
+    const e = this.company.employees.find((x) => x.id === id);
+    const block = e && this.company.blocks.find((b) => b.id === e.blockId);
+    if (!e?.workspace || !block) return undefined;
+    const result = integrate(block.cwd, e.workspace, e.name, title);
+    if (result.kind === 'merged') this.events.log(id, `Merged ${result.branch} into ${block.name}`, Date.now());
+    if (result.kind === 'held') this.events.log(id, `${e.name}'s work is on branch ${result.branch}, not merged into ${block.name}: ${result.reason}`, Date.now());
+    if (result.kind === 'conflict') this.events.log(id, `${e.name}'s work on ${result.branch} conflicts with ${block.name} in ${result.paths.join(', ')}`, Date.now());
+    return result;
   }
 
   // A boss speaking to someone who is waiting on a decision is the decision. Everyone else is told in the middle of the turn.
@@ -585,6 +648,7 @@ export class Office {
 
   private startSession(employee: Employee) {
     const block = this.block(employee.blockId);
+    this.ensureWorkspace(employee, block);
     // Whatever the last session had running died with it.
     employee.subagents = [];
     let session: EmployeeSession | undefined;
@@ -641,7 +705,7 @@ export class Office {
       });
     const host: SessionHost = {
       employee,
-      block,
+      block: employee.workspace ? { ...block, cwd: employee.workspace.path } : block,
       companyName: this.company.name,
       get model() {
         return employee.model;
@@ -819,6 +883,8 @@ export class Office {
   private dismiss(e: Employee) {
     this.mail.employeeFired(e.id);
     this.stopSession(e.id);
+    const block = this.company.blocks.find((b) => b.id === e.blockId);
+    if (e.workspace && block) removeWorkspace(block.cwd, e.workspace, e.name);
     this.company.employees = this.company.employees.filter((x) => x.id !== e.id);
     // Their own notes go to alumni/. The block's notes stay for whoever works there next.
     this.services.memory.archive(e.id).catch((err) => console.error(`Could not archive ${e.name}'s notes:`, err));
@@ -874,6 +940,10 @@ export class Office {
         const members = this.company.employees.filter((e) => e.blockId === blockId);
         const busy = members.find((e) => e.status.kind === 'working' || e.status.kind === 'blocked_on_owner');
         if (busy) throw new OfficeError(`${busy.name} is busy. Move ${block.name} when everyone is idle.`);
+        for (const e of members) {
+          if (e.workspace) removeWorkspace(block.cwd, e.workspace, e.name);
+          delete e.workspace;
+        }
         block.cwd = next;
         // Claude sessions are stored per directory, so an old sessionId cannot be resumed in the new one.
         for (const e of members) {

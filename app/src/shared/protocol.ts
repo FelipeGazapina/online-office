@@ -82,6 +82,8 @@ export type Employee = {
   subagents: Subagent[];
   completedAt?: number;
   sessionId?: string;
+  // The employee's own git worktree and branch of the block's repo. Absent when the block folder is not a git repo.
+  workspace?: { path: string; branch: string };
   hiredAt: number;
 };
 
