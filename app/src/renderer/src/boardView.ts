@@ -1,7 +1,7 @@
 // What the task screens draw, worked out from the snapshot: which board a block shows, which column a task sits in, how
 // time reads. Pure, so the 3D board, the HUD board and the per-frame sim agree and verify/board-view-check.ts can run it.
-import { taskBoardStatusLabel, type BlockId, type Employee, type EmployeeId, type TaskProvider } from '../../shared/protocol.ts';
-import { STAGES, primaryBoard, stageOfStatus, totalWorkedMs, workedMs, type Board, type BoardId, type Task, type TaskId, type TaskStage, type TaskTime } from '../../shared/tasks.ts';
+import { taskBoardStatusLabel, type BlockId, type ClientMessage, type Employee, type EmployeeId, type TaskProvider } from '../../shared/protocol.ts';
+import { STAGES, primaryBoard, stageOfStatus, totalWorkedMs, workedMs, type Board, type BoardId, type Priority, type Task, type TaskId, type TaskStage, type TaskTime } from '../../shared/tasks.ts';
 
 export const STAGE_LABEL: Record<TaskStage, string> = { todo: 'Todo', doing: 'In Progress', review: 'In Review', done: 'Done' };
 
@@ -61,6 +61,53 @@ const isPo = (e: Employee) => (e.role ?? 'employee') === 'orchestrator';
 export const peopleOf = (employees: readonly Employee[], blockId: BlockId): Employee[] =>
   employees.filter((e) => e.blockId === blockId).sort((a, b) => Number(isPo(b)) - Number(isPo(a)) || a.hiredAt - b.hiredAt || (a.id < b.id ? -1 : 1));
 
+// What a person is up to, in the words a picker and the task detail both use. `kind` is the employee's own status kind.
+export type Presence = { kind: Employee['status']['kind']; word: string };
+const PRESENCE_WORD: Record<Presence['kind'], string> = { idle: 'idle', working: 'working', blocked_on_owner: 'waiting on you', error: 'error' };
+export const presenceOf = (e: Employee): Presence => ({ kind: e.status.kind, word: PRESENCE_WORD[e.status.kind] });
+
+// ───────────────────────────── A task being made ─────────────────────────────
+
+// What the owner has filled in on an inline composer so far. `assignee` is who they picked, which may since have left.
+export type Draft = { title: string; notes: string; assignee?: EmployeeId; priority?: Priority };
+
+// The person a draft hands the task to: the one picked, if they are still on the block's team.
+export const assigneeOf = (draft: Draft, team: readonly Employee[]): Employee | undefined => team.find((p) => p.id === draft.assignee);
+
+// Where a card made in `column` begins. Handing it to someone starts the work, so it begins in doing whatever the column.
+export const landingStage = (column: TaskStage, assignee: Employee | undefined): TaskStage => (assignee ? 'doing' : column);
+
+// The message a draft becomes, or nothing while it has no title. It says only what the composer shows: a person who left the
+// team since they were picked is not sent, the same as the pill showing no one.
+export function newTaskMessage(boardId: BoardId, column: TaskStage, draft: Draft, team: readonly Employee[]): Extract<ClientMessage, { type: 'create_task' }> | undefined {
+  const title = draft.title.trim();
+  if (!title) return undefined;
+  const assignee = assigneeOf(draft, team);
+  const notes = draft.notes.trim();
+  return {
+    type: 'create_task',
+    boardId,
+    title,
+    stage: landingStage(column, assignee),
+    ...(notes ? { notes } : {}),
+    ...(assignee ? { assignee: assignee.id } : {}),
+    ...(draft.priority ? { priority: draft.priority } : {}),
+  };
+}
+
+// What a draft keeps for the next one when the composer stays open: who and how urgent, not what.
+export const nextDraft = (draft: Draft): Draft => ({ title: '', notes: '', ...(draft.assignee ? { assignee: draft.assignee } : {}), ...(draft.priority ? { priority: draft.priority } : {}) });
+
+// An arrow key in a list of `count` options, from option `at`. It wraps at both ends, Home and End jump, and any other key stays.
+export function listStep(at: number, count: number, key: string): number {
+  if (count <= 0) return -1;
+  if (key === 'Home') return 0;
+  if (key === 'End') return count - 1;
+  if (key === 'ArrowDown') return (at + 1) % count;
+  if (key === 'ArrowUp') return (at - 1 + count) % count;
+  return at;
+}
+
 // ───────────────────────────── Where a task came from ─────────────────────────────
 
 export type OriginView = { kind: 'manual' | TaskProvider; ref: string; source: string; url?: string; priority?: string; providerStatus?: string };
@@ -76,9 +123,11 @@ export function safeUrl(raw: string | undefined): string | undefined {
   }
 }
 
+export const PRIORITY_LABEL: Record<Priority, string> = { urgent: 'Urgent', high: 'High', medium: 'Medium', low: 'Low' };
+
 export function originOf(task: Task): OriginView {
   const o = task.origin;
-  if (o.kind === 'manual') return { kind: 'manual', ref: 'Manual', source: 'Added here' };
+  if (o.kind === 'manual') return { kind: 'manual', ref: 'Manual', source: 'Added here', ...(o.priority ? { priority: PRIORITY_LABEL[o.priority] } : {}) };
   const url = safeUrl(o.url);
   return { kind: o.kind, ref: o.identifier, source: o.sourceLabel, providerStatus: o.providerStatus, ...(url ? { url } : {}), ...(o.priority ? { priority: o.priority } : {}) };
 }

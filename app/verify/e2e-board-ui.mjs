@@ -1,8 +1,10 @@
 // The task board, driven the way the owner drives it: real mouse and key events through CDP, and every claim read from the
-// store's snapshot or the page. Boards and tabs, an inline create in two columns (Enter saves, Esc cancels), a drag between
-// columns, the detail (title, notes, assigning to the PO and to an employee, hours per person), a CronoSpark board from a
-// fake server with its origin link, the sync button and the error state, keyboard use, and F at the 3D board. Two real
-// haiku runs: a task for the PO, and one for an employee whose timer must tick on the card while they work.
+// store's snapshot or the page. Boards and tabs, the inline composer (title, notes, assignee and priority; Enter, Cmd+Enter,
+// Create more and Esc; mouse and keyboard alone; a task made with an assignee starts at once), a drag between columns, the
+// detail (title, notes, priority, assigning to the PO and to an employee, hours per person), a CronoSpark board from a fake
+// server with its origin link, the sync button and the error state, keyboard use, and F at the 3D board. Three real haiku
+// runs: a task the composer hands to the PO, one the detail hands to the PO, and one for an employee whose timer must tick
+// on the card while they work.
 // Run: pnpm build:verify && OFFICE_OUT_DIR=out/verify OFFICE_CDP_PORT=9342 node verify/cdp.mjs verify/e2e-board-ui.mjs
 // OFFICE_BOARD_WAIT_MIN caps each agent run (default 6).
 import { execFileSync } from 'node:child_process';
@@ -86,6 +88,7 @@ export default async (s) => {
   await s.waitFor(`${state}.company.employees.length === 2`);
   const pia = await s.eval(`${state}.company.employees.find((e) => e.name === 'Pia').id`);
   const ana = await s.eval(`${state}.company.employees.find((e) => e.name === 'Ana').id`);
+  await unattended(s);
 
   // ── the HUD entry and the first board ──
   await s.clickOn('[data-testid=tasks-chip]');
@@ -95,34 +98,85 @@ export default async (s) => {
   assert(await s.eval("!document.querySelector('[aria-label=\"Sync this board\"]') && document.body.innerText.includes('Saved on this Mac')"), 'a quick board has no sync button and no source setup');
   const quickId = await s.eval(`${state}.boards.find((b) => b.kind === 'quick').id`);
 
-  // ── inline create: Enter saves and keeps the field for the next, Esc cancels ──
+  // ── inline create: Enter makes the card, Cmd+Enter or Create more keeps the composer for the next, Esc cancels ──
+  const inTitle = "document.activeElement?.dataset.testid === 'composer-title'";
+  const composerOpen = "!!document.querySelector('[data-testid=composer]')";
   await s.clickOn('[aria-label="Add a task to Todo"]');
-  await s.waitFor("!!document.activeElement?.closest('[data-testid=composer]')");
+  await s.waitFor(inTitle);
+  assert(await s.eval("document.querySelector('[data-testid=composer-stage]').innerText.trim() === 'Todo' && document.querySelector('[data-testid=composer-hint]').innerText.includes('Enter creates')"), 'the composer says which column it makes the card in and what Enter does');
+  const reading = await s.eval(`(() => {
+    const lum = ([r, g, b]) => [r, g, b].map((v) => { v /= 255; return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4; }).reduce((sum, v, i) => sum + v * [0.2126, 0.7152, 0.0722][i], 0);
+    const ratio = (fg, bg) => { const a = lum(fg), b = lum(bg); return (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05); };
+    const rgb = (c) => c.match(/[\\d.]+/g).slice(0, 3).map(Number);
+    const back = (el) => { for (let n = el; n; n = n.parentElement) { const c = getComputedStyle(n).backgroundColor; if (!/, 0\\)$|transparent/.test(c)) return rgb(c); } return [255, 255, 255]; };
+    const one = (sel, pseudo) => { const el = document.querySelector(sel); const st = getComputedStyle(el, pseudo); return { size: parseFloat(st.fontSize), ratio: ratio(rgb(st.color), back(el)) }; };
+    return { hint: one('[data-testid=composer-hint] span'), key: one('[data-testid=composer-hint] kbd'), placeholder: one('[data-testid=composer-title]', '::placeholder'), pill: one('[data-testid=pill-assignee] .tb-pill-text'), clipped: [...document.querySelectorAll('[data-testid=composer] *')].filter((el) => el.scrollWidth > el.clientWidth + 1 && getComputedStyle(el).overflow !== 'visible' || getComputedStyle(el).textOverflow === 'ellipsis').length };
+  })()`);
+  console.log('composer text:', JSON.stringify(reading));
+  assert(reading.hint.size >= 12 && reading.hint.ratio >= 4.5 && reading.key.size >= 11 && reading.key.ratio >= 4.5, `the hint reads at ${reading.hint.size}px with contrast ${reading.hint.ratio.toFixed(1)}:1 and its keys ${reading.key.ratio.toFixed(1)}:1 (AA is 4.5:1)`);
+  assert(reading.placeholder.ratio >= 4.5 && reading.pill.ratio >= 4.5 && reading.clipped === 0, `the placeholder (${reading.placeholder.ratio.toFixed(1)}:1) and the empty pill (${reading.pill.ratio.toFixed(1)}:1) read, and nothing in the composer is cut off`);
+
+  const mark0 = await sentCount();
   await s.type('Draft the launch checklist');
   await s.press('Enter');
   await s.waitFor(`!!${taskByTitle('Draft the launch checklist')}`);
   assert(await s.eval(`(() => { const t = ${taskByTitle('Draft the launch checklist')}; return t.stage === 'todo' && t.origin.kind === 'manual' && t.boardId === ${JSON.stringify(quickId)}; })()`), 'Enter in the Todo composer creates a manual todo task on this board');
-  assert(await s.eval("document.querySelector('[data-testid=composer] input')?.value === ''"), 'the composer stays open and empty for the next task');
+  const bare = (await sentSince(mark0)).filter((m) => m.type === 'create_task');
+  assert(bare.length === 1 && JSON.stringify(bare[0]) === JSON.stringify({ type: 'create_task', boardId: quickId, title: 'Draft the launch checklist', stage: 'todo' }), 'a bare title sends a bare create_task: no assignee, no priority, no notes');
+  await s.waitFor(`!${composerOpen}`);
+  assert(await s.eval("!!document.querySelector('[data-testid=task-board]')"), 'Enter makes the task and puts the composer away');
+
+  await s.clickOn('[aria-label="Add a task to Todo"]');
+  await s.waitFor(inTitle);
   await s.type('Book the demo room');
-  await s.press('Enter');
+  await s.chord('Enter', 4);
   await s.waitFor(`!!${taskByTitle('Book the demo room')}`);
+  await s.waitFor(`${inTitle} && document.querySelector('[data-testid=composer-title]').value === ''`);
+  assert(await s.eval(composerOpen), 'Cmd+Enter makes the task and keeps the composer open and empty, with focus in the title');
+
+  await s.clickOn('[data-testid=create-more]');
+  assert(await s.eval("document.querySelector('[data-testid=create-more]').getAttribute('aria-checked') === 'true' && document.querySelector('[data-testid=composer-hint]').innerText.includes('Enter creates another')"), 'the Create more switch turns on and the hint now says Enter creates another');
+  await s.clickOn('[data-testid=composer-title]');
+  await s.type('Send the invite');
+  await s.press('Enter');
+  await s.waitFor(`!!${taskByTitle('Send the invite')}`);
+  await s.waitFor(inTitle);
+  await s.type('Confirm the room');
+  await s.press('Enter');
+  await s.waitFor(`!!${taskByTitle('Confirm the room')}`);
+  assert(await s.eval(`${composerOpen} && ${inTitle}`), 'with Create more on, Enter makes the task and the composer stays for the next one');
   const before = await s.eval(`${state}.tasks.length`);
   await s.type('discard me');
   await s.press('Escape');
-  await s.waitFor("!document.querySelector('[data-testid=composer]')");
+  await s.waitFor(`!${composerOpen}`);
   await s.sleep(500);
   assert((await s.eval(`${state}.tasks.length`)) === before && !(await s.eval(`${state}.tasks.some((t) => t.title === 'discard me')`)), 'Esc cancels the composer and creates nothing');
   assert(await s.eval("!!document.querySelector('[data-testid=task-board]')"), 'Esc in the composer closes only the composer, not the board');
 
+  await s.clickOn('[aria-label="Add a task to Todo"]');
+  await s.waitFor(inTitle);
+  await s.clickOn('.tb-stats');
+  await s.waitFor(`!${composerOpen}`);
+  ok('leaving an empty composer closes it');
+  await s.clickOn('[aria-label="Add a task to Todo"]');
+  await s.waitFor(inTitle);
+  await s.type('half a thought');
+  await s.clickOn('.tb-stats');
+  await s.sleep(300);
+  assert(await s.eval(`${composerOpen} && document.querySelector('[data-testid=composer-title]').value === 'half a thought'`), 'leaving a composer with words in it keeps them');
+  await s.clickOn('[data-testid=composer-title]');
+  await s.press('Escape');
+  await s.waitFor(`!${composerOpen}`);
+
   // ── inline create in another column ──
   await s.clickOn('[aria-label="Add a task to In Review"]');
-  await s.waitFor("!!document.activeElement?.closest('[data-testid=composer]')");
+  await s.waitFor(inTitle);
+  assert(await s.eval("document.querySelector('[data-testid=composer-stage]').innerText.trim() === 'In Review'"), 'the composer in the In Review column says In Review');
   await s.type('Check the staging deploy');
   await s.press('Enter');
   await s.waitFor(`${taskByTitle('Check the staging deploy')}?.stage === 'review'`);
   assert(await s.eval("!!document.querySelector('.tb-col[data-stage=review] .tb-card')?.innerText.includes('Check the staging deploy')"), 'a task made in the In Review column is created there and shown there');
-  await s.press('Escape');
-  await s.waitFor("!document.querySelector('[data-testid=composer]')");
+  await s.waitFor(`!${composerOpen}`);
 
   // ── drag between columns, with the ghost and the drop outline in between ──
   const from = await s.center('.tb-card', 'Book the demo room');
@@ -245,6 +299,150 @@ export default async (s) => {
   await s.waitFor("!!document.querySelector('[data-testid=task-detail]')");
   assert(await s.eval("document.querySelector('[data-testid=task-detail] .tb-title-input').value === 'Book the demo room'"), 'Enter on a focused card opens its detail');
   await s.press('Escape');
+
+  // ── the composer with the mouse: notes, priority and the PO, then Enter makes the task and starts the PO ──
+  const poTitle = 'Reply to the launch note';
+  const option = (text) => `[...document.querySelectorAll('[role=option]')].find((o) => o.innerText.includes(${JSON.stringify(text)}))`;
+  await s.clickOn('[aria-label="Add a task to Todo"]');
+  await s.waitFor(inTitle);
+  await s.clickOn('[data-testid=pill-notes]');
+  await s.waitFor("document.activeElement?.dataset.testid === 'composer-notes'");
+  await s.type('Reply done at once. Do not delegate, hire anyone or change any file.');
+  await s.clickOn('[data-testid=pill-priority]');
+  await s.waitFor("!!document.querySelector('[role=listbox][aria-label=Priority]')");
+  assert(await s.eval("[...document.querySelectorAll('[role=option]')].map((o) => o.innerText.trim()).join() === 'No priority,Urgent,High,Medium,Low'"), 'the priority list offers none, urgent, high, medium and low');
+  await s.clickOn('[role=option]', 'High');
+  await s.waitFor(`${inTitle} && !document.querySelector('[role=listbox]')`);
+  assert(await s.eval("document.querySelector('[data-testid=pill-priority]').innerText.includes('High')"), 'picking High closes the list, shows it on the pill and hands focus back to the title');
+  await s.clickOn('[data-testid=pill-assignee]');
+  await s.waitFor("!!document.querySelector('[role=listbox][aria-label=Assignee]')");
+  const people = await s.eval("[...document.querySelectorAll('[role=listbox][aria-label=Assignee] [role=option]')].map((o) => ({ text: o.innerText.replace(/\\s+/g, ' ').trim(), avatar: !!o.querySelector('.tb-av'), selected: o.getAttribute('aria-selected') }))");
+  console.log('assignee list:', JSON.stringify(people));
+  assert(people.length === 3 && /^No one yet/.test(people[0].text) && people[0].selected === 'true' && /^P Pia PO (idle|working)$/.test(people[1].text) && /^A Ana (idle|working)$/.test(people[2].text) && people.slice(1).every((x) => x.avatar), 'the assignee list is no one, then the PO, then the block\'s employees, each with an avatar and working or idle');
+  await s.clickOn('[role=option]', 'Pia');
+  await s.waitFor(`${inTitle} && !document.querySelector('[role=listbox]')`);
+  assert(await s.eval("document.querySelector('[data-testid=composer-stage]').innerText.replace(/\\s+/g, ' ').trim() === 'In Progress Pia starts at once' && document.querySelector('[data-testid=pill-assignee]').innerText.includes('Pia')"), 'with Pia picked the composer says the card begins in In Progress and Pia starts at once');
+  await s.type(poTitle);
+  const mark1 = await sentCount();
+  await s.press('Enter');
+  const entered = Date.now();
+  let landed = false;
+  while (Date.now() - entered < 2000 && !landed) {
+    landed = await s.eval(`(() => { const t = ${taskByTitle(poTitle)}; return !!t && t.runs.length === 1 && t.stage === 'doing' && t.assignees.includes(${JSON.stringify(pia)}); })()`);
+    if (!landed) await s.sleep(25);
+  }
+  assert(landed, `Enter on a task with an assignee makes it, posts the run and moves it to doing in ${Date.now() - entered} ms (limit 2000)`);
+  const poMsg = (await sentSince(mark1)).filter((m) => m.type === 'create_task');
+  assert(poMsg.length === 1 && JSON.stringify(poMsg[0]) === JSON.stringify({ type: 'create_task', boardId: quickId, title: poTitle, stage: 'doing', notes: 'Reply done at once. Do not delegate, hire anyone or change any file.', assignee: pia, priority: 'high' }), 'one create_task carried the title, notes, priority and assignee, and nothing else was sent for it');
+  assert((await sentSince(mark1)).filter((m) => m.type === 'assign_task').length === 0, 'the assignee went with create_task: no second assign_task');
+  while (Date.now() - entered < 2000 && !(await s.eval(`${state}.taskTime[${taskByTitle(poTitle)}.id]?.running.some((r) => r.employeeId === ${JSON.stringify(pia)})`))) await s.sleep(25);
+  assert(await s.eval(`${state}.taskTime[${taskByTitle(poTitle)}.id]?.running.some((r) => r.employeeId === ${JSON.stringify(pia)})`), `the PO is running on it ${Date.now() - entered} ms after Enter`);
+  await s.waitFor(`!!document.querySelector('.tb-col[data-stage=doing] .tb-card[data-task-id=${JSON.stringify(await s.eval(`${taskByTitle(poTitle)}.id`))}]')`, 2000);
+  assert(await s.eval(`(() => { const c = document.querySelector('.tb-col[data-stage=doing] .tb-card[data-task-id=${JSON.stringify(await s.eval(`${taskByTitle(poTitle)}.id`))}]'); return !!c.querySelector('[data-employee=${JSON.stringify(pia)}]') && c.innerText.includes('High') && c.innerText.includes('Manual'); })()`), 'the card sits in In Progress with the PO as its assignee and the High chip');
+  assert(await s.eval(`${composerOpen} === false`), 'the composer is put away');
+
+  // ── the composer with the keyboard alone ──
+  const pill = (id) => `document.activeElement?.dataset.testid === ${JSON.stringify(id)}`;
+  const focused = (text) => s.eval(`document.activeElement?.getAttribute('role') === 'option' && document.activeElement.innerText.includes(${JSON.stringify(text)})`);
+  await s.eval("document.querySelector('[aria-label=\"Add a task to Todo\"]').focus()");
+  await s.chord('Enter');
+  await s.waitFor(inTitle);
+  await s.type('Write the changelog');
+  await s.chord('Tab');
+  assert(await s.eval(pill('pill-assignee')), 'Tab from the title lands on the assignee pill');
+  await s.chord('Tab');
+  assert(await s.eval(pill('pill-priority')), 'then the priority pill');
+  await s.chord('Tab');
+  assert(await s.eval(pill('pill-notes')), 'then the notes pill');
+  await s.chord('Tab');
+  assert(await s.eval("document.activeElement?.dataset.testid === 'create-more'"), 'then Create more');
+  await s.chord('Tab');
+  assert(await s.eval("document.activeElement?.dataset.testid === 'create-task'"), 'then Create task');
+  for (let i = 0; i < 4; i++) await s.chord('Tab', 8);
+  assert(await s.eval(pill('pill-assignee')), 'Shift+Tab walks back to the assignee pill');
+  await s.chord('Enter');
+  await s.waitFor("!!document.querySelector('[role=listbox][aria-label=Assignee]')");
+  assert(await focused('No one yet'), 'Enter on the pill opens the list with focus on the current choice');
+  await s.chord('ArrowDown');
+  await s.chord('ArrowDown');
+  assert(await focused('Ana'), 'the arrow keys move down the list');
+  await s.chord('ArrowDown');
+  assert(await focused('No one yet'), 'and wrap at the end');
+  await s.chord('ArrowUp');
+  assert(await focused('Ana'), 'and up again');
+  await s.chord('Enter');
+  await s.waitFor(`${inTitle} && !document.querySelector('[role=listbox]')`);
+  assert(await s.eval("document.querySelector('[data-testid=composer-stage]').innerText.includes('Ana starts at once')"), 'Enter picks Ana and hands focus back to the title, where Enter would make the task');
+  await s.chord('Tab');
+  await s.chord('ArrowDown');
+  await s.waitFor("!!document.querySelector('[role=listbox][aria-label=Assignee]')");
+  assert(await focused('Ana'), 'ArrowDown on the pill opens the list on the current choice');
+  await s.chord('Home');
+  await s.chord('Enter');
+  await s.waitFor(inTitle);
+  assert(await s.eval("!document.querySelector('[data-testid=composer-stage]').innerText.includes('starts at once') && document.querySelector('[data-testid=composer-stage]').innerText.trim() === 'Todo'"), 'picking No one again takes it back: the card stays in Todo');
+  await s.chord('Tab');
+  await s.chord('Tab');
+  assert(await s.eval(pill('pill-priority')), 'two Tabs from the title reach the priority pill again');
+  await s.chord('Enter');
+  await s.waitFor("!!document.querySelector('[role=listbox][aria-label=Priority]')");
+  await s.chord('ArrowDown');
+  await s.chord('ArrowDown');
+  await s.chord('ArrowDown');
+  assert(await focused('Medium'), 'three arrows down the priority list reach Medium');
+  await s.chord('Enter');
+  await s.waitFor(inTitle);
+  for (let i = 0; i < 3; i++) await s.chord('Tab');
+  assert(await s.eval(pill('pill-notes')), 'three Tabs from the title reach the notes pill');
+  await s.chord('Enter');
+  await s.waitFor("document.activeElement?.dataset.testid === 'composer-notes'");
+  await s.type('Newest first, keep it short.');
+  const markKb = await sentCount();
+  await s.chord('Enter', 4);
+  await s.waitFor(`!!${taskByTitle('Write the changelog')}`);
+  const kb = (await sentSince(markKb)).filter((m) => m.type === 'create_task');
+  assert(kb.length === 1 && JSON.stringify(kb[0]) === JSON.stringify({ type: 'create_task', boardId: quickId, title: 'Write the changelog', stage: 'todo', notes: 'Newest first, keep it short.', priority: 'medium' }), 'Cmd+Enter from the notes field made one create_task with title, notes and priority, in Todo');
+  await s.waitFor(`${inTitle} && document.querySelector('[data-testid=composer-title]').value === ''`);
+  assert(await s.eval("document.querySelector('[data-testid=composer-notes]').value === '' && document.querySelector('[data-testid=pill-priority]').innerText.includes('Medium')"), 'the composer stays for the next one: words cleared, the priority kept');
+  await s.chord('Tab');
+  assert(await s.eval("document.activeElement?.dataset.testid === 'composer-notes'"), 'with the notes field open it is the next stop after the title');
+  await s.chord('Tab');
+  assert(await s.eval(pill('pill-assignee')), 'and the pills come after it');
+  await s.chord('Enter');
+  await s.waitFor("!!document.querySelector('[role=listbox][aria-label=Assignee]')");
+  await s.chord('Escape');
+  await s.waitFor("!document.querySelector('[role=listbox]')");
+  assert(await s.eval(`${composerOpen} && ${pill('pill-assignee')}`), 'Esc in an open list shuts the list and leaves the composer, with focus on its pill');
+  await s.chord('Escape');
+  await s.waitFor(`!${composerOpen}`);
+  assert(await s.eval("!!document.querySelector('[data-testid=task-board]')"), 'a second Esc cancels the composer and the board stays');
+
+  // ── the priority on the card, in the detail, and not editable on a provider's card ──
+  const poId = await s.eval(`${taskByTitle(poTitle)}.id`);
+  await s.clickOn('.tb-card', poTitle);
+  await s.waitFor(`document.querySelector('[data-testid=task-detail] .tb-title-input')?.value === ${JSON.stringify(poTitle)}`);
+  assert(await s.eval("document.querySelector('[data-testid=task-detail] select[aria-label=Priority]').value === 'high'"), 'the detail of a task made by hand shows its priority');
+  const markPriority = await sentCount();
+  await s.eval("(() => { const sel = document.querySelector('[data-testid=task-detail] select[aria-label=Priority]'); Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set.call(sel, 'urgent'); sel.dispatchEvent(new Event('change', { bubbles: true })); })()");
+  await s.waitFor(`${state}.tasks.find((t) => t.id === ${JSON.stringify(poId)}).origin.priority === 'urgent'`);
+  assert((await sentSince(markPriority)).filter((m) => m.type === 'update_task').length === 1, 'changing it in the detail sends one update_task');
+  await s.waitFor(`document.querySelector('.tb-card[data-task-id=${JSON.stringify(poId)}]')?.innerText.includes('Urgent')`);
+  ok('and the card\'s chip follows');
+  await s.press('Escape');
+  await s.waitFor("!document.querySelector('[data-testid=task-detail]')");
+  await s.clickOn('[role=tab]', 'Sprint');
+  await s.waitFor("document.querySelector('[role=tab][aria-selected=true]')?.innerText.includes('Sprint')");
+  await s.clickOn('.tb-card', 'CS-701');
+  await s.waitFor("!!document.querySelector('[data-testid=task-detail]')");
+  assert(await s.eval("!document.querySelector('[data-testid=task-detail] select[aria-label=Priority]') && document.querySelector('[data-testid=task-detail]').innerText.includes('P2')"), 'a CronoSpark task shows the provider\'s own priority and offers no priority to change');
+  await s.press('Escape');
+  await s.waitFor("!document.querySelector('[data-testid=task-detail]')");
+  await s.clickOn('[role=tab]', 'Quick tasks');
+  await s.waitFor("document.querySelector('[role=tab][aria-selected=true]')?.innerText.includes('Quick tasks')");
+
+  // A turn that serves two tasks splits its time between them, which is right and is not what the per-person comparison below
+  // measures, so the PO finishes the task the composer gave them before anyone is handed another.
+  await settled(s, poTitle, 'the PO\'s task made by the composer');
 
   // ── assign to the PO and to an employee, from the detail ──
   await s.eval(`window.office.send({ type: 'create_task', boardId: ${JSON.stringify(quickId)}, title: 'Confirm the launch checklist', notes: 'Reply done at once. Do not delegate, hire anyone or change any file.' })`);

@@ -30,6 +30,7 @@ import {
   type BoardSync,
   type HoursEntry,
   type LegacySources,
+  type Priority,
   type RunState,
   type Task,
   type TaskId,
@@ -57,6 +58,9 @@ export type TasksHost = {
 };
 
 type TasksFile = { v: 1; boards: Board[]; tasks: Task[]; people: Record<string, string> };
+
+// What a task made by hand may carry beyond its title. `assignee` hands it over in the same step.
+export type NewTask = { notes?: string; stage?: TaskStage; priority?: Priority; assignee?: EmployeeId };
 
 export type TasksView = { boards: Board[]; tasks: Task[]; boardSync: Record<BoardId, BoardSync>; taskTime: Record<TaskId, TaskTime> };
 
@@ -279,17 +283,29 @@ export class Tasks {
 
   // ── tasks ──
 
-  createTask(boardId: BoardId, title: string, notes?: string, stage: TaskStage = 'todo'): Task {
-    this.board(boardId);
+  // With an `assignee` the task is made and handed over in one step: either both happen, or the task is not made at all.
+  createTask(boardId: BoardId, title: string, opt: NewTask = {}): Task {
+    const board = this.board(boardId);
     const clean = title.trim();
     if (!clean) throw new OfficeError('A task needs a title.');
-    const task = newTask({ id: this.taskId(), boardId, title: clean, ...(notes?.trim() ? { notes: notes.trim() } : {}), origin: { kind: 'manual' }, stage, now: this.host.now() });
+    if (opt.assignee) this.assertMember(opt.assignee, board.blockId);
+    const notes = opt.notes?.trim();
+    const origin = { kind: 'manual' as const, ...(opt.priority ? { priority: opt.priority } : {}) };
+    const task = newTask({ id: this.taskId(), boardId, title: clean, ...(notes ? { notes } : {}), origin, stage: opt.stage ?? 'todo', now: this.host.now() });
     this.tasks = [...this.tasks, task];
     this.save();
-    return task;
+    if (!opt.assignee) return task;
+    try {
+      this.assign(task.id, opt.assignee);
+    } catch (err) {
+      this.tasks = this.tasks.filter((t) => t.id !== task.id);
+      this.save();
+      throw err;
+    }
+    return this.task(task.id);
   }
 
-  updateTask(taskId: TaskId, patch: { title?: string; notes?: string; stage?: TaskStage }) {
+  updateTask(taskId: TaskId, patch: { title?: string; notes?: string; stage?: TaskStage; priority?: Priority | null }) {
     const task = this.task(taskId);
     const title = patch.title === undefined ? task.title : patch.title.trim();
     if (!title) throw new OfficeError('A task needs a title.');
@@ -297,7 +313,12 @@ export class Tasks {
     const notes = patch.notes === undefined ? task.notes : patch.notes.trim() || undefined;
     // A provider task the owner moves stays where the owner put it, whatever the provider says on the next sync.
     const pin = patch.stage !== undefined && task.origin.kind !== 'manual';
-    this.replace({ ...rest, ...(notes ? { notes } : {}), title, stage: patch.stage ?? task.stage, ...(pin ? { stagePinned: true as const } : {}), updatedAt: this.host.now() });
+    let origin = task.origin;
+    if (patch.priority !== undefined) {
+      if (origin.kind !== 'manual') throw new OfficeError(`The priority of a ${origin.sourceLabel} task is set in ${origin.sourceLabel}.`);
+      origin = patch.priority === null ? { kind: 'manual' } : { kind: 'manual', priority: patch.priority };
+    }
+    this.replace({ ...rest, ...(notes ? { notes } : {}), origin, title, stage: patch.stage ?? task.stage, ...(pin ? { stagePinned: true as const } : {}), updatedAt: this.host.now() });
     if (patch.stage && patch.stage !== task.stage) this.pushHours();
   }
 
@@ -315,7 +336,7 @@ export class Tasks {
   assign(taskId: TaskId, employeeId: EmployeeId) {
     const task = this.task(taskId);
     const board = this.board(task.boardId);
-    if (!this.host.members().some((m) => m.id === employeeId && m.blockId === board.blockId)) throw new OfficeError('A task goes to the PO of its block or to one of the block\'s employees.');
+    this.assertMember(employeeId, board.blockId);
     const mail = this.host.mail();
     const theirs = task.runs.filter((r) => mail.state.messages.get(r)?.to === employeeId);
     if (theirs.some((r) => mail.state.unsettled.has(r))) return;
@@ -334,6 +355,10 @@ export class Tasks {
       stage: 'doing',
       updatedAt: this.host.now(),
     };
+  }
+
+  private assertMember(employeeId: EmployeeId, blockId: BlockId) {
+    if (!this.host.members().some((m) => m.id === employeeId && m.blockId === blockId)) throw new OfficeError('A task goes to the PO of its block or to one of the block\'s employees.');
   }
 
   // Throws when `taskId` is not a task of `blockId`, so a hire can be refused before anyone is hired.

@@ -1,12 +1,12 @@
 import { useEffect, useState, type KeyboardEvent } from 'react';
 import type { Employee, EmployeeId } from '../../../../shared/protocol.ts';
-import { STAGES, type Board, type Task, type TaskStage, type TaskTime } from '../../../../shared/tasks.ts';
-import { STAGE_LABEL, fmtAgo, fmtClock, fmtHours, originOf, sharesOf, taskMs } from '../../boardView.ts';
+import { PRIORITIES, STAGES, type Board, type Priority, type Task, type TaskStage, type TaskTime } from '../../../../shared/tasks.ts';
+import { PRIORITY_LABEL, STAGE_LABEL, fmtAgo, fmtClock, fmtHours, originOf, presenceOf, sharesOf, taskMs } from '../../boardView.ts';
 import { send } from '../../store.ts';
 import { isPo } from '../chat/model.ts';
 import { moveTask } from './actions.ts';
 import { Avatar } from './Card.tsx';
-import { Alert, Check, Close, External, OriginTile, StageIcon } from './icons.tsx';
+import { Alert, Check, Close, External, OriginTile, PriorityIcon, StageIcon } from './icons.tsx';
 
 // A field that saves when the owner leaves it. Esc puts back what is saved. The saved value coming in replaces the draft.
 function useDraft(saved: string, commit: (value: string) => void, opt: { multiline?: boolean; allowEmpty?: boolean } = {}) {
@@ -103,10 +103,24 @@ export function Detail({ task, board, blockPeople, people, time, stage, now, onC
             </label>
             {origin.providerStatus && task.runs.length === 0 && <span className="tb-chip ghost" title={`${origin.source} says`}>{origin.providerStatus}</span>}
           </dd>
+          {task.origin.kind === 'manual' && (
+            <>
+              <dt>Priority</dt>
+              <dd>
+                <label className="tb-select">
+                  <PriorityIcon priority={task.origin.priority} size={14} />
+                  <select aria-label="Priority" value={task.origin.priority ?? ''} onChange={(e) => send({ type: 'update_task', taskId: task.id, priority: (e.target.value || null) as Priority | null })}>
+                    <option value="">No priority</option>
+                    {PRIORITIES.map((p) => <option key={p} value={p}>{PRIORITY_LABEL[p]}</option>)}
+                  </select>
+                </label>
+              </dd>
+            </>
+          )}
           <dt>Source</dt>
           <dd>
             <span>{manual ? 'Added here' : origin.source}</span>
-            {origin.priority && <span className="tb-chip">{origin.priority}</span>}
+            {!manual && origin.priority && <span className="tb-chip">{origin.priority}</span>}
           </dd>
           <dt>Board</dt>
           <dd>{board.name}</dd>
@@ -119,13 +133,14 @@ export function Detail({ task, board, blockPeople, people, time, stage, now, onC
             {blockPeople.map((p) => {
               const on = task.assignees.includes(p.id);
               const running = !!time?.running.some((r) => r.employeeId === p.id);
+              const presence = presenceOf(p);
               return (
                 <li key={p.id} data-employee={p.id}>
                   <Avatar person={p} size={26} />
                   <span className="tb-person">
                     <b>{p.name}</b>
                     {isPo(p) && <small className="tb-po">PO</small>}
-                    <em className={p.status.kind}>{p.status.kind === 'working' ? 'working' : p.status.kind === 'blocked_on_owner' ? 'waiting on you' : p.status.kind === 'error' ? 'error' : 'idle'}</em>
+                    <em className={presence.kind}>{presence.word}</em>
                   </span>
                   {running ? (
                     <span className="tb-chip running"><i className="tb-live" />On it</span>

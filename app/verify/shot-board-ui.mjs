@@ -2,7 +2,8 @@
 // Linear, CronoSpark and by hand, and people at work. Nothing here reaches a provider: the tasks, times and people are put
 // into the renderer's store, which is all the board draws from. The flows themselves are proved in e2e-board-ui.mjs.
 // Run: pnpm build:verify && OFFICE_OUT_DIR=out/verify OFFICE_CDP_PORT=9342 node verify/cdp.mjs verify/shot-board-ui.mjs
-// OFFICE_SHOTS_DIR is where the PNGs are copied (default: the game program's shots/t2 folder).
+// OFFICE_SHOTS_DIR is where the PNGs are copied (default: the game program's shots/t2 folder). `create` is the inline composer
+// with a title, a priority and an assignee set and the assignee list open.
 import { copyFileSync, mkdirSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
@@ -125,10 +126,18 @@ export default async (s) => {
 
   await s.eval("document.querySelector('[aria-label=\"Close details\"]').click()");
   await s.clickOn('[aria-label="Add a task to Todo"]');
-  await s.waitFor("!!document.querySelector('[data-testid=composer] input')");
+  await s.waitFor("!!document.querySelector('[data-testid=composer-title]')");
   await s.type('Add a health check to the worker');
+  await s.clickOn('[data-testid=pill-priority]');
+  await s.clickOn('[role=option]', 'High');
+  await s.clickOn('[data-testid=pill-assignee]');
+  await s.clickOn('[role=option]', 'Ana');
+  await s.clickOn('[data-testid=pill-assignee]');
+  await s.waitFor("!!document.querySelector('[role=listbox][aria-label=Assignee]')");
   await s.sleep(300);
   await save('create');
+  await s.press('Escape');
+  await s.waitFor("!document.querySelector('[role=listbox]')");
   await s.press('Escape');
   await s.waitFor("!document.querySelector('[data-testid=composer]')");
 

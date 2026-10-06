@@ -33,7 +33,7 @@
 .tb-running { display: inline-flex; align-items: center; gap: 6px; color: #1c6b49; font-weight: 700; }
 .tb-head-actions { display: flex; align-items: center; gap: 8px; flex: none; }
 
-.tb-tip { color: #9a9bb0; font-size: 12px; font-weight: 500; white-space: nowrap; }
+.tb-tip { padding-right: 14px; margin-right: 2px; border-right: 1px solid var(--tb-line); color: #7b7e93; font-size: 12px; font-weight: 500; line-height: 18px; white-space: nowrap; }
 @media (max-width: 1180px) { .tb-tip { display: none; } }
 .tb-sync { display: inline-flex; align-items: center; gap: 5px; margin-right: 4px; color: var(--muted); font-size: 12px; font-weight: 600; white-space: nowrap; }
 .tb-sync.error { color: #a5262b; }
@@ -134,10 +134,48 @@
 .tb-av-stack > .tb-av { position: relative; }
 .tb-av-stack > .tb-av + .tb-av { margin-left: -6px; }
 
-.tb-composer { display: grid; gap: 6px; padding: 9px 11px; border: 1.5px solid var(--brand); border-radius: 11px; background: #fff; box-shadow: 0 0 0 3px rgba(84, 87, 224, 0.14); }
-.tb-composer-input { width: 100%; border: 0; outline: none; background: transparent; font: 600 13.5px var(--body); color: var(--ink); }
-.tb-composer small { color: #9a9bb0; font-size: 11px; }
-.tb-composer kbd { font-size: 10px; padding: 0 4px; }
+/* The inline composer: a card with its title, property pills under it, and a footer that says what Enter does */
+.tb-composer { display: grid; gap: 9px; padding: 11px 12px 12px; border: 1.5px solid var(--brand); border-radius: 12px; background: #fff; box-shadow: 0 0 0 3px rgba(84, 87, 224, 0.14), 0 8px 22px rgba(35, 38, 64, 0.1); }
+.tb-composer-stage { display: flex; align-items: center; gap: 7px; min-height: 20px; color: var(--muted); font-size: 12px; }
+.tb-composer-stage b { color: var(--ink); font-weight: 700; }
+.tb-starts { margin-left: auto; padding: 1px 9px; border-radius: 999px; background: #e4f5ec; color: #1c6b49; font-size: 11.5px; font-style: normal; font-weight: 700; }
+.tb-composer-input { width: 100%; padding: 2px 0; border: 0; outline: none; background: transparent; color: var(--ink); font: 650 15px/1.3 var(--body); }
+.tb-composer-input::placeholder, .tb-composer-notes::placeholder { color: #6c6f88; opacity: 1; font-weight: 500; }
+.tb-composer-notes { width: 100%; min-height: 64px; padding: 8px 10px; border: 1px solid var(--tb-line); border-radius: 9px; background: #faf8f3; color: var(--ink); font: 500 13px/1.45 var(--body); resize: vertical; }
+.tb-composer-notes:focus { outline: none; border-color: var(--brand); box-shadow: 0 0 0 3px rgba(84, 87, 224, 0.14); }
+.tb-pills { display: flex; flex-wrap: wrap; gap: 6px; }
+.tb-pill { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 7px 0 8px; border: 1px solid var(--tb-line); border-radius: 8px; background: #fff; color: var(--ink); font: 650 12.5px var(--body); cursor: pointer; transition: background 0.12s, border-color 0.12s; }
+.tb-pill:hover, .tb-pill.open { background: var(--paper-2); border-color: rgba(35, 38, 64, 0.24); }
+.tb-pill:focus-visible { outline: 2px solid var(--brand); outline-offset: 1px; }
+.tb-pill-text.dim { color: #565975; font-weight: 600; }
+.tb-pill > svg:last-child { opacity: 0.55; }
+.tb-menu { flex: 1 0 100%; display: grid; gap: 2px; padding: 4px; border: 1px solid var(--tb-line); border-radius: 10px; background: #faf8f3; }
+.tb-opt { display: flex; align-items: center; gap: 9px; width: 100%; min-height: 36px; padding: 6px 8px; border: 0; border-radius: 8px; background: transparent; color: var(--ink); font: inherit; text-align: left; cursor: pointer; }
+.tb-opt:hover { background: var(--paper-2); }
+.tb-opt:focus { outline: none; background: rgba(84, 87, 224, 0.1); box-shadow: inset 0 0 0 1.5px var(--brand); }
+.tb-opt[aria-selected='true']::after { content: ''; flex: none; width: 14px; height: 14px; margin-left: 2px; background: center / contain no-repeat url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%235457e0' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3.5 8.4l3 3 6-6.6'/%3E%3C/svg%3E"); }
+.tb-opt-name { flex: 1; min-width: 0; display: flex; align-items: baseline; flex-wrap: wrap; gap: 2px 6px; overflow-wrap: anywhere; }
+.tb-opt-name b { font-size: 13.5px; font-weight: 650; }
+.tb-opt-name small { color: var(--muted); font-size: 12px; }
+.tb-presence { display: inline-flex; align-items: center; gap: 5px; color: #565975; font-size: 12px; font-style: normal; white-space: nowrap; }
+.tb-presence.working { color: #1c6b49; font-weight: 700; }
+.tb-presence.blocked_on_owner { color: #8a5a00; font-weight: 700; }
+.tb-presence.error { color: #a5262b; font-weight: 700; }
+.tb-dot { width: 7px; height: 7px; border-radius: 50%; background: #c3c1d4; }
+.tb-presence.working .tb-dot { background: var(--moss); }
+.tb-presence.blocked_on_owner .tb-dot { background: var(--amber); }
+.tb-presence.error .tb-dot { background: var(--tomato); }
+.tb-menu-note { margin: 4px 8px 6px; color: #565975; font-size: 12.5px; line-height: 1.4; }
+.tb-composer-hint { display: flex; flex-wrap: wrap; gap: 3px 14px; margin: 0; color: #43465f; font-size: 12px; line-height: 1.7; }
+.tb-composer-hint span { white-space: nowrap; }
+.tb-composer-hint kbd { display: inline-block; padding: 0 5px; border: 1px solid #d3cdbf; border-bottom-width: 2px; border-radius: 5px; background: #f6f2ea; color: #2c2f4c; font: 650 11.5px/1.45 var(--body); }
+.tb-composer-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding-top: 9px; border-top: 1px solid var(--tb-line); }
+.tb-switch { display: inline-flex; align-items: center; gap: 8px; height: 30px; padding: 0 4px; border: 0; border-radius: 8px; background: transparent; color: #3b3f63; font: 650 12.5px var(--body); cursor: pointer; }
+.tb-switch i { position: relative; width: 28px; height: 16px; border-radius: 999px; background: #bdbfd2; transition: background 0.12s; }
+.tb-switch i::after { content: ''; position: absolute; top: 2px; left: 2px; width: 12px; height: 12px; border-radius: 50%; background: #fff; box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25); transition: transform 0.12s; }
+.tb-switch.on i { background: var(--brand); }
+.tb-switch.on i::after { transform: translateX(12px); }
+.tb-switch:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
 
 .tb-ghost { position: fixed; z-index: 1000; left: 0; top: 0; pointer-events: none; will-change: transform; filter: drop-shadow(0 16px 24px rgba(35, 38, 64, 0.32)); }
 .tb-ghost .tb-card { cursor: grabbing; border-color: var(--brand); }

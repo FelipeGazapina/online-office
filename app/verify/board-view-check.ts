@@ -3,7 +3,7 @@
 // Run from app/: node verify/board-view-check.ts   Exits 1 on any failed check.
 import type { BlockId, Employee, EmployeeId } from '../src/shared/protocol.ts';
 import type { Board, BoardId, Task, TaskId, TaskTime } from '../src/shared/tasks.ts';
-import { blocksWithTasks, boardFor, columnsOf, fmtAgo, fmtClock, originOf, peopleOf, providerNote, safeUrl, sharesOf, stageOf, statsOf, stageStep } from '../src/renderer/src/boardView.ts';
+import { assigneeOf, blocksWithTasks, boardFor, columnsOf, fmtAgo, fmtClock, landingStage, listStep, newTaskMessage, nextDraft, originOf, peopleOf, presenceOf, providerNote, safeUrl, sharesOf, stageOf, statsOf, stageStep, type Draft } from '../src/renderer/src/boardView.ts';
 
 let failed = 0;
 const check = (cond: boolean, msg: string) => {
@@ -85,6 +85,36 @@ check(stats.tasks === 2 && stats.running === 1 && stats.ms === 75_000, 'board to
 const person = (id: string, blockId: BlockId, hiredAt: number, role?: 'orchestrator'): Employee => ({ id: id as EmployeeId, name: id, blockId, hiredAt, ...(role ? { role } : {}) }) as Employee;
 const team = peopleOf([person('z', block(1), 1), person('po', block(1), 9, 'orchestrator'), person('y', block(1), 2), person('other', block(2), 0)], block(1));
 check(team.map((p) => p.id).join() === 'po,z,y', 'the PO comes first, then the block\'s people in hiring order, nobody from another block');
+
+// ── presence ──
+const withStatus = (id: string, status: Employee['status']) => ({ ...person(id, block(1), 1), status }) as Employee;
+check(presenceOf(withStatus('a', { kind: 'idle' })).word === 'idle' && presenceOf(withStatus('a', { kind: 'working', task: 't', startedAt: 1 })).word === 'working', 'a person is idle or working');
+check(presenceOf(withStatus('a', { kind: 'blocked_on_owner', task: 't', question: {} as never })).word === 'waiting on you' && presenceOf(withStatus('a', { kind: 'error', message: 'x' })).kind === 'error', 'and may wait on the owner or be in error, with the status kind kept for styling');
+
+// ── priority on a card ──
+check(originOf(task('p', 'b', { origin: { kind: 'manual', priority: 'urgent' } })).priority === 'Urgent' && originOf(task('p', 'b')).priority === undefined, 'a task made by hand shows its priority as the label, and none when it has none');
+check(originOf(linear).priority === 'High', 'a provider task keeps the provider\'s own text');
+
+// ── a task being made ──
+const crew = [person('po', block(1), 9, 'orchestrator'), person('ana', block(1), 2)];
+const draft = (over: Partial<Draft> = {}): Draft => ({ title: '', notes: '', ...over });
+const into = 'b1' as BoardId;
+check(newTaskMessage(into, 'todo', draft({ title: '   ' }), crew) === undefined, 'a draft with no title makes nothing');
+const plain = newTaskMessage(into, 'review', draft({ title: '  Check staging  ' }), crew)!;
+check(JSON.stringify(plain) === JSON.stringify({ type: 'create_task', boardId: 'b1', title: 'Check staging', stage: 'review' }), 'a bare draft is the trimmed title in its column and nothing else');
+const full = newTaskMessage(into, 'todo', draft({ title: 'Ship it', notes: ' with tests ', assignee: 'ana' as EmployeeId, priority: 'high' }), crew)!;
+check(full.assignee === 'ana' && full.priority === 'high' && full.notes === 'with tests' && full.stage === 'doing', 'an assignee, a priority and notes are carried, and handing it over starts it in doing');
+const left = newTaskMessage(into, 'todo', draft({ title: 'Ship it', assignee: 'gone' as EmployeeId }), crew)!;
+check(!('assignee' in left) && left.stage === 'todo' && assigneeOf(draft({ assignee: 'gone' as EmployeeId }), crew) === undefined, 'someone who left the team since they were picked is not sent, and the task stays in its column');
+check(!('notes' in newTaskMessage(into, 'todo', draft({ title: 'x', notes: '  ' }), crew)!), 'blank notes are not sent');
+check(landingStage('done', crew[0]) === 'doing' && landingStage('done', undefined) === 'done', 'the stage a card lands in follows the assignee');
+const kept = nextDraft(draft({ title: 'a', notes: 'b', assignee: 'ana' as EmployeeId, priority: 'low' }));
+check(kept.title === '' && kept.notes === '' && kept.assignee === 'ana' && kept.priority === 'low', 'staying open keeps who and how urgent for the next task, not the words');
+check(!('assignee' in nextDraft(draft({ title: 'a' }))), 'and nothing it never had');
+
+// ── keys in a list ──
+check(listStep(0, 4, 'ArrowDown') === 1 && listStep(3, 4, 'ArrowDown') === 0 && listStep(0, 4, 'ArrowUp') === 3, 'arrows step and wrap');
+check(listStep(2, 4, 'Home') === 0 && listStep(1, 4, 'End') === 3 && listStep(2, 4, 'x') === 2 && listStep(0, 0, 'ArrowDown') === -1, 'Home and End jump, other keys stay, an empty list has no option');
 
 if (failed) {
   console.error(`${failed} check(s) failed`);

@@ -1,8 +1,9 @@
 // What the owner does on the task screens. Each one sends the message main already knows. A board made by name has to wait
 // for the snapshot because the protocol answers a create with nothing: it is matched against the next snapshot that brings
 // a board it has not seen.
-import type { BlockId } from '../../../../shared/protocol.ts';
+import type { BlockId, Employee } from '../../../../shared/protocol.ts';
 import type { Board, BoardId, Task, TaskId, TaskStage } from '../../../../shared/tasks.ts';
+import { newTaskMessage, type Draft } from '../../boardView.ts';
 import type { Aim } from '../../deskDrop.ts';
 import { get, send, set, toast, useStore } from '../../store.ts';
 
@@ -47,10 +48,11 @@ export function dropOnDesk(task: Task, aim: Aim) {
 type PendingBoard = { blockId: BlockId; name: string; before: Set<BoardId>; until: number };
 let pendingBoard: PendingBoard | undefined;
 
-export function createTaskIn(board: Board, stage: TaskStage, title: string) {
-  const text = title.trim();
-  if (!text) return;
-  send({ type: 'create_task', boardId: board.id, title: text, stage });
+// Makes the task a draft describes, in `column` of `board`. False when the draft has no title yet.
+export function createTaskFrom(board: Board, column: TaskStage, draft: Draft, team: readonly Employee[]): boolean {
+  const msg = newTaskMessage(board.id, column, draft, team);
+  if (msg) send(msg);
+  return !!msg;
 }
 
 export function createBoard(blockId: BlockId, name: string, kind: Board['kind']) {
