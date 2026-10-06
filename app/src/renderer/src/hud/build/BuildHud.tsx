@@ -3,7 +3,7 @@ import { ITEM_DEFS } from '../../../../shared/space/index.ts';
 import { get, useStore, type BuildTool } from '../../store.ts';
 import { addFloor, chooseEntry, exitBuild, isActive, patchBuild, peek, redo, rotate, selectTab, setLevel, undo } from './actions.ts';
 import { footprintText, TABS, visibleEntries, type Entry } from './catalog.ts';
-import { Redo, Search, TabIcon, ToolIcon, Turn, Undo, WALL_MODES, WallsIcon } from './icons.tsx';
+import { FloorIcon, Redo, Search, TabIcon, ToolIcon, Turn, Undo, WALL_MODES, WallsIcon } from './icons.tsx';
 import { useThumbs } from './thumbs.ts';
 import './build.css';
 
@@ -36,15 +36,15 @@ function Levels() {
   const mode = useStore((s) => s.build?.wallsMode ?? 'cutaway');
   return (
     <div className="bh-levels">
-      <div className="bh-floor" role="group" aria-label="Floor">
-        <button className="bh-ico" onClick={() => setLevel(level + 1)} disabled={level + 1 >= count} title="Floor up (Page Up)" aria-label="Floor up">▲</button>
-        <span className="bh-floor-n" data-testid="build-level" title="The floor you are building on">
-          <b>{level + 1}</b>
-          <small>of {count}</small>
-        </span>
-        <button className="bh-ico" onClick={() => setLevel(level - 1)} disabled={level <= 0} title="Floor down (Page Down)" aria-label="Floor down">▼</button>
+      <div className="bh-floors" role="tablist" aria-label="Floors" data-testid="build-level">
+        {Array.from({ length: count }, (_, i) => count - 1 - i).map((i) => (
+          <button key={i} role="tab" className="bh-floor-tab" data-floor={i} aria-selected={level === i} onClick={() => setLevel(i)} title={`Floor ${i + 1} (Page ${i > level ? 'Up' : 'Down'})`}>
+            <FloorIcon />
+            Floor {i + 1}
+          </button>
+        ))}
       </div>
-      <button className="bh-add" onClick={addFloor} disabled={count >= 4}>+ Add floor</button>
+      <button className="bh-add" onClick={addFloor} disabled={count >= 4}><i aria-hidden="true">+</i> Add floor</button>
       <div className="bh-walls" role="group" aria-label="Walls">
         {WALL_MODES.map((m) => (
           <button key={m.mode} className="bh-ico" aria-pressed={mode === m.mode} title={m.label} aria-label={m.label} onClick={() => patchBuild({ wallsMode: m.mode })}>
@@ -138,7 +138,7 @@ function Dock() {
         <div className="bh-head">
           <label className="bh-search">
             <Search />
-            <input ref={input} value={search} onChange={(e) => patchBuild({ search: e.target.value })} onFocus={() => patchBuild({ searching: true })} onBlur={() => patchBuild({ searching: false })} placeholder="Search the catalog" aria-label="Search the catalog" spellCheck={false} />
+            <input ref={input} value={search} onChange={(e) => patchBuild({ search: e.target.value })} onFocus={() => patchBuild({ searching: true })} onBlur={() => patchBuild({ searching: false })} placeholder="Search catalog" aria-label="Search the catalog" spellCheck={false} />
             {search && <button type="button" className="bh-clear" onClick={() => { patchBuild({ search: '' }); input.current?.focus(); }} aria-label="Clear search">×</button>}
           </label>
           <div className="bh-tabs" role="tablist">

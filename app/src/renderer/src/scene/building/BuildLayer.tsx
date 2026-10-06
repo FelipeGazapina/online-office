@@ -1,4 +1,5 @@
 import { useStore } from '../../store.ts';
+import { BelowGhost } from './BelowGhost.tsx';
 import { BuildInput } from './BuildInput.tsx';
 import { GhostLayer } from './Ghost.tsx';
 import { GridOverlay } from './GridOverlay.tsx';
@@ -11,6 +12,7 @@ export function BuildLayer() {
     <>
       <BuildInput />
       <GridOverlay />
+      <BelowGhost />
       <GhostLayer />
     </>
   );

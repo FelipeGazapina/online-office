@@ -5,7 +5,7 @@ import { useFrame } from '@react-three/fiber';
 import { Edges, Html } from '@react-three/drei';
 import { useMemo, useState } from 'react';
 import { BufferGeometry, CircleGeometry, DoubleSide, Float32BufferAttribute, MeshBasicMaterial, MeshStandardMaterial, RingGeometry, Shape } from 'three';
-import { ITEM_DEFS, STORY_H, WALL_HALF, YAW, footprint, rotateLocal, type Item, type Vec2 } from '../../../../shared/space/index.ts';
+import { ITEM_DEFS, STORY_H, WALL_HALF, YAW, footprint, rotateLocal, stairsInfo, type Item, type Vec2 } from '../../../../shared/space/index.ts';
 import { draft, type Ghost } from '../../hud/build/state.ts';
 import { useStore } from '../../store.ts';
 import { modelOf } from './models.ts';
@@ -33,6 +33,8 @@ const MATERIALS = {
   fillRed: basic(RED, 0.38, false),
   padGreen: basic(GREEN, 0.7, false),
   padRed: basic(RED, 0.72, false),
+  hole: basic('#ffb347', 0.6, false),
+  landing: basic(GREEN, 0.35, false),
   turnDisc: basic('#232640', 0.85, false),
   turnArrow: basic(WHITE, 1, false),
   post: basic(WHITE, 0.95),
@@ -228,7 +230,19 @@ function ItemGhost({ item, ok, outline }: { item: Item; ok: boolean; outline: bo
   );
 }
 
-function Shown({ g }: { g: Ghost }) {
+// Where the stairs will cut through the floor above: the hole tiles in amber and the landing the stairs arrive on.
+function StairHole({ item }: { item: Item }) {
+  const info = stairsInfo(item, ITEM_DEFS[item.def]);
+  const landing = info.landing;
+  return (
+    <group position-y={STORY_H}>
+      <Tiles tiles={info.holeTiles.map((t) => ({ x: t.tx, z: t.tz }))} material={MATERIALS.hole} />
+      <Rect x0={landing.tx} z0={landing.tz} x1={landing.tx + 1} z1={landing.tz + 1} color={GREEN} fill={MATERIALS.landing} probe={{ probe: 'stair-hole', tiles: info.holeTiles.length }} />
+    </group>
+  );
+}
+
+function Shown({ g, level, stories }: { g: Ghost; level: number; stories: number }) {
   switch (g.kind) {
     case 'vertex':
       return (
@@ -299,7 +313,12 @@ function Shown({ g }: { g: Ghost }) {
         </>
       );
     case 'item':
-      return <ItemGhost item={g.item} ok={g.ok} outline={false} />;
+      return (
+        <>
+          <ItemGhost item={g.item} ok={g.ok} outline={false} />
+          {ITEM_DEFS[g.item.def].stairs && stories > level + 1 && <StairHole item={g.item} />}
+        </>
+      );
     case 'outline':
       return <ItemGhost item={g.item} ok outline />;
   }
@@ -307,6 +326,7 @@ function Shown({ g }: { g: Ghost }) {
 
 export function GhostLayer() {
   const level = useStore((s) => s.build?.level ?? 0);
+  const stories = useStore((s) => s.building?.stories.length ?? 1);
   const [ghost, setGhost] = useState<Ghost | null>(null);
   const [seen, setSeen] = useState(-1);
   useFrame(() => {
@@ -317,7 +337,7 @@ export function GhostLayer() {
   if (!ghost) return null;
   return (
     <group position-y={level * STORY_H}>
-      <Shown g={ghost} />
+      <Shown g={ghost} level={level} stories={stories} />
     </group>
   );
 }

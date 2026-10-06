@@ -159,3 +159,9 @@ export const Turn = () => (
     <path d="M20 12a8 8 0 1 1-2.6-5.9M20 4v5h-5" />
   </Svg>
 );
+
+export const FloorIcon = () => (
+  <Svg size={15}>
+    <path d="M3 8l9-4 9 4-9 4zM3 12l9 4 9-4M3 16l9 4 9-4" />
+  </Svg>
+);
