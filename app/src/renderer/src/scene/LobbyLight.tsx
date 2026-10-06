@@ -107,6 +107,7 @@ export function LobbySun({ b, building }: { b: Bounds; building: Building }) {
       <mesh geometry={geo.haze} material={hazeMaterial} renderOrder={6} frustumCulled={false} />
       <Shade x={(b.x0 + right) / 2} z={3.4} w={right - b.x0 + 4} d={3} />
       <Shade x={right - 1.5} z={5.5} w={5} d={9} />
+      <Shade x={b.x0 + 11} z={4.1} w={16} d={3.2} />
     </group>
   );
 }
