@@ -142,7 +142,7 @@
 .tb-ghost .tb-card { cursor: grabbing; border-color: var(--brand); }
 /* Out in the office the card shrinks to hang off the pointer, so the desk under it stays in view. */
 .tb-ghost-in { transform-origin: 0 0; transition: scale 0.16s ease, translate 0.16s ease; }
-.tb-ghost.away .tb-ghost-in { scale: 0.5; translate: calc(var(--gx) + 12px) calc(var(--gy) + 12px); }
+.tb-ghost.away .tb-ghost-in { scale: 0.58; translate: calc(var(--gx) + 12px) calc(var(--gy) + 12px); }
 .tb-ghost-aim { position: absolute; max-width: 300px; padding: 5px 12px; border-radius: 999px; background: rgba(24, 27, 45, 0.95); color: #fff; font: 700 12.5px/1.25 var(--body); white-space: nowrap; box-shadow: 0 8px 20px rgba(10, 8, 24, 0.4), 0 0 0 2px var(--aim); --aim: #8f93b8; }
 .tb-ghost-aim.go { --aim: #2fe06a; }
 .tb-ghost-aim.same { --aim: #ffb340; }

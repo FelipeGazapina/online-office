@@ -38,7 +38,7 @@ export function DeskAim() {
     <group position-y={aim.story * STORY_H} userData={{ probe: 'desk-aim', desk: aim.deskId, tone, label: labelOf(aim.verdict) }}>
       <mesh position={[x, def.height / 2, z]} renderOrder={7}>
         <boxGeometry args={[w, def.height + 0.04, d]} />
-        <meshBasicMaterial color={color} transparent opacity={0.2} depthWrite={false} side={DoubleSide} />
+        <meshBasicMaterial color={color} transparent opacity={0.26} depthWrite={false} side={DoubleSide} />
         <Edges color={color} lineWidth={3} depthTest={false} />
       </mesh>
       <mesh position={[x, def.height + 0.03, z]} rotation-x={-Math.PI / 2} renderOrder={8}>
@@ -47,9 +47,9 @@ export function DeskAim() {
       </mesh>
       <mesh position={[(pad.x0 + pad.x1) / 2, 0.04, (pad.z0 + pad.z1) / 2]} rotation-x={-Math.PI / 2} renderOrder={6}>
         <planeGeometry args={[pad.x1 - pad.x0, pad.z1 - pad.z0]} />
-        <meshBasicMaterial color={color} transparent opacity={0.34} depthWrite={false} side={DoubleSide} />
+        <meshBasicMaterial color={color} transparent opacity={0.5} depthWrite={false} side={DoubleSide} />
       </mesh>
-      <Html position={[x, def.height + 0.85, z]} center zIndexRange={[20, 0]} style={{ pointerEvents: 'none' }}>
+      <Html position={[x, def.height + 0.6, z]} center zIndexRange={[20, 0]} style={{ pointerEvents: 'none' }}>
         <div className={`desk-aim ${tone}`} data-testid="desk-aim">
           <i />
           {labelOf(aim.verdict)}

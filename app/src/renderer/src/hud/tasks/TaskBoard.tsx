@@ -344,7 +344,7 @@ export function TaskBoardModal({ blockId }: { blockId: BlockId }) {
               <Card task={drag.task} stage={drag.from} time={times[drag.task.id]} now={now} people={people} selected={false} dragging={false} ghost onOpen={open} onPress={press} onKey={onCardKey} wasDragged={wasDragged} />
             </div>
             {away && (
-              <div className={`tb-ghost-aim ${aim ? toneOf(aim.verdict) : 'idle'}`} data-testid="ghost-aim" style={{ left: drag.grabX + 12, top: drag.grabY + 12 + drag.height * 0.5 + 6 }}>
+              <div className={`tb-ghost-aim ${aim ? toneOf(aim.verdict) : 'idle'}`} data-testid="ghost-aim" style={{ left: drag.grabX + 12, top: drag.grabY + 12 + drag.height * 0.58 + 6 }}>
                 {aim ? actionOf(aim.verdict) : 'Hold it over a desk'}
               </div>
             )}
