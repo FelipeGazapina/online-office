@@ -34,7 +34,7 @@ const COLD_TRIALS = Number(process.env.FIRST_REPLY_COLD_TRIALS ?? 5);
 // The owner takes a few seconds between a hire and the first message, and a session warmed at hire uses them.
 const GOAL = 'Add a slugify(text) function in src/slug.js (ES module, named export) with tests in test/slug.test.js, and a "slugify" section in README.md documenting it. The bar: node --test passes and slugify handles accents, spaces, punctuation and empty input. Split the work between people, get the function reviewed against the bar, and tell me when it is all done.';
 const HIRE_TO_FIRST_MESSAGE_MS = 8000;
-const KEY_HOPS = ['post_received', 'deliver', 'assign', 'spawn', 'push', 'system_init', 'event_message_start', 'first_delta', 'first_text'];
+const KEY_HOPS = ['post_received', 'deliver', 'ack_start', 'ack_first_delta', 'assign', 'spawn', 'push', 'system_init', 'event_message_start', 'first_delta', 'first_text'];
 
 const p50 = (xs) => [...xs].sort((a, b) => a - b)[Math.floor((xs.length - 1) / 2)];
 

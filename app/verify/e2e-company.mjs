@@ -157,6 +157,8 @@ export default async (s) => {
     });
   })()`);
 
+  // The owner takes a few seconds between a hire and the first message, and the warm sessions use them.
+  await s.sleep(8000);
   const timing = await s.eval(`window.__timeTask(${JSON.stringify(TASK)}, 'g1-task-1')`);
   const rootId = posts().find((m) => m.from === 'owner' && m.to === po.id && m.kind === 'request')?.id;
   console.log(`ms from post to first stream token: ${timing.stream === null ? 'never' : Math.round(timing.stream)}; to first PO bubble: ${timing.bubble === null ? 'never' : Math.round(timing.bubble)}`);
