@@ -7,6 +7,10 @@ import {
   PAINT,
   WALL_STYLES,
   applyOps,
+  blockAt,
+  blockItems,
+  blockPose,
+  cellBounds,
   checkOps,
   closeDoor,
   deriveFloors,
@@ -16,14 +20,18 @@ import {
   encodeBuilding,
   freeDesk,
   legacyBuilding,
+  moveBlockOp,
   navOf,
   openDoor,
   paintRect,
   parseBuilding,
+  placeBlock,
   placeDesk,
+  rotateLocal,
   route,
   seatPose,
   teamKit,
+  turnBlock,
   validate,
   wallName,
   type Applied,
@@ -258,6 +266,97 @@ const flat = (stories = 1, size = 20): Building => {
   check(dbl.some((v) => v.kind === 'desk_double_occupied'), 'two employees on one desk is desk_double_occupied');
   const stale = applyOps(grown, [put(0, item('zz', 'plant', 30, -30))], { ...kitCtx, seats: new Map([['k0', id('b3:po_desk:00')]]) });
   check(stale.ok, 'a seat that was already wrong does not block unrelated edits');
+}
+
+// ---------------------------------------------------------------- moving a whole block
+{
+  const blocks = [{ id: 'b1', slot: 0 }, { id: 'b2', slot: 1 }];
+  const employees = [
+    { id: 'o2', blockId: 'b2', desk: 0, orchestrator: true },
+    { id: 'e1', blockId: 'b2', desk: 0, orchestrator: false },
+    { id: 'e2', blockId: 'b2', desk: 3, orchestrator: false },
+    { id: 'e3', blockId: 'b1', desk: 1, orchestrator: false },
+  ];
+  const a = legacyBuilding(blocks, employees);
+  const ctx: SpaceContext = {
+    blocks: new Set(blocks.map((x) => x.id)),
+    employees: new Map(employees.map((e) => [e.id, { blockId: e.blockId, orchestrator: e.orchestrator }])),
+    seats: a.seats,
+  };
+  const story = a.building.stories[0];
+  const items = blockItems(story, 'b2');
+  const box = cellBounds(items)!;
+  check(items.length === 10 && items.every((i) => i.blockId === 'b2'), 'blockItems is every item of the block and nothing else');
+
+  const turned = (q: 0 | 1 | 2 | 3) => turnBlock(items, q);
+  check(eq(turned(0), items), 'no turn leaves the block as it was');
+  check(eq(turnBlock(turnBlock(turnBlock(turnBlock(items, 1), 1), 1), 1), items), 'four quarter turns come back to the same items');
+  check(eq(turnBlock(turned(1), 1), turned(2)) && eq(turned(3), turnBlock(turned(2), 1)), 'turning by n is n single turns');
+  const tb = cellBounds(turned(1))!;
+  check(tb.x1 - tb.x0 === box.z1 - box.z0 && tb.z1 - tb.z0 === box.x1 - box.x0 && tb.x0 === box.x0 && tb.z0 === box.z0, 'a quarter turn swaps the bounding box sides and keeps its corner');
+  const world = (it: Item, p: { x: number; z: number }) => {
+    const l = rotateLocal(ITEM_DEFS[it.def], it.rot, p);
+    return { x: it.x + l.x, z: it.z + l.z };
+  };
+  const depth = box.z1 - box.z0;
+  const turnedOk = items.every((old, n) => {
+    const now = turned(1)[n];
+    const chair = ITEM_DEFS[old.def].seat?.chair;
+    if (!chair) return true;
+    const was = world(old, chair);
+    const want = { x: box.x0 + depth - (was.z - box.z0), z: box.z0 + (was.x - box.x0) };
+    const got = world(now, chair);
+    return now.rot === (old.rot + 1) % 4 && Math.abs(got.x - want.x) < 1e-9 && Math.abs(got.z - want.z) < 1e-9;
+  });
+  check(turnedOk, 'every desk chair lands where the whole block turned it');
+
+  const shift = (dx: number, dz: number, quarter: 0 | 1 | 2 | 3 = 0) => moveBlockOp(story, 0, 'b2', { quarter, origin: { x: box.x0 + dx, z: box.z0 + dz } });
+  check(shift(0, 0) === null, 'a pose that changes nothing makes no op');
+  const east = shift(16, 0)!;
+  const moved = applyOps(a.building, [east], ctx);
+  check(moved.ok && east.t === 'items' && east.put.length === 10 && east.del.length === 0, 'moving a block is one items op over all ten pieces', moved.ok ? '' : JSON.stringify(moved.violations));
+  if (moved.ok) {
+    const after = blockItems(moved.building.stories[0], 'b2');
+    check(after.length === 10 && after.every((n, k) => n.id === items[k].id && n.x === items[k].x + 16 && n.z === items[k].z && n.rot === items[k].rot && n.blockId === 'b2'), 'every piece keeps its id, team and turn, and moves 8 m east together');
+    check(eq(blockItems(moved.building.stories[0], 'b1'), blockItems(story, 'b1')), 'the other block did not move');
+    const seatsHold = [...a.seats].every(([emp, desk]) => deskOf(moved.building, a.seats, emp)?.id === desk) && validate(moved.building, ctx).length === 0;
+    check(seatsHold, 'every employee still sits at the same desk id and the building validates clean');
+    const e1 = a.seats.get('e1' as EmployeeId)!;
+    check(seatPose(moved.building, e1).chair.x === seatPose(a.building, e1).chair.x + 8, 'the seat of a moved desk is 8 m east of where it was');
+    const back = applyOps(moved.building, moved.inverse, ctx);
+    check(back.ok && eq(back.building, a.building), 'the inverse puts the block back exactly');
+    const history = new BuildHistory();
+    history.push({ forward: moved.forward, inverse: moved.inverse, label: 'build' });
+    const undone = history.undo(moved.building, ctx);
+    const redone = undone?.ok ? history.redo(undone.building, ctx) : null;
+    check(undone?.ok === true && eq(undone.building, a.building) && redone?.ok === true && eq(redone.building, moved.building), 'undo and redo carry the whole block');
+  }
+
+  const bad: [string, BuildOp | null, ViolationKind][] = [
+    ['onto the other block', shift(-24, 0), 'overlap'],
+    ['out of the lot', shift(60, 0), 'out_of_lot'],
+    ['over bare ground', shift(16, 0), 'no_floor'],
+  ];
+  const holed = must(applyOps(a.building, [{ t: 'floor', story: 0, cells: [{ x: 8, z: -5, half: 0, paint: PAINT.none }] }], ctx));
+  for (const [name, op, kind] of bad) {
+    const on = kind === 'no_floor' ? holed : a.building;
+    const r = op && applyOps(on, [op], ctx);
+    check(!!op && !!r && !r.ok && kinds(r).includes(kind) && eq(checkOps(on, [op], ctx), r.ok ? [] : r.violations), `a block moved ${name} is rejected as ${kind}, and checkOps agrees`, r ? JSON.stringify(kinds(r)) : 'no op');
+  }
+  check(applyOps(a.building, [shift(2, 0)!], ctx).ok, "a nudge that lands on the block's own old cells is not an overlap");
+
+  const dropped = blockPose(items, 1, { x: 24, z: -20 });
+  const turnedAt = placeBlock(items, dropped);
+  const turnedBox = cellBounds(turnedAt)!;
+  check(turnedBox.x1 - turnedBox.x0 === depth && Math.abs((turnedBox.x0 + turnedBox.x1) / 2 - 24) <= 0.5 && Math.abs((turnedBox.z0 + turnedBox.z1) / 2 + 20) <= 0.5, 'blockPose puts the turned block on the asked middle');
+  const spun = applyOps(a.building, [moveBlockOp(story, 0, 'b2', dropped)!], ctx);
+  check(!spun.ok && kinds(spun).length > 0, 'a block turned where it does not fit is rejected', spun.ok ? 'accepted' : '');
+
+  const desk = items.find((i) => i.def === 'bench_desk')!;
+  check(blockAt(story, { x: (desk.x + 1) * 0.5, z: (desk.z + 0.5) * 0.5 }) === 'b2', 'a point on a desk picks its block');
+  check(blockAt(story, { x: (box.x0 + box.x1) / 4, z: (box.z0 + box.z1) / 4 }) === 'b2', 'a point on the floor between the pieces picks the block whose bounding box holds it');
+  check(blockAt(story, { x: 14, z: 7 }) === null, 'a point outside every block picks nothing');
+  check(blockAt(story, { x: (box.x0 - 0.5) / 2, z: (box.z0 + box.z1) / 4 }) !== 'b2', 'a point just outside the block does not pick it');
 }
 
 // ---------------------------------------------------------------- persistence boundary
