@@ -267,6 +267,13 @@ export type GauntletStep =
   | { act: 'review'; artifact: string[] }
   | { act: 'settle'; outcome: Outcome; text: string; artifact?: string[] };
 
+// A critic whose turn ends without calling reply has only its final text. Read the verdict off it: a pass is the word PASS
+// with no FAIL beside it. Anything else is a fail with the text as the finding, as before.
+export const verdictFromText = (text: string): Verdict => {
+  const pass = /\bpass(ed|es)?\b/i.test(text) && !/\bfail(ed|s|ure)?\b/i.test(text);
+  return { pass, findings: pass ? [] : [text] };
+};
+
 export const gauntletNext = (s: MailState, gid: MessageId): GauntletStep | null => {
   const g = s.messages.get(gid);
   if (!g || g.kind !== 'request' || !g.gauntlet || !s.unsettled.has(gid)) return null;
@@ -458,10 +465,22 @@ export class Mailroom {
   }
 
   // Idempotent. A second reply to a settled request is ok and changes nothing.
-  reply(from: EmployeeId, requestId: string, r: { outcome: Outcome; text: string; verdict?: Verdict; artifact?: string[] }): { ok: true } | { ok: false; reason: 'not_yours' | 'unknown' } {
+  reply(from: EmployeeId, requestId: string, r: { outcome: Outcome; text: string; verdict?: Verdict; artifact?: string[] }): { ok: true } | { ok: false; reason: 'not_yours' | 'unknown' | 'open_children' | 'verdict_required'; detail?: string } {
     const req = this.findRequest(requestId);
     if (!req || req.kind !== 'request') return { ok: false, reason: 'unknown' };
     if (req.to !== from || req.intent === 'gauntlet') return { ok: false, reason: 'not_yours' };
+    // A review without a verdict would count as a fail and send the builder round again, so the critic has to retry.
+    if (req.intent === 'review' && r.outcome === 'done' && !r.verdict && this.state.unsettled.has(req.id)) {
+      return { ok: false, reason: 'verdict_required', detail: 'A review needs a verdict. Call reply again with verdict { pass, findings }: pass true only when the artifact meets the whole bar, and put the biggest gap first in findings.' };
+    }
+    // The same rule the auto-settle at turn end follows: a parent is not done while a piece it handed out is still open.
+    if (r.outcome === 'done' && this.state.unsettled.has(req.id)) {
+      const open = openChildren(this.state, req.id);
+      if (open.length) {
+        const titles = open.map((id) => `"${(this.state.messages.get(id) as { title?: string } | undefined)?.title ?? id}"`).join(', ');
+        return { ok: false, reason: 'open_children', detail: `Not done yet: ${open.length} request(s) you made are still open (${titles}). End your turn without replying; the last reply wakes you, then reply.` };
+      }
+    }
     if (this.state.unsettled.has(req.id)) this.settleWith(req, from, r);
     this.pump(from);
     return { ok: true };
@@ -579,7 +598,9 @@ export class Mailroom {
     this.append({ t: 'turn_end', turn, at: this.ports.now() });
     for (const id of settleAtTurnEnd(this.state, turn, ok)) {
       const req = this.state.messages.get(id)!;
-      this.settleWith(req, who, ok ? { outcome: 'done', text: finalText.trim() || 'Done.', auto: true } : { outcome: 'failed', text: finalText.trim() || 'The turn failed.', auto: true });
+      const text = finalText.trim() || 'Done.';
+      const verdict = req.kind === 'request' && req.intent === 'review' ? { verdict: verdictFromText(text) } : {};
+      this.settleWith(req, who, ok ? { outcome: 'done', text, ...verdict, auto: true } : { outcome: 'failed', text: finalText.trim() || 'The turn failed.', auto: true });
     }
     this.pump(who);
   }
