@@ -76,7 +76,7 @@ async function load(name: PropName): Promise<Prop> {
 let ready: Promise<void> | undefined;
 /** Decodes every prop once. The scene waits on this before it draws a single instance. */
 export function loadProps(): Promise<void> {
-  ready ??= Promise.all(NAMES.map(async (name) => loaded.set(name, await load(name)))).then(() => undefined);
+  ready ??= Promise.all(NAMES.map(async (name) => loaded.set(name, await load(name)))).then(() => void performance.mark('office-props-ready'));
   return ready;
 }
 
