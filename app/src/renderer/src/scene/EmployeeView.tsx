@@ -50,7 +50,7 @@ export const EmployeeView = memo(function EmployeeView({ employee }: { employee:
           <meshBasicMaterial color={talking ? '#8ff0b8' : '#ffffff'} transparent opacity={talking ? 0.95 : 0.6} />
         </mesh>
       )}
-      <Html position={[0, 2.0, 0]} portal={labelLayer} pointerEvents="auto" zIndexRange={[20, 0]}>
+      <Html position={[0, 1.85, 0]} portal={labelLayer} pointerEvents="auto" zIndexRange={[20, 0]}>
         <ResizableHud itemKey={`employee-label-${employee.id}`}><Label employee={employee} meetingDoor={meetingDoor} /></ResizableHud>
       </Html>
     </Person>

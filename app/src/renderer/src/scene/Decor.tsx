@@ -85,9 +85,10 @@ function meeting(): BufferGeometry[] {
 
 function lobby(cx: number, z1: number, doorX: number): BufferGeometry[] {
   const out: BufferGeometry[] = [
-    box(6.6, 0.02, 3.0, cx, 0.012, 3.4, '#d9c9ad'),
-    box(6.0, 0.024, 2.4, cx, 0.014, 3.4, '#9a6a4c'),
-    box(5.6, 0.028, 2.0, cx, 0.016, 3.4, '#c58f68'),
+    box(6.6, 0.02, 3.0, cx, 0.012, 4.9, '#d9c9ad'),
+    box(6.0, 0.024, 2.4, cx, 0.014, 4.9, '#9a6a4c'),
+    box(5.6, 0.028, 2.0, cx, 0.016, 4.9, '#c58f68'),
+    ...[-6.5, -2.5, 8, 16].flatMap((px) => pottedPlant(px, 2.6, 1.1)),
   ];
   out.push(...pottedPlant(doorX - 2.4, z1 - 0.8, 1.2), ...pottedPlant(doorX + 2.4, z1 - 0.8, 1.2));
   out.push(box(2.4, 0.46, 0.5, -15.6, 0.23, z1 - 0.6, '#8c6a4a'), box(2.4, 0.06, 0.55, -15.6, 0.48, z1 - 0.6, '#c59e73'));

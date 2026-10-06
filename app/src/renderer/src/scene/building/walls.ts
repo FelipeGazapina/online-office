@@ -22,13 +22,18 @@ const merge = (parts: BufferGeometry[]) => {
   return g;
 };
 const cap = (y: number) => part(1, 0.08, T + 0.06, y, CAP);
+const SHADE: [number, number, number] = [0.8, 0.78, 0.74];
+// Crown molding: a coping that overhangs the wall and a shadow band under it, so the roofline reads from far away.
+const cornice = (): BufferGeometry[] => [part(1, 0.1, T + 0.22, STORY_H + 0.05, CAP), part(1, 0.1, T + 0.12, STORY_H - 0.05, SHADE)];
+// A footing the wall stands on, a little wider than the wall.
+const footing = (): BufferGeometry => part(1, 0.26, T + 0.1, 0.13, SHADE);
 
 // Each model is one unit long along x, centered on its segment, standing on the floor.
 const geometries: Record<Variant, () => BufferGeometry> = {
-  solid: () => merge([part(1, STORY_H, T, STORY_H / 2, WHITE), cap(STORY_H + 0.04)]),
-  door: () => merge([part(1, 1, T, STORY_H - 0.5, WHITE), cap(STORY_H + 0.04)]),
-  arch: () => merge([part(1, 0.6, T, STORY_H - 0.3, WHITE), cap(STORY_H + 0.04)]),
-  window: () => merge([part(1, 0.9, T, 0.45, WHITE), part(1, 1.1, T, STORY_H - 0.55, WHITE), cap(STORY_H + 0.04), cap(0.94)]),
+  solid: () => merge([part(1, STORY_H, T, STORY_H / 2, WHITE), ...cornice(), footing()]),
+  door: () => merge([part(1, 1, T, STORY_H - 0.5, WHITE), ...cornice()]),
+  arch: () => merge([part(1, 0.6, T, STORY_H - 0.3, WHITE), ...cornice()]),
+  window: () => merge([part(1, 0.9, T, 0.45, WHITE), part(1, 1.1, T, STORY_H - 0.55, WHITE), ...cornice(), footing(), cap(0.94)]),
 };
 const built = new Map<string, BufferGeometry>();
 export const wallModel = (v: Variant): BufferGeometry => {
@@ -39,6 +44,35 @@ export const wallModel = (v: Variant): BufferGeometry => {
 export const curbModel = (): BufferGeometry => {
   let g = built.get('curb');
   if (!g) built.set('curb', (g = merge([part(1, CURB, T, CURB / 2, WHITE), cap(CURB + 0.04)])));
+  return g;
+};
+// The window's frame: a header, a deep sill that sticks out on both faces, jambs and two mullions. It takes no instance color,
+// so every window is the same dark bronze whatever the wall's paint.
+const frameBar = (w: number, h: number, d: number, x: number, y: number, color: [number, number, number]) => {
+  const g = part(w, h, d, y, color);
+  g.translate(x, 0, 0);
+  return g;
+};
+export const frameModel = (): BufferGeometry => {
+  let g = built.get('frame');
+  if (!g) {
+    const dark: [number, number, number] = [0.2, 0.17, 0.17];
+    const lit: [number, number, number] = [0.93, 0.91, 0.86];
+    const t = T + 0.08;
+    built.set(
+      'frame',
+      (g = merge([
+        frameBar(1, 0.07, t, 0, 2.08, dark),
+        frameBar(1, 0.05, t + 0.1, 0, 0.92, dark),
+        frameBar(1, 0.1, T + 0.3, 0, 0.87, lit),
+        frameBar(0.05, 1.2, t, -0.475, 1.5, dark),
+        frameBar(0.05, 1.2, t, 0.475, 1.5, dark),
+        frameBar(0.035, 1.2, t - 0.02, -0.16, 1.5, dark),
+        frameBar(0.035, 1.2, t - 0.02, 0.16, 1.5, dark),
+        frameBar(1, 0.035, t - 0.02, 0, 1.78, dark),
+      ])),
+    );
+  }
   return g;
 };
 export const glassModel = (): BufferGeometry => {

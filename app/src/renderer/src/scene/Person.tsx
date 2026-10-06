@@ -5,6 +5,9 @@ import { crowd, type CrowdEntry, type Look } from './people/crowd.ts';
 export type { Look };
 export type Pose = { pos: Vector3; yaw: number; speed: number; seated: boolean };
 
+// Grown a fifth over the modeled size so a person reads next to a desk and a nameplate.
+const PERSON_SCALE = 1.2;
+
 // One capsule person. Both the owner and every employee are posed with this; the sim owns where they are.
 // The group tree below holds only the joints the animation moves and the children that follow the person (labels, rings).
 // CrowdMeshes draws every person's body parts together as instanced meshes.
@@ -46,7 +49,7 @@ export function Person({
     a.walk += (Math.min(1, p.speed / 1.3) - a.walk) * k;
     a.phase += dt * (5 + p.speed * 2.2);
 
-    g.position.set(p.pos.x, p.pos.y + 0.09 * a.seat, p.pos.z);
+    g.position.set(p.pos.x, p.pos.y + 0.09 * a.seat * PERSON_SCALE, p.pos.z);
     g.rotation.y = p.yaw;
     const swing = Math.sin(a.phase) * 0.75 * a.walk * (1 - a.seat);
     body.current!.position.y = Math.abs(Math.sin(a.phase)) * 0.07 * a.walk;
@@ -79,7 +82,7 @@ export function Person({
   }, [entry]);
 
   return (
-    <group ref={root} visible={!hidden}>
+    <group ref={root} visible={!hidden} scale={PERSON_SCALE}>
       <group ref={body}>
         <group ref={head} position={[0, 1.52, 0]} />
         <group ref={armL} position={[-0.36, 1.1, 0]} />
