@@ -291,6 +291,7 @@ const KEYS: [string, string][] = [
   ['Click the floor', 'Walk there (overview camera)'],
   ['F near a board', 'Open the task board or project computer'],
   ['Click the whiteboard', 'Open the diagram large'],
+  ['B', 'Build mode: move furniture and whole blocks. Works in first person too'],
   ['Esc', 'Close whatever is open'],
   ['H', 'This help'],
 ];

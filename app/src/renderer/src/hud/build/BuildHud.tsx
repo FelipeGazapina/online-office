@@ -8,15 +8,17 @@ import { floorSwatch, wallSwatch } from './swatches.ts';
 import { useThumbs } from './thumbs.ts';
 import './build.css';
 
-const HINTS: Record<BuildTool['kind'], (t: BuildTool) => string[][]> = {
-  select: () => [['Click or drag', 'move furniture'], ['Shift-click', 'move its whole block'], ['E', 'copy it'], ['Delete', 'remove it']],
+// A key, what it does, and `danger` for the one that destroys something. Esc puts a piece back; only Delete deletes it.
+type Hint = [key: string, does: string, danger?: true];
+const HINTS: Record<BuildTool['kind'], (t: BuildTool) => Hint[]> = {
+  select: () => [['Click or drag', 'move furniture'], ['Shift-click', 'move its whole block'], ['E', 'copy it'], ['Delete', 'delete the piece under the pointer', true]],
   block: (t) => (t.kind === 'block' && t.carry ? [['Click', 'drop the block here'], [', .', 'turn'], ['Esc', 'put it back']] : [['Click or drag', 'pick up a block'], ['Esc', 'back to furniture']]),
   wall: () => [['Drag', 'draw a wall'], ['Ctrl-drag', 'delete walls']],
   room: () => [['Drag', 'draw a room'], ['Ctrl-drag', 'delete its walls'], ['Shift', 'wall tool']],
   floor: () => [['Click or drag', 'paint'], ['Shift', 'fill the room']],
   wallpaint: () => [['Click', 'paint a wall'], ['Shift', 'paint the room']],
   opening: (t) => [['Click', `put a ${t.kind === 'opening' ? t.open : ''} on a wall`]],
-  item: (t) => (t.kind === 'item' && t.carry ? [['Click', 'drop it here'], [', .', 'turn'], ['Delete', 'remove']] : [['Click', 'place'], [', .', 'turn'], ['Esc', 'stop']]),
+  item: (t) => (t.kind === 'item' && t.carry ? [['Click', 'drop it here'], [', .', 'turn'], ['Esc', 'put it back'], ['Delete', 'delete the piece', true]] : [['Click', 'place'], [', .', 'turn'], ['Esc', 'stop']]),
 };
 
 function Mover() {
@@ -155,8 +157,8 @@ function Dock() {
   return (
     <div className="bh-dock" data-testid="build-catalog">
       <div className="bh-hint" aria-live="polite">
-        {hint.map(([k, v]) => (
-          <span key={k}><kbd>{k}</kbd> {v}</span>
+        {hint.map(([k, v, danger]) => (
+          <span key={k}><kbd className={danger ? 'danger' : undefined}>{k}</kbd> {v}</span>
         ))}
         <TeamPick />
         {(tool.kind === 'floor' || tool.kind === 'wallpaint') && <FillToggle />}
@@ -204,10 +206,12 @@ function Readout() {
   );
 }
 
+// In first person the pointer is locked to the view, so the key is the way in; Esc or C frees the pointer to click instead.
 function EnterButton() {
   const ready = useStore((s) => !!s.building);
+  const first = useStore((s) => s.camera === 'first');
   return (
-    <button className="bh-enter" onClick={(e) => { enterBuild(); e.currentTarget.blur(); }} disabled={!ready} title="Build mode: move furniture and whole blocks (B)" data-testid="build-enter">
+    <button className={`bh-enter${first ? ' key-first' : ''}`} onClick={(e) => { enterBuild(); e.currentTarget.blur(); }} disabled={!ready} title={first ? 'Press B to build. Esc or C frees the pointer to click this button' : 'Build mode: move furniture and whole blocks (B)'} data-testid="build-enter">
       <BuildIcon />
       Build <kbd>B</kbd>
     </button>

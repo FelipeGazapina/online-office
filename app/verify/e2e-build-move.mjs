@@ -72,7 +72,15 @@ export default async function (s, { launch }) {
     await s.sleep(120);
     return p;
   };
-  const footprint = async (name) => (await s.eval(`__office.probe('${name}')`))[0];
+  // The ghost is drawn on the next frame after the pointer moves, and frames run slower while other apps load the machine.
+  const footprint = async (name) => {
+    for (let i = 0; i < 20; i++) {
+      const [found] = await s.eval(`__office.probe('${name}')`);
+      if (found) return found;
+      await s.sleep(100);
+    }
+    return undefined;
+  };
   const deskPoint = (d) => ({ x: d.x / 2 + 0.75, z: d.z / 2 + 0.5 });
 
   // ---- the way in: a button in the top right, in every camera
@@ -105,6 +113,11 @@ export default async function (s, { launch }) {
   assert(await s.eval(`!!document.querySelector('[data-testid="build-enter"]')`), 'Done leaves build mode and the Build button is back');
   await s.eval(`__office.store.setState({ selectedId: null })`);
   await s.eval(`document.activeElement?.blur()`);
+  await s.press('KeyH', 'h');
+  await s.waitFor(`!!document.querySelector('.modal.help')`, 3000);
+  assert(await s.eval(`[...document.querySelectorAll('.modal.help dl > div')].some((row) => row.querySelector('dt').textContent === 'B' && /build mode/i.test(row.querySelector('dd').textContent))`), 'the keys list names B as build mode');
+  await s.press('KeyH', 'h');
+  await s.waitFor(`!document.querySelector('.modal.help')`, 3000);
   await s.press('KeyB', 'b');
   await s.waitFor(`!!${store}.build`, 3000);
   await s.press('KeyB', 'b');
@@ -115,6 +128,7 @@ export default async function (s, { launch }) {
   await s.waitFor(`${store}.camera === 'first'`, 4000);
   await s.sleep(600);
   assert(await s.eval(`!!document.querySelector('[data-testid="build-enter"]') && getComputedStyle(document.querySelector('[data-testid="build-enter"]')).display !== 'none'`), 'the Build button is on screen in first person');
+  assert(await s.eval(`/Press B/.test(document.querySelector('[data-testid="build-enter"]').title) && /Esc or C/.test(document.querySelector('[data-testid="build-enter"]').title)`), 'where it says that B is the way in and Esc or C frees the pointer to click it');
   await enterByButton();
   assert((await s.eval(`${store}.camera`)) === 'iso', 'clicking it from first person switches to the overview');
   await leaveByButton();
@@ -151,6 +165,10 @@ export default async function (s, { launch }) {
   await hover(goal.x, goal.z);
   const pad = await footprint('footprint');
   assert(pad?.ok === true && pad.color === GREEN && Math.abs(pad.w - 1.5) < 1e-6, 'it follows the pointer with a green footprint');
+  const hints = await s.eval(`[...document.querySelectorAll('.bh-hint > span')].map((x) => ({ key: x.querySelector('kbd').textContent, text: x.textContent.replace(x.querySelector('kbd').textContent, '').trim(), danger: x.querySelector('kbd').classList.contains('danger') }))`);
+  const hintOf = (key) => hints.find((h) => h.key === key);
+  assert(hintOf('Esc')?.text === 'put it back' && hintOf('Esc').danger === false, 'the hint bar says Esc puts it back');
+  assert(hintOf('Delete')?.text === 'delete the piece' && hintOf('Delete').danger === true && !hints.some((h) => h.key === 'Delete' && /remove/.test(h.text)), 'and Delete deletes the piece, marked as the destructive key');
   await s.press('Escape');
   assert((await tool(s)).kind === 'select' && JSON.stringify(byId(await building(s)).get(desk0.id)) === JSON.stringify(desk0), 'Escape puts it back where it was');
 
