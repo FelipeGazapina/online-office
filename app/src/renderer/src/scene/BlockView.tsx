@@ -1,5 +1,5 @@
 import { memo, useEffect, useMemo, useState, type ReactNode } from 'react';
-import { Color } from 'three';
+import { Color, DoubleSide, MeshStandardMaterial } from 'three';
 import { taskBoardColumns, type Employee, type ProjectBlock } from '../../../shared/protocol.ts';
 import { BLOCK_D, BLOCK_W, STORY_H, YAW, blockCenter, type Building, type Item } from '../../../shared/space/index.ts';
 import { enterProjectComputer } from '../computer.ts';
@@ -72,6 +72,20 @@ function DailyHuddle({ color }: { color: string }) {
   );
 }
 
+// The pod's front edge: a pane of clear glass between a thin sill and a thin top rail, so the team's desks read through it.
+const railMaterial = new MeshStandardMaterial({ color: '#c9ced4', roughness: 0.4, metalness: 0.5 });
+const paneMaterial = new MeshStandardMaterial({ color: '#dcefff', roughness: 0.06, transparent: true, opacity: 0.16, depthWrite: false, side: DoubleSide });
+function GlassRail({ x, z, w }: { x: number; z: number; w: number }) {
+  return (
+    <group position={[x, 0, z]}>
+      <mesh receiveShadow material={railMaterial} position={[0, 0.02, 0]}><boxGeometry args={[w, 0.04, 0.06]} /></mesh>
+      <mesh material={railMaterial} position={[0, 0.76, 0]}><boxGeometry args={[w, 0.03, 0.05]} /></mesh>
+      {[-w / 2, w / 2].map((px) => <mesh key={px} material={railMaterial} position={[px, 0.39, 0]}><boxGeometry args={[0.04, 0.78, 0.05]} /></mesh>)}
+      <mesh material={paneMaterial} position={[0, 0.4, 0]}><planeGeometry args={[w, 0.72]} /></mesh>
+    </group>
+  );
+}
+
 function PodBoundary({ color }: { color: string }) {
   const edge = '#d2d8dd';
   return (
@@ -79,7 +93,7 @@ function PodBoundary({ color }: { color: string }) {
       {[[0, -3.72, 9.6, 0.08], [-4.72, 0, 0.08, 7.4], [4.72, 0, 0.08, 7.4]].map(([x, z, w, d], i) => (
         <mesh key={i} receiveShadow position={[x, 0.28, z]}><boxGeometry args={[w, 0.56, d]} /><meshStandardMaterial color={i === 0 ? color : edge} roughness={0.85} transparent opacity={0.82} /></mesh>
       ))}
-      <mesh receiveShadow position={[0, 0.22, 3.72]}><boxGeometry args={[3.1, 0.44, 0.18]} /><meshStandardMaterial color={edge} roughness={0.9} /></mesh>
+      <GlassRail x={0} z={3.72} w={3.1} />
     </group>
   );
 }

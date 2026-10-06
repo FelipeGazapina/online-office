@@ -59,7 +59,7 @@ const frameBar = (w: number, h: number, d: number, x: number, y: number, color: 
 export const frameModel = (): BufferGeometry => {
   let g = built.get('frame');
   if (!g) {
-    const dark: [number, number, number] = [0.5, 0.52, 0.55];
+    const dark: [number, number, number] = [0.74, 0.75, 0.77];
     const lit: [number, number, number] = [0.93, 0.91, 0.86];
     const t = T + 0.08;
     const h = HEAD - SILL;
