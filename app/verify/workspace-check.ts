@@ -31,6 +31,7 @@ const repo = (): string => {
 };
 const hire = (block: string, name: string): Workspace => createWorkspace(block, join(root, 'data', `${name}-${seq}`), name);
 const log = (dir: string) => git(dir, 'log', '--format=%s', '--first-parent');
+const unmergedNone = (dir: string) => git(dir, 'diff', '--name-only', '--diff-filter=U') === '' && !existsSync(join(dir, git(dir, 'rev-parse', '--git-path', 'MERGE_HEAD')));
 const text = (dir: string, file: string) => readFileSync(join(dir, file), 'utf8');
 
 // hire
@@ -87,6 +88,23 @@ const text = (dir: string, file: string) => readFileSync(join(dir, file), 'utf8'
   const before = git(block, 'rev-parse', 'HEAD');
   check(integrate(block, bruno, 'Bruno', 'rerun').kind === 'already' && git(block, 'rev-parse', 'HEAD') === before, 'rerunning an integration changes nothing');
   check(commitsAhead(block, bruno) === 0 && changedInWorkspace(block, bruno).length === 0, 'after integration the branch is not ahead and has no pending files');
+}
+
+// a request that reaches someone mid-turn
+{
+  const block = repo();
+  const ana = hire(block, 'Ana');
+  const bruno = hire(block, 'Bruno');
+  write(ana.path, 'lib.txt', 'ana lib\n');
+  integrate(block, ana, 'Ana', 'Ana lib');
+  write(bruno.path, 'draft.txt', 'bruno is typing\n');
+  const mid = syncWorkspace(block, bruno, 'Bruno', true);
+  check(mid.kind === 'merged' && text(bruno.path, 'lib.txt') === 'ana lib\n' && text(bruno.path, 'draft.txt') === 'bruno is typing\n', 'a mid-turn sync brings in teammates\' integrated files and keeps the uncommitted draft');
+  write(ana.path, 'shared.txt', 'ANA\n');
+  integrate(block, ana, 'Ana', 'Ana shared');
+  write(bruno.path, 'shared.txt', 'BRUNO\n');
+  const clash = syncWorkspace(block, bruno, 'Bruno', true);
+  check(clash.kind === 'skipped' && text(bruno.path, 'shared.txt') === 'BRUNO\n' && unmergedNone(bruno.path), 'a mid-turn sync that would clash is skipped and leaves no merge open');
 }
 
 // the owner's dirty tree

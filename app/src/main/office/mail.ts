@@ -334,6 +334,8 @@ export type MailPorts = {
   artifacts: ArtifactPort;
   // Lands a done work request's branch in the block folder. Absent for a person with no worktree.
   integrate?(who: EmployeeId, title: string): Integration | undefined;
+  // A request reached someone in the middle of a turn, so what teammates integrated meanwhile has to reach their worktree too.
+  arrived?(who: EmployeeId): void;
   // Where a person's own branch stands against the block, for the team view.
   branchOf?(who: EmployeeId): { branch: string; ahead: number } | undefined;
   persist(entry: LedgerEntry): void;
@@ -696,7 +698,10 @@ export class Mailroom {
   inbox(who: EmployeeId, peek: boolean): Message[] {
     const queued = (this.state.queue.get(who) ?? []).map((id) => this.state.messages.get(id)!);
     const turn = this.state.active.get(who);
-    if (!peek && turn && queued.length) this.append({ t: 'deliver', ids: queued.map((m) => m.id), to: who, turn, at: this.ports.now() });
+    if (!peek && turn && queued.length) {
+      this.ports.arrived?.(who);
+      this.append({ t: 'deliver', ids: queued.map((m) => m.id), to: who, turn, at: this.ports.now() });
+    }
     return queued;
   }
 

@@ -360,6 +360,11 @@ export class Office {
           }),
         ),
         integrate: (who, title) => this.integrateWork(who, title),
+        arrived: (who) => {
+          const e = this.company.employees.find((x) => x.id === who);
+          const block = e && this.company.blocks.find((b) => b.id === e.blockId);
+          if (e?.workspace && block) syncWorkspace(block.cwd, e.workspace, e.name, true);
+        },
         branchOf: (who) => {
           const e = this.company.employees.find((x) => x.id === who);
           const block = e && this.company.blocks.find((b) => b.id === e.blockId);

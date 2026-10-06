@@ -20,6 +20,7 @@ const dataDir = mkdtempSync(join(tmpdir(), 'g1-company-data-'));
 const repo = realpathSync(mkdtempSync(join(tmpdir(), 'g1-company-repo-')));
 execFileSync('git', ['init', '-q'], { cwd: repo });
 cpSync(join(HERE, 'fixtures', 'company-project'), repo, { recursive: true });
+const gitIn = (cwd, ...args) => execFileSync('git', ['-c', 'user.name=owner', '-c', 'user.email=owner@example.com', ...args], { cwd, stdio: 'pipe' }).toString();
 const git = (...args) => execFileSync('git', ['-c', 'user.name=owner', '-c', 'user.email=owner@example.com', ...args], { cwd: repo, stdio: 'pipe' }).toString();
 git('add', '-A');
 git('commit', '-q', '-m', 'initial');
@@ -235,6 +236,38 @@ export default async (s) => {
   check(words, 'node --test passes with src/words.js and test/words.test.js');
   await chatShot(s, eli.id, 'g1-direct-after');
   const thread2 = await s.eval(`[...document.querySelectorAll('.thread .msg')].map((m) => m.innerText.replace(/\\n+/g, ' ')).join('\\n')`);
+
+  // Each person worked in their own worktree: a done artifact is in the branch of the person who made it, and the block
+  // folder (the owner's checkout) ends with every branch merged and nothing left uncommitted.
+  const people = await s.eval(`${company}.employees.map((e) => ({ id: e.id, name: e.name, workspace: e.workspace ?? null }))`);
+  const isPo = (id) => id === po.id;
+  // What a person's branch added, read back from the block's own history: each merge of it brings in the files changed on
+  // that branch since it last shared a commit with the block. Teammates' files that the branch only synced never count.
+  const mergeLines = git('log', '--first-parent', '--merges', '--format=%H %s').split('\n').filter(Boolean).map((l) => ({ sha: l.slice(0, 40), subject: l.slice(41) }));
+  const ownFiles = (branch) => {
+    const out = new Set();
+    for (const m of mergeLines.filter((x) => x.subject.startsWith(`Merge ${branch}:`))) {
+      const base = git('merge-base', `${m.sha}^1`, `${m.sha}^2`).trim();
+      for (const f of git('diff', '--name-only', base, `${m.sha}^2`).split('\n').filter(Boolean)) out.add(f);
+    }
+    return out;
+  };
+  const allDones = posts().filter((m) => m.kind === 'reply' && m.outcome === 'done' && asked.get(m.requestId)?.intent === 'work' && m.artifact?.length && !isPo(m.from));
+  const misattributed = allDones.flatMap((m) => {
+    const who = people.find((p) => p.id === m.from);
+    if (!who?.workspace) return [`${names(m.from)} has no workspace`];
+    const own = ownFiles(who.workspace.branch);
+    return m.artifact.filter((a) => !/^[0-9a-f]{7,40}$/.test(a) && !own.has(a) && ![...own].some((f) => f.startsWith(`${a}/`))).map((a) => `${who.name}:${a}`);
+  });
+  console.log(`done artifacts not in their own branch: ${misattributed.join(', ') || 'none'}`);
+  check(allDones.length > 0 && people.every((p) => p.workspace && existsSync(p.workspace.path)) && misattributed.length === 0, `every done artifact is in its own employee's branch diff (${allDones.length} done replies, ${people.length} worktrees)`);
+  const workers = [...new Set(allDones.map((m) => people.find((p) => p.id === m.from)?.workspace?.branch).filter(Boolean))];
+  const merges = mergeLines.map((m) => m.subject);
+  const unmerged = workers.filter((b) => {
+    try { git('merge-base', '--is-ancestor', b, 'HEAD'); return false; } catch { return true; }
+  });
+  console.log(`block merges: ${merges.filter(Boolean).join(' | ')}`);
+  check(workers.length > 0 && unmerged.length === 0 && workers.every((b) => merges.some((l) => l.startsWith(`Merge ${b}:`))) && git('status', '--porcelain').trim() === '', `the block folder has every employee merge in its log and a clean tree (${workers.join(', ')})`);
 
   const render = (list) =>
     list

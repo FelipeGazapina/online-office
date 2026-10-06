@@ -95,9 +95,9 @@ export const removeWorkspace = (blockCwd: string, ws: Workspace, name: string): 
   run(blockCwd, ['worktree', 'prune']);
 };
 
-// Brings the block's current HEAD into the employee's branch before a request starts. A conflict is left in the
+// Brings the block's current HEAD into the employee's branch before a request starts, or when one reaches them mid-turn. A conflict is left in the
 // worktree for the employee to resolve, because the request that follows a failed integration is exactly that.
-export const syncWorkspace = (blockCwd: string, ws: Workspace, name: string): Sync => {
+export const syncWorkspace = (blockCwd: string, ws: Workspace, name: string, midTurn = false): Sync => {
   const stuck = unresolved(ws.path);
   if (stuck.length) return { kind: 'conflict', paths: stuck };
   const head = headOf(blockCwd);
@@ -105,6 +105,11 @@ export const syncWorkspace = (blockCwd: string, ws: Workspace, name: string): Sy
   const merged = run(ws.path, ['merge', '--no-edit', '--no-verify', '-m', `Sync ${ws.branch} with the block`, head], name);
   if (merged.ok) return { kind: 'merged' };
   const paths = unmerged(ws.path);
+  // Someone in the middle of a turn is not handed a half-open merge: it waits for their next request.
+  if (midTurn && paths.length) {
+    run(ws.path, ['merge', '--abort']);
+    return { kind: 'skipped', reason: `conflicts in ${paths.join(', ')}` };
+  }
   return paths.length ? { kind: 'conflict', paths } : { kind: 'skipped', reason: firstLine(merged.err || merged.out) };
 };
 
