@@ -1,16 +1,17 @@
 // Verification hooks: the render loop can be throttled in background tabs, so tests advance the sim by hand.
 import { _roots } from '@react-three/fiber';
-import { Vector3 } from 'three';
+import { Raycaster, Vector2, Vector3, type InstancedMesh, type Mesh, type Object3D } from 'three';
 import type { Building } from '../../shared/space/index.ts';
 import type { BlockId, Employee, EmployeeId, ModelId, ProjectBlock } from '../../shared/protocol.ts';
 import { DESKS_PER_BLOCK } from '../../shared/protocol.ts';
-import { applyOps, legacyBuilding, rectWalls, type BuildOp, type Item, type ItemId, type SpaceContext, type WallSeg } from '../../shared/space/index.ts';
+import { applyOps, CELL, legacyBuilding, rectWalls, STORY_H, type BuildOp, type Item, type ItemId, type SpaceContext, type WallSeg } from '../../shared/space/index.ts';
+import { defOf, itemRect } from '../../shared/space/geom.ts';
 import { benchItem } from '../../shared/space/kit.ts';
 import { applyServerMessage } from './office.ts';
 import { loadMailFixture } from './hud/chat/fixture.ts';
 import { renders } from './hud/chat/renders.ts';
 import { KEYS_INTENT, runtime } from './runtime.ts';
-import { floorBase } from './world.ts';
+import { floorBase, tripTo, worldFor } from './world.ts';
 import { stepSim, tripEnd, walkTo } from './sim.ts';
 import { get, sendTap, set, setSetting, useStore } from './store.ts';
 
@@ -135,6 +136,44 @@ function measureFrames(ms: number) {
   });
 }
 
+// Test-only: what a real click at a viewport pixel reaches. It raycasts the pixel through the objects the event system
+// listens to, nearest first, and names the first one with an onClick: the floor, a piece of furniture a click walks to,
+// a fixture that does something else when clicked (the project computer, the whiteboard), an avatar, or nothing.
+// For the floor and furniture it also says where the walk that click starts would end, or null when there is no way there.
+function pick(x: number, y: number) {
+  const root = _roots.values().next().value;
+  if (!root) return null;
+  const { camera, size, internal } = root.store.getState();
+  const caster = new Raycaster();
+  caster.setFromCamera(new Vector2(((x - size.left) / size.width) * 2 - 1, -((y - size.top) / size.height) * 2 + 1), camera);
+  const handled = (o: Object3D | null): boolean => !!o && (!!(o as { __r3f?: { handlers?: { onClick?: unknown } } }).__r3f?.handlers?.onClick || handled(o.parent));
+  const first = caster.intersectObjects(internal.interaction, true).find((h) => handled(h.object));
+  if (!first) return { kind: 'nothing' as const };
+  const { point, object } = first;
+  const floor = Math.max(0, Math.floor((point.y + 0.5) / STORY_H));
+  const instanced = (object as InstancedMesh).isInstancedMesh;
+  // The floor is the one clickable mesh drawn with a list of materials, one per paint.
+  const onFloor = !instanced && Array.isArray((object as Mesh).material);
+  const item = get().building?.stories[floor]?.items.find((i) => {
+    const def = defOf(i);
+    if (!def) return false;
+    const r = itemRect(i, def);
+    return point.x >= r.x0 * CELL && point.x <= r.x1 * CELL && point.z >= r.z0 * CELL && point.z <= r.z1 * CELL;
+  });
+  const kind = onFloor ? ('floor' as const) : instanced ? (item ? ('furniture' as const) : ('avatar' as const)) : ('fixture' as const);
+  const world = worldFor(get().building, get().meetingDoor);
+  const { pos } = runtime.owner;
+  const trip = kind === 'floor' || kind === 'furniture' ? world && tripTo(world, { floor: runtime.owner.floor, x: pos.x, z: pos.z }, { floor, x: point.x, z: point.z }) : null;
+  const end = trip ? tripEnd(trip) : null;
+  return {
+    kind,
+    what: kind === 'floor' ? 'floor' : `${item?.def ?? object.type}${item ? ` ${item.id}` : ''}`,
+    point: { x: +point.x.toFixed(2), y: +point.y.toFixed(2), z: +point.z.toFixed(2) },
+    floor,
+    walk: end ? { x: +end.at.x.toFixed(2), z: +end.at.z.toFixed(2), waypoints: end.waypoints } : null,
+  };
+}
+
 // Test-only: how many wall pieces stand at full height, and how many curbs stand where the cutaway dropped a wall.
 function wallStats() {
   const root = _roots.values().next().value;
@@ -199,6 +238,7 @@ export function installDebug() {
       const p = new Vector3(x, y, z).project(camera);
       return { x: size.left + ((p.x + 1) / 2) * size.width, y: size.top + ((1 - p.y) / 2) * size.height };
     },
+    pick,
     // Test-only: stands the owner on another story at once, so the overview draws every story up to it.
     ownerTo(floor: number, x: number, z: number) {
       runtime.owner.floor = floor;
