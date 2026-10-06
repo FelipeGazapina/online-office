@@ -62,6 +62,7 @@ async function profileLaunch() {
   let result;
   const { fixture, visible } = await launchHeld({
     attach: (call, page) => [
+      call('Page.enable', {}, page),
       call('Profiler.enable', {}, page),
       call('Profiler.setSamplingInterval', { interval: 200 }, page),
       call('Profiler.start', {}, page),
