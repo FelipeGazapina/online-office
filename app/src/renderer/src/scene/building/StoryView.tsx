@@ -1,11 +1,11 @@
 import { useFrame, type ThreeEvent } from '@react-three/fiber';
 import { memo, useLayoutEffect, useMemo, useRef } from 'react';
-import { AdditiveBlending, BackSide, BufferGeometry, Color, DoubleSide, Group, InstancedMesh, Matrix4, MeshBasicMaterial, MeshStandardMaterial, PlaneGeometry, Quaternion, Vector2, Vector3 } from 'three';
+import { AdditiveBlending, BackSide, BoxGeometry, BufferGeometry, Color, DoubleSide, Group, InstancedMesh, Matrix4, MeshBasicMaterial, MeshStandardMaterial, PlaneGeometry, Quaternion, Vector2, Vector3 } from 'three';
 import { PROVIDERS, type Employee } from '../../../../shared/protocol.ts';
 import { ITEM_DEFS, STORY_H, WALL_STYLES, YAW, type FloorGeometry, type ItemId } from '../../../../shared/space/index.ts';
 import { hasFloorAt, tileIndex } from '../../../../shared/space/geom.ts';
 import { runtime } from '../../runtime.ts';
-import { draft } from '../../hud/build/state.ts';
+import { buildView, draft } from '../../hud/build/state.ts';
 import { get, set, useStore } from '../../store.ts';
 import { walkTo } from '../../sim.ts';
 import { chairOf } from '../../world.ts';
@@ -16,7 +16,7 @@ import { reflective } from '../Lighting.tsx';
 import { floorGeometry } from './floor.ts';
 import { propOf } from '../props.ts';
 import { box, cyl, merge, DEFAULT_TINT, DYNAMIC, modelOf, onTopOf, PROP_DEFS, screenGeometry } from './models.ts';
-import { curbModel, facesCamera, frameModel, glassModel, occludes, octantOf, VARIANTS, wallMatrix, wallModel, wallRecords, ZERO, type Variant, type WallRecord } from './walls.ts';
+import { crossesView, curbModel, facesCamera, frameModel, glassModel, occludes, octantOf, VARIANTS, wallMatrix, wallModel, wallRecords, ZERO, type Variant, type WallRecord } from './walls.ts';
 
 const up = new Vector3(0, 1, 0);
 const q = new Quaternion();
@@ -43,12 +43,12 @@ const plaster = plasterSurface();
 const wallMaterial = detail(new MeshStandardMaterial({ vertexColors: true, roughness: 0.95 }), 'wall', { ...plaster, mean: PLASTER_MEAN, metresPerRepeat: PLASTER_METRES });
 // Clear glass: the sky, the lawn and the trees show through it, with a faint cool tint and a sheen of the room on it.
 const glassMaterial = new MeshStandardMaterial({ color: '#dcefff', emissive: '#a8d4ff', emissiveIntensity: 0.06, roughness: 0.06, transparent: true, opacity: 0.16, depthWrite: false, side: DoubleSide });
-reflective.set(glassMaterial, 0.9);
+reflective.set(glassMaterial, 0.35);
 const frameMaterial = new MeshStandardMaterial({ vertexColors: true, roughness: 0.5, metalness: 0.2 });
 const railMaterial = new MeshStandardMaterial({ color: '#c9cdd8', roughness: 0.5, metalness: 0.3 });
 const ceilingMap = ceilingTexture();
 ceilingMap.repeat.set(6.5, 6.5);
-const ceilingMaterial = new MeshStandardMaterial({ map: ceilingMap, roughness: 0.95, side: BackSide, color: '#e6d8c4', emissive: '#fff0d8', emissiveIntensity: 0.14 });
+const ceilingMaterial = new MeshStandardMaterial({ map: ceilingMap, roughness: 0.95, side: BackSide, color: '#f0e6d6', emissive: '#fff0d8', emissiveIntensity: 0.2 });
 const slabMaterial = new MeshStandardMaterial({ color: '#cdbfa9', roughness: 0.95 });
 const fixtureMaterial = new MeshBasicMaterial({ vertexColors: true, toneMapped: false });
 // The pendant's glowing disc, set in the underside of the baked lamp's shade. The shade itself is the `lamp` prop.
@@ -66,6 +66,9 @@ const glowMaterial = new MeshBasicMaterial({ map: poolTexture(), transparent: tr
 const glowGeometry = new PlaneGeometry(1.2, 0.8).rotateX(-Math.PI / 2).translate(0, 0.78, -0.12);
 const NO_BLOB: ReadonlySet<string> = new Set(['rug', 'rail', 'stairs']);
 const CEILING_Y = STORY_H - 0.3;
+// Walnut beams on the pendants' 4 m grid divide the ceiling into coffers, each lamp in the middle of one.
+const beamGeometry = new BoxGeometry(1.04, 0.16, 0.12).translate(0, -0.08, 0);
+const beamMaterial = new MeshStandardMaterial({ color: '#c19a70', roughness: 0.6, emissive: '#6b4a2c', emissiveIntensity: 0.25 });
 const screenMaterial = new MeshBasicMaterial({ map: codeTexture(), toneMapped: false });
 
 function Instances({
@@ -176,11 +179,14 @@ function Walls({ geom }: { geom: FloorGeometry }) {
     // While furniture is being placed on this floor, the walls between the camera and it step out of the way too.
     const f = iso && mode !== 'down' && draft.focus?.level === geom.index ? draft.focus : null;
     const yaw = runtime.view.yaw;
-    const stamp = `${key}|${f ? `${Math.round(f.x * 2)},${Math.round(f.z * 2)},${octantOf(yaw)}` : ''}`;
+    // Interior walls step down by where the owner stands, so the stamp carries the owner's tile too.
+    const at = get().build ? buildView : runtime.owner.pos;
+    const fx = Math.round(at.x), fz = Math.round(at.z);
+    const stamp = `${key}|${key >= 0 ? `${fx},${fz}` : ''}|${f ? `${Math.round(f.x * 2)},${Math.round(f.z * 2)},${octantOf(yaw)}` : ''}`;
     if (stamp === seen.current) return;
     seen.current = stamp;
     const cutYaw = key * (Math.PI / 4);
-    const isCut = (r: WallRecord) => key === ALL_DOWN || (key >= 0 && facesCamera(r, cutYaw)) || (!!f && occludes(r, yaw, f));
+    const isCut = (r: WallRecord) => key === ALL_DOWN || (key >= 0 && (facesCamera(r, cutYaw) || crossesView(r, cutYaw, { x: fx, z: fz }))) || (!!f && occludes(r, yaw, f));
     apply(isCut);
     colorCurbs(isCut);
   });
@@ -443,6 +449,31 @@ function Ceiling({ geom }: { geom: FloorGeometry }) {
     },
     [lamps],
   );
+  const beams = useMemo(() => {
+    const out: [number, number, number][] = [];
+    const { lot, story } = geom;
+    const floored = (tx: number, tz: number) => {
+      if (tx < lot.x0 || tz < lot.z0 || tx >= lot.x0 + lot.w || tz >= lot.z0 + lot.h) return false;
+      const i = tileIndex(lot, tx, tz);
+      return hasFloorAt(story, i) && !geom.hole[i];
+    };
+    const mod4 = (v: number) => ((v % 4) + 4) % 4;
+    for (let tz = lot.z0; tz < lot.z0 + lot.h; tz++) {
+      for (let tx = lot.x0; tx < lot.x0 + lot.w; tx++) {
+        if (!floored(tx, tz)) continue;
+        if (mod4(tz) === 3) out.push([tx + 0.5, tz + 0.5, 0]);
+        if (mod4(tx) === 3) out.push([tx + 0.5, tz + 0.5, Math.PI / 2]);
+      }
+    }
+    return out;
+  }, [geom]);
+  const fillBeams = useMemo(
+    () => (mesh: InstancedMesh) => {
+      const m = new Matrix4();
+      beams.forEach(([x, z, yaw], i) => mesh.setMatrixAt(i, place(m, x, CEILING_Y, z, yaw)));
+    },
+    [beams],
+  );
   const fillPools = useMemo(
     () => (mesh: InstancedMesh) => {
       const m = new Matrix4();
@@ -458,6 +489,7 @@ function Ceiling({ geom }: { geom: FloorGeometry }) {
   return (
     <group ref={group} visible={false}>
       <mesh geometry={geo} material={ceilingMaterial} position-y={CEILING_Y} />
+      <Instances geometry={beamGeometry} material={beamMaterial} count={beams.length} fill={fillBeams} castShadow={false} receiveShadow={false} />
       <Instances geometry={fixtureGeometry} material={fixtureMaterial} count={lamps.length} fill={fill} castShadow={false} receiveShadow={false} />
       <Instances geometry={propOf('lamp').geometry} material={propOf('lamp').material} count={lamps.length} fill={fill} castShadow={false} receiveShadow={false} />
       <Instances geometry={poolGeometry} material={poolMaterial} count={lamps.length} fill={fillPools} castShadow={false} receiveShadow={false} />

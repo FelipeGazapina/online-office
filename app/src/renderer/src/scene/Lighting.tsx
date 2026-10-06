@@ -1,8 +1,9 @@
 import { useFrame, useThree } from '@react-three/fiber';
 import { useEffect, useLayoutEffect, useMemo, useRef } from 'react';
-import { AdditiveBlending, Color, CubeCamera, HalfFloatType, Texture, WebGLCubeRenderTarget, InstancedMesh, Matrix4, MeshBasicMaterial, MeshStandardMaterial, Object3D, PlaneGeometry, PMREMGenerator, Quaternion, Vector3 } from 'three';
+import { AdditiveBlending, DirectionalLight, HemisphereLight, Color, CubeCamera, HalfFloatType, Texture, WebGLCubeRenderTarget, InstancedMesh, Matrix4, MeshBasicMaterial, MeshStandardMaterial, Object3D, PlaneGeometry, PMREMGenerator, Quaternion, Vector3 } from 'three';
 import { blockCenter, DOOR_X } from '../../../shared/space/index.ts';
 import type { Bounds } from './Environment.tsx';
+import { runtime } from '../runtime.ts';
 import { poolTexture } from './textures.ts';
 
 // Pools of lamplight lie on the floor under every zone's lights: one additive decal each, all drawn together. They
@@ -109,10 +110,24 @@ export function Lights({ b, slots }: { b: Bounds; slots: readonly number[] }) {
   }, [target, cx, cz]);
   useRoomReflections(useMemo(() => new Vector3(cx, 1.5, cz), [cx, cz]));
   const pools = usePools(b, slots);
+  const sun = useRef<DirectionalLight>(null);
+  const sky = useRef<HemisphereLight>(null);
+  // From above the rooms the sun stands higher and its shadows are lighter, so a streak of shade never hides a desk; at eye
+  // height it is the low, dramatic light through the windows.
+  useFrame(() => {
+    const t = 1 - Math.min(1, runtime.view.blend * 4);
+    if (sun.current) {
+      sun.current.position.set(cx + 38, 12 + 12 * t, cz + 14);
+      sun.current.shadow.intensity = 1 - 0.38 * t;
+      sun.current.intensity = 4.6 - 0.8 * t;
+    }
+    if (sky.current) sky.current.intensity = 0.62 + 0.22 * t;
+  });
   return (
     <>
-      <hemisphereLight args={['#b9cdf2', '#caa27a', 0.62]} />
+      <hemisphereLight ref={sky} args={['#b9cdf2', '#caa27a', 0.62]} />
       <directionalLight
+        ref={sun}
         target={target}
         castShadow
         color="#ffc98c"
@@ -129,6 +144,8 @@ export function Lights({ b, slots }: { b: Bounds; slots: readonly number[] }) {
         shadow-camera-near={1}
         shadow-camera-far={110}
       />
+      {/* The bounce off the lawn and the far walls: a cool-warm fill from the shaded side, so walls that face away from the sun keep their paint colour. */}
+      <directionalLight color="#ffe2c4" intensity={2} position={[cx - 30, 14, cz - 22]} />
       <LightPools pools={pools} />
       <primitive object={target} />
     </>
