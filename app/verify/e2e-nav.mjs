@@ -167,11 +167,12 @@ export default async (s) => {
   const tail = JSON.parse(await s.eval(`JSON.stringify(__office.store.getState().mail.tail)`));
   const sent = tail.find((m) => m.kind === 'request' && m.from === 'owner' && m.to === claudeId && m.text === message);
   assert(sent, 'the message reached the real employee through the mailroom as a request from the owner');
-  // The reply shows in the thread while the turn is still running. The ledger settles the request when the turn ends, and a
-  // work request whose turn left the folder unchanged settles blocked with the final text (mail-check.ts, 76ce7f9).
-  const settled = `__office.store.getState().mail.tail.some((m) => m.kind === 'reply' && m.requestId === ${JSON.stringify(sent.id)} && m.outcome === 'blocked' && m.auto === true && /pineapple/i.test(m.text))`;
+  // The reply shows in the thread while the turn is still running. The ledger settles the request later, and a work request
+  // that left no file changed cannot settle done (mail-check.ts, 76ce7f9): it settles blocked with the answer, either by the
+  // turn end or by the employee's own blocked reply, whichever the model does.
+  const settled = `__office.store.getState().mail.tail.some((m) => m.kind === 'reply' && m.requestId === ${JSON.stringify(sent.id)} && m.outcome === 'blocked' && /pineapple/i.test(m.text))`;
   await s.waitFor(settled, 60000);
-  assert(await s.eval(settled), 'and the turn end settled it with the answer, blocked because no file changed');
+  assert(await s.eval(settled), 'and the ledger settled it with the answer, blocked because no file changed');
   await s.shot('n1-chat');
 };
 
