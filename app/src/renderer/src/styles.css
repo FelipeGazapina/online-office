@@ -1909,6 +1909,8 @@ body.hud-moving, body.hud-moving * { cursor: grabbing !important; user-select: n
 .cp-line.owner .cp-meta { flex-direction: row-reverse; }
 .cp-meta:empty { display: none; }
 .cp-auto { font-weight: 600; border: 1px solid var(--line); border-radius: 999px; padding: 0 6px; }
+.cp-artifact { font: 600 11px var(--body); border-radius: 6px; padding: 1px 6px; background: var(--paper); color: var(--ink-soft); border: 1px solid var(--line); max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cp-chip.waiting { background: #e3eefb; border-color: transparent; color: #1f4f8a; }
 .cp-undo { border: 0; background: none; padding: 0; color: var(--brand); font: 600 11px var(--body); cursor: pointer; }
 .cp-undo:hover { text-decoration: underline; }
 .cp-chip { font-weight: 700; font-size: 11px; border-radius: 999px; padding: 1px 8px; background: var(--paper); color: var(--ink-soft); border: 1px solid var(--line); white-space: nowrap; }

@@ -684,9 +684,14 @@ console.log('\n# the mailroom, end to end with scripted employees');
   await finishTurn(po.fake, 'Split into two pieces.');
   check(!mailOffice.snapshot().mail.tail.some((m) => m.kind === 'reply' && m.requestId === rootId), 'the owner request is not settled while its children are open');
 
+  mkdirSync(join(repo, 'src'), { recursive: true });
+  writeFileSync(join(repo, 'src/csv.ts'), 'export const csv = 1;\n');
+  writeFileSync(join(repo, 'src/button.ts'), 'export const button = 1;\n');
+  const refused = await asBenj.tool('reply', { requestId: toBenj.id, outcome: 'done', text: 'button shipped' });
+  check(refused.ok === false && refused.reason === 'no_artifacts', 'a done reply without files is refused through the real office');
   await asAnna.tool('reply', { requestId: toAnna.id, outcome: 'done', text: 'route shipped', artifact: ['src/csv.ts'] });
   await finishTurn(anna.fake, 'route shipped');
-  await asBenj.tool('reply', { requestId: toBenj.id, outcome: 'done', text: 'button shipped' });
+  await asBenj.tool('reply', { requestId: toBenj.id, outcome: 'done', text: 'button shipped', artifact: ['src/button.ts'] });
   await finishTurn(benj.fake, 'button shipped');
   check(po.fake.assigned.length >= 2 && /route shipped/.test(po.fake.assigned.join('\n')), 'the replies wake the PO with the results');
   const last = await asPo.tool('reply', { requestId: rootId, outcome: 'done', text: 'CSV export shipped, both pieces verified' });

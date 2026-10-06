@@ -190,6 +190,16 @@ export default async (s) => {
   check(finalReply && finalReply.at >= lastOther, 'the PO answered the owner after every other request settled');
   check(settled && !!finalReply, `all requests settled and the PO replied to the owner (${wallS} s wall${finalReply ? `, outcome ${finalReply.outcome}` : ''})`);
 
+  const asked = new Map(posts().filter((m) => m.kind === 'request').map((m) => [m.id, m]));
+  const dones = posts().filter((m) => m.kind === 'reply' && m.outcome === 'done' && asked.get(m.requestId)?.intent === 'work');
+  const noProof = dones.filter((m) => !m.artifact?.length || m.artifact.some((a) => !/^[0-9a-f]{7,40}$/.test(a) && !existsSync(join(repo, a))));
+  console.log(`done replies on work requests: ${dones.length}; without existing artifacts: ${noProof.map((m) => `${names(m.from)}:${(m.artifact ?? []).join(',') || 'none'}`).join(' | ') || 'none'}`);
+  check(dones.length > 0 && noProof.length === 0, 'every done reply on a work request carries artifacts that exist in the repo');
+  const talky = dones.filter((m) => /waiting|will check back|once .* (is|are) done/i.test(m.text));
+  check(talky.length === 0, `no done reply says it is waiting (${talky.map((m) => m.text.slice(0, 60)).join(' | ') || 'none'})`);
+  const listed = finalReply?.artifact ?? [];
+  check(finalReply?.outcome === 'done' && listed.length > 0 && listed.every((a) => existsSync(join(repo, a))), `the PO final reply to the owner lists the artifacts (${listed.join(', ') || 'none'})`);
+
   let testsOk = false;
   try {
     execFileSync('node', ['--test'], { cwd: repo, stdio: 'pipe' });
@@ -200,7 +210,8 @@ export default async (s) => {
   const slugOk = existsSync(join(repo, 'src/slug.js')) && existsSync(join(repo, 'test/slug.test.js'));
   check(testsOk && slugOk, 'node --test passes in the repo with src/slug.js and test/slug.test.js');
   const readme = readFileSync(join(repo, 'README.md'), 'utf8');
-  check(/^#{1,6}\s.*slugify/im.test(readme), 'README.md has a slugify section');
+  const readmeChanged = git('status', '--porcelain', 'README.md').trim() !== '' || git('log', '--oneline', '--', 'README.md').trim().split('\n').length > 1;
+  check(readmeChanged && /slugify\(|^#{1,6}\s.*slugify/im.test(readme), 'README.md was edited and documents slugify');
   console.log(`README headings: ${readme.split('\n').filter((l) => l.startsWith('#')).join(' | ')}`);
   await chatShot(s, po.id, 'g1-chat-after');
   const thread1 = await s.eval(`[...document.querySelectorAll('.thread .msg')].map((m) => m.innerText.replace(/\\n+/g, ' ')).join('\\n')`);
@@ -233,10 +244,10 @@ export default async (s) => {
       })
       .join('\n');
   writeFileSync(
-    `${GAME}/g1-transcript.md`,
-    `# G1 company transcript\n\nPO first bubble ${timing.bubble === null ? 'never' : Math.round(timing.bubble) + ' ms'}, first token ${timing.stream === null ? 'never' : Math.round(timing.stream) + ' ms'}.\n\n## Scenario 1, task to the PO\n\n${render(msgs)}\n\n### Thread as rendered\n\n${thread1}\n\n## Scenario 2, task straight to ${eli.name}\n\n${render(chain2)}\n\n### Thread as rendered\n\n${thread2}\n`,
+    `${GAME}/w3-transcript.md`,
+    `# W3 company transcript\n\nPO first bubble ${timing.bubble === null ? 'never' : Math.round(timing.bubble) + ' ms'}, first token ${timing.stream === null ? 'never' : Math.round(timing.stream) + ' ms'}.\n\n## Scenario 1, task to the PO\n\n${render(msgs)}\n\n### Thread as rendered\n\n${thread1}\n\n## Scenario 2, task straight to ${eli.name}\n\n${render(chain2)}\n\n### Thread as rendered\n\n${thread2}\n`,
   );
-  console.log(`transcript: ${GAME}/g1-transcript.md`);
+  console.log(`transcript: ${GAME}/w3-transcript.md`);
 
   const failed = results.filter((r) => !r.ok);
   console.log(`\nSUMMARY ${results.length - failed.length}/${results.length} lines pass`);

@@ -28,6 +28,11 @@ export function world(ledger: readonly LedgerEntry[] = []) {
   const hires: HireSpec[] = [];
   let n = 0;
   let failDeliver: EmployeeId | undefined;
+  // What the folder holds. A ref in `fresh` changed since the request, a ref in `stale` did not, any other is missing.
+  const fresh = new Set<string>();
+  const stale = new Set<string>();
+  // Files a turn leaves behind. Most checks assume the work happened.
+  let dirty = ['out.txt'];
   const nameOf = (a: ActorId) => (a === 'owner' ? 'the owner' : a === 'mailroom' ? 'the office' : (members.find((m) => m.id === a)?.name ?? a));
   const room = new Mailroom(
     {
@@ -44,6 +49,10 @@ export function world(ledger: readonly LedgerEntry[] = []) {
         members.push({ id: hired.id, name: hired.name, role: 'employee', blockId: B1, status: 'idle' });
         return { ok: true, ...hired };
       },
+      artifacts: {
+        check: (_who, refs) => refs.map((r) => (fresh.has(r) ? 'changed' : stale.has(r) ? 'unchanged' : 'missing')),
+        changed: () => dirty,
+      },
       persist: (entry) => void persisted.push(entry),
       changed: () => {},
       stream: () => {},
@@ -52,7 +61,7 @@ export function world(ledger: readonly LedgerEntry[] = []) {
     },
     ledger,
   );
-  return { room, prompts, steers, persisted, hires, members, failDeliver: (e?: EmployeeId) => void (failDeliver = e) };
+  return { room, prompts, steers, persisted, hires, members, fresh, stale, setDirty: (d: string[]) => void (dirty = d), failDeliver: (e?: EmployeeId) => void (failDeliver = e) };
 }
 
 
