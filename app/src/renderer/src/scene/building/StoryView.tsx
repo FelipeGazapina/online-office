@@ -37,7 +37,9 @@ reflective.set(floorMaterials[0], 0.25);
 reflective.set(floorMaterials[2], 0.7);
 const furnitureMaterial = detail(new MeshStandardMaterial({ vertexColors: true, roughness: 0.75 }), 'furniture');
 const wallMaterial = detail(new MeshStandardMaterial({ vertexColors: true, roughness: 0.95 }), 'wall');
-const glassMaterial = new MeshStandardMaterial({ color: '#cfe8ff', emissive: '#a8d4ff', emissiveIntensity: 0.9, roughness: 0.2, side: DoubleSide });
+// Clear glass: the sky, the lawn and the trees show through it, with a faint cool tint and a sheen of the room on it.
+const glassMaterial = new MeshStandardMaterial({ color: '#dcefff', emissive: '#a8d4ff', emissiveIntensity: 0.06, roughness: 0.06, transparent: true, opacity: 0.16, depthWrite: false, side: DoubleSide });
+reflective.set(glassMaterial, 0.9);
 const frameMaterial = new MeshStandardMaterial({ vertexColors: true, roughness: 0.5, metalness: 0.2 });
 const railMaterial = new MeshStandardMaterial({ color: '#c9cdd8', roughness: 0.5, metalness: 0.3 });
 const ceilingMap = ceilingTexture();
