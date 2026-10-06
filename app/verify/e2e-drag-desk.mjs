@@ -5,12 +5,17 @@
 //   a drop on the tray moves the stage, a drop on an employee's desk assigns once and they react within 2 s, a drop on the
 //   PO's desk (in first person) assigns the PO who delegates, and a drop on an empty desk opens the hire panel for that
 //   block and desk, whose Hire seats the new employee there and starts the task.
+//   While the card is carried it never covers a name tag (screen rectangles of the card, its line and every tag showing),
+//   and the bar at the bottom says what letting go does for each target: give it to Ana, hire for this desk, move to a
+//   stage, or why it is refused. After a drop on a person the board stays folded as a tray of the cards still waiting, and
+//   three cards go to three people in a row from it, without opening the board, each run started.
 // Run: pnpm build:verify && OFFICE_OUT_DIR=out/verify OFFICE_CDP_PORT=9342 node verify/cdp.mjs verify/e2e-drag-desk.mjs
 // OFFICE_DRAG_WAIT_MIN caps each run of an agent (default 6).
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { carryClearance } from './carry-rects.mjs';
 import { HAIKU, assert } from './lib.mjs';
 
 const WAIT_MS = Number(process.env.OFFICE_DRAG_WAIT_MIN ?? 6) * 60_000;
@@ -130,11 +135,23 @@ export default async (s) => {
   const aim = () => s.eval(`${state}.aim`);
   const aimWord = () => s.eval("document.querySelector('[data-testid=desk-aim]')?.innerText ?? null");
   const chip = () => s.eval("document.querySelector('[data-testid=ghost-aim]')?.innerText ?? null");
+  const bar = () => s.eval("(() => { const b = document.querySelector('[data-testid=carry-bar]'); return b ? { text: b.innerText.replace(/\\s+/g, ' ').trim(), tone: b.dataset.tone } : null; })()");
+  const barIs = async (tone, pattern, label) => {
+    const b = await bar();
+    assert(!!b && b.tone === tone && pattern.test(b.text), `${label}: the bar says "${b?.text}" (${b?.tone})`);
+    return b;
+  };
+  const clear = async (p, label, minTags = 2) => {
+    const c = await carryClearance(s, p);
+    assert(c.covered.length === 0 && c.tags >= minTags, `${label}: the card and its line cover none of ${c.tags} name tags, ${c.away} px from the pointer${c.covered.length ? ` (covers ${c.covered.join(' | ')})` : ''}`);
+    return c;
+  };
   const onScreen = (p) => p.x > 8 && p.x < 1432 && p.y > 8 && p.y < 892;
   for (const [name, id] of [['Ana', ana.seat], ['Pia', pia.seat], ['the empty desk', emptyDesk], ['Bruno', bruno.seat]]) assert(onScreen(await deskAt(id)), `${name}'s desk is on screen at 1440x900`);
   const openBoard = async () => {
-    if (await s.eval("!!document.querySelector('[data-testid=task-board]')")) return;
-    await s.clickOn('[data-testid=tasks-chip]');
+    if (await s.eval("!!document.querySelector('[data-testid=task-board]') && !document.querySelector('.scrim.tb-away')")) return;
+    if (await s.eval("!!document.querySelector('[data-testid=tray-open]')")) await s.clickOn('[data-testid=tray-open]');
+    else await s.clickOn('[data-testid=tasks-chip]');
     await s.waitFor("!!document.querySelector('[data-testid=task-board]') && !document.querySelector('.scrim.tb-away')");
     await s.sleep(250);
   };
@@ -187,21 +204,32 @@ export default async (s) => {
   assert(a.deskId === ana.seat && a.verdict.to.id === ana.id && !a.verdict.already, 'over Ana\'s desk the aim is an assignment to Ana');
   await s.waitFor("document.querySelector('[data-testid=desk-aim]')?.innerText.trim() === 'Ana'");
   assert((await chip()) === 'Give it to Ana', 'the desk says Ana and the card in hand says what letting go does');
+  await barIs('go', /^Let go to give it to Ana\. Ana starts at once\./, 'over Ana');
+  await clear(anaAt, 'over Ana', 4);
   const lit = await s.eval("__office.probe('desk-aim')");
   assert(lit.length === 1 && lit[0].desk === ana.seat && lit[0].tone === 'go' && lit[0].label === 'Ana', 'the 3D highlight sits on Ana\'s desk, green', JSON.stringify(lit));
   await hover(await deskAt(pia.seat), `${state}.aim?.deskId === ${JSON.stringify(pia.seat)}`);
   assert((await aim()).verdict.to.po === true && (await s.eval("document.querySelector('[data-testid=desk-aim]').innerText.trim()")) === 'Pia · PO', 'over the PO desk it names the PO');
+  await barIs('go', /^Let go to give it to Pia, the PO\. Pia starts at once\./, 'over the PO desk');
+  await clear(await deskAt(pia.seat), 'over the PO desk', 4);
   await hover(await deskAt(emptyDesk), `${state}.aim?.verdict.kind === 'hire'`);
   a = await aim();
   assert(a.deskId === emptyDesk && a.verdict.blockId === checkout && a.verdict.role === 'employee', 'over an empty desk the aim is a hire into that desk of this block');
   await s.waitFor("document.querySelector('[data-testid=desk-aim]')?.innerText.trim() === 'Empty desk: hire'");
   assert((await chip()) === 'Hire for this desk', 'the empty desk says "Empty desk: hire"');
+  const emptyBar = await barIs('go', /^Empty desk\. Let go to hire someone for it, who starts this task\./, 'over the empty desk');
+  assert(!/give it to|person there/.test(emptyBar.text), 'and it does not talk about a person there');
+  await clear(await deskAt(emptyDesk), 'over the empty desk', 4);
   await hover(await deskAt(bruno.seat), `${state}.aim?.verdict.kind === 'refuse'`);
   const refusal = (await aim()).verdict.message;
   assert(/belongs to Billing/.test(refusal) && /own block, Checkout/.test(refusal), 'over a desk of another block the aim is a refusal that names both blocks', refusal);
-  assert((await s.eval("__office.probe('desk-aim')"))[0]?.tone === 'stop' && (await chip()) === refusal, 'it is lit red and the card in hand says why');
+  assert((await s.eval("__office.probe('desk-aim')"))[0]?.tone === 'stop' && (await chip()) === 'Not there', 'it is lit red and the card in hand says it cannot go there');
+  assert((await bar()).tone === 'stop' && (await bar()).text.startsWith(refusal), 'the bar says why: ' + refusal);
+  await clear(await deskAt(bruno.seat), 'over another block\'s desk', 4);
   await hover(await floorAt(), `${state}.aim === null`);
   assert((await s.eval("__office.probe('desk-aim').length")) === 0 && (await chip()) === 'Hold it over a desk', 'over open floor nothing is lit');
+  await barIs('idle', /^Hold it over a desk to give it to the person there, or over a stage to move it\./, 'over open floor');
+  await clear(await floorAt(), 'over open floor', 4);
   await hover(anaAt, `${state}.aim?.verdict.kind === 'assign'`);
   await s.press('Escape');
   await boardBack();
@@ -232,6 +260,16 @@ export default async (s) => {
   await s.mouse('mouseMoved', trayDoing.x, trayDoing.y, 1);
   await s.waitFor("!!document.querySelector('[data-tray-stage=doing].over')");
   assert((await aim()) === null, 'over a tray chip there is no desk aim');
+  await barIs('go', /^Let go to move it to In Progress\./, 'over the In Progress chip');
+  assert((await chip()) === 'Move to In Progress', 'and the card in hand says the same');
+  const trayTodo = await s.center('[data-tray-stage=todo]');
+  await s.mouse('mouseMoved', trayTodo.x - 10, trayTodo.y - 4, 1);
+  await s.mouse('mouseMoved', trayTodo.x, trayTodo.y, 1);
+  await s.waitFor("document.querySelector('[data-testid=carry-bar]')?.dataset.tone === 'same'");
+  await barIs('same', /^It is already in Todo\./, 'over the stage the card came from');
+  await s.mouse('mouseMoved', trayDoing.x - 10, trayDoing.y - 4, 1);
+  await s.mouse('mouseMoved', trayDoing.x, trayDoing.y, 1);
+  await s.waitFor("!!document.querySelector('[data-tray-stage=doing].over')");
   await s.mouse('mouseReleased', trayDoing.x, trayDoing.y);
   await boardBack();
   const moves = await s.eval(`window.__sent.slice(${mark}).filter((m) => m.type === 'update_task')`);
@@ -264,7 +302,11 @@ export default async (s) => {
   assert(sentAssign.length === 1 && sentAssign[0].taskId === anaTask.id && sentAssign[0].employeeId === ana.id, 'the drop fires assign_task once, for Ana');
   await s.sleep(1500);
   assert((await assigns()).length === 1, 'and not again');
-  assert(await s.eval(`!${state}.modal && !document.querySelector('[data-testid=task-board]')`), 'the owner is back in the office, the board closed');
+  await s.waitFor("!!document.querySelector('[data-testid=task-tray]')");
+  assert(await s.eval(`${state}.modal?.kind === 'task_board' && ${state}.modal.tray === true && !document.querySelector('[data-testid=task-board]') && !document.querySelector('[data-testid=carry-tray]')`), 'the owner is back in the office and the board stays folded as a tray');
+  const waiting = await s.eval("[...document.querySelectorAll('[data-testid=task-tray] .tb-card')].map((c) => c.querySelector('.tb-card-title').innerText)");
+  assert(!waiting.includes(titles.ana) && waiting.includes(titles.po) && waiting.includes(titles.hire) && waiting.length === 5, 'the tray lists the cards still in Todo and not the one just handed over', waiting.join(' | '));
+  assert(await s.eval("!!document.querySelector('[data-testid=tray-open]') && !!document.querySelector('[data-testid=tasks-chip]')"), 'and it says how to get the whole board back: an Open board button, and the Tasks chip still opens it');
   await s.waitFor(`${taskBy(titles.ana)}.stage === 'doing' && ${taskBy(titles.ana)}.assignees.includes(${JSON.stringify(ana.id)}) && ${taskBy(titles.ana)}.runs.length === 1`);
   const run = requestsTo(ana.id).find((m) => m.from === 'owner' && m.title === titles.ana);
   assert(!!run && run.intent === 'work' && (await task('ana')).runs[0] === run.id, 'mail.jsonl has one work request from the owner to Ana, and it is the task\'s run');
@@ -281,6 +323,7 @@ export default async (s) => {
   await pickUp(titles.ana);
   await hover(anaAt, `${state}.aim?.deskId === ${JSON.stringify(ana.seat)}`);
   assert((await aim()).verdict.already === true && (await s.eval("document.querySelector('[data-testid=desk-aim]').innerText.trim()")) === 'Ana is already on it' && (await s.eval("__office.probe('desk-aim')"))[0]?.tone === 'same', 'while Ana is on the task, her desk says so and lights amber');
+  await barIs('same', /^Ana is already on it\. Letting go changes nothing\./, 'over Ana while she is on it');
   await s.mouse('mouseReleased', anaAt.x, anaAt.y);
   await boardBack();
   await nothingSince(mark, 'dropping the card on her again sends nothing');
@@ -297,6 +340,8 @@ export default async (s) => {
   await pickUp(titles.po);
   await hover(piaFp, `${state}.aim?.deskId === ${JSON.stringify(pia.seat)}`);
   assert((await aim()).verdict.to.id === pia.id && (await s.eval("document.querySelector('[data-testid=desk-aim]').innerText.trim()")) === 'Pia · PO', 'in first person too, the PO\'s desk is the aim and says Pia');
+  await barIs('go', /^Let go to give it to Pia, the PO\./, 'in first person over the PO desk');
+  await clear(piaFp, 'in first person over the PO desk', 1);
   await s.mouse('mouseReleased', piaFp.x, piaFp.y);
   const poReleased = Date.now();
   let poReacted = null;
@@ -359,8 +404,63 @@ export default async (s) => {
   await inReview(s, titles.hire, 'hire.txt');
   const hire1 = await task('hire');
   assert(hire1.lastOutcome.outcome === 'done' && hire1.assignees.length === 1, 'the new hire finished the task on their first run');
+
+  // Three cards to three people in a row. The board is opened once, for the first card. After it the board stays folded as a
+  // tray, and the next two cards are picked from the tray and carried to their desks, with no trip back to the board.
+  const rows = [
+    { title: 'Add row1.txt', who: ana, file: 'row1.txt' },
+    { title: 'Add row2.txt', who: cleo, file: 'row2.txt' },
+    { title: 'Add row3.txt', who: pia, file: 'row3.txt' },
+  ];
+  for (const r of rows) await send({ type: 'create_task', boardId: quick, title: r.title, notes: deliverable(r.file, `hello from ${r.who.name}`) });
+  await s.waitFor(`${state}.tasks.length === ${Object.keys(titles).length + rows.length}`);
+  const inRow = (r) => s.eval(`${taskBy(r.title)}`);
+  const rowIds = [];
+  for (const r of rows) rowIds.push((await inRow(r)).id);
+  const pickFromTray = async (title) => {
+    const card = await s.eval(`(() => { const el = [...document.querySelectorAll('[data-testid=task-tray] .tb-card')].find((c) => c.innerText.includes(${JSON.stringify(title)})); if (!el) return null; el.scrollIntoView({ inline: 'nearest', block: 'nearest' }); const r = el.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; })()`);
+    if (!card) throw new Error(`no card for ${title} in the tray`);
+    await s.mouse('mouseMoved', card.x, card.y);
+    await s.mouse('mousePressed', card.x, card.y, 1);
+    await s.mouse('mouseMoved', card.x + 4, card.y - 12, 1);
+    await s.mouse('mouseMoved', card.x + 8, card.y - 40, 1);
+    await s.waitFor("!!document.querySelector('.tb-ghost')");
+    for (let i = 1; i <= 6; i++) await s.mouse('mouseMoved', card.x + 8, card.y - 40 - (i * 120) / 6, 1);
+    await s.waitFor("!!document.querySelector('.scrim.tb-away') && !!document.querySelector('[data-testid=carry-tray]')");
+  };
+  await openBoard();
+  await s.eval(`window.__modals = []; const kind = (m) => (m ? m.kind + (m.tray ? ':tray' : '') : 'none'); window.__modals.push(kind(${state}.modal)); __office.store.subscribe((st) => { const k = kind(st.modal); if (window.__modals.at(-1) !== k) window.__modals.push(k); })`);
+  mark = await sentCount();
+  const handed = [];
+  for (const [i, r] of rows.entries()) {
+    if (i === 0) await pickUp(r.title);
+    else await pickFromTray(r.title);
+    const at = await deskAt(r.who.seat);
+    await hover(at, `${state}.aim?.deskId === ${JSON.stringify(r.who.seat)}`);
+    await barIs('go', new RegExp(`^Let go to give it to ${r.who.name}`), `card ${i + 1} of 3 over ${r.who.name}`);
+    await clear(at, `card ${i + 1} of 3 over ${r.who.name}`, 4);
+    await s.mouse('mouseReleased', at.x, at.y);
+    await s.waitFor(`${state}.tasks.find((t) => t.id === ${JSON.stringify(rowIds[i])}).assignees.includes(${JSON.stringify(r.who.id)})`, 10000);
+    await s.waitFor("!!document.querySelector('[data-testid=task-tray]') && !document.querySelector('[data-testid=carry-tray]') && !document.querySelector('.tb-ghost')");
+    handed.push(r.title);
+    const left = await s.eval("[...document.querySelectorAll('[data-testid=task-tray] .tb-card .tb-card-title')].map((e) => e.innerText)");
+    assert(handed.every((t) => !left.includes(t)) && rows.slice(i + 1).every((n) => left.includes(n.title)), `after card ${i + 1} the tray lists what is left (${left.length} cards) and not what was handed over`);
+  }
+  const trail = await s.eval('window.__modals');
+  assert(JSON.stringify(trail) === JSON.stringify(['task_board', 'task_board:tray']), `three cards went out without the board reopening: the dialog went board, then tray, and stayed there (${trail.join(' > ')})`);
+  const trio = await s.eval(`window.__sent.slice(${mark}).filter((m) => m.type === 'assign_task')`);
+  assert(trio.length === 3 && trio.every((m, i) => m.taskId === rowIds[i] && m.employeeId === rows[i].who.id), 'three assign_task messages left, one per card, each for its person');
+  for (const [i, r] of rows.entries()) {
+    await s.waitFor(`${taskBy(r.title)}.runs.length === 1 && ${taskBy(r.title)}.stage === 'doing' && ${state}.taskTime[${JSON.stringify(rowIds[i])}]?.running.some((x) => x.employeeId === ${JSON.stringify(r.who.id)})`, 30000);
+    const req = requestsTo(r.who.id).find((m) => m.from === 'owner' && m.title === r.title);
+    assert(!!req && req.intent === 'work' && (await inRow(r)).runs[0] === req.id, `${r.who.name}'s run of "${r.title}" started: one work request in mail.jsonl, and the clock is running`);
+  }
+  assert((await s.eval(`${state}.modal?.tray === true`)), 'and the tray is still up for the next card');
+  await s.clickOn('[data-testid=tray-open]');
+  await s.waitFor("!!document.querySelector('[data-testid=task-board]') && !document.querySelector('.scrim.tb-away') && !document.querySelector('[data-testid=task-tray]')");
+  assert(await s.eval(`[...document.querySelectorAll('.tb-col[data-stage=doing] .tb-card')].filter((c) => ${JSON.stringify(rows.map((r) => r.title))}.some((t) => c.innerText.includes(t))).length === 3`), 'Open board brings the whole board back with the three cards in In Progress');
   const assignAll = await sentOf('assign_task');
-  assert(assignAll.length === 2 && assignAll.every((m) => [ana.id, pia.id].includes(m.employeeId)), 'over the whole run exactly two assign_task messages left the HUD: Ana\'s and the PO\'s');
+  assert(assignAll.length === 5 && assignAll.map((m) => m.employeeId).join() === [ana.id, pia.id, ana.id, cleo.id, pia.id].join(), 'over the whole run exactly five assign_task messages left the HUD: Ana, the PO, then the three of the row');
   assert((await s.eval(`${state}.tasks.filter((t) => ['${titles.cross}', '${titles.floor}', '${titles.esc}'].includes(t.title)).every((t) => t.stage === 'todo' && t.runs.length === 0 && t.assignees.length === 0)`)), 'the cards that were cancelled or refused are still untouched in Todo');
 };
 
