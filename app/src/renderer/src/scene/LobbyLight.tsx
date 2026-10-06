@@ -4,6 +4,8 @@ import { AdditiveBlending, BufferGeometry, DoubleSide, Float32BufferAttribute, t
 import type { Building } from '../../../shared/space/index.ts';
 import { runtime } from '../runtime.ts';
 import { poolTexture } from './textures.ts';
+import { lobbyVoid, type VoidRect } from './lobbyVoid.ts';
+import { CLERESTORY, END_WINDOWS, endWindowZs } from './LobbyVoid.tsx';
 import type { Bounds } from './Environment.tsx';
 
 // The lobby's own sun: the street-front windows throw crisp patches of light across the floor, with the frame's jambs and
@@ -20,9 +22,9 @@ const WARM: [number, number, number] = [1, 0.74, 0.42];
 type Pt = [number, number, number];
 
 /** Where a point of the window opening lands on the floor along the sun's ray. */
-const land = (x: number, y: number, z: number, x0: number): Pt => [Math.max(x0 + 0.3, x + DX * y), 0.035, z + DZ * y];
+const land = (x: number, y: number, z: number, x0: number, z0 = -99): Pt => [Math.max(x0 + 0.3, x + DX * y), 0.035, Math.max(z0, z + DZ * y)];
 
-function sunGeometry(b: Bounds, walls: readonly { x: number; z: number; d: string; open?: string }[]) {
+function sunGeometry(b: Bounds, walls: readonly { x: number; z: number; d: string; open?: string }[], lift: VoidRect | null) {
   const patch: number[] = [];
   const patchColor: number[] = [];
   const haze: number[] = [];
@@ -37,26 +39,31 @@ function sunGeometry(b: Bounds, walls: readonly { x: number; z: number; d: strin
     tri(out, col, p, q, r, ip, iq, ir);
     tri(out, col, p, r, s, ip, ir, is);
   };
+  // One window opening: its rim on the glass, the patch it throws and the faces of the beam between them.
+  const opening = (a: Pt, c: Pt, y0: number, y1: number, zClip: number, k = 1) => {
+    // a and c are the opening's two lower corners along its width, at height 0; y0..y1 is its height.
+    const at = (p: Pt, y: number): Pt => [p[0], y, p[2]];
+    const n0 = land(a[0], y0, a[2], b.x0, zClip);
+    const n1 = land(c[0], y0, c[2], b.x0, zClip);
+    const f1 = land(c[0], y1, c[2], b.x0, zClip);
+    const f0 = land(a[0], y1, a[2], b.x0, zClip);
+    quad(patch, patchColor, n0, n1, f1, f0, k, k, 0.55 * k, 0.55 * k);
+    const g0 = at(a, y0);
+    const g1 = at(c, y0);
+    const g2 = at(c, y1);
+    const g3 = at(a, y1);
+    quad(haze, hazeColor, g3, g0, n0, f0, 0.5 * k, 0.5 * k, 0.15 * k, 0);
+    quad(haze, hazeColor, g2, g1, n1, f1, 0.5 * k, 0.5 * k, 0.15 * k, 0);
+    quad(haze, hazeColor, g3, g2, f1, f0, 0.5 * k, 0.5 * k, 0, 0);
+  };
   for (const w of walls) {
     if (w.d !== 'e' || w.z !== b.z1 || w.open !== 'window') continue;
-    for (const [a, c] of [[0.05, 0.485], [0.515, 0.95]]) {
-      const xa = w.x + a;
-      const xb = w.x + c;
-      const z = b.z1 - 0.1;
-      const n0 = land(xa, SILL, z, b.x0);
-      const n1 = land(xb, SILL, z, b.x0);
-      const f1 = land(xb, HEAD, z, b.x0);
-      const f0 = land(xa, HEAD, z, b.x0);
-      quad(patch, patchColor, n0, n1, f1, f0, 1, 1, 0.55, 0.55);
-      // The four faces of the beam: the window's rim on the glass, its patch on the floor.
-      const g0: Pt = [xa, SILL, z];
-      const g1: Pt = [xb, SILL, z];
-      const g2: Pt = [xb, HEAD, z];
-      const g3: Pt = [xa, HEAD, z];
-      quad(haze, hazeColor, g3, g0, n0, f0, 0.5, 0.5, 0.15, 0);
-      quad(haze, hazeColor, g2, g1, n1, f1, 0.5, 0.5, 0.15, 0);
-      quad(haze, hazeColor, g3, g2, f1, f0, 0.5, 0.5, 0, 0);
-    }
+    for (const [a, c] of [[0.05, 0.485], [0.515, 0.95]]) opening([w.x + a, 0, b.z1 - 0.1], [w.x + c, 0, b.z1 - 0.1], SILL, HEAD, -99);
+  }
+  if (lift) {
+    // The clerestory over the front wall, between its mullions, and the three tall windows in the brick end wall.
+    for (let x = lift.x0; x < lift.x1; x += CLERESTORY.pitch) opening([x + 0.06, 0, b.z1 - 0.1], [Math.min(x + CLERESTORY.pitch - 0.06, lift.x1), 0, b.z1 - 0.1], CLERESTORY.y0, CLERESTORY.y1, lift.z0 + 0.3, 0.4);
+    for (const z of endWindowZs(lift)) opening([lift.x1 - 0.12, 0, z - END_WINDOWS.w / 2], [lift.x1 - 0.12, 0, z + END_WINDOWS.w / 2], END_WINDOWS.y0, END_WINDOWS.y1, lift.z0 + 0.3, 0.12);
   }
   const make = (pos: number[], col: number[]) => {
     const g = new BufferGeometry();
@@ -82,7 +89,8 @@ function Shade({ x, z, w, d }: { x: number; z: number; w: number; d: number }) {
 
 export function LobbySun({ b, building }: { b: Bounds; building: Building }) {
   const walls = building.stories[0]?.walls ?? [];
-  const geo = useMemo(() => sunGeometry(b, walls), [b.x0, b.x1, b.z1, walls]);
+  const lift = useMemo(() => lobbyVoid(building), [building]);
+  const geo = useMemo(() => sunGeometry(b, walls, lift), [b.x0, b.x1, b.z1, walls, lift]);
   const group = useRef<Group>(null);
   // Strongest at eye height; gone in the overview, where the sun stands high and the shadows are light.
   useFrame(() => {

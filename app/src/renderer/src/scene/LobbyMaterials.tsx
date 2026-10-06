@@ -1,7 +1,9 @@
 import { useMemo } from 'react';
 import { MeshStandardMaterial, RepeatWrapping } from 'three';
 import { LOBBY_Z0 } from '../../../shared/space/kit.ts';
+import type { Building } from '../../../shared/space/index.ts';
 import type { Bounds } from './Environment.tsx';
+import { lobbyVoid, VOID_TOP } from './lobbyVoid.ts';
 import { reflective } from './Lighting.tsx';
 import { useCanvasTexture } from './textures.ts';
 
@@ -88,19 +90,22 @@ function drawRug(g: CanvasRenderingContext2D) {
 
 const dim = (w: number, h: number) => ({ w, h });
 
-export function BrickWall({ b }: { b: Bounds }) {
-  const z0 = LOBBY_Z0 + 0.2;
+export function BrickWall({ b, building }: { b: Bounds; building: Building }) {
+  const lift = lobbyVoid(building);
+  // In the double-height hall the brick runs to the high ceiling and only covers the hall; otherwise it is the low feature wall.
+  const z0 = lift ? lift.z0 + 0.12 : LOBBY_Z0 + 0.2;
   const z1 = b.z1 - 0.2;
   const len = z1 - z0;
+  const height = lift ? VOID_TOP : 2.7;
   const tex = useCanvasTexture(1024, 512, drawBrick, []);
   const material = useMemo(() => {
     tex.wrapS = tex.wrapT = RepeatWrapping;
-    tex.repeat.set(len / 3.4, 2.7 / 1.7);
+    tex.repeat.set(len / 3.4, height / 1.7);
     return new MeshStandardMaterial({ map: tex, bumpMap: tex, bumpScale: 2.2, roughness: 0.88 });
-  }, [tex, len]);
+  }, [tex, len, height]);
   return (
-    <mesh position={[b.x1 - 0.1, 1.35, (z0 + z1) / 2]} rotation-y={-Math.PI / 2} material={material} receiveShadow>
-      <planeGeometry args={[len, 2.7]} />
+    <mesh position={[b.x1 - 0.1, height / 2, (z0 + z1) / 2]} rotation-y={-Math.PI / 2} material={material} receiveShadow>
+      <planeGeometry args={[len, height]} />
     </mesh>
   );
 }

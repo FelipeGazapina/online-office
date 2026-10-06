@@ -15,6 +15,7 @@ import { Environment } from './Environment.tsx';
 import { Exterior } from './Exterior.tsx';
 import { Lights } from './Lighting.tsx';
 import { LobbySun } from './LobbyLight.tsx';
+import { LobbyVoid } from './LobbyVoid.tsx';
 import { BrickWall, PatternRug, Terrazzo } from './LobbyMaterials.tsx';
 import { Chair, Desk, RoundedPlane } from './Furniture.tsx';
 import { fitText, FONT_BODY, FONT_DISPLAY, roundRect, useCanvasTexture } from './textures.ts';
@@ -294,7 +295,8 @@ export function Office({ company }: { company: Company | null }) {
       <CompanySign name={company?.name ?? 'Online Office'} b={b} />
       <SharedFacilities b={b} world={world} />
       <LobbyDecor cx={(b.x0 + b.x1) / 2} z1={b.z1} right={b.x1 - 4} doorX={DOOR_X} />
-      <BrickWall b={b} />
+      <LobbyVoid building={world.building} />
+      <BrickWall b={b} building={world.building} />
       <PatternRug x={(b.x0 + b.x1) / 2 + 1.5} z={5} w={9.4} d={5.2} />
       <MeetingRoom world={world} />
       <OwnerCorner world={world} />

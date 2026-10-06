@@ -14,6 +14,7 @@ import { carpetSurface, concreteSurface, PLASTER_MEAN, PLASTER_METRES, plasterSu
 import { detail, showAo } from '../shading.ts';
 import { reflective } from '../Lighting.tsx';
 import { floorGeometry } from './floor.ts';
+import { inVoid, lobbyVoid } from '../lobbyVoid.ts';
 import { propOf } from '../props.ts';
 import { box, cyl, merge, DEFAULT_TINT, DYNAMIC, modelOf, onTopOf, PROP_DEFS, screenGeometry } from './models.ts';
 import { crossesView, curbModel, facesCamera, frameModel, glassModel, occludes, octantOf, VARIANTS, wallMatrix, wallModel, wallRecords, ZERO, type Variant, type WallRecord } from './walls.ts';
@@ -419,17 +420,33 @@ function Rails({ geom }: { geom: FloorGeometry }) {
 // A story's ceiling, drawn only in first person. In the overview it would hide the rooms from above.
 function Ceiling({ geom }: { geom: FloorGeometry }) {
   const group = useRef<Group>(null);
+  const building = useStore((s) => s.building);
+  // The lobby's double-height void has its own, higher ceiling: this story's ceiling, beams and lamps skip it.
+  const lift = useMemo(() => (geom.index === 0 ? lobbyVoid(building) : null), [geom.index, building]);
   const geo = useMemo(() => {
     const floor = floorGeometry(geom);
     if (!floor) return null;
     const g = new BufferGeometry();
-    g.setAttribute('position', floor.getAttribute('position'));
+    const position = floor.getAttribute('position');
+    g.setAttribute('position', position);
     g.setAttribute('normal', floor.getAttribute('normal'));
     g.setAttribute('uv', floor.getAttribute('uv'));
-    g.setIndex(floor.getIndex());
+    const index = floor.getIndex();
+    if (index && lift) {
+      const kept: number[] = [];
+      for (let t = 0; t < index.count; t += 3) {
+        const a = index.getX(t);
+        const b = index.getX(t + 1);
+        const c = index.getX(t + 2);
+        const x = (position.getX(a) + position.getX(b) + position.getX(c)) / 3;
+        const z = (position.getZ(a) + position.getZ(b) + position.getZ(c)) / 3;
+        if (!inVoid(lift, x, z)) kept.push(a, b, c);
+      }
+      g.setIndex(kept);
+    } else g.setIndex(index);
     g.computeBoundingSphere();
     return g;
-  }, [geom]);
+  }, [geom, lift]);
   const lamps = useMemo(() => {
     const out: [number, number][] = [];
     const { lot, story } = geom;
@@ -437,11 +454,11 @@ function Ceiling({ geom }: { geom: FloorGeometry }) {
       for (let tx = lot.x0; tx < lot.x0 + lot.w; tx++) {
         if (((tx % 4) + 4) % 4 !== 1 || ((tz % 4) + 4) % 4 !== 1) continue;
         const i = tileIndex(lot, tx, tz);
-        if (hasFloorAt(story, i) && !geom.hole[i]) out.push([tx + 0.5, tz + 0.5]);
+        if (hasFloorAt(story, i) && !geom.hole[i] && !inVoid(lift, tx + 0.5, tz + 0.5)) out.push([tx + 0.5, tz + 0.5]);
       }
     }
     return out;
-  }, [geom]);
+  }, [geom, lift]);
   const fill = useMemo(
     () => (mesh: InstancedMesh) => {
       const m = new Matrix4();
@@ -455,7 +472,7 @@ function Ceiling({ geom }: { geom: FloorGeometry }) {
     const floored = (tx: number, tz: number) => {
       if (tx < lot.x0 || tz < lot.z0 || tx >= lot.x0 + lot.w || tz >= lot.z0 + lot.h) return false;
       const i = tileIndex(lot, tx, tz);
-      return hasFloorAt(story, i) && !geom.hole[i];
+      return hasFloorAt(story, i) && !geom.hole[i] && !inVoid(lift, tx + 0.5, tz + 0.5);
     };
     const mod4 = (v: number) => ((v % 4) + 4) % 4;
     for (let tz = lot.z0; tz < lot.z0 + lot.h; tz++) {
@@ -466,7 +483,7 @@ function Ceiling({ geom }: { geom: FloorGeometry }) {
       }
     }
     return out;
-  }, [geom]);
+  }, [geom, lift]);
   const fillBeams = useMemo(
     () => (mesh: InstancedMesh) => {
       const m = new Matrix4();
