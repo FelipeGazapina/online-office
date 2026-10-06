@@ -41,6 +41,8 @@ export type Task = {
   notes?: string;
   origin: TaskOrigin;
   stage: TaskStage;
+  // Set once the owner has chosen the stage of a provider task. From then on the provider's status never moves it.
+  stagePinned?: true;
   assignees: EmployeeId[];
   // The root request of every run this task started. A message belongs to the task when its rootId is one of these.
   runs: MessageId[];
@@ -167,9 +169,10 @@ export function runRequest(task: Task, board: Board): { title: string; text: str
 
 const sourceKey = (o: ProviderOrigin) => `${o.kind}:${o.externalId}`;
 
-// Provider cards become tasks, keyed by (board, provider, externalId). A card's status sets the stage only while the task
-// has no runs: after that the office knows better. A card that is gone upstream takes its task with it unless the task
-// has runs, and only when every source answered, so a source that failed cannot empty the board.
+// Provider cards become tasks, keyed by (board, provider, externalId). A card's status sets the stage only while the office
+// has no say: once the task has runs or the owner pinned its stage, the office knows better. A card that is gone upstream
+// takes its task with it unless the task has runs, and only when every source answered, so a source that failed cannot
+// empty the board.
 export function syncCards(board: Board, tasks: readonly Task[], cards: readonly TaskCard[], opt: { now: number; complete: boolean; newId: () => TaskId }): { tasks: Task[]; changed: boolean } {
   const mine = new Map<string, Task>();
   for (const t of tasks) if (t.boardId === board.id && t.origin.kind !== 'manual') mine.set(sourceKey(t.origin), t);
@@ -196,7 +199,7 @@ export function syncCards(board: Board, tasks: readonly Task[], cards: readonly 
       changed = true;
       continue;
     }
-    const stage = had.runs.length === 0 ? stageOfStatus(card.status) : had.stage;
+    const stage = had.runs.length === 0 && !had.stagePinned ? stageOfStatus(card.status) : had.stage;
     if (JSON.stringify([had.title, had.origin, had.stage]) !== JSON.stringify([card.title, origin, stage])) {
       next.set(had.id, { ...had, title: card.title, origin, stage, updatedAt: opt.now });
       changed = true;
