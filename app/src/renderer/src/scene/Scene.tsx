@@ -1,5 +1,5 @@
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
-import { useEffect, useRef } from 'react';
+import { Suspense, use, useEffect, useRef } from 'react';
 import { setLabelLayer } from './labelLayer.ts';
 import { useStore } from '../store.ts';
 import { BuildingLayer } from './building/BuildingLayer.tsx';
@@ -10,9 +10,11 @@ import { EmployeeView } from './EmployeeView.tsx';
 import { Office } from './Office.tsx';
 import { CrowdMeshes } from './people/CrowdMeshes.tsx';
 import { OwnerView } from './OwnerView.tsx';
+import { loadProps } from './props.ts';
 import { WalkMarker } from './WalkMarker.tsx';
 
 function World() {
+  use(loadProps());
   const company = useStore((s) => s.company);
   return (
     <>
@@ -114,7 +116,9 @@ export function Scene() {
       >
         <color attach="background" args={['#f1d9bd']} />
         <AdaptiveQuality />
-        <World />
+        <Suspense fallback={null}>
+          <World />
+        </Suspense>
       </Canvas>
     </>
   );

@@ -14,3 +14,21 @@ Each folder holds `diff.jpg` (colour), `nor.jpg` (OpenGL normal) and `arm.jpg` (
 | concrete | Concrete Floor 02, Poly Haven | https://polyhaven.com/a/concrete_floor_02 | CC0 |
 | plaster | Beige Wall 001, Poly Haven | https://polyhaven.com/a/beige_wall_001 | CC0 |
 | carpet | Carpet 014, ambientCG (Color, NormalGL and Roughness maps; ARM packed from Roughness) | https://ambientcg.com/a/Carpet014 | CC0 |
+
+## Models (`src/renderer/src/assets/models/`)
+
+Each prop is baked by `src/renderer/src/assets/bake/bake-props.mjs` from the sources below: welded into one mesh and one material, resized, simplified
+where heavy, with its maps packed into one atlas (`<name>-diff.jpg`, `<name>-nor.jpg`, `<name>-arm.jpg`, 512 or 1024 px per source material).
+Kenney's chair has flat material colours, so it ships as vertex colours with no maps.
+
+| Prop | Source asset | Page | License |
+| --- | --- | --- | --- |
+| desk | Wooden Table 02, Poly Haven | https://polyhaven.com/a/wooden_table_02 | CC0 |
+| sofa | Sofa 03, Poly Haven | https://polyhaven.com/a/sofa_03 | CC0 |
+| armchair | Modern Arm Chair 01, Poly Haven | https://polyhaven.com/a/modern_arm_chair_01 | CC0 |
+| bookshelf | Wooden Bookshelf Worn, Poly Haven | https://polyhaven.com/a/wooden_bookshelf_worn | CC0 |
+| plant_ficus, plant_tall | Potted Plant 01, Poly Haven (simplified) | https://polyhaven.com/a/potted_plant_01 | CC0 |
+| plant_syngonium | Potted Plant 02, Poly Haven (simplified) | https://polyhaven.com/a/potted_plant_02 | CC0 |
+| plant_succulent | Potted Plant 04, Poly Haven | https://polyhaven.com/a/potted_plant_04 | CC0 |
+| lamp | Modern Ceiling Lamp 01, Poly Haven (cord shortened) | https://polyhaven.com/a/modern_ceiling_lamp_01 | CC0 |
+| chair | `chairDesk`, Kenney Furniture Kit 2.0 | https://kenney.nl/assets/furniture-kit | CC0 |
