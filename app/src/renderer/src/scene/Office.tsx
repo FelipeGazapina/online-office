@@ -290,9 +290,6 @@ function Lights({ b, slots }: { b: Bounds; slots: readonly number[] }) {
         shadow-camera-near={1}
         shadow-camera-far={90}
       />
-      <pointLight position={[cx, 2.6, b.z1 - 3.5]} color="#ffb870" intensity={14} distance={16} decay={1.6} />
-      <pointLight position={[b.x1 - 4, 2.4, b.z1 - 3]} color="#ff9f5a" intensity={9} distance={11} decay={1.6} />
-      <pointLight position={[-14.5, 2.4, 5]} color="#ffb070" intensity={8} distance={10} decay={1.6} />
       <LightPools pools={pools} />
       <primitive object={target} />
     </>
