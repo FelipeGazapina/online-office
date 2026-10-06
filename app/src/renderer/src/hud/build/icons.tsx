@@ -171,3 +171,29 @@ export const FillIcon = () => (
     <path d="M4 4h16v16H4zM4 12h16M12 4v16" />
   </Svg>
 );
+
+export function BuildIcon() {
+  return (
+    <Svg size={18}>
+      <path d="M14.5 5.5l4 4M4 20l7.5-7.5M12.5 11.5l5-5a2.8 2.8 0 013.9 3.9l-5 5zM9 8l-2-2 3-3 2 2" />
+    </Svg>
+  );
+}
+
+export function PieceIcon() {
+  return (
+    <Svg size={18}>
+      <rect x="5" y="9" width="14" height="6" rx="1" />
+      <path d="M7 15v4M17 15v4M9 9V6h6v3" />
+    </Svg>
+  );
+}
+
+export function BlockIcon() {
+  return (
+    <Svg size={18}>
+      <path d="M3 8.5l9-4 9 4v7l-9 4-9-4zM3 8.5l9 4 9-4M12 12.5v7" />
+      <path d="M7.5 6.5l9 4" strokeDasharray="1.5 2" />
+    </Svg>
+  );
+}
