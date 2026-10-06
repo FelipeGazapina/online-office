@@ -39,9 +39,10 @@ export default async function (s) {
   const load = loadavg();
   await s.eval(`window.__stalls = []; new PerformanceObserver((l) => window.__stalls.push(...l.getEntries().map((e) => [Math.round(e.startTime), Math.round(e.duration)]))).observe({ type: 'longtask', buffered: true })`);
   await s.waitFor(`performance.now() > ${WINDOW_MS + 500}`, 40_000);
-  const { stalls, firstFrame, employees, stories } = await s.eval(`({
+  const { stalls, firstFrame, marks, employees, stories } = await s.eval(`({
     stalls: window.__stalls,
     firstFrame: Math.round(performance.getEntriesByName('office-first-frame')[0]?.startTime ?? -1),
+    marks: Object.fromEntries(performance.getEntriesByType('mark').filter((m) => m.name.startsWith('office-')).map((m) => [m.name.slice(7), m.detail ? Math.round(m.startTime) + ' ' + JSON.stringify(m.detail) : Math.round(m.startTime)])),
     employees: __office.store.getState().company.employees.length,
     stories: __office.store.getState().building.stories.length,
   })`);
@@ -52,7 +53,7 @@ export default async function (s) {
   const totalMs = within.reduce((a, [, d]) => a + d, 0);
   const maxMs = Math.max(0, ...within.map(([, d]) => d));
   const shot = await s.shot(`stalls-${fixture}-${tag}`);
-  const summary = { fixture, visible, load1: +load[0].toFixed(2), load5: +load[1].toFixed(2), firstFrameMs: firstFrame, tasks: within.length, maxMs, totalMs, tasksMs: within.map(([start, d]) => `${start}+${d}`) };
+  const summary = { fixture, visible, load1: +load[0].toFixed(2), load5: +load[1].toFixed(2), firstFrameMs: firstFrame, marks, tasks: within.length, maxMs, totalMs, tasksMs: within.map(([start, d]) => `${start}+${d}`) };
   console.log(JSON.stringify(summary));
   if (process.env.OFFICE_STALLS_REF) {
     const { readFileSync } = await import('node:fs');

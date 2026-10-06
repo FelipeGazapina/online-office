@@ -56,6 +56,8 @@ code {
 .stage {
   position: fixed;
   inset: 0;
+  /* The sky colour the scene clears to, so the window is not dark while the first draw waits for the GPU. */
+  background: #f1d9bd;
 }
 .stage canvas {
   display: block;

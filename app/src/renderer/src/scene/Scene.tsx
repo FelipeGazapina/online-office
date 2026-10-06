@@ -1,5 +1,5 @@
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
-import { Suspense, use, useEffect, useRef } from 'react';
+import { Suspense, use, useCallback, useEffect, useRef, useState } from 'react';
 import { setLabelLayer } from './labelLayer.ts';
 import { useStore } from '../store.ts';
 import { BuildingLayer } from './building/BuildingLayer.tsx';
@@ -13,6 +13,7 @@ import { OwnerView } from './OwnerView.tsx';
 import { DeskAim } from './DeskAim.tsx';
 import { setPickView } from './pickView.ts';
 import { loadProps } from './props.ts';
+import { warmFirstDraw } from './warmup.ts';
 import { WalkMarker } from './WalkMarker.tsx';
 
 function PickView() {
@@ -24,9 +25,24 @@ function PickView() {
   return null;
 }
 
-function World() {
+// The render loop waits for this: the first draw would otherwise block the main thread while the GPU links the programs and
+// takes the textures. It mounts once the company and the building have arrived, so the scene it compiles is the whole office.
+function FirstDraw({ onReady }: { onReady: () => void }) {
+  const { gl, scene, camera } = useThree();
+  useEffect(() => {
+    let live = true;
+    void warmFirstDraw(gl, scene, camera).then(() => live && onReady());
+    return () => {
+      live = false;
+    };
+  }, [gl, scene, camera, onReady]);
+  return null;
+}
+
+function World({ onReady }: { onReady: () => void }) {
   use(loadProps());
   const company = useStore((s) => s.company);
+  const built = useStore((s) => s.building !== null);
   return (
     <>
       <PickView />
@@ -45,6 +61,7 @@ function World() {
       {company?.employees.map((e) => (
         <EmployeeView key={e.id} employee={e} />
       ))}
+      {company && built && <FirstDraw onReady={onReady} />}
     </>
   );
 }
@@ -115,7 +132,16 @@ function AdaptiveQuality() {
   return null;
 }
 
+// If the GPU or the main process never answers, the office draws anyway after this long.
+const WARMUP_LIMIT_MS = 4000;
+
 export function Scene() {
+  const [warm, setWarm] = useState(false);
+  const open = useCallback(() => setWarm(true), []);
+  useEffect(() => {
+    const limit = setTimeout(open, WARMUP_LIMIT_MS);
+    return () => clearTimeout(limit);
+  }, [open]);
   return (
     <>
       <div className="labels" ref={setLabelLayer} />
@@ -126,11 +152,12 @@ export function Scene() {
         dpr={[1, 1.5]}
         camera={{ fov: 55, near: 0.1, far: 220, position: [-10, 6, 12] }}
         gl={{ antialias: true, powerPreference: 'high-performance' }}
+        frameloop={warm ? 'always' : 'never'}
       >
         <color attach="background" args={['#f1d9bd']} />
         <AdaptiveQuality />
         <Suspense fallback={null}>
-          <World />
+          <World onReady={open} />
         </Suspense>
       </Canvas>
     </>
