@@ -65,8 +65,11 @@ function DailyHuddle({ color }: { color: string }) {
   }, []);
   return (
     <group>
-      <mesh receiveShadow position={[0, 0.035, 0]}><cylinderGeometry args={[1.25, 1.25, 0.06, 20]} /><meshStandardMaterial color={color} roughness={0.9} /></mesh>
-      <mesh castShadow position={[0, 0.62, 0]}><cylinderGeometry args={[0.75, 0.82, 0.1, 16]} /><meshStandardMaterial color="#eadfc9" roughness={0.75} /></mesh>
+      <mesh receiveShadow position={[0, 0.035, 0]}><cylinderGeometry args={[1.25, 1.25, 0.06, 56]} /><meshStandardMaterial color={color} roughness={0.9} /></mesh>
+      <mesh castShadow position={[0, 0.7, 0]}><cylinderGeometry args={[0.8, 0.8, 0.05, 56]} /><meshStandardMaterial color="#eadfc9" roughness={0.45} /></mesh>
+      <mesh castShadow position={[0, 0.665, 0]}><cylinderGeometry args={[0.76, 0.76, 0.03, 56]} /><meshStandardMaterial color="#8c6a4a" roughness={0.6} /></mesh>
+      <mesh castShadow position={[0, 0.35, 0]}><cylinderGeometry args={[0.07, 0.1, 0.65, 16]} /><meshStandardMaterial color="#3a3f4e" roughness={0.5} /></mesh>
+      <mesh castShadow position={[0, 0.03, 0]}><cylinderGeometry args={[0.38, 0.4, 0.04, 40]} /><meshStandardMaterial color="#3a3f4e" roughness={0.5} /></mesh>
       {[-1, 1].map((x) => <Chair key={x} position={[x * 0.95, 0, 0]} color={color} rotationY={x < 0 ? -Math.PI / 2 : Math.PI / 2} />)}
       <mesh position={[0, 1.05, -0.82]}><planeGeometry args={[1.5, 0.64]} /><meshBasicMaterial map={tex} transparent /></mesh>
     </group>

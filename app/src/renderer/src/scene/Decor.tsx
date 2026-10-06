@@ -1,6 +1,7 @@
 import { useLayoutEffect, useMemo, useRef } from 'react';
 import { BufferGeometry, Float32BufferAttribute, type InstancedMesh, Matrix4, MeshStandardMaterial, Quaternion, Vector3 } from 'three';
 import { box, blob, cyl, leafMass, merge } from './building/models.ts';
+import { bbox } from './building/parts.ts';
 import { propOf } from './props.ts';
 import { detail } from './shading.ts';
 
@@ -70,7 +71,7 @@ function art(x: number, y: number, z: number, w: number, h: number, face: 1 | -1
 // A low shelf of books with a plant and a framed picture leaning on it. Long side along z.
 function shelf(x: number, z: number, len: number, n: number): BufferGeometry[] {
   const books = ['#b85c4a', '#4f7ea3', '#d9b45a', '#6a8f5a', '#e9e4da', '#6a4c93'];
-  const out = [box(0.4, 0.9, len, x, 0.45, z, '#8c6a4a'), box(0.44, 0.04, len + 0.04, x, 0.92, z, '#6a4d34')];
+  const out = [bbox(0.4, 0.9, len, x, 0.45, z, '#8c6a4a', 0.03), bbox(0.44, 0.05, len + 0.04, x, 0.92, z, '#6a4d34', 0.02)];
   for (let i = 0; i < Math.floor(len / 0.2) - 1; i++) out.push(box(0.26, 0.22 + (i % 3) * 0.05, 0.1, x, 1.05 + (i % 3) * 0.025, z - len / 2 + 0.25 + i * 0.2, books[(i + n) % books.length]));
   return out;
 }
@@ -182,15 +183,28 @@ export function LobbyDecor({ cx, z1, right, doorX }: DecorSpec) {
   );
 }
 
+// Behind the whiteboard: a walnut slat wall with two framed pictures, so the board stands against a finished wall and not against glass.
+function boardWall(): BufferGeometry[] {
+  const z = -4.45;
+  const out: BufferGeometry[] = [box(7.2, 3.0, 0.04, 0.25, 1.5, z - 0.02, '#4a3624'), box(7.3, 0.08, 0.1, 0.25, 3.02, z - 0.05, '#2b2e38'), box(7.3, 0.1, 0.1, 0.25, 0.05, z - 0.05, '#2b2e38')];
+  const tones = ['#c08a5a', '#b27a4c', '#cb9768', '#a96f42'];
+  for (let i = 0; i < 46; i++) out.push(box(0.09, 2.88, 0.06 + (i % 3) * 0.015, 0.25 - 3.45 + i * 0.15, 1.5, z - 0.07, tones[i % 4]));
+  out.push(...art(-2.95, 1.7, z + 0.02, 0.8, 1.1, 1, 2), ...art(3.45, 1.7, z + 0.02, 0.8, 1.1, 1, 3));
+  return out;
+}
+
 function pod(): BufferGeometry[] {
   return [
+    ...boardWall(),
     ...pottedPlant(-4.2, 3.1, 1),
     ...pottedPlant(4.2, -3.1, 1),
-    box(0.9, 0.7, 2.4, 4.3, 0.35, 0.3, '#efe0c6'),
-    box(0.9, 0.04, 2.4, 4.3, 0.72, 0.3, '#c59e73'),
+    bbox(0.9, 0.7, 2.4, 4.3, 0.35, 0.3, '#efe0c6', 0.05),
+    bbox(0.96, 0.06, 2.46, 4.3, 0.73, 0.3, '#c59e73', 0.025),
+    ...[-0.8, 0, 0.8].map((dz) => box(0.02, 0.5, 0.7, 3.84, 0.37, 0.3 + dz, '#d8c4a4')),
     cyl(0.04, 0.04, 1.4, -4.3, 0.7, -2.6, '#2b2e38', 8),
     cyl(0.2, 0.1, 0.26, -4.3, 1.45, -2.6, '#f8e7b8'),
-    cyl(0.5, 0.5, 0.34, 2.4, 0.17, 3.3, '#c9a77c', 14),
+    cyl(0.5, 0.5, 0.3, 2.4, 0.15, 3.3, '#b08a5e', 40),
+    cyl(0.46, 0.5, 0.08, 2.4, 0.34, 3.3, '#d2b58a', 40),
     ...shelf(-4.7, 0.6, 2.2, 0),
     ...art(0, 1.35, 0, 0.5, 0.6, 1, 3).map((g) => g.rotateY(Math.PI / 2).translate(-4.55, 0, 1.4)),
     // A printer on its table, a water cooler and a bin along the back of the pod.
