@@ -135,17 +135,46 @@ export default async function (s) {
   await s.sleep(1200);
   await save(s, 's4-catalog');
   const cardCount = await s.eval(`document.querySelectorAll('.bh-card').length`);
-  assert(cardCount >= 2, `the catalog lists its desks (${cardCount} cards)`);
-  assert(await s.eval(`[...document.querySelectorAll('.bh-card img')].every((i) => i.src.startsWith('data:image/png'))`), 'every furniture card shows a rendered thumbnail');
+  assert(cardCount >= 8, `the catalog lists its desks (${cardCount} cards)`);
+  const labels = await s.eval(`[...document.querySelectorAll('.bh-tab')].map((t) => t.textContent.trim())`);
+  assert(labels.length === 10 && labels.every((l) => l.length > 2), `every category tab shows its name (${labels.join(', ')})`);
+  for (const tab of ['desks', 'seating', 'tables', 'decor', 'plants', 'storage']) {
+    await clickSel(`[data-tab="${tab}"]`);
+    const n = await s.eval(`document.querySelectorAll('.bh-card').length`);
+    assert(n >= 8, `the ${tab} tab holds ${n} items`);
+    assert(await s.eval(`[...document.querySelectorAll('.bh-card img')].every((i) => i.src.startsWith('data:image/png') && i.src.length > 1500)`), `every ${tab} card shows a rendered thumbnail`);
+    assert(await s.eval(`[...document.querySelectorAll('.bh-card')].every((c) => /^[0-9.]+ × [0-9.]+ m$/.test(c.querySelector('[data-testid="footprint-badge"]')?.textContent ?? ''))`), `and a footprint badge on each ${tab} card`);
+  }
+  await clickSel('[data-tab="desks"]');
   await clickSel('.bh-search input');
+  const everything = await s.eval(`document.querySelectorAll('.bh-card').length`);
+  assert(everything >= 60, `an empty search box lists everything (${everything} cards)`);
   await s.type('pla');
   await s.sleep(250);
   const found = await s.eval(`[...document.querySelectorAll('.bh-card')].map((c) => c.dataset.entry)`);
-  assert(found.includes('plant') && !found.includes('sofa'), `the search box narrows the catalog to plants (${found.join(', ')})`);
+  assert(found.includes('plant') && found.includes('plant_tree') && !found.includes('sofa'), `typing narrows it live to plants (${found.length} left)`);
+  await s.type('nt_t');
+  await s.sleep(250);
+  assert((await s.eval(`[...document.querySelectorAll('.bh-card')].map((c) => c.dataset.entry)`)).join() === 'plant_tree', 'and keeps narrowing as more letters come');
   await s.eval(`document.querySelector('.bh-search input').blur()`);
   await clickSel('.bh-clear');
   await s.press('Escape');
   assert((await s.eval(`${store}.build.search`)) === '', 'and the clear button empties the search');
+  await clickSel('[data-tab="desks"]');
+  const cardAt = (id) => s.eval(`(() => { const r = document.querySelector('[data-entry="${id}"]').getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; })()`);
+  await clickSel('[data-tab="plants"]');
+  const over = await cardAt('plant_large');
+  await s.mouse('mouseMoved', over.x, over.y);
+  await s.sleep(300);
+  const peeked = await s.eval(`__office.probe('footprint')`);
+  assert(peeked.length === 1 && peeked[0].w === 0.5 && peeked[0].d === 0.5, `hovering a card previews the piece as the cursor ghost (${peeked[0]?.w} x ${peeked[0]?.d} m)`);
+  assert((await ui(s)).tool.kind === 'select', 'without taking the piece in hand');
+  await s.mouse('mouseMoved', 700, 300);
+  await s.sleep(150);
+  await s.mouse('mouseMoved', 720, 320);
+  await s.sleep(250);
+  assert((await s.eval(`__office.probe('footprint')`)).length === 0, 'and the ghost goes away with the pointer');
+  await clickSel('[data-tab="desks"]');
 
   // ---- the camera pans on its own while building
   const cam0 = await s.eval('({ x: __officeCamera.x, z: __officeCamera.z })');

@@ -25,7 +25,7 @@ import {
 } from '../../../../shared/space/buildersGesture.ts';
 import { rotate, sendOps, setTool, toolItem } from '../../hud/build/actions.ts';
 import { buildView, draft, modifiers, setGhost, spaceContext, VIOLATION_TEXT, type Ghost } from '../../hud/build/state.ts';
-import { get, set, useStore, type BuildCursor, type BuildState } from '../../store.ts';
+import { get, set, useStore, type BuildCursor, type BuildState, type BuildTool } from '../../store.ts';
 import { groundPoint, tileOf, vertexOf } from './Picking.ts';
 
 type Drag = { tool: 'wall' | 'room' | 'floor'; a: Vec2; erase: boolean; tiles: Map<string, Vec2>; flood: boolean; lastTile: Vec2 | null };
@@ -47,11 +47,17 @@ function storyItem(b: Building, level: number, id: ItemId | null): Item | null {
   return id ? (b.stories[level]?.items.find((i) => i.id === id) ?? null) : null;
 }
 
+function peekTool(def: string): Extract<BuildTool, { kind: 'item' }> {
+  return { kind: 'item', def, rot: 0, carry: null, blockId: ITEM_DEFS[def].seat ? (get().company?.blocks[0]?.id ?? null) : null };
+}
+
 function plan(b: Building, build: BuildState, p: Vec2, drag: Drag | null, shift: boolean, ctrl: boolean): Plan | null {
   const level = build.level;
   const story = b.stories[level];
   if (!story) return null;
-  const tool = build.tool;
+  // A furniture card under the pointer stands in for whatever tool is in hand, so hovering shows the piece as the cursor ghost.
+  const peeked = !drag && build.peek && ITEM_DEFS[build.peek] ? peekTool(build.peek) : null;
+  const tool = peeked ?? build.tool;
   const kind = drag?.tool ?? (tool.kind === 'room' && shift ? 'wall' : tool.kind);
   switch (kind) {
     case 'select':
@@ -119,6 +125,8 @@ export function BuildInput() {
     if (!on) return;
     const el = gl.domElement;
     let last: { x: number; y: number } | null = null;
+    // Where the pointer last was over the scene, so a card hovered afterwards still previews its piece there.
+    let seen: { x: number; y: number } | null = null;
     let drag: Drag | null = null;
     let down: { x: number; y: number; button: number } | null = null;
     let verdictKey = '';
@@ -153,8 +161,11 @@ export function BuildInput() {
 
     const current = () => {
       const s = get();
-      if (!s.build || !s.building || !last) return null;
-      const p = groundPoint(camera, el, last.x, last.y, s.build.level);
+      if (!s.build || !s.building) return null;
+      const r = el.getBoundingClientRect();
+      const from = last ?? (s.build.peek ? (seen ?? { x: r.left + r.width / 2, y: r.top + r.height / 2 }) : null);
+      if (!from) return null;
+      const p = groundPoint(camera, el, from.x, from.y, s.build.level);
       return p ? { s, build: s.build, b: s.building, p } : null;
     };
 
@@ -179,9 +190,10 @@ export function BuildInput() {
         ghost = pl.ghost(v.ok);
         if (ghost) verdict = { ok: v.ok, text: v.text };
         const text = !v.ok ? v.text : pl.readout;
-        if (text && last) {
+        if (text && (last ?? seen)) {
           const spot = drag && pl.anchor ? screenOf(pl.anchor, build.level) : null;
-          readout = spot ? { text, x: spot.x, y: spot.y, bad: !v.ok, anchored: true } : { text, x: last.x, y: last.y, bad: !v.ok };
+          const at = (last ?? seen)!;
+          readout = spot ? { text, x: spot.x, y: spot.y, bad: !v.ok, anchored: true } : { text, x: at.x, y: at.y, bad: !v.ok };
         }
       }
       if (!ghost && build.tool.kind === 'select' && hover && story) {
@@ -193,7 +205,7 @@ export function BuildInput() {
     };
 
     const track = (e: PointerEvent) => {
-      last = { x: e.clientX, y: e.clientY };
+      last = seen = { x: e.clientX, y: e.clientY };
       modifiers.shift = e.shiftKey || modifiers.shift;
       const r = el.getBoundingClientRect();
       buildView.edge.x = e.clientX - r.left < EDGE_PX ? -1 : r.right - e.clientX < EDGE_PX ? 1 : 0;

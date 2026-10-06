@@ -42,7 +42,8 @@ export type BuildTool =
   | { kind: 'opening'; open: 'door' | 'window' | 'arch' }
   | { kind: 'item'; def: string; rot: Rot; carry: ItemId | null; blockId: string | null };
 export type WallsMode = 'up' | 'cutaway' | 'down';
-export type BuildState = { tool: BuildTool; tab: string; search: string; paint: PaintId; style: number; wallsMode: WallsMode; level: number };
+// `searching` is the search box having focus: the catalog lists everything. `peek` is the furniture card under the pointer, drawn as the cursor ghost.
+export type BuildState = { tool: BuildTool; tab: string; search: string; searching: boolean; peek: string | null; paint: PaintId; style: number; wallsMode: WallsMode; level: number };
 // What the pointer is over, for the tooltip next to it. `verdict` is the rule check of the ghost, null when there is no ghost.
 export type BuildCursor = { readout: { text: string; x: number; y: number; bad: boolean; anchored?: boolean } | null; verdict: { ok: boolean; text: string } | null; hover: ItemId | null };
 

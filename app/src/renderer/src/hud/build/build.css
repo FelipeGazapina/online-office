@@ -186,7 +186,7 @@ html[data-building] .labels * {
   display: flex;
   align-items: center;
   gap: 6px;
-  width: 190px;
+  width: 150px;
   height: 34px;
   padding: 0 8px 0 11px;
   background: white;
@@ -229,9 +229,9 @@ html[data-building] .labels * {
   flex: none;
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 5px;
   height: 34px;
-  padding: 0 11px;
+  padding: 0 8px;
   border: 0;
   border-radius: 10px 10px 0 0;
   background: transparent;
@@ -263,7 +263,7 @@ html[data-building] .labels * {
   align-items: center;
   gap: 6px;
   font-size: 12.5px;
-  color: var(--muted);
+  color: var(--paper);
 }
 .bh-team i {
   width: 10px;
@@ -271,11 +271,13 @@ html[data-building] .labels * {
   border-radius: 50%;
 }
 .bh-team select {
-  height: 30px;
-  border: 1px solid var(--line);
-  border-radius: 8px;
+  height: 24px;
+  border: 0;
+  border-radius: 999px;
   background: white;
+  color: var(--ink);
   padding: 0 8px;
+  font: 600 12.5px var(--body);
 }
 .bh-strip {
   display: flex;
@@ -435,4 +437,24 @@ html[data-building] .labels * {
 }
 .bh-edge.bad {
   color: #b8322f;
+}
+
+.bh-thumb {
+  position: relative;
+}
+.bh-badge {
+  position: absolute;
+  top: -2px;
+  right: -4px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: rgba(35, 38, 64, 0.82);
+  color: white;
+  font: 600 10.5px/1.4 var(--body);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.bh-card[aria-pressed='true'] .bh-badge {
+  background: rgba(255, 255, 255, 0.9);
+  color: var(--ink);
 }

@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react';
 import { ITEM_DEFS } from '../../../../shared/space/index.ts';
 import { get, useStore, type BuildTool } from '../../store.ts';
-import { addFloor, chooseEntry, exitBuild, isActive, patchBuild, redo, rotate, selectTab, setLevel, undo } from './actions.ts';
+import { addFloor, chooseEntry, exitBuild, isActive, patchBuild, peek, redo, rotate, selectTab, setLevel, undo } from './actions.ts';
 import { footprintText, TABS, visibleEntries, type Entry } from './catalog.ts';
 import { Redo, Search, TabIcon, ToolIcon, Turn, Undo, WALL_MODES, WallsIcon } from './icons.tsx';
 import { useThumbs } from './thumbs.ts';
@@ -60,18 +60,27 @@ function Card({ entry, thumb, search }: { entry: Entry; thumb: string | undefine
   const active = useStore((s) => (s.build ? isActive(entry, s.build) : false));
   const tab = TABS.find((t) => t.id === entry.tab)?.label ?? '';
   const swatch = entry.kind === 'floor' || entry.kind === 'style';
-  const sub = search ? tab : entry.kind === 'item' ? footprintText(entry.def) : entry.kind === 'tool' ? '' : '';
+  const item = entry.kind === 'item';
   return (
-    <button className={`bh-card${swatch ? ' bh-swatch' : ''}`} aria-pressed={active} onClick={() => chooseEntry(entry)} title={entry.name} data-entry={entry.id}>
+    <button
+      className={`bh-card${swatch ? ' bh-swatch' : ''}`}
+      aria-pressed={active}
+      onClick={() => chooseEntry(entry)}
+      onPointerEnter={() => item && peek(entry.def)}
+      onPointerLeave={() => item && peek(null)}
+      title={entry.name}
+      data-entry={entry.id}
+    >
       <span className="bh-thumb">
         {entry.kind === 'item' && (thumb ? <img src={thumb} alt="" draggable={false} /> : <i className="bh-thumb-wait" />)}
         {entry.kind === 'tool' && <ToolIcon icon={entry.icon} />}
         {swatch && (
           <i className={`bh-chip${entry.kind === 'floor' && entry.paint === 0 ? ' none' : ''}`} style={{ background: entry.color }} />
         )}
+        {entry.kind === 'item' && <span className="bh-badge" data-testid="footprint-badge">{footprintText(entry.def)}</span>}
       </span>
       <span className="bh-name">{entry.name}</span>
-      {sub && <span className="bh-sub">{sub}</span>}
+      {search && <span className="bh-sub">{tab}</span>}
     </button>
   );
 }
@@ -105,9 +114,11 @@ function TeamPick() {
 function Dock() {
   const tab = useStore((s) => s.build?.tab ?? 'desks');
   const search = useStore((s) => s.build?.search ?? '');
+  const searching = useStore((s) => s.build?.searching ?? false);
   const tool = useStore((s) => s.build?.tool ?? { kind: 'select' as const });
   const thumbs = useThumbs();
-  const entries = visibleEntries(tab as never, search);
+  const entries = visibleEntries(tab as never, search, searching);
+  const listing = searching || !!search.trim();
   const hint = HINTS[tool.kind](tool);
   const input = useRef<HTMLInputElement>(null);
   return (
@@ -116,6 +127,7 @@ function Dock() {
         {hint.map(([k, v]) => (
           <span key={k}><kbd>{k}</kbd> {v}</span>
         ))}
+        <TeamPick />
         {tool.kind === 'item' && ITEM_DEFS[tool.def]?.kind !== 'stairs' && (
           <button type="button" className="bh-turn" data-testid="rotate-handle" onClick={() => rotate(1)} title="Turn it a quarter (. key)" aria-label="Turn it">
             <Turn /> Turn
@@ -126,24 +138,23 @@ function Dock() {
         <div className="bh-head">
           <label className="bh-search">
             <Search />
-            <input ref={input} value={search} onChange={(e) => patchBuild({ search: e.target.value })} placeholder="Search the catalog" aria-label="Search the catalog" spellCheck={false} />
+            <input ref={input} value={search} onChange={(e) => patchBuild({ search: e.target.value })} onFocus={() => patchBuild({ searching: true })} onBlur={() => patchBuild({ searching: false })} placeholder="Search the catalog" aria-label="Search the catalog" spellCheck={false} />
             {search && <button type="button" className="bh-clear" onClick={() => { patchBuild({ search: '' }); input.current?.focus(); }} aria-label="Clear search">×</button>}
           </label>
           <div className="bh-tabs" role="tablist">
             {TABS.map((t) => (
-              <button key={t.id} role="tab" data-tab={t.id} aria-selected={!search && tab === t.id} className="bh-tab" onClick={() => selectTab(t.id)} title={t.label}>
+              <button key={t.id} role="tab" data-tab={t.id} aria-selected={!listing && tab === t.id} className="bh-tab" onClick={() => selectTab(t.id)} title={t.label}>
                 <TabIcon tab={t.id} />
-                {!search && tab === t.id && <span>{t.label}</span>}
+                <span>{t.label}</span>
               </button>
             ))}
           </div>
-          <TeamPick />
         </div>
-        <div className="bh-strip">
+        <div className="bh-strip" onMouseDown={(e) => searching && e.preventDefault()}>
           {entries.length === 0 ? (
             <p className="bh-empty">Nothing called “{search.trim()}”. Try desk, plant or window.</p>
           ) : (
-            entries.map((e) => <Card key={e.id} entry={e} thumb={e.kind === 'item' ? thumbs.get(e.def) : undefined} search={!!search.trim()} />)
+            entries.map((e) => <Card key={e.id} entry={e} thumb={e.kind === 'item' ? thumbs.get(e.def) : undefined} search={listing} />)
           )}
         </div>
       </div>
