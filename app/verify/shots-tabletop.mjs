@@ -98,7 +98,7 @@ export default async function (s) {
   await d.hoverPx(px);
   await s.sleep(400);
   const foot = await d.probeOf('top-footprint');
-  console.log('footprint', JSON.stringify(foot));
+  assert(foot?.ok === true && foot.color === '#2fe06a' && (await d.probeOf('surface'))?.ok === true, 'the footprint on the table and the outline of its top are green before the shot');
   await d.shotTo('place');
   await s.press('Escape');
   await d.park();
