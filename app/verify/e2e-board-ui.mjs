@@ -555,6 +555,9 @@ export default async (s, { launch }) => {
   assert(await s.eval(`(() => { const b = document.querySelector('[data-testid=send-hours]'); return !!b && !b.disabled && document.querySelector('[data-testid=hours-unsent]')?.innerText.includes('Ana') && !document.querySelector('[data-testid=send-hours-reason]'); })()`), 'the detail lists what is not sent per person and offers an enabled Send button');
   assert(await s.eval(`!!document.querySelector('.tb-card[data-task-id=${JSON.stringify(csTask.id)}] [data-testid=unsent-chip]')`), 'the card carries a small chip with the time to send');
   const markSend = await sentCount();
+  // The branch and pull request rows push the button below the fold of a short window, and a click lands on the pixel it is given.
+  await s.eval(`document.querySelector('[data-testid=send-hours]').scrollIntoView({ block: 'center' })`);
+  await s.sleep(300);
   await s.clickOn('[data-testid=send-hours]');
   assert((await sentSince(markSend)).filter((m) => m.type === 'send_hours').length === 1, 'the click sends one send_hours');
   await s.waitFor(`document.querySelector('[data-testid=send-hours]')?.disabled === true && document.querySelector('[data-testid=send-hours-reason]')?.innerText.includes('Nothing to send yet')`, 15000);

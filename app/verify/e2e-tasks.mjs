@@ -113,7 +113,9 @@ async function waitForStage(s, taskId, stage, label) {
   while (Date.now() - t0 < WAIT_MS) {
     await unattended(s);
     const t = await s.eval(`(() => { const t = ${taskExpr(taskId)}; return t && { stage: t.stage, runs: t.runs.length, out: t.lastOutcome && { outcome: t.lastOutcome.outcome, text: t.lastOutcome.text.slice(0, 200) } }; })()`);
-    if (t?.stage === stage) return t;
+    // An employee may move the card to review before the reply that lands their work, so review counts once the run has settled.
+    if (t?.stage === stage && (stage !== 'review' || t.out)) return t;
+    if (stage === 'review' && t?.out && t.out.outcome !== 'done') throw new Error(`${label}: the run ended ${t.out.outcome}: ${t.out.text}`);
     if (t?.stage === 'todo' && t.out) throw new Error(`${label}: the task went back to todo (${t.out.outcome}: ${t.out.text})`);
     if ((Date.now() - t0) % 60_000 < 3100) console.log(`[${Math.round((Date.now() - t0) / 1000)} s] ${label}: ${JSON.stringify(t)}`);
     await s.sleep(3000);

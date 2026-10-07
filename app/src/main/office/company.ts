@@ -850,6 +850,7 @@ export class Office {
         block.whiteboard = { title, mermaid: '', page, by: employee.id, at: Date.now() };
         this.commit();
       },
+      moveTask: (a) => this.tasks.moveByAgent(employee.id, a.to, a.reason, a.task),
       mail: mailTools(this.mail, employee.id, nameOf, (employee.role ?? 'employee') === 'orchestrator'),
       memory: notebook,
     });

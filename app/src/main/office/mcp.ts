@@ -8,6 +8,7 @@ import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/
 import { isInitializeRequest, type CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import { z } from 'zod';
 import type { EmployeeId, QuestionBody } from '../../shared/protocol.ts';
+import type { AgentStage } from '../../shared/tasks.ts';
 import { logger } from './debug.ts';
 import type { MailTools } from './mail-tools.ts';
 import type { Notebook } from './memory.ts';
@@ -18,6 +19,8 @@ export type EmployeeTools = {
   ask(body: QuestionBody, signal?: AbortSignal): Promise<string>;
   drawDiagram(title: string, mermaid: string): void;
   openBoard(title: string, target: string): Promise<void>;
+  // Moves the board card of a task this employee is on. Answers with how it went, refusals included.
+  moveTask(a: { to: AgentStage; reason: string; task?: string }): unknown;
   mail: MailTools;
   memory: Notebook;
 };
@@ -223,6 +226,17 @@ export async function startOfficeMcp(): Promise<OfficeMcp> {
         timeoutSec: z.number().min(1).max(600).optional(),
       },
       (a, signal) => mail.awaitReplies(a, signal),
+    );
+
+    tool(
+      'moveTask',
+      'Move the board card of a task you are on. to "review": your work is ready for the owner to look at. to "done": the task is finished and checked, and every piece you handed out is back. to "doing": you pick it up again. Say why in one sentence, because the owner reads it in the task log. The office refuses when the task is not yours, when the owner put the card where it is, while another request of the task is still open, or (for done) while its pull request is not merged; the refusal says why. Moving a card to where it already is does nothing.',
+      {
+        to: z.enum(['doing', 'review', 'done']),
+        reason: z.string().trim().min(1).max(500).describe('One sentence for the owner: why the card moves'),
+        task: z.string().max(200).optional().describe('The task title or id. Leave it out when you hold the request of one task.'),
+      },
+      (a) => tools.moveTask(a),
     );
 
     tool('inbox', 'Read messages that arrived while you worked. peek keeps them unread.', { peek: z.boolean().optional() }, (a) => mail.inbox(a));

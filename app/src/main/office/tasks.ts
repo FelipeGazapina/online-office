@@ -6,10 +6,11 @@
 // Plain Node: verify/task-check.ts imports it without Electron.
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
-import { activityIndexOf, answerKey, clipText, emptyActivity, foldActivity, liveOf, logOf, noInputs, noteKey, type ActivityEntry, type ActivityIndex, type LiveInputs, type TaskLive } from '../../shared/activity.ts';
-import type { LedgerEntry, MessageId } from '../../shared/mail.ts';
+import { activityIndexOf, answerKey, clipText, emptyActivity, foldActivity, liveOf, logOf, noInputs, noteKey, rootsOf, type ActivityEntry, type ActivityIndex, type LiveInputs, type TaskLive } from '../../shared/activity.ts';
+import type { LedgerEntry, Message, MessageId } from '../../shared/mail.ts';
 import type { BlockId, EmployeeId, LinearPeople, LinearPerson, TaskBoardSource, TaskCard } from '../../shared/protocol.ts';
 import {
+  agentMoveRefusal,
   closedDayWork,
   emptyTurnLog,
   ensureBoards,
@@ -35,6 +36,7 @@ import {
   withGitNote,
   withPr,
   withEvent,
+  type AgentStage,
   type Board,
   type BoardId,
   type BoardPatch,
@@ -42,6 +44,8 @@ import {
   type BoardSync,
   type HoursEntry,
   type LegacySources,
+  type MoveFacts,
+  type MoveRefusal,
   type Priority,
   type RunState,
   type StageBy,
@@ -379,8 +383,9 @@ export class Tasks {
     if (!title) throw new OfficeError('A task needs a title.');
     const { notes: _, ...rest } = task;
     const notes = patch.notes === undefined ? task.notes : patch.notes.trim() || undefined;
-    // A provider task the owner moves stays where the owner put it, whatever the provider says on the next sync.
-    const pin = patch.stage !== undefined && task.origin.kind !== 'manual';
+    // A task the owner moves stays where the owner put it: whatever its provider says on the next sync, and whatever a teammate
+    // would say, until the owner gives the task to someone again.
+    const pin = patch.stage !== undefined;
     let origin = task.origin;
     if (patch.priority !== undefined) {
       if (origin.kind !== 'manual') throw new OfficeError(`The priority of a ${origin.sourceLabel} task is set in ${origin.sourceLabel}.`);
@@ -427,6 +432,7 @@ export class Tasks {
       assignees: task.assignees.includes(who) ? task.assignees : [...task.assignees, who],
       updatedAt: now,
     };
+    if (by === 'owner') delete taken.stagePinned;
     return restage(taken, 'doing', by, now, cause);
   }
 
@@ -462,6 +468,55 @@ export class Tasks {
     const posted = mail.post({ from: 'owner', to: nudge.to, blockId: board.blockId, ...(nudge.parentId ? { parentId: nudge.parentId } : {}), key: noteKey(task.id, id), body: { kind: 'say', text: nudge.text, urgency: 'next' } });
     if (!posted.ok) throw new OfficeError(posted.detail);
     this.host.changed();
+  }
+
+  // ── a teammate moves the card ──
+
+  // A teammate takes their task to review, to done, or back to doing, and says why. The card is the one they name (its id or
+  // its title), or the only one they are working on. The rules are shared/tasks.ts agentMoveRefusal, asked of what the mail
+  // says: the move is recorded on the task's history under their name with their reason, and a refused one changes nothing.
+  // Asking again for where the card already is changes nothing either.
+  moveByAgent(who: EmployeeId, to: AgentStage, reason: string, ref?: string): { ok: true; task: string; from: TaskStage; to: AgentStage; changed: boolean } | ({ ok: false } & MoveRefusal) {
+    const found = this.taskFor(who, ref);
+    if ('reason' in found) return { ok: false, ...found };
+    const refusal = agentMoveRefusal(found, to, this.movesOf(found, who));
+    if (refusal) return { ok: false, ...refusal };
+    const now = this.host.now();
+    const moved = restage({ ...found, updatedAt: now }, to, who, now, undefined, reason);
+    const changed = moved.stage !== found.stage;
+    if (changed) this.replace(moved);
+    return { ok: true, task: found.title, from: found.stage, to, changed };
+  }
+
+  // The task a teammate means: the one they name among their block's tasks, else the one they hold a request of.
+  private taskFor(who: EmployeeId, ref?: string): Task | MoveRefusal {
+    const blockId = this.host.members().find((m) => m.id === who)?.blockId;
+    const mine = this.tasks.filter((t) => this.board(t.boardId).blockId === blockId);
+    const line = (t: Task) => `"${t.title}" (${t.id})`;
+    if (ref) {
+      const key = ref.trim().toLowerCase();
+      const found = mine.filter((t) => t.id === ref || t.title.toLowerCase() === key);
+      if (found.length === 1) return found[0]!;
+      return { reason: found.length ? 'ambiguous' : 'unknown_task', detail: found.length ? `More than one task is called "${ref}": ${found.map(line).join(', ')}. Name one by its id.` : `No task of your block is called or numbered "${ref}".` };
+    }
+    const held = mine.filter((t) => this.movesOf(t, who).holding);
+    if (held.length === 1) return held[0]!;
+    return held.length
+      ? { reason: 'ambiguous', detail: `You are working on ${held.length} tasks: ${held.map(line).join(', ')}. Say which one with task.` }
+      : { reason: 'no_task', detail: 'You hold no request of a task right now. Say which task you mean with task (its title or id), if it is yours.' };
+  }
+
+  // What the mail says about `who` and a task: whether it is theirs, whether they hold one of its requests, and what else is open.
+  private movesOf(task: Task, who: EmployeeId): MoveFacts {
+    const ix = this.activity;
+    const chain = [...rootsOf(task, ix)].flatMap((root) => ix.members.get(root) ?? []).map((id) => ix.msgs.get(id)!);
+    const open = chain.filter((m): m is Extract<Message, { kind: 'request' }> => m.kind === 'request' && m.intent !== 'gauntlet' && ix.unsettled.has(m.id));
+    const mine = open.filter((r) => r.to === who && ix.life.get(r.id)?.s === 'delivered');
+    return {
+      onTask: task.assignees.includes(who) || chain.some((m) => m.from === who || m.to === who),
+      holding: mine.length > 0,
+      open: open.filter((r) => !mine.includes(r)).map((r) => `${this.nameOf(r.to as EmployeeId)}: "${r.title}"`),
+    };
   }
 
   private assertMember(employeeId: EmployeeId, blockId: BlockId) {
