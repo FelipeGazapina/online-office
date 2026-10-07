@@ -205,7 +205,7 @@ export function startOffice({ dataFile, harnesses, window, services }: Options) 
       stream: (employeeId, replyingTo, delta, done) => emit({ type: 'stream', employeeId, replyingTo, delta, ...(done ? { done } : {}) }),
       history: (convo, messages, hasMore) => emit({ type: 'history', convo, messages, hasMore }),
       activity: (taskId, entries, live) => emit({ type: 'activity', taskId, entries, live }),
-      terminal: (push) => emit({ type: 'terminal', ...push }),
+      terminal: (employeeId, push) => emit({ type: 'terminal', employeeId, ...push }),
       error: (message) => emit({ type: 'error', message }),
     },
     services,

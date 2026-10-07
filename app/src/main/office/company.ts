@@ -86,7 +86,7 @@ export type OfficeEvents = {
   // Something the owner must hear about that no request is open for, like a folder that was deleted.
   error?(message: string): void;
   // What changed on an employee's terminal, a few times a second at most.
-  terminal?(push: TerminalPush): void;
+  terminal?(employeeId: EmployeeId, push: TerminalPush): void;
 };
 
 // What the office needs from the acknowledger. Without `triage` every owner message is work.
@@ -969,7 +969,7 @@ export class Office {
       this.terminalTimer = undefined;
       for (const id of this.terminalsDirty) {
         const push = this.terminals.get(id)?.take();
-        if (push) this.events.terminal?.({ ...push, employeeId: id });
+        if (push) this.events.terminal?.(id, push);
       }
       this.terminalsDirty.clear();
     }, TERMINAL_FLUSH_MS);
@@ -977,7 +977,7 @@ export class Office {
 
   // A window that just opened holds none of it.
   private sendTerminals() {
-    for (const e of this.company.employees) this.events.terminal?.({ ...this.terminalOf(e).full(), employeeId: e.id });
+    for (const e of this.company.employees) this.events.terminal?.(e.id, this.terminalOf(e).full());
   }
 
   // Esc on the terminal. Someone who is not in the middle of something has nothing to stop.

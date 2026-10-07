@@ -337,7 +337,7 @@ export type ServerMessage =
   | { type: 'activity'; taskId: TaskId; entries: ActivityEntry[]; live: TaskLive }
   | { type: 'build_rejected'; violations: readonly Violation[] }
   // What changed on an employee's terminal (shared/terminal.ts). Throttled to a few a second per employee.
-  | ({ type: 'terminal' } & TerminalPush)
+  | ({ type: 'terminal'; employeeId: EmployeeId } & TerminalPush)
   | { type: 'error'; message: string }
   | MailServerMessage;
 

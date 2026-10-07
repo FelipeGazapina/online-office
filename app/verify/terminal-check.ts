@@ -61,25 +61,25 @@ fresh.apply({ k: 'tokens', out: 120 });
 const tok = fresh.take()!;
 check(tok.blocks.length === 0 && tok.live.tokens === 120, 'the token count rides along without a block');
 const held = new Map<number, TermBlock>();
-for (const push of [first!, second]) applyPush(held, { employeeId: 'e', ...push });
+for (const push of [first!, second]) applyPush(held, push);
 check([...held.keys()].join() === '0,1,2', 'a window that applies the pushes in order holds the same blocks');
 
 console.log('\n# the ring');
 const big = new TerminalBuffer('/work/repo');
 const sent = new Map<number, TermBlock>();
-applyPush(sent, { employeeId: 'e', ...big.take()! });
+applyPush(sent, big.take()!);
 for (let i = 0; i < 400; i++) {
   big.apply({ k: 'text', id: `m${i}`, text: `line a ${i}\nline b ${i}` });
   big.apply({ k: 'tool', id: `c${i}`, name: 'Bash', input: { command: `echo ${i}` } });
-  if (i % 37 === 0) applyPush(sent, { employeeId: 'e', ...big.take()! });
+  if (i % 37 === 0) applyPush(sent, big.take()!);
 }
-applyPush(sent, { employeeId: 'e', ...big.take()! });
+applyPush(sent, big.take()!);
 const total = big.all().reduce((n, b) => n + b.lines.length, 0);
 check(total <= TERMINAL_LINES && big.all()[0]!.n === 0, `it keeps ${total} lines at most ${TERMINAL_LINES} and the banner`);
 check(text(big.all().at(-2)!.lines)[0] === '● line a 399' && text(big.all().at(-1)!.lines)[0] === '● Bash(echo 399)', 'what it drops is the oldest');
 check(JSON.stringify([...sent.values()].sort((a, b) => a.n - b.n)) === JSON.stringify(big.all()), 'a window that only got pushes holds what the buffer holds, drops included');
 const reopened = new Map<number, TermBlock>();
-applyPush(reopened, { employeeId: 'e', ...big.full() });
+applyPush(reopened, big.full());
 check(JSON.stringify([...reopened.values()].sort((a, b) => a.n - b.n)) === JSON.stringify(big.all()), 'a window opened late gets all of it in one push');
 
 console.log('\n# the screen');

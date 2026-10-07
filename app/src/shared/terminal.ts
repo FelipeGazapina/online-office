@@ -21,7 +21,7 @@ export type TermBlock = { n: number; lines: TerminalLine[] };
 export type TermLive = { tokens: number };
 // What changed since the last push. Blocks below `from` (other than the banner) are gone. `reset` says the sender holds
 // nothing the receiver can keep, so it starts from these blocks alone.
-export type TerminalPush = { employeeId: string; from: number; blocks: TermBlock[]; live: TermLive; reset?: boolean };
+export type TerminalPush = { from: number; blocks: TermBlock[]; live: TermLive; reset?: boolean };
 
 // ---------------------------------------------------------------- what a session reports
 
@@ -421,14 +421,14 @@ export class TerminalBuffer {
     this.dirty = new Set();
     const reset = !this.everSent;
     this.everSent = true;
-    return { employeeId: '', from: this.from, blocks, live: this.live, ...(reset ? { reset } : {}) };
+    return { from: this.from, blocks, live: this.live, ...(reset ? { reset } : {}) };
   }
 
   // Everything the buffer holds, for a window that just opened.
   full(): TerminalPush {
     this.everSent = true;
     this.dirty = new Set();
-    return { employeeId: '', from: this.from, blocks: [...this.blocks.values()].sort((a, b) => a.n - b.n), live: this.live, reset: true };
+    return { from: this.from, blocks: [...this.blocks.values()].sort((a, b) => a.n - b.n), live: this.live, reset: true };
   }
 
   get size(): number {
