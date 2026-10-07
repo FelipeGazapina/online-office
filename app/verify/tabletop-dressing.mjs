@@ -1,71 +1,7 @@
-// A dressed office, as data: what stands where on a team's desks, its huddle table, a meeting table and a shelf. Shared by the shots
-// script and e2e-tabletop so the picture the panel sees is the one the rules accepted. A spot is [def, u, v, { rot, look, ang, lvl }]
-// in 12.5 cm units of the host's own frame (a team desk is 12 by 8, its monitor and keyboard are already on it).
-import { applyOps, blockItems, composeVignette, floorItems, ITEM_DEFS } from '../src/shared/space/index.ts';
-
-// How a team desk is dressed. A spot is [def, u, v, { rot, look, ang, lvl }]; a def that starts with `vg_` is a set (a vignette), put down the way the
-// build tool puts it down, as its members. Every desk has one thing it is built around, a set or a stack, on one side of the computer, and
-// a few things of its own beside it; the side, the set and the mix change from desk to desk so a row of them reads as a row of different people.
-const DESKS = [
-  // coffee tray on the left, a bottle on the right, a plant and a frame at the back
-  [
-    ['vg_coffee', 0, 1, { look: 0 }],
-    ['water_bottle', 10, 0, { look: 0 }],
-    ['potted_plant', 10, 6, { look: 1, ang: 20 }],
-    ['frame_small', 6, 7, { look: 2, ang: -6 }],
-    ['sticky_notes', 11, 3, { look: 0, ang: 14 }],
-  ],
-  // a stack of books with a plant on top on the right, headphones and a mug on the left
-  [
-    ['vg_stack', 10, 1, { rot: 1, look: 1 }],
-    ['headphones', 0, 3, { look: 0, ang: 8 }],
-    ['mug', 0, 1, { look: 2, ang: 14 }],
-    ['lamp_desk', 0, 5, { ang: 10 }],
-    ['candle', 10, 6, { look: 2 }],
-  ],
-  // a runner across the back with its candles, a notebook and a pen cup in front of it
-  [
-    ['vg_runner', 2, 6, { look: 1 }],
-    ['notebook', 0, 1, { look: 3, ang: -4 }],
-    ['pen_cup', 0, 4, { look: 2 }],
-    ['tumbler', 10, 1, { look: 2 }],
-    ['phone_stand', 11, 4, { look: 0, rot: 3, ang: -10 }],
-  ],
-  // a gadget tray on the left and a reading nook along the back
-  [
-    ['vg_gadgets', 0, 1, { look: 1 }],
-    ['vg_reading', 4, 6, { look: 2 }],
-    ['mug', 10, 2, { look: 4, ang: -16 }],
-    ['cat_statue', 11, 0, { look: 0, rot: 3 }],
-  ],
-  // a snack break down the left side, a small stack at the right
-  [
-    ['vg_snack', 0, 0, { rot: 1, look: 2 }],
-    ['vg_stack', 10, 4, { rot: 1, look: 2 }],
-    ['lamp_desk', 0, 5, { ang: -8 }],
-    ['succulent_trio', 8, 7, { look: 1 }],
-    ['water_bottle', 10, 0, { look: 3 }],
-  ],
-  // the laptop one: a laptop beside the computer, books in a row, glasses on a folder
-  [
-    ['laptop', 0, 1, { rot: 2, ang: 6 }],
-    ['folder', 0, 4, { look: 1, ang: -3 }],
-    ['glasses', 0, 4, { lvl: 1, look: 1, ang: -20 }],
-    ['books_row', 4, 6, { look: 1 }],
-    ['lunchbox', 8, 6, { look: 2, ang: -3 }],
-    ['pen_cup', 10, 1, { look: 0 }],
-    ['sticky_notes', 11, 4, { look: 1, ang: 18 }],
-  ],
-];
-
-// The PO's desk has its own planner on the left, so the arrangement keeps to the right and the back.
-const PO = [
-  ['vg_runner', 2, 6, { look: 2 }],
-  ['tumbler', 10, 1, { look: 1 }],
-  ['coaster', 10, 3, { look: 1 }],
-  ['mug', 10, 3, { lvl: 1, look: 0 }],
-  ['frame_small', 11, 4, { look: 3, ang: -5 }],
-];
+// What the owner puts on a team's huddle table, a meeting table and a shelf, as data. The team desks are not here: each wears its own things
+// from the building itself (`shared/space/dressing.ts`). Shared by the shots script, perf-dressed and dressing-check so the picture the panel
+// sees is the one the rules accepted. A spot is [def, u, v, { rot, look, ang, lvl }] in 12.5 cm units of the host's own frame.
+import { applyOps, composeVignette, floorItems, ITEM_DEFS } from '../src/shared/space/index.ts';
 
 // A round top: a runner along one side with the plant, candles and the cat, a tray and a bowl on the other, and the middle left open.
 const HUDDLE = [
@@ -94,8 +30,7 @@ const SHELF = [
 /** Every spot this plan fills, as ops for a story: which hosts are dressed and with what. Hosts that are missing are skipped. */
 export function dressingOps(building, { block = 'blk-a', story = 0, table = 'meeting_table:00', shelf = 'bookshelf:50', huddle = `${block}:pod_huddle_table:00` } = {}) {
   const items = floorItems(building.stories[story]);
-  const desks = blockItems(building.stories[story], block).filter((i) => i.def === 'bench_desk' || i.def === 'po_desk');
-  const plans = [...desks.map((d, n) => [d.id, d.def === 'po_desk' ? PO : DESKS[n % DESKS.length]]), [huddle, HUDDLE], [table, TABLE], [shelf, SHELF]].filter(([id]) => items.some((i) => i.id === id));
+  const plans = [[huddle, HUDDLE], [table, TABLE], [shelf, SHELF]].filter(([id]) => items.some((i) => i.id === id));
   const put = [];
   plans.forEach(([host, spots], n) => {
     spots.forEach(([def, u, v, extra = {}], k) => {

@@ -1,7 +1,7 @@
 // The models of the small things that stand on desks, tables and shelves. Each sits on y = 0, the surface it stands on, with
 // its origin at the middle of its footprint (`ItemDef.top`, in 12.5 cm units) and faces +z at rot 0 like every other model:
 // a laptop's keys are toward +z, its screen toward -z. They are a few boxes and cylinders each, so one def stays one draw call.
-import { BoxGeometry, Quaternion, TorusGeometry, Vector3, type BufferGeometry } from 'three';
+import { BoxGeometry, IcosahedronGeometry, Quaternion, TorusGeometry, Vector3, type BufferGeometry } from 'three';
 import { blob, box, cyl, lathe, lean, merge, paint, rbox } from './parts.ts';
 
 // Every model takes the look it is drawn in: the same footprint and height, another colour or style. `of` wraps round a palette.
@@ -540,6 +540,76 @@ const speaker = (look: number) => {
   return merge([cyl(0.045, 0.045, 0.1, 0, 0.05, 0, c, 14), cyl(0.0465, 0.0465, 0.07, 0, 0.05, 0, grille, 14), cyl(0.04, 0.04, 0.008, 0, 0.104, 0, '#1c1f27', 14), box(0.012, 0.004, 0.012, -0.012, 0.109, 0, '#f2b84b'), box(0.012, 0.004, 0.012, 0.012, 0.109, 0, '#9fe0a0')]);
 };
 
+
+// ---- the plants and oddities that make one desk someone's: other species than the leafy pot, a toy, a puzzle. Only desks wear them (`dressing.ts`).
+
+const clump = (r: number, x: number, y: number, z: number, color: string) => paint(new IcosahedronGeometry(r, 1).translate(x, y, z), color);
+const clay = (look: number) => {
+  const [pot, rim] = of(POTS, look);
+  return [cyl(0.04, 0.03, 0.05, 0, 0.025, 0, pot, 12), cyl(0.042, 0.042, 0.01, 0, 0.05, 0, rim, 12), cyl(0.034, 0.034, 0.003, 0, 0.0545, 0, '#5a4636', 12)];
+};
+const arm = (side: number, y: number, rise: number) => [lean(cyl(0.009, 0.009, 0.04, 0, 0, 0, '#5f9f6c', 6), 0, Math.PI / 2, side * 0.032, y, 0), cyl(0.009, 0.009, rise, side * 0.05, y + rise / 2, 0, '#5f9f6c', 6)];
+// A cactus: a column with an arm raised on one side, a round barrel with a flower, or a stack of paddles.
+const cactus = (look: number) => {
+  if (look === 0) return merge([...clay(look), cyl(0.016, 0.018, 0.08, 0, 0.095, 0, '#5f9f6c', 8), blob(0.016, 0, 0.133, 0, '#5f9f6c'), ...arm(1, 0.09, 0.03), ...arm(-1, 0.105, 0.02)]);
+  if (look === 1) return merge([...clay(look), blob(0.042, 0, 0.098, 0, '#5f9f6c'), ...[0, 1, 2, 3].map((n) => box(0.004, 0.07, 0.004, Math.cos(n * 0.79) * 0.04, 0.098, Math.sin(n * 0.79) * 0.04, '#d9e8c4')), blob(0.01, 0.01, 0.144, 0.004, '#e8828f')]);
+  const pad = (x: number, y: number, rx: number, rz: number, h: number) => lean(paint(new BoxGeometry(0.052, h, 0.012).translate(0, h / 2, 0), '#7fb77a'), rx, rz, x, y, 0);
+  return merge([...clay(look), pad(0, 0.052, 0.04, 0.08, 0.06), pad(0.018, 0.096, 0.02, -0.3, 0.05), pad(-0.022, 0.09, -0.02, 0.36, 0.045), blob(0.008, 0.03, 0.14, 0, '#e8828f')]);
+};
+
+const SNAKE = [['#3f7a52', '#c4d98a'], ['#4d8a5d', '#e8d36a'], ['#4f7f78', '#a9cfc0']] as const;
+// A snake plant: nine stiff blades fanned up out of a pot, each with a pale edge, the middle ones tallest.
+const snakePlant = (look: number) => {
+  const [pot, rim] = of(PLANTERS, look + 1);
+  const [leaf, edge] = of(SNAKE, look);
+  const blades: [number, number, number][] = [[0, 0.02, 0.25], [1.2, 0.1, 0.22], [2.4, 0.14, 0.2], [3.6, 0.12, 0.23], [4.8, 0.16, 0.19], [0.6, 0.2, 0.15], [2.0, 0.24, 0.14], [3.1, 0.22, 0.15], [5.4, 0.25, 0.13]];
+  return merge([
+    cyl(0.075, 0.055, 0.09, 0, 0.045, 0, pot, 14),
+    cyl(0.08, 0.08, 0.012, 0, 0.09, 0, rim, 14),
+    cyl(0.066, 0.066, 0.004, 0, 0.094, 0, '#4a3a2b', 14),
+    ...blades.flatMap(([a, tilt, len]) => [
+      lean(paint(new BoxGeometry(0.044, len, 0.009).translate(0, len / 2, -0.002), edge), Math.sin(a) * tilt, -Math.cos(a) * tilt, Math.cos(a) * 0.02, 0.09, Math.sin(a) * 0.02),
+      lean(paint(new BoxGeometry(0.03, len - 0.01, 0.01).translate(0, (len - 0.01) / 2, 0.001), leaf), Math.sin(a) * tilt, -Math.cos(a) * tilt, Math.cos(a) * 0.02, 0.09, Math.sin(a) * 0.02),
+    ]),
+  ]);
+};
+
+// A trailing plant: a mound of heart leaves on a pot, and three vines that spill over its rim and hang.
+const pothos = (look: number) => {
+  const [pot, rim] = of(PLANTERS, look);
+  const vines = [0.4, 2.5, 4.6];
+  return merge([
+    cyl(0.062, 0.046, 0.08, 0, 0.04, 0, pot, 14),
+    cyl(0.066, 0.066, 0.012, 0, 0.08, 0, rim, 14),
+    clump(0.05, 0, 0.12, 0, '#4d8a5d'),
+    clump(0.036, 0.03, 0.15, 0.015, '#78b97a'),
+    clump(0.032, -0.025, 0.14, -0.02, '#5f9f6c'),
+    clump(0.03, 0.01, 0.17, -0.025, '#8ccb84'),
+    ...vines.flatMap((a, v) =>
+      Array.from({ length: 6 }, (_, i) => clump(0.011 + (i % 2) * 0.003, Math.cos(a) * (0.066 + i * 0.009), 0.082 - i * 0.012, Math.sin(a) * (0.066 + i * 0.009), of(LEAF, i + v + look))),
+    ),
+  ]);
+};
+
+const DUCKS = [['#f7d94c', '#e08a4a'], ['#f29bb5', '#f2b84b']] as const;
+const rubberDuck = (look: number) => {
+  const [body, beak] = of(DUCKS, look);
+  return merge([blob(0.03, 0, 0.03, 0, body), blob(0.016, 0, 0.056, 0.016, body), box(0.02, 0.007, 0.016, 0, 0.054, 0.036, beak), lean(paint(new BoxGeometry(0.02, 0.014, 0.02).translate(0, 0, 0), body), -0.5, 0, 0, 0.045, -0.032), box(0.003, 0.003, 0.003, -0.008, 0.062, 0.027, '#1c1f27'), box(0.003, 0.003, 0.003, 0.008, 0.062, 0.027, '#1c1f27')]);
+};
+
+const CUBES = [['#d95d63', '#f2b84b', '#4f7ea3', '#6aa36f', '#f4f0e6'], ['#4f7ea3', '#f4f0e6', '#d95d63', '#e08a4a', '#6aa36f'], ['#f2b84b', '#6aa36f', '#f4f0e6', '#4f7ea3', '#d95d63']] as const;
+// A twisted puzzle cube: a dark body with a 3 by 3 grid of colored stickers on its top and two sides.
+const puzzleCube = (look: number) => {
+  const c = of(CUBES, look);
+  const grid = (face: 'top' | 'z' | 'x') =>
+    Array.from({ length: 9 }, (_, n) => {
+      const [i, j] = [(n % 3) - 1, Math.floor(n / 3) - 1];
+      const color = c[(n * 2 + (face === 'top' ? 0 : face === 'z' ? 1 : 3) + look) % c.length];
+      return face === 'top' ? box(0.016, 0.002, 0.016, i * 0.018, 0.0575, j * 0.018, color) : face === 'z' ? box(0.016, 0.016, 0.002, i * 0.018, 0.0275 + j * 0.018, 0.0285, color) : box(0.002, 0.016, 0.016, 0.0285, 0.0275 + j * 0.018, i * 0.018, color);
+    });
+  return merge([box(0.057, 0.057, 0.057, 0, 0.0285, 0, '#1c1f27'), ...grid('top'), ...grid('z'), ...grid('x')]);
+};
+
 // ---- the bases a set is arranged on
 
 const SERVING_TRAYS = [['#8c6a4a', '#d8b47d'], ['#2b2e38', '#5a6070'], ['#f4f0e6', '#c9cdd8']] as const;
@@ -605,6 +675,11 @@ export const TABLETOP_MODELS: Readonly<Record<string, (look: number) => BufferGe
   glasses: around(glasses),
   stapler: around(stapler),
   speaker: around(speaker),
+  cactus: around(cactus),
+  snake_plant: around(snakePlant),
+  pothos: around(pothos),
+  rubber_duck: around(rubberDuck),
+  puzzle_cube: around(puzzleCube),
   tray: around(tray),
   runner: around(runner),
 };

@@ -94,6 +94,11 @@ export function drive(s, { shots } = {}) {
     await s.sleep(700);
     await still();
   };
+  // Zooms the overview to `dist` meters from the point it looks at, whatever it was before: a framing a shot can name.
+  const zoomTo = async (dist) => {
+    const now = await s.eval('window.__officeCamera.dist');
+    await zoom((dist - now) / 0.03);
+  };
   const shotTo = async (name) => {
     const path = await s.shot(name);
     if (shots) {
@@ -123,5 +128,5 @@ export function drive(s, { shots } = {}) {
     const now = (await tool()).rot;
     for (let n = 0; n < (((world - now) % 4) + 4) % 4; n++) await s.press('Period');
   };
-  return { at, hold, release, building, tool, level, verdict, waitBuilding, park, still, bring, centerOn, hoverPx, probeOf, waitProbe, enterBuild, exitBuild, zoom, shotTo, openCatalog, choose, turnTo };
+  return { at, hold, release, building, tool, level, verdict, waitBuilding, park, still, bring, centerOn, hoverPx, probeOf, waitProbe, enterBuild, exitBuild, zoom, zoomTo, shotTo, openCatalog, choose, turnTo };
 }

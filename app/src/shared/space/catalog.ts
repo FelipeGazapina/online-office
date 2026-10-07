@@ -160,6 +160,12 @@ const tabletop: ItemDef[] = [
   small('glasses', 2, 1, 0.02, { looks: 3 }),
   small('stapler', 2, 1, 0.05, { looks: 3 }),
   small('speaker', 1, 1, 0.12, { looks: 3 }),
+  // Only desks wear these (`dressing.ts`); the build catalog does not list them.
+  small('cactus', 1, 1, 0.14, { looks: 3 }),
+  small('snake_plant', 2, 2, 0.34, { looks: 3 }),
+  small('pothos', 2, 2, 0.2, { looks: 2 }),
+  small('rubber_duck', 1, 1, 0.07, { looks: 2 }),
+  small('puzzle_cube', 1, 1, 0.06, { looks: 3 }),
   small('tray', 4, 3, 0.03, { looks: 3, ...flat }),
   small('runner', 8, 2, 0.012, { looks: 4, ...flat }),
 ];

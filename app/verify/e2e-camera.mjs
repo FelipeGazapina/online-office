@@ -30,6 +30,27 @@ export default async (s) => {
   assert(await s.eval('!!document.querySelector(".camera-toggle")'), 'the HUD has a camera toggle');
   await save(s, 'c1-iso');
 
+  // The wheel zooms the overview between a nearest and a farthest distance. The nearest keeps the camera above the top of a wall (3.2 m), and the way
+  // there is eased: the camera glides through in-between positions instead of jumping.
+  const wheel = (deltaY) => s.eval(`document.querySelector('canvas').dispatchEvent(new WheelEvent('wheel', { deltaY: ${deltaY}, bubbles: true }))`);
+  const wallTop = 3.2;
+  const far = await cam(s);
+  await s.eval(RECORD);
+  await wheel(-4000);
+  await s.sleep(1500);
+  const near = await cam(s);
+  const glide = (await s.eval('window.__camLog')).map((c) => c.y).filter((y) => y < far.y - 0.05 && y > near.y + 0.05);
+  assert(near.dist === near.near && near.near < 8, `the wheel stops at the nearest distance, ${near.near} (it used to stop at 8)`);
+  assert(near.y - (await s.eval('__office.state().owner.y')) >= wallTop, `at the nearest the camera is ${near.y.toFixed(2)} m up, above a wall's top (${wallTop} m)`);
+  assert(glide.length >= 3 && glide.every((y, i) => i === 0 || y <= glide[i - 1] + 1e-6), `the way in is eased through ${glide.length} in-between heights`);
+  await save(s, 'c1-near');
+  await wheel(4000);
+  await s.sleep(1500);
+  assert((await cam(s)).dist === 48, 'the wheel stops at 48 when not building');
+  await wheel(-((48 - far.dist) / 0.03));
+  await s.sleep(1500);
+  assert(Math.abs((await cam(s)).dist - far.dist) < 0.01, 'and comes back to where it was');
+
   // Tab flies to the owner's eyes.
   await s.eval(RECORD);
   await s.press('Tab');

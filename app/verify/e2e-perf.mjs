@@ -3,6 +3,8 @@
 // OFFICE_PERF_FLOORS=3 builds two extra stories (stairs, desks, decor) and seats the employees across them.
 // OFFICE_PERF_TOPS=120 puts that many small items (lamps, laptops, books, mugs...) on the bench desks before measuring.
 // OFFICE_PERF_CAMERA=first switches to first person before measuring.
+// Draw calls and triangles read the highest frame of the window. The environment capture is one extra render taken a few frames after the scene is
+// built, when the GPU has linked its programs; a window with it in reads about 95 calls and 250k triangles higher than one without, whatever the code.
 // OFFICE_PERF_ASSERT=1 fails the run unless fpsAvg >= 59.5 and at most 1% of frames take longer than 25 ms (standing perf bar).
 // Hidden windows stop requestAnimationFrame, so this scenario shows the window (OFFICE_TEST_RUN empty) and measures
 // real frames. The window is visible while it runs, and the figure depends on the machine's display refresh rate.
