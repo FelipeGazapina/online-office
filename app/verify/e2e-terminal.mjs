@@ -196,4 +196,27 @@ export default async function (s) {
   await s.sleep(1200);
   const back = away(await s.eval('({ ...__officeCamera })'));
   assert(back > 5 && !(await s.eval(`!!document.querySelector('.term-frame')`)), `Esc leaves and the camera returns (${back.toFixed(1)} m from the screen)`);
+
+  // A click on the screen opens it too, from anywhere the screen can be seen. The overview turns until the screen faces it.
+  await s.eval(`__office.teleport(${at.x + 6}, ${at.z + 1.4}, 0)`);
+  await s.sleep(1000);
+  const facing = async () => {
+    const cam = await s.eval('({ ...__officeCamera })');
+    return (cam.x - monitor.center[0]) * monitor.normal[0] + (cam.z - monitor.center[2]) * monitor.normal[2] > 0;
+  };
+  for (let turns = 0; turns < 3 && !(await facing()); turns++) {
+    await s.press('KeyQ', 'q');
+    await s.sleep(1300);
+  }
+  assert(await facing(), 'the screen faces the overview camera');
+  const spot = await s.eval(`(() => { const [x, y, z] = __officeMonitors()[${JSON.stringify(id)}].center; return __office.project(x, y, z); })()`);
+  const hit = await s.eval(`__office.pick(${spot.x}, ${spot.y})`);
+  await s.click(spot.x, spot.y);
+  await s.waitFor(`__officeMonitor.getState().open === ${JSON.stringify(id)}`, 3000).catch(() => {
+    throw new Error(`a click at ${Math.round(spot.x)},${Math.round(spot.y)} did not open the terminal (it reaches ${JSON.stringify(hit)})`);
+  });
+  assert(true, `a click on the monitor opens the terminal (${hit.kind})`);
+  await s.waitFor(`!!document.querySelector('.term-frame.ready')`, 5000);
+  await s.press('Escape', 'Escape');
+  await s.waitFor(`__officeMonitor.getState().open === null`, 3000);
 }
