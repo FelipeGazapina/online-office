@@ -1,4 +1,4 @@
-import { blockItems, cellBounds, CELL, ITEM_DEFS, type BuildOp, type Item, type ItemId, type Rot, type Vec2 } from '../../../../shared/space/index.ts';
+import { blockItems, cellBounds, CELL, ITEM_DEFS, type BuildOp, type FloorItem, type Item, type ItemId, type Rot, type Vec2 } from '../../../../shared/space/index.ts';
 import { leaveComputer } from '../../computer.ts';
 import { runtime } from '../../runtime.ts';
 import { get, send, set, setSetting, useStore, type BuildState, type BuildTool } from '../../store.ts';
@@ -157,8 +157,8 @@ export function newItemId(def: string): ItemId {
 }
 
 /** The item as the tool would put it at the cell, new or moved. */
-export function toolItem(tool: Extract<BuildTool, { kind: 'item' }>, at: { x: number; z: number }, existing: Item | null): Item {
-  const item: Item = { id: tool.carry ?? newItemId(tool.def), def: tool.def, x: at.x, z: at.z, rot: tool.rot };
+export function toolItem(tool: Extract<BuildTool, { kind: 'item' }>, at: { x: number; z: number }, existing: Item | null): FloorItem {
+  const item: FloorItem = { id: tool.carry ?? newItemId(tool.def), def: tool.def, x: at.x, z: at.z, rot: tool.rot };
   if (tool.blockId) item.blockId = tool.blockId;
   if (existing?.tint !== undefined) item.tint = existing.tint;
   return item;

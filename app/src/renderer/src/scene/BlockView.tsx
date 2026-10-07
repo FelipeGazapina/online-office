@@ -2,7 +2,7 @@ import { memo, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { AdditiveBlending, Color, DoubleSide, MeshBasicMaterial, MeshStandardMaterial, PlaneGeometry } from 'three';
 import type { Employee, ProjectBlock } from '../../../shared/protocol.ts';
 import { blocksWithTasks } from '../boardView.ts';
-import { BLOCK_D, BLOCK_W, STORY_H, YAW, type Building, type Item } from '../../../shared/space/index.ts';
+import { BLOCK_D, BLOCK_W, STORY_H, YAW, floorItems, type Building, type FloorItem } from '../../../shared/space/index.ts';
 import { enterProjectComputer } from '../computer.ts';
 import { set, useStore } from '../store.ts';
 import { itemCenter } from '../world.ts';
@@ -273,11 +273,11 @@ function LinearBoardWhiteboard({ block }: { block: ProjectBlock }) {
 const RUG_W = BLOCK_W - 1;
 const RUG_D = BLOCK_D - 1;
 
-type Placed = { item: Item; story: number };
+type Placed = { item: FloorItem; story: number };
 /** Every piece of the block that React draws, wherever on the building it stands now. */
 function piecesOf(b: Building | null, blockId: string): Placed[] {
   if (!b) return [];
-  return b.stories.flatMap((s, story) => s.items.filter((i) => i.blockId === blockId && DYNAMIC.has(i.def)).map((item) => ({ item, story })));
+  return b.stories.flatMap((s, story) => floorItems(s).filter((i) => i.blockId === blockId && DYNAMIC.has(i.def)).map((item) => ({ item, story })));
 }
 
 // Items that are drawn one by one carry the story's height and the turn of their item.

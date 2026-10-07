@@ -5,7 +5,7 @@ import type { Building } from '../../shared/space/index.ts';
 import type { BlockId, Employee, EmployeeId, ModelId, ProjectBlock } from '../../shared/protocol.ts';
 import { DESKS_PER_BLOCK } from '../../shared/protocol.ts';
 import { applyOps, CELL, legacyBuilding, rectWalls, STORY_H, type BuildOp, type Item, type ItemId, type SpaceContext, type WallSeg } from '../../shared/space/index.ts';
-import { defOf, itemRect } from '../../shared/space/geom.ts';
+import { defOf, floorItems, itemRect } from '../../shared/space/geom.ts';
 import { benchItem } from '../../shared/space/kit.ts';
 import { applyServerMessage } from './office.ts';
 import { loadMailFixture } from './hud/chat/fixture.ts';
@@ -154,7 +154,7 @@ function pick(x: number, y: number) {
   const instanced = (object as InstancedMesh).isInstancedMesh;
   // The floor is the one clickable mesh drawn with a list of materials, one per paint.
   const onFloor = !instanced && Array.isArray((object as Mesh).material);
-  const item = get().building?.stories[floor]?.items.find((i) => {
+  const item = floorItems(get().building!.stories[floor]!).find((i) => {
     const def = defOf(i);
     if (!def) return false;
     const r = itemRect(i, def);

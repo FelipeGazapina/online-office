@@ -4,7 +4,7 @@
 import { useThree } from '@react-three/fiber';
 import { useEffect } from 'react';
 import { Vector3 } from 'three';
-import { blockAt, blockItems, blockPose, CELL, checkOps, FLOOR_PAINTS, ITEM_DEFS, moveBlockOps, placeBlock, rectWalls, STORY_H, WALL_STYLES, type Building, type BuildOp, type Item, type ItemId, type Vec2 } from '../../../../shared/space/index.ts';
+import { blockAt, blockItems, floorItems, blockPose, CELL, checkOps, FLOOR_PAINTS, ITEM_DEFS, moveBlockOps, placeBlock, rectWalls, STORY_H, WALL_STYLES, type Building, type BuildOp, type Item, type ItemId, type Vec2 } from '../../../../shared/space/index.ts';
 import {
   floodRoom,
   itemAt,
@@ -236,7 +236,7 @@ export function BuildInput() {
         }
       }
       if (!ghost && build.tool.kind === 'select' && hover && story) {
-        const item = story.items.find((i) => i.id === hover);
+        const item = floorItems(story).find((i) => i.id === hover);
         const whole = item?.blockId && modifiers.shift ? blockItems(story, item.blockId) : [];
         if (whole.length) ghost = { kind: 'blockSelect', items: whole };
         else if (item) ghost = { kind: 'outline', item };

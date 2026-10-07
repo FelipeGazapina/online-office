@@ -2,8 +2,8 @@
 // runs it in Node. The scene turns the pointer into a ray, `deskUnder` finds the desk it points at, and `verdictFor` says
 // what dropping there would do. The same verdict drives the highlight, the label and the drop.
 import { headcountCap, type BlockId, type Company, type EmployeeId, type EmployeeRole } from '../../shared/protocol.ts';
-import { ITEM_DEFS, STORY_H, rotateLocal, type Building, type Item, type ItemId } from '../../shared/space/index.ts';
-import { itemRect } from '../../shared/space/geom.ts';
+import { ITEM_DEFS, STORY_H, rotateLocal, type Building, type FloorItem, type ItemId } from '../../shared/space/index.ts';
+import { floorItems, itemRect } from '../../shared/space/geom.ts';
 
 type Vec3 = readonly [number, number, number];
 export type Ray = { o: Vec3; d: Vec3 };
@@ -14,7 +14,7 @@ const SEAT_REACH = 0.5;
 
 const isDesk = (def: string | undefined) => def !== undefined && (ITEM_DEFS[def]?.kind === 'bench_desk' || ITEM_DEFS[def]?.kind === 'po_desk');
 
-export type DeskHit = { story: number; item: Item };
+export type DeskHit = { story: number; item: FloorItem };
 
 // The desk a ray from the camera points at, on the stories up to `top` (the ones drawn). The ray is cut by the plane of each
 // desktop. The highest story with a desk at that point answers, since it is the one in front, and within a story the desk the
@@ -24,8 +24,8 @@ export function deskUnder(b: Building, top: number, ray: Ray): DeskHit | null {
   const [dx, dy, dz] = ray.d;
   if (Math.abs(dy) < 1e-6) return null;
   for (let story = Math.min(top, b.stories.length - 1); story >= 0; story--) {
-    let best: { item: Item; away: number } | null = null;
-    for (const item of b.stories[story]!.items) {
+    let best: { item: FloorItem; away: number } | null = null;
+    for (const item of floorItems(b.stories[story]!)) {
       if (!isDesk(item.def)) continue;
       const def = ITEM_DEFS[item.def]!;
       const t = (story * STORY_H + def.height - oy) / dy;
@@ -57,7 +57,7 @@ export type Verdict =
 export type Aim = { deskId: ItemId; story: number; verdict: Verdict };
 
 // What dropping a task of `taskBlock` on `desk` does. `running` is who is working on the task right now.
-export function verdictFor(desk: Item, taskBlock: BlockId, company: Company, running: ReadonlySet<EmployeeId>): Verdict {
+export function verdictFor(desk: FloorItem, taskBlock: BlockId, company: Company, running: ReadonlySet<EmployeeId>): Verdict {
   const nameOf = (id: string | undefined) => company.blocks.find((x) => x.id === id)?.name ?? 'another block';
   if (desk.blockId !== taskBlock) return { kind: 'refuse', message: `That desk belongs to ${nameOf(desk.blockId)}. A task goes to a desk in its own block, ${nameOf(taskBlock)}.` };
   const sitter = company.employees.find((e) => e.seat === desk.id);

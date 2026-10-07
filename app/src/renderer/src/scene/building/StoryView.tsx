@@ -2,7 +2,7 @@ import { useFrame, type ThreeEvent } from '@react-three/fiber';
 import { memo, useLayoutEffect, useMemo, useRef } from 'react';
 import { AdditiveBlending, BackSide, BoxGeometry, BufferGeometry, Color, DoubleSide, Group, InstancedMesh, Matrix4, MeshBasicMaterial, MeshStandardMaterial, PlaneGeometry, Quaternion, Vector2, Vector3 } from 'three';
 import { PROVIDERS, type Employee } from '../../../../shared/protocol.ts';
-import { ITEM_DEFS, STORY_H, WALL_STYLES, YAW, layerOf, type FloorGeometry, type ItemId } from '../../../../shared/space/index.ts';
+import { ITEM_DEFS, STORY_H, WALL_STYLES, YAW, floorItems, layerOf, type FloorGeometry, type ItemId } from '../../../../shared/space/index.ts';
 import { hasFloorAt, tileIndex } from '../../../../shared/space/geom.ts';
 import { runtime } from '../../runtime.ts';
 import { buildView, draft } from '../../hud/build/state.ts';
@@ -245,7 +245,7 @@ function Furniture({ geom }: { geom: FloorGeometry }) {
   const trim = useMemo(() => new Map([...hue].map(([id, c]) => [id, trimOf(c)])), [hue]);
   const trimTint = useMemo(() => (id: ItemId) => trim.get(teamOf.get(id) ?? '') ?? null, [trim, teamOf]);
   const defs = useMemo(() => [...geom.render.items].filter(([def]) => !DYNAMIC.has(def)), [geom]);
-  const desks = useMemo(() => geom.story.items.filter((i) => ITEM_DEFS[i.def]?.seat), [geom]);
+  const desks = useMemo(() => floorItems(geom.story).filter((i) => ITEM_DEFS[i.def]?.seat), [geom]);
 
   const pick = (ids: readonly ItemId[]) => (e: ThreeEvent<MouseEvent>) => {
     if (e.delta >= 6 || e.instanceId === undefined) return;
@@ -320,7 +320,7 @@ function ContactShadows({ geom }: { geom: FloorGeometry }) {
         out.push({ x: data.matrices[i * 5], z: data.matrices[i * 5 + 2], yaw: data.matrices[i * 5 + 3], w: dims.w / 2 + 0.3, d: dims.d / 2 + 0.3 });
       }
     }
-    for (const d of geom.story.items) {
+    for (const d of floorItems(geom.story)) {
       if (!ITEM_DEFS[d.def]?.seat) continue;
       const c = chairOf(d);
       if (c) out.push({ x: c.x, z: c.z, yaw: 0, w: 0.7, d: 0.7 });
@@ -343,7 +343,7 @@ function ContactShadows({ geom }: { geom: FloorGeometry }) {
 // A desk's screen shows what its sitter is doing. One mesh draws them all, and each frame sets each one's brightness.
 function Screens({ geom }: { geom: FloorGeometry }) {
   const mesh = useRef<InstancedMesh>(null);
-  const desks = useMemo(() => geom.story.items.filter((i) => i.def === 'bench_desk' || i.def === 'po_desk'), [geom]);
+  const desks = useMemo(() => floorItems(geom.story).filter((i) => i.def === 'bench_desk' || i.def === 'po_desk'), [geom]);
   const sitters = useRef<{ company: unknown; bySeat: Map<string, Employee> }>({ company: null, bySeat: new Map() });
   const geo = useMemo(() => screenGeometry(), []);
   const glow = useRef<InstancedMesh>(null);

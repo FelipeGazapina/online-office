@@ -6,7 +6,7 @@ import { Edges, Html } from '@react-three/drei';
 import { useEffect, useMemo, useState } from 'react';
 import { BackSide, BufferGeometry, CircleGeometry, Color, DoubleSide, Float32BufferAttribute, MeshBasicMaterial, MeshStandardMaterial, RingGeometry, ShaderMaterial, Shape, Vector2 } from 'three';
 import { mergeVertices } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
-import { cellBounds, ITEM_DEFS, STORY_H, WALL_HALF, YAW, footprint, rotateLocal, stairsInfo, type Item, type Vec2 } from '../../../../shared/space/index.ts';
+import { cellBounds, ITEM_DEFS, STORY_H, WALL_HALF, YAW, footprint, rotateLocal, stairsInfo, type FloorItem, type Vec2 } from '../../../../shared/space/index.ts';
 import { draft, type Ghost } from '../../hud/build/state.ts';
 import { useStore } from '../../store.ts';
 import { modelOf } from './models.ts';
@@ -236,7 +236,7 @@ function Rect({ x0, z0, x1, z1, color, fill, border = BORDER, ink = false, probe
 }
 
 // Which side of the item people use it from: the chair side of a desk, else the +z face the models are drawn toward.
-function frontOf(item: Item): { at: Vec2; yaw: number } {
+function frontOf(item: FloorItem): { at: Vec2; yaw: number } {
   const def = ITEM_DEFS[item.def];
   const c = { x: def.w / 2, z: def.d / 2 };
   let dir = { x: 0, z: 1 };
@@ -292,7 +292,7 @@ function TurnMark({ box, ok }: { box: { x0: number; z0: number; x1: number; z1: 
 }
 
 // The piece itself, tinted by the verdict, outlined, and again through whatever stands in front of it.
-function ItemModel({ item, ok }: { item: Item; ok: boolean }) {
+function ItemModel({ item, ok }: { item: FloorItem; ok: boolean }) {
   const f = footprint(ITEM_DEFS[item.def], item.rot);
   const at: [number, number, number] = [item.x / 2 + f.w / 4, 0, item.z / 2 + f.d / 4];
   const hull = hullOf(item.def);
@@ -330,7 +330,7 @@ function Cage({ x0, z0, x1, z1, color }: { x0: number; z0: number; x1: number; z
   );
 }
 
-function BlockGhost({ items, ok }: { items: readonly Item[]; ok: boolean }) {
+function BlockGhost({ items, ok }: { items: readonly FloorItem[]; ok: boolean }) {
   const box = cellBounds(items);
   if (!box) return null;
   const [x0, z0, x1, z1] = [box.x0 / 2, box.z0 / 2, box.x1 / 2, box.z1 / 2];
@@ -346,7 +346,7 @@ function BlockGhost({ items, ok }: { items: readonly Item[]; ok: boolean }) {
   );
 }
 
-function BlockSelect({ items }: { items: readonly Item[] }) {
+function BlockSelect({ items }: { items: readonly FloorItem[] }) {
   const box = cellBounds(items);
   if (!box) return null;
   return (
@@ -362,7 +362,7 @@ function BlockSelect({ items }: { items: readonly Item[] }) {
   );
 }
 
-function ItemGhost({ item, ok, outline }: { item: Item; ok: boolean; outline: boolean }) {
+function ItemGhost({ item, ok, outline }: { item: FloorItem; ok: boolean; outline: boolean }) {
   const def = ITEM_DEFS[item.def];
   const f = footprint(def, item.rot);
   const x0 = item.x / 2;
@@ -388,7 +388,7 @@ function ItemGhost({ item, ok, outline }: { item: Item; ok: boolean; outline: bo
 }
 
 // Where the stairs will cut through the floor above: the hole tiles in amber and the landing the stairs arrive on.
-function StairHole({ item }: { item: Item }) {
+function StairHole({ item }: { item: FloorItem }) {
   const info = stairsInfo(item, ITEM_DEFS[item.def]);
   const landing = info.landing;
   return (
