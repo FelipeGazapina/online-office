@@ -714,6 +714,43 @@ console.log('\n# the owner\'s pin wins over a teammate');
   check(x.tasks.moveByAgent(BRUNO, 'doing', 'x', made.id).ok === false && (x.tasks.moveByAgent(BRUNO, 'doing', 'x', made.id) as { reason: string }).reason === 'not_on_task', 'and someone off the task is told so before the pin is mentioned');
 }
 
+console.log('\n# a task with a pull request is merged by the owner');
+{
+  const x = taskWorld();
+  const quick = x.tasks.boardsOf(B1).find((b) => b.kind === 'quick')!;
+  const made = x.tasks.createTask(quick.id, 'Ship it on GitHub');
+  x.w.fresh.add('ship.txt');
+  x.tasks.assign(made.id, ANA);
+  x.sync();
+  const withPr = (state: 'draft' | 'open' | 'merged' | 'closed') => {
+    const file = JSON.parse(readFileSync(x.file, 'utf8')) as { tasks: { id: string; stage: string; git?: unknown }[] };
+    const row = file.tasks.find((y) => y.id === made.id)!;
+    row.stage = 'doing';
+    row.git = { branch: 'task/ship-it', base: 'main', pr: { number: 7, url: 'https://example.test/pull/7', state } };
+    writeFileSync(x.file, JSON.stringify(file));
+    const again = new Tasks(x.file, x.host, x.w.persisted);
+    again.recover([B1, B2], []);
+    for (const entry of x.w.persisted) again.observe(entry);
+    return again;
+  };
+  for (const state of ['draft', 'open'] as const) {
+    const t = withPr(state);
+    const refused = t.moveByAgent(ANA, 'done', 'Finished.', made.id);
+    check(!refused.ok && refused.reason === 'pr_open' && /#7/.test(refused.detail) && /owner merges/.test(refused.detail) && t.view(0).tasks[0]!.stage === 'doing', `a task whose pull request is ${state} cannot be called done by a teammate, and the refusal says the owner merges`, JSON.stringify(refused));
+    const review = t.moveByAgent(ANA, 'review', 'Ready to merge.', made.id);
+    check(review.ok && review.changed && t.view(0).tasks[0]!.stage === 'review', `but it goes to review while the pull request is ${state}`);
+    const fromReview = t.moveByAgent(ANA, 'done', 'Finished.', made.id);
+    check(!fromReview.ok && fromReview.reason === 'pr_open', `and from review it still cannot go to done while the pull request is ${state}`);
+  }
+  const closed = withPr('closed').moveByAgent(ANA, 'done', 'The pull request was closed, and the work is not needed.', made.id);
+  check(closed.ok && closed.changed, 'a closed pull request is no reason to hold it: done goes through');
+  const noPr = taskWorld();
+  const plain = noPr.tasks.createTask(noPr.tasks.boardsOf(B1).find((b) => b.kind === 'quick')!.id, 'No pull request here');
+  noPr.tasks.assign(plain.id, ANA);
+  noPr.sync();
+  check(noPr.tasks.moveByAgent(ANA, 'done', 'A task without a branch has no pull request to wait for.', plain.id).ok, 'a task with no pull request is not held');
+}
+
 console.log('\n# which card a teammate means');
 {
   const x = taskWorld();

@@ -2,7 +2,8 @@ import { createAcknowledger, type Acknowledger } from './ack.ts';
 import { isPlainOrder, type OwnerIntent } from './owner-intent.ts';
 import { boardPage } from './board.ts';
 import { folderArtifacts } from './mail-artifacts.ts';
-import { commitsAhead, createWorkspace, integrate, isGitRepo, removeWorkspace, syncWorkspace, workspaceArtifacts } from './workspace.ts';
+import { commitsAhead, createWorkspace, hold, integrate, isGitRepo, removeWorkspace, syncWorkspace, workspaceArtifacts } from './workspace.ts';
+import { runGh, type Gh } from './pull-request.ts';
 import { randomUUID } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { appendFileSync, existsSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
@@ -41,13 +42,13 @@ import type { ActivityEntry, LiveInputs, TaskLive } from '../../shared/activity.
 import type { LegacySources, TaskId } from '../../shared/tasks.ts';
 import { addShells, applyOps, BuildHistory, deskOf, encodeBuilding, freeDesk, legacyBuilding, parseBuilding, placeDesk, shellItems, teamKit, ITEM_DEFS } from '../../shared/space/index.ts';
 import type { Building, BuildOp, EmployeeId as SpaceEmployeeId, ItemId, SpaceContext, Violation } from '../../shared/space/index.ts';
-import type { ActorId, ConvoKey, LedgerEntry, MailView, MessageId } from '../../shared/mail.ts';
+import type { ActorId, ConvoKey, LedgerEntry, MailView, Message, MessageId } from '../../shared/mail.ts';
 import { HARNESSES } from './adapters/index.ts';
 import type { EmployeeSession, SessionHost } from './adapters/types.ts';
 import { logger } from './debug.ts';
 import { OfficeError } from './error.ts';
 import { Inbox, type Left } from './inbox.ts';
-import { defaultIds, Mailroom, type HireSpec, type Hired, type Member } from './mail.ts';
+import { defaultIds, Mailroom, serving, type HireSpec, type Hired, type Member } from './mail.ts';
 import { mailTools } from './mail-tools.ts';
 import type { OfficeMcp } from './mcp.ts';
 import type { MemoryStore } from './memory.ts';
@@ -89,7 +90,10 @@ export type OfficeEvents = {
 type Acker = Pick<Acknowledger, 'warm' | 'ack' | 'stop'> & Partial<Pick<Acknowledger, 'triage'>>;
 
 // The things every session leans on, started before the first employee so a session can connect the moment it is built.
-export type OfficeServices = { mcp: OfficeMcp; memory: MemoryStore; taskBoards?: TaskBoardService; acker?: Acker };
+export type OfficeServices = { mcp: OfficeMcp; memory: MemoryStore; taskBoards?: TaskBoardService; acker?: Acker; gh?: Gh };
+
+// How often the pull requests of tasks are asked about while one is open. A script that waits for a merge shortens it.
+const PR_POLL_MS = Number(process.env.OFFICE_PR_POLL_MS) || 3 * 60_000;
 
 // Where a blocked employee goes when the last question is answered. The adapter keeps reporting while the card is up
 // (a subagent finishes, the turn ends), and those reports land here so the card stays put.
@@ -331,6 +335,7 @@ export class Office {
   private readonly ledgerFile: string;
   private mail!: Mailroom;
   private readonly acker: Acker;
+  private readonly prTimer: NodeJS.Timeout;
   // Owner posts that wait for a triage answer, and the end of the line they keep their order in.
   private ownerPosts = { waiting: 0, tail: Promise.resolve(), closed: false };
   // The last thing each employee said in the turn they are on. It is the reply when the harness gives no final text.
@@ -361,6 +366,11 @@ export class Office {
         members: () => this.company.employees.map((e) => ({ id: e.id, name: e.name, blockId: e.blockId })),
         provider: this.services.taskBoards,
         changed: () => this.events.changed(),
+        git: {
+          block: (id) => this.company.blocks.find((b) => b.id === id),
+          worktree: (id) => join(dirname(dataFile), 'worktrees', `task-${id}`),
+          gh: services.gh ?? runGh,
+        },
       },
       ledger,
     );
@@ -380,6 +390,11 @@ export class Office {
     }
     save(dataFile, this.company, this.building);
     this.tasks.refreshWhere((board) => board.sources.length > 0);
+    this.tasks.resumeGit();
+    this.prTimer = setInterval(() => {
+      if (this.tasks.watchingPrs()) void this.tasks.refreshPrs();
+    }, PR_POLL_MS);
+    this.prTimer.unref();
     // Sessions exist now, so whatever a crash left half delivered can go out again.
     if (!frozen) this.mail.recoverOnStart();
   }
@@ -397,7 +412,7 @@ export class Office {
           (who) => {
             const e = this.company.employees.find((x) => x.id === who);
             const block = e && this.company.blocks.find((b) => b.id === e.blockId);
-            return e?.workspace && block ? { blockCwd: block.cwd, ws: e.workspace } : undefined;
+            return e?.workspace && block ? { home: this.landing(block.cwd, this.aboutNow(who as EmployeeId)).home, ws: e.workspace } : undefined;
           },
           folderArtifacts((who) => {
             const e = this.company.employees.find((x) => x.id === who);
@@ -408,12 +423,12 @@ export class Office {
         arrived: (who) => {
           const e = this.company.employees.find((x) => x.id === who);
           const block = e && this.company.blocks.find((b) => b.id === e.blockId);
-          if (e?.workspace && block) syncWorkspace(block.cwd, e.workspace, e.name, true);
+          if (e?.workspace && block) syncWorkspace(this.landing(block.cwd, this.aboutNow(who)).home, e.workspace, e.name, true);
         },
         branchOf: (who) => {
           const e = this.company.employees.find((x) => x.id === who);
           const block = e && this.company.blocks.find((b) => b.id === e.blockId);
-          return e?.workspace && block ? { branch: e.workspace.branch, ahead: commitsAhead(block.cwd, e.workspace) } : undefined;
+          return e?.workspace && block ? { branch: e.workspace.branch, ahead: commitsAhead(this.landing(block.cwd, this.aboutNow(who)).home, e.workspace) } : undefined;
         },
         persist: (entry) => {
           mkdirSync(dirname(this.ledgerFile), { recursive: true });
@@ -457,21 +472,39 @@ export class Office {
     }
     delete e.completedAt;
     this.lastSaid.delete(id);
-    const note = this.syncNote(e);
+    const note = this.syncNote(e, this.aboutNow(id));
     trace(id, 'assign');
     this.sessionOf(e).assign(note + prompt, title);
   }
 
-  // Every request starts from the block's latest integrated work. A conflict is left in the worktree and told to the employee.
-  private syncNote(e: Employee): string {
+  // What this person is working on right now: the messages of their turn, else the requests they are serving.
+  private aboutNow(who: EmployeeId): Message[] {
+    const s = this.mail.state;
+    const turn = s.active.get(who);
+    const batch = ((turn && s.turns.get(turn)?.ids) || []).flatMap((id) => s.messages.get(id) ?? []);
+    return batch.length ? batch : serving(s, who);
+  }
+
+  // Where work about these messages comes from and lands: the branch of the task they belong to, when it has one, else the block's folder.
+  // `lost` says the task has a branch that cannot be reached right now, so the block's folder is only a place to read from.
+  private landing(blockCwd: string, about: readonly Message[]): { home: string; label: string; taskId?: TaskId; lost?: string } {
+    const task = this.tasks.homeOf(about.map((m) => m.rootId));
+    if (!task) return { home: blockCwd, label: 'the block folder' };
+    if ('lost' in task) return { home: blockCwd, label: 'the block folder', taskId: task.taskId, lost: task.lost };
+    return { home: task.ws.path, label: `the task branch ${task.ws.branch}`, taskId: task.taskId };
+  }
+
+  // Every request starts from the latest integrated work of where it lands. A conflict is left in the worktree and told to the employee.
+  private syncNote(e: Employee, about: readonly Message[]): string {
     if (!e.workspace) return '';
     const block = this.block(e.blockId);
-    const sync = syncWorkspace(block.cwd, e.workspace, e.name);
+    const from = this.landing(block.cwd, about);
+    const sync = syncWorkspace(from.home, e.workspace, e.name);
     if (sync.kind === 'conflict') {
-      this.events.log(e.id, `Merging the block's latest code into ${e.workspace.branch} conflicts in ${sync.paths.join(', ')}`, Date.now());
-      return `[Office note. The block folder moved on, and merging its latest code into your branch ${e.workspace.branch} conflicts in: ${sync.paths.join(', ')}. The merge is open in your worktree. Resolve those files and commit before anything else.]\n\n`;
+      this.events.log(e.id, `Merging the latest code of ${from.label} into ${e.workspace.branch} conflicts in ${sync.paths.join(', ')}`, Date.now());
+      return `[Office note. ${from.label[0]!.toUpperCase()}${from.label.slice(1)} moved on, and merging its latest code into your branch ${e.workspace.branch} conflicts in: ${sync.paths.join(', ')}. The merge is open in your worktree. Resolve those files and commit before anything else.]\n\n`;
     }
-    if (sync.kind === 'skipped') return `[Office note. The block's latest code could not be merged into your branch (${sync.reason}). Work from what you have.]\n\n`;
+    if (sync.kind === 'skipped') return `[Office note. The latest code of ${from.label} could not be merged into your branch (${sync.reason}). Work from what you have.]\n\n`;
     return '';
   }
 
@@ -499,10 +532,14 @@ export class Office {
     const e = this.company.employees.find((x) => x.id === id);
     const block = e && this.company.blocks.find((b) => b.id === e.blockId);
     if (!e?.workspace || !block) return undefined;
-    const result = integrate(block.cwd, e.workspace, e.name, title);
-    if (result.kind === 'merged') this.events.log(id, `Merged ${result.branch} into ${block.name}`, Date.now());
-    if (result.kind === 'held') this.events.log(id, `${e.name}'s work is on branch ${result.branch}, not merged into ${block.name}: ${result.reason}`, Date.now());
-    if (result.kind === 'conflict') this.events.log(id, `${e.name}'s work on ${result.branch} conflicts with ${block.name} in ${result.paths.join(', ')}`, Date.now());
+    const asked = serving(this.mail.state, id).filter((m) => m.kind === 'request' && m.title === title);
+    const into = this.landing(block.cwd, asked.length ? asked : this.aboutNow(id));
+    const where = into.taskId ? into.label : block.name;
+    const result = into.lost ? hold(e.workspace, e.name, title, `the task's own branch is not available (${into.lost}), so the office left the owner's branch alone`) : integrate(into.home, e.workspace, e.name, title);
+    if (result.kind === 'merged') this.events.log(id, `Merged ${result.branch} into ${where}`, Date.now());
+    if (result.kind === 'held') this.events.log(id, `${e.name}'s work is on branch ${result.branch}, not merged into ${where}: ${result.reason}`, Date.now());
+    if (result.kind === 'conflict') this.events.log(id, `${e.name}'s work on ${result.branch} conflicts with ${where} in ${result.paths.join(', ')}`, Date.now());
+    if (result.kind === 'merged' && into.taskId) void this.tasks.publish(into.taskId);
     return result;
   }
 
@@ -534,6 +571,7 @@ export class Office {
   }
 
   shutdown() {
+    clearInterval(this.prTimer);
     this.ownerPosts.closed = true;
     for (const id of [...this.sessions.keys()]) this.stopSession(id);
     this.acker.stop();
@@ -571,6 +609,7 @@ export class Office {
         this.tasks.deleteBoard(msg.boardId);
         return this.events.changed();
       case 'refresh_board':
+        void this.tasks.refreshPrs(true);
         return void this.tasks.refresh(msg.boardId);
       case 'create_task': {
         const { type: _, boardId, title, ...rest } = msg;
@@ -1025,9 +1064,9 @@ export class Office {
   private removeBlock(blockId: BlockId) {
     const block = this.block(blockId);
     for (const e of this.company.employees.filter((x) => x.blockId === blockId)) this.dismiss(e);
+    this.tasks.dropBlock(blockId);
     this.company.blocks = this.company.blocks.filter((b) => b !== block);
     this.dropItems(blockId);
-    this.tasks.dropBlock(blockId);
     this.commit();
   }
 
@@ -1089,6 +1128,7 @@ export class Office {
           if (e.workspace) removeWorkspace(block.cwd, e.workspace, e.name);
           delete e.workspace;
         }
+        this.tasks.releaseWorktrees(blockId);
         block.cwd = next;
         // Claude sessions are stored per directory, so an old sessionId cannot be resumed in the new one.
         for (const e of members) {

@@ -2,6 +2,7 @@
 // and facing +z at rot 0. Every one is a handful of boxes, cylinders and blobs so a def still costs one draw call.
 import type { BufferGeometry } from 'three';
 import { POD_MODELS } from './pod.ts';
+import { TABLETOP_MODELS } from './tabletop.ts';
 import { bbox, blob, box, cyl, merge, rbox } from './parts.ts';
 
 const WOOD = '#efe0c6';
@@ -119,7 +120,7 @@ export const FURNITURE: Readonly<Record<string, () => BufferGeometry>> = {
   // ---- tables
   meeting_round: () => merge([cyl(1.0, 1.0, 0.08, 0, 0.72, 0, OAK, 28), cyl(0.1, 0.16, 0.7, 0, 0.35, 0, DARK, 10), cyl(0.5, 0.5, 0.04, 0, 0.02, 0, DARK, 18)]),
   meeting_long: () => merge([bbox(3.9, 0.1, 1.4, 0, 0.72, 0, OAK, 0.04), box(0.12, 0.7, 1.1, -1.7, 0.35, 0, DARK), box(0.12, 0.7, 1.1, 1.7, 0.35, 0, DARK), box(3.2, 0.06, 0.1, 0, 0.5, 0, DARK)]),
-  coffee_table: () => merge([bbox(0.9, 0.05, 0.9, 0, 0.42, 0, WALNUT, 0.02), ...legs(0.9, 0.9, 0.4, 0.07, DARK), cyl(0.07, 0.07, 0.01, 0.1, 0.46, 0.1, SKY, 12)]),
+  coffee_table: () => merge([bbox(0.9, 0.05, 0.9, 0, 0.42, 0, WALNUT, 0.02), ...legs(0.9, 0.9, 0.4, 0.07, DARK)]),
   side_table: () => merge([cyl(0.22, 0.22, 0.04, 0, 0.52, 0, WALNUT, 16), cyl(0.03, 0.03, 0.5, 0, 0.25, 0, DARK, 8), cyl(0.15, 0.15, 0.03, 0, 0.02, 0, DARK, 12)]),
   high_table: () => merge([bbox(1.4, 0.06, 0.9, 0, 1.05, 0, OAK, 0.025), ...legs(1.4, 0.9, 1.02, 0.08, STEEL), box(1.2, 0.03, 0.7, 0, 0.3, 0, STEEL)]),
   cafe_table: () => merge([cyl(0.45, 0.45, 0.05, 0, 0.74, 0, CREAM, 22), cyl(0.04, 0.04, 0.72, 0, 0.36, 0, INK, 8), cyl(0.28, 0.28, 0.03, 0, 0.02, 0, INK, 16)]),
@@ -151,6 +152,9 @@ export const FURNITURE: Readonly<Record<string, () => BufferGeometry>> = {
   wardrobe: () => merge([box(1.4, 2.0, 0.5, 0, 1.0, 0, '#e2d1b3'), box(0.66, 1.9, 0.02, -0.34, 1.0, 0.26, '#d4c2a2'), box(0.66, 1.9, 0.02, 0.34, 1.0, 0.26, '#d4c2a2'), box(0.04, 0.3, 0.03, -0.05, 1.0, 0.285, INK), box(0.04, 0.3, 0.03, 0.05, 1.0, 0.285, INK)]),
   sideboard: () => merge([box(1.9, 0.8, 0.45, 0, 0.45, 0, WALNUT), ...legs(1.9, 0.4, 0.06, 0.08, INK), ...[-0.62, 0, 0.62].map((x) => box(0.58, 0.68, 0.02, x, 0.45, 0.235, '#7a5a3c')), box(1.94, 0.04, 0.5, 0, 0.87, 0, OAK)]),
   cubby: () => merge([box(1.4, 1.1, 0.4, 0, 0.55, 0, OAK), ...[-0.23, 0.23].map((x) => box(0.02, 1.0, 0.36, x, 0.55, 0.03, WALNUT)), ...[0.37, 0.73].map((y) => box(1.3, 0.03, 0.36, 0, y, 0.03, WALNUT)), ...[-0.46, 0, 0.46].map((x, i) => box(0.28, 0.25, 0.25, x, 0.5, 0.04, [SAGE, '#e0a458', SKY][i]))]),
+
+  // ---- small things for the top of a desk, a table or a shelf
+  ...TABLETOP_MODELS,
 
   // ---- the pieces of a team's pod
   ...POD_MODELS,

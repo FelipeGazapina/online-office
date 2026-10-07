@@ -1,4 +1,5 @@
 import { removeItemOp } from '../../../../shared/space/buildersGesture.ts';
+import { worldRotOf } from '../../../../shared/space/index.ts';
 import { runtime } from '../../runtime.ts';
 import { get } from '../../store.ts';
 import { enterBuild, exitBuild, redo, rotate, sendOps, setLevel, setTool, stepBack, undo } from './actions.ts';
@@ -81,8 +82,9 @@ export function buildKey(e: KeyboardEvent): boolean {
       return taken();
     }
     case 'KeyE': {
-      const item = s.buildCursor.hover && s.building?.stories[level]?.items.find((i) => i.id === s.buildCursor.hover);
-      if (item) setTool({ kind: 'item', def: item.def, rot: item.rot, carry: null, blockId: item.blockId ?? null });
+      const story = s.building?.stories[level];
+      const item = s.buildCursor.hover && story?.items.find((i) => i.id === s.buildCursor.hover);
+      if (item && story) setTool({ kind: 'item', def: item.def, rot: worldRotOf(story, item), carry: null, blockId: item.blockId ?? null });
       return taken();
     }
     case 'Tab':

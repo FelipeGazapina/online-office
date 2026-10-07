@@ -9,6 +9,8 @@ export const MAX_LOT = 64;
 export const MAX_STORIES = 4;
 export const NAV_CLEARANCE = 0.35;
 export const WALL_HALF = 0.08;
+/** The grid small items sit on top of furniture: a quarter of a cell, 12.5 cm. */
+export const TOP_UNIT = CELL / 4;
 
 export type BlockId = string;
 export type EmployeeId = string;
@@ -36,18 +38,25 @@ export type Story = {
  */
 export type Building = { v: 1; lot: Lot; stories: readonly Story[]; shelled?: 1 | 2 };
 
-export type Item = {
-  id: ItemId;
-  def: string;
-  x: number;
-  z: number;
-  rot: Rot;
-  blockId?: BlockId;
-  tint?: number;
-};
+type ItemBase = { id: ItemId; def: string; rot: Rot; blockId?: BlockId; tint?: number };
+/** Stands on the floor at absolute cell (x, z). */
+export type FloorItem = ItemBase & { x: number; z: number; on?: undefined; u?: undefined; v?: undefined };
+/**
+ * Stands on top of the floor item `on`. (u, v) is the corner of its footprint nearest the host's own origin, in TOP_UNITs
+ * from the host's footprint in the host's unturned frame, and `rot` is relative to the host. The host's position and turn
+ * are the only place where it is in the world, so moving, turning or deleting the host carries or drops it with no edit of its own.
+ */
+export type TopItem = ItemBase & { on: ItemId; u: number; v: number; x?: undefined; z?: undefined };
+export type Item = FloorItem | TopItem;
 
 /** A floor item lies on the ground: people walk over it, objects stand on it, and two floor items never overlap. Everything else is an object. */
 export type ItemLayer = 'floor' | 'object';
+/** A rectangle of a surface in TOP_UNITs, in the host's unturned frame: [u0, u1) by [v0, v1). */
+export type UnitRect = { u0: number; v0: number; u1: number; v1: number };
+/** The top of a desk, table, counter or shelf: how high it is, where things may stand and where something fixed (a monitor) already does. */
+export type Surface = { height: number; rect: UnitRect; blocked?: readonly UnitRect[] };
+/** Where an item may stand: on the floor only, on a surface only, or either (a lamp, a plant). */
+export type Placement = 'floor' | 'surface' | 'both';
 export type ItemKind = 'bench_desk' | 'po_desk' | 'owner_desk' | 'decor' | 'table' | 'seat' | 'board' | 'terminal' | 'stairs';
 export type ItemDef = {
   id: string;
@@ -57,6 +66,11 @@ export type ItemDef = {
   height: number;
   walkable: boolean;
   layer?: ItemLayer;
+  /** Defaults to the floor. A def that may stand on a surface also has `top`. */
+  placement?: Placement;
+  /** Footprint on a surface, in TOP_UNITs. */
+  top?: { w: number; d: number };
+  surface?: Surface;
   seat?: { chair: Vec2; exit: Vec2; yaw: number };
   stairs?: { rise: 1; holeLen: number };
 };
@@ -86,6 +100,11 @@ export type ViolationKind =
   | 'bad_diagonal_half'
   | 'bad_paint'
   | 'unknown_item'
+  | 'no_host'
+  | 'not_surface'
+  | 'off_surface'
+  | 'floor_only'
+  | 'needs_surface'
   | 'desk_wrong_block'
   | 'desk_wrong_kind'
   | 'desk_double_occupied'
@@ -121,6 +140,8 @@ export type FloorGeometry = {
   occ: Uint16Array;
   /** Like `occ`, for floor-layer items only: the cell's floor item, as its index in the story plus one. */
   floorOcc: Uint16Array;
+  /** Per host, the indices in the story of the items that stand on it. */
+  tops: ReadonlyMap<ItemId, readonly number[]>;
   overlaps: readonly (readonly [ItemId, ItemId])[];
   wallAt: ReadonlyMap<number, WallSeg>;
   roomOf: Uint16Array;

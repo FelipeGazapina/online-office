@@ -32,3 +32,12 @@ Kenney's chair has flat material colours, so it ships as vertex colours with no 
 | plant_succulent | Potted Plant 04, Poly Haven | https://polyhaven.com/a/potted_plant_04 | CC0 |
 | lamp | Modern Ceiling Lamp 01, Poly Haven (cord shortened) | https://polyhaven.com/a/modern_ceiling_lamp_01 | CC0 |
 | chair | `chairDesk`, Kenney Furniture Kit 2.0 | https://kenney.nl/assets/furniture-kit | CC0 |
+| desk_lamp | Desk Lamp Arm 01, Poly Haven (simplified to 2,400 triangles) | https://polyhaven.com/a/desk_lamp_arm_01 | CC0 |
+| laptop | Classic Laptop, Poly Haven (simplified to 2,700 triangles, screen glass given a flat map) | https://polyhaven.com/a/classic_laptop | CC0 |
+| picture_frame | Standing Picture Frame 01, Poly Haven (simplified to 700 triangles, turned to face +z) | https://polyhaven.com/a/standing_picture_frame_01 | CC0 |
+| vase | Ceramic Vase 01, Poly Haven (simplified to 900 triangles) | https://polyhaven.com/a/ceramic_vase_01 | CC0 |
+| desk_clock | Alarm Clock 01, Poly Haven (simplified to 1,000 triangles) | https://polyhaven.com/a/alarm_clock_01 | CC0 |
+
+The five small props above stand on desks, tables and shelves (`ItemDef.top`). The small plants on tops are the `plant_succulent` prop of
+Potted Plant 04. The books, papers, mug, pen cup and trophy have no source file: they are boxes and cylinders written in
+`src/renderer/src/scene/building/tabletop.ts`, original to this repository, and so carry no third-party license.

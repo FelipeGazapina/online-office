@@ -68,15 +68,15 @@ const wallDir = z.enum(['e', 's', 'sd', 'nd']);
 const wallRef = z.object({ x: tile, z: tile, d: wallDir });
 const wallSeg: z.ZodType<WallSeg> = z.object({ x: tile, z: tile, d: wallDir, style: z.number().int().min(0).max(255), open: z.enum(['door', 'window', 'arch']).optional() });
 const itemIdSchema = z.string().min(1).max(200).transform((s) => s as ItemId);
-const item: z.ZodType<Item> = z.object({
+const itemBase = {
   id: itemIdSchema,
   def: z.string().min(1).max(60),
-  x: tile,
-  z: tile,
   rot,
   blockId: z.string().min(1).optional(),
   tint: z.number().int().min(0).max(0xffffff).optional(),
-});
+};
+const unit = z.number().int().min(-1024).max(1024);
+const item: z.ZodType<Item> = z.union([z.object({ ...itemBase, x: tile, z: tile }), z.object({ ...itemBase, on: itemIdSchema, u: unit, v: unit })]);
 const lot = z.object({ x0: tile, z0: tile, w: z.number().int().min(1).max(64), h: z.number().int().min(1).max(64) });
 const MANY = 4096;
 const buildOp: z.ZodType<BuildOp> = z.discriminatedUnion('t', [
