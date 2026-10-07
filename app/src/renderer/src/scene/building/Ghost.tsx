@@ -6,10 +6,11 @@ import { Edges, Html } from '@react-three/drei';
 import { useEffect, useMemo, useState } from 'react';
 import { BackSide, BufferGeometry, CircleGeometry, Color, DoubleSide, Float32BufferAttribute, MeshBasicMaterial, MeshStandardMaterial, RingGeometry, ShaderMaterial, Shape, Vector2 } from 'three';
 import { mergeVertices } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
-import { cellBounds, ITEM_DEFS, STORY_H, WALL_HALF, YAW, footprint, rotateLocal, stairsInfo, type Item, type Vec2 } from '../../../../shared/space/index.ts';
+import { cellBounds, ITEM_DEFS, STORY_H, WALL_HALF, YAW, footprint, rotateLocal, stairsInfo, type FloorItem, type TopItem, type TopPose, type Vec2 } from '../../../../shared/space/index.ts';
 import { draft, type Ghost } from '../../hud/build/state.ts';
 import { useStore } from '../../store.ts';
-import { modelOf } from './models.ts';
+import { propOf } from '../props.ts';
+import { modelOf, PROP_DEFS } from './models.ts';
 
 const GREEN = '#2fe06a';
 const RED = '#ff4d4d';
@@ -46,6 +47,16 @@ const MATERIALS = {
 // The piece is tinted to the verdict's colour, not just lit by it: a pale piece over pale floor reads as glass.
 const ghostModel = (ok: boolean, depthTest: boolean) =>
   new MeshStandardMaterial({ vertexColors: true, color: ok ? '#3fd97e' : '#ff5c5c', transparent: true, opacity: depthTest ? 0.92 : 0.28, emissive: ok ? GREEN : RED, emissiveIntensity: 0.22, depthWrite: false, depthTest });
+// A baked prop has no vertex colors: the verdict's color is its whole color.
+const flatModel = (ok: boolean, depthTest: boolean) => {
+  const m = ghostModel(ok, depthTest);
+  m.vertexColors = false;
+  return m;
+};
+const FLAT_OK = flatModel(true, true);
+const FLAT_BAD = flatModel(false, true);
+const FLAT_XRAY_OK = flatModel(true, false);
+const FLAT_XRAY_BAD = flatModel(false, false);
 const MODEL_OK = ghostModel(true, true);
 const MODEL_BAD = ghostModel(false, true);
 const XRAY_OK = ghostModel(true, false);
@@ -72,11 +83,14 @@ const rim = (color: string, px: number) =>
   });
 const RIM = { ink: rim('#232640', RIM_INK), ok: rim('#a6ffc4', RIM_TONE), bad: rim('#ffb0b0', RIM_TONE) };
 const hulls = new Map<string, BufferGeometry>();
+// The small things that are drawn from a baked prop show that prop as their ghost, so the piece in hand is the piece that lands.
+const GHOST_BAKED: ReadonlySet<string> = new Set(['lamp_desk', 'laptop', 'picture_frame', 'vase', 'desk_clock']);
+const shapeOf = (def: string): BufferGeometry => (GHOST_BAKED.has(def) && PROP_DEFS[def] ? propOf(PROP_DEFS[def].prop).geometry : modelOf(def));
 /** The model's shape with its vertices welded and smoothly shaded, so pushing it outward does not tear it at the corners. */
 function hullOf(def: string): BufferGeometry {
   let g = hulls.get(def);
   if (!g) {
-    const src = modelOf(def);
+    const src = shapeOf(def);
     const bare = new BufferGeometry().setAttribute('position', src.getAttribute('position').clone());
     if (src.index) bare.setIndex(src.index.clone());
     g = mergeVertices(bare, 1e-4);
@@ -236,7 +250,7 @@ function Rect({ x0, z0, x1, z1, color, fill, border = BORDER, ink = false, probe
 }
 
 // Which side of the item people use it from: the chair side of a desk, else the +z face the models are drawn toward.
-function frontOf(item: Item): { at: Vec2; yaw: number } {
+function frontOf(item: FloorItem): { at: Vec2; yaw: number } {
   const def = ITEM_DEFS[item.def];
   const c = { x: def.w / 2, z: def.d / 2 };
   let dir = { x: 0, z: 1 };
@@ -274,8 +288,8 @@ const discRim = new RingGeometry(0.46, 0.55, 28);
 
 // The curved arrow that says this piece turns: the keys , and . and the Turn button do it. It sits on the ghost's back
 // right corner, half on the footprint, in the verdict's colour, and grows with the piece: a plant gets a small one.
-function TurnMark({ box, ok }: { box: { x0: number; z0: number; x1: number; z1: number }; ok: boolean }) {
-  const radius = Math.min(0.9, Math.max(0.26, Math.min(box.x1 - box.x0, box.z1 - box.z0) * 0.3));
+function TurnMark({ box, ok, min = 0.26 }: { box: { x0: number; z0: number; x1: number; z1: number }; ok: boolean; min?: number }) {
+  const radius = Math.min(0.9, Math.max(min, Math.min(box.x1 - box.x0, box.z1 - box.z0) * 0.3));
   const at = { x: box.x1, z: box.z0 };
   return (
     <group position={[at.x, 0.09, at.z]} rotation-x={-Math.PI / 2} scale={radius / 0.46} userData={{ probe: 'turn-mark', ...at, r: radius, ok }}>
@@ -292,18 +306,22 @@ function TurnMark({ box, ok }: { box: { x0: number; z0: number; x1: number; z1: 
 }
 
 // The piece itself, tinted by the verdict, outlined, and again through whatever stands in front of it.
-function ItemModel({ item, ok }: { item: Item; ok: boolean }) {
-  const f = footprint(ITEM_DEFS[item.def], item.rot);
-  const at: [number, number, number] = [item.x / 2 + f.w / 4, 0, item.z / 2 + f.d / 4];
-  const hull = hullOf(item.def);
+function Model({ def, at, yaw, ok }: { def: string; at: [number, number, number]; yaw: number; ok: boolean }) {
+  const hull = hullOf(def);
+  const flat = GHOST_BAKED.has(def);
   return (
     <>
-      <mesh geometry={hull} material={RIM.ink} position={at} rotation-y={YAW[item.rot]} renderOrder={6} />
-      <mesh geometry={hull} material={ok ? RIM.ok : RIM.bad} position={at} rotation-y={YAW[item.rot]} renderOrder={7} userData={{ probe: 'ghost-rim', ok }} />
-      <mesh geometry={modelOf(item.def)} material={ok ? XRAY_OK : XRAY_BAD} position={at} rotation-y={YAW[item.rot]} renderOrder={8} />
-      <mesh geometry={modelOf(item.def)} material={ok ? MODEL_OK : MODEL_BAD} position={at} rotation-y={YAW[item.rot]} renderOrder={9} />
+      <mesh geometry={hull} material={RIM.ink} position={at} rotation-y={yaw} renderOrder={6} />
+      <mesh geometry={hull} material={ok ? RIM.ok : RIM.bad} position={at} rotation-y={yaw} renderOrder={7} userData={{ probe: 'ghost-rim', ok }} />
+      <mesh geometry={shapeOf(def)} material={flat ? (ok ? FLAT_XRAY_OK : FLAT_XRAY_BAD) : ok ? XRAY_OK : XRAY_BAD} position={at} rotation-y={yaw} renderOrder={8} />
+      <mesh geometry={shapeOf(def)} material={flat ? (ok ? FLAT_OK : FLAT_BAD) : ok ? MODEL_OK : MODEL_BAD} position={at} rotation-y={yaw} renderOrder={9} />
     </>
   );
+}
+
+function ItemModel({ item, ok }: { item: FloorItem; ok: boolean }) {
+  const f = footprint(ITEM_DEFS[item.def], item.rot);
+  return <Model def={item.def} at={[item.x / 2 + f.w / 4, 0, item.z / 2 + f.d / 4]} yaw={YAW[item.rot]} ok={ok} />;
 }
 
 const CAGE_HEIGHT = 2.4;
@@ -330,7 +348,7 @@ function Cage({ x0, z0, x1, z1, color }: { x0: number; z0: number; x1: number; z
   );
 }
 
-function BlockGhost({ items, ok }: { items: readonly Item[]; ok: boolean }) {
+function BlockGhost({ items, ok }: { items: readonly FloorItem[]; ok: boolean }) {
   const box = cellBounds(items);
   if (!box) return null;
   const [x0, z0, x1, z1] = [box.x0 / 2, box.z0 / 2, box.x1 / 2, box.z1 / 2];
@@ -346,7 +364,7 @@ function BlockGhost({ items, ok }: { items: readonly Item[]; ok: boolean }) {
   );
 }
 
-function BlockSelect({ items }: { items: readonly Item[] }) {
+function BlockSelect({ items }: { items: readonly FloorItem[] }) {
   const box = cellBounds(items);
   if (!box) return null;
   return (
@@ -362,7 +380,7 @@ function BlockSelect({ items }: { items: readonly Item[] }) {
   );
 }
 
-function ItemGhost({ item, ok, outline }: { item: Item; ok: boolean; outline: boolean }) {
+function ItemGhost({ item, ok, outline }: { item: FloorItem; ok: boolean; outline: boolean }) {
   const def = ITEM_DEFS[item.def];
   const f = footprint(def, item.rot);
   const x0 = item.x / 2;
@@ -387,8 +405,35 @@ function ItemGhost({ item, ok, outline }: { item: Item; ok: boolean; outline: bo
   );
 }
 
+// A small item on a desk, table or shelf: the usable part of the top faintly outlined, the item's footprint on it in the verdict's
+// colour, and the item itself standing there. A hovered one in the select tool only gets the footprint, in white.
+function TopGhost({ item, pose, ok, outline, surface }: { item: TopItem; pose: TopPose; ok: boolean; outline: boolean; surface?: { x0: number; z0: number; x1: number; z1: number; y: number } }) {
+  const color = outline ? WHITE : tone(ok);
+  const { x0, z0, x1, z1 } = pose.box;
+  return (
+    <>
+      {surface && !outline && (
+        <group position-y={surface.y - 0.052}>
+          <Rect x0={surface.x0} z0={surface.z0} x1={surface.x1} z1={surface.z1} color={WHITE} fill={MATERIALS.fillWhite} border={0.012} probe={{ probe: 'surface', y: surface.y, x0: surface.x0, z0: surface.z0, x1: surface.x1, z1: surface.z1 }} />
+        </group>
+      )}
+      <group position-y={pose.y - 0.05}>
+        <Rect x0={x0} z0={z0} x1={x1} z1={z1} color={color} fill={outline ? null : ok ? MATERIALS.padGreen : MATERIALS.padRed} border={0.014} ink={!outline} probe={{ probe: 'top-footprint', ok, host: item.on, x0, z0, w: x1 - x0, d: z1 - z0, y: pose.y }} />
+      </group>
+      {!outline && (
+        <>
+          <group position-y={pose.y - 0.045}>
+            <TurnMark box={pose.box} ok={ok} min={0.1} />
+          </group>
+          <Model def={item.def} at={[pose.x, pose.y, pose.z]} yaw={pose.yaw} ok={ok} />
+        </>
+      )}
+    </>
+  );
+}
+
 // Where the stairs will cut through the floor above: the hole tiles in amber and the landing the stairs arrive on.
-function StairHole({ item }: { item: Item }) {
+function StairHole({ item }: { item: FloorItem }) {
   const info = stairsInfo(item, ITEM_DEFS[item.def]);
   const landing = info.landing;
   return (
@@ -478,6 +523,8 @@ function Shown({ g, level, stories }: { g: Ghost; level: number; stories: number
           {ITEM_DEFS[g.item.def].stairs && stories > level + 1 && <StairHole item={g.item} />}
         </>
       );
+    case 'top':
+      return <TopGhost item={g.item} pose={g.pose} ok={g.ok} outline={!!g.outline} surface={g.surface} />;
     case 'outline':
       return <ItemGhost item={g.item} ok outline />;
     case 'block':

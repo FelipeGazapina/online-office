@@ -3,11 +3,11 @@
 // pose that carries the team's slot layout onto the desks, board and sign as they stand now is read from those pieces, and the
 // pod goes there when it passes the rules a block move uses. Otherwise it stays where the static pod stood.
 import { ITEM_DEFS, PAINT } from './catalog.ts';
-import { inLotTile, itemRect, tileIndex } from './geom.ts';
+import { inLotTile, isFloor, itemRect, tileIndex } from './geom.ts';
 import { blockCenter, coreItems, shellItems } from './kit.ts';
 import { applyAll, itemInLot } from './story.ts';
 import { applyOps, findItem, locateItem } from './validate.ts';
-import type { Building, BlockId, BuildOp, FloorCell, Item, ItemId, Rot, SpaceContext, Vec2, Violation } from './types.ts';
+import type { Building, BlockId, BuildOp, FloorCell, FloorItem, Item, ItemId, Rot, SpaceContext, Vec2, Violation } from './types.ts';
 
 /** How a team's slot layout was carried to where its pieces stand: turned `quarter` quarter turns clockwise about the cell origin (x, z) -> (-z, x), then shifted by (dx, dz) cells. */
 export type SlotPose = { quarter: Rot; dx: number; dz: number };
@@ -23,20 +23,20 @@ export type SlotReading = { story: number; pose: SlotPose; agree: number; of: nu
 const turn = (q: Rot, p: Vec2): Vec2 => (q === 0 ? p : q === 1 ? { x: -p.z, z: p.x } : q === 2 ? { x: -p.x, z: -p.z } : { x: p.z, z: -p.x });
 
 // The minimum corner of an item's footprint once the layout is turned, before the shift.
-function turnedCorner(item: Item, quarter: Rot): Vec2 {
+function turnedCorner(item: FloorItem, quarter: Rot): Vec2 {
   const r = itemRect(item, ITEM_DEFS[item.def]);
   const a = turn(quarter, { x: r.x0, z: r.z0 });
   const c = turn(quarter, { x: r.x1, z: r.z1 });
   return { x: Math.min(a.x, c.x), z: Math.min(a.z, c.z) };
 }
 
-function carry(item: Item, pose: SlotPose): Item {
+function carry(item: FloorItem, pose: SlotPose): FloorItem {
   const at = turnedCorner(item, pose.quarter);
   return { ...item, x: at.x + pose.dx, z: at.z + pose.dz, rot: ((item.rot + pose.quarter) % 4) as Rot };
 }
 
 const isSlot = (p: SlotPose) => p.quarter === 0 && p.dx === 0 && p.dz === 0;
-const sameSpot = (a: Item, b: Item) => a.x === b.x && a.z === b.z && a.rot === b.rot;
+const sameSpot = (a: FloorItem, b: FloorItem) => a.x === b.x && a.z === b.z && a.rot === b.rot;
 
 /**
  * Where a team stands, read from its core pieces (desks, PO desk, board, terminal, sign). Each piece found by id gives the one
@@ -46,11 +46,11 @@ const sameSpot = (a: Item, b: Item) => a.x === b.x && a.z === b.z && a.rot === b
 export function inferSlotPose(b: Building, blockId: BlockId, slot: number): SlotReading {
   const cores = coreItems(blockId, slot);
   let story = 0;
-  let pairs: { was: Item; now: Item }[] = [];
+  let pairs: { was: FloorItem; now: FloorItem }[] = [];
   for (let s = 0; s < b.stories.length; s++) {
     const here = cores.flatMap((was) => {
       const now = findItem(b.stories[s], was.id);
-      return now?.def === was.def ? [{ was, now }] : [];
+      return now && isFloor(now) && now.def === was.def ? [{ was, now }] : [];
     });
     if (here.length > pairs.length) {
       story = s;
@@ -104,16 +104,16 @@ type Job = {
   story: number;
   reading: SlotReading;
   /** Pieces already standing at their slot spot, which follow the team. */
-  lift: Item[];
+  lift: FloorItem[];
   /** Pieces the team has no item for yet. */
-  add: Item[];
+  add: FloorItem[];
 };
 
 function jobFor(b: Building, block: ShellBlock, fresh: boolean): Job {
   const reading = inferSlotPose(b, block.id, block.slot);
   const story = 'pose' in reading ? reading.story : 0;
-  const lift: Item[] = [];
-  const add: Item[] = [];
+  const lift: FloorItem[] = [];
+  const add: FloorItem[] = [];
   for (const piece of shellItems(block.id, block.slot)) {
     const found = locateItem(b, piece.id);
     if (!found) {

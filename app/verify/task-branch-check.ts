@@ -43,6 +43,8 @@ console.log('# branch names, pull request text, and what a pull request does to 
   check(drafted.git?.pr?.state === 'draft' && drafted.stage === 'todo' && withPr(drafted, pr('draft'), 9) === drafted, 'recording a pull request changes nothing it already knew');
   const merged = withPr({ ...drafted, stage: 'doing' }, pr('merged'), 6);
   check(merged.stage === 'done' && merged.git?.pr?.state === 'merged' && !prIsOpen(merged.git.pr), 'a merged pull request moves the task to done');
+  const lastMove = merged.history?.at(-1);
+  check(lastMove?.kind === 'stage' && lastMove.from === 'doing' && lastMove.to === 'done' && lastMove.by === 'owner' && lastMove.at === 6, 'and the move is on the task\'s history, as the owner\'s');
   const closed = withPr({ ...drafted, stage: 'review' }, pr('closed'), 6);
   check(closed.stage === 'review' && closed.git?.pr?.state === 'closed' && !prIsOpen(closed.git.pr), 'a closed one is only shown');
   check(prIsOpen(pr('draft')) && prIsOpen(pr('open')) && !prIsOpen(undefined), 'draft and open are the open ones');

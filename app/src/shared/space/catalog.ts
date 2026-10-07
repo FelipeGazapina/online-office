@@ -1,4 +1,4 @@
-import type { ItemDef, ItemLayer, Rot } from './types.ts';
+import type { ItemDef, ItemLayer, Placement, Rot, Surface } from './types.ts';
 
 export const FLOOR_PAINTS: readonly { name: string; color: string }[] = [
   { name: 'none', color: '#000000' },
@@ -52,7 +52,7 @@ const defs: ItemDef[] = [
   { id: 'team_sign', kind: 'decor', w: 2, d: 1, height: 1.2, walkable: false },
   { id: 'plant', kind: 'decor', w: 1, d: 1, height: 1.1, walkable: false },
   { id: 'sofa', kind: 'seat', w: 4, d: 2, height: 0.85, walkable: false },
-  { id: 'coffee_machine', kind: 'decor', w: 1, d: 1, height: 1.0, walkable: false },
+  { id: 'coffee_machine', kind: 'decor', w: 1, d: 1, height: 0.68, walkable: false },
   { id: 'meeting_table', kind: 'table', w: 6, d: 3, height: 0.75, walkable: false },
   { id: 'chair', kind: 'seat', w: 1, d: 1, height: 0.9, walkable: false },
   { id: 'rug', kind: 'decor', w: 6, d: 4, height: 0.02, walkable: true, layer: 'floor' },
@@ -90,15 +90,15 @@ const more: ItemDef[] = [
   piece('rug_small', 'decor', 4, 3, 0.03, true),
   piece('rug_round', 'decor', 4, 4, 0.03, true),
   piece('lamp_floor', 'decor', 1, 1, 1.7),
-  piece('lamp_desk', 'decor', 1, 1, 0.5),
+  piece('lamp_desk', 'decor', 1, 1, 0.42),
   piece('wall_art', 'decor', 2, 1, 1.4),
   piece('clock', 'decor', 1, 1, 1.75),
   piece('divider', 'decor', 4, 1, 1.65),
   // plants
-  piece('plant_small', 'decor', 1, 1, 0.55),
+  piece('plant_small', 'decor', 1, 1, 0.42),
   piece('plant_large', 'decor', 1, 1, 1.9),
   piece('plant_tree', 'decor', 2, 2, 2.5),
-  piece('plant_cactus', 'decor', 1, 1, 0.85),
+  piece('plant_cactus', 'decor', 1, 1, 0.42),
   piece('plant_fern', 'decor', 1, 1, 0.85),
   piece('plant_planter', 'decor', 3, 1, 0.8),
   piece('plant_hedge', 'decor', 4, 1, 1.15),
@@ -110,6 +110,22 @@ const more: ItemDef[] = [
   piece('wardrobe', 'decor', 3, 1, 2.0),
   piece('sideboard', 'decor', 4, 1, 0.9),
   piece('cubby', 'decor', 3, 1, 1.1),
+];
+
+// Small things for the top of a desk, a table, a counter or a shelf. On the floor they have a nominal one cell footprint, which only
+// the ghost shows when the pointer is not over a surface. Their real footprint is `top`, in TOP_UNITs (12.5 cm).
+const small = (id: string, w: number, d: number, height: number): ItemDef => ({ id, kind: 'decor', w: 1, d: 1, height, walkable: false, placement: 'surface', top: { w, d } });
+
+const tabletop: ItemDef[] = [
+  small('laptop', 3, 2, 0.28),
+  small('books', 3, 2, 0.1),
+  small('papers', 3, 2, 0.04),
+  small('mug', 1, 1, 0.09),
+  small('picture_frame', 2, 1, 0.25),
+  small('vase', 2, 2, 0.34),
+  small('pen_cup', 1, 1, 0.16),
+  small('desk_clock', 2, 1, 0.15),
+  small('trophy', 2, 2, 0.22),
 ];
 
 // What a project block brings besides its desks, board, terminal and sign. The kit places these around the block's middle
@@ -132,9 +148,45 @@ const pod: ItemDef[] = [
   piece('pod_daily_sign', 'decor', 3, 1, 1.37),
 ];
 
-export const ITEM_DEFS: Readonly<Record<string, ItemDef>> = Object.freeze(Object.fromEntries([...defs, ...more, ...pod].map((d) => [d.id, d])));
+// The tops of furniture, in TOP_UNITs from the footprint's corner in its unturned frame. `blocked` is what a def's model already
+// carries on its top: the monitor, the keyboard and the mouse of a desk. A rect inside the footprint keeps a thing off the
+// rim of a round or rounded top.
+const bench: Surface = { height: 0.72, rect: { u0: 0, v0: 0, u1: 12, v1: 8 }, blocked: [{ u0: 4, v0: 1, u1: 10, v1: 4 }, { u0: 3, v0: 5, u1: 9, v1: 6 }] };
+const SURFACES: Readonly<Record<string, Surface>> = {
+  bench_desk: bench,
+  po_desk: { ...bench, blocked: [...bench.blocked!, { u0: 0, v0: 1, u1: 4, v1: 3 }] },
+  standing_desk: { height: 1.1, rect: { u0: 0, v0: 0, u1: 12, v1: 8 }, blocked: [{ u0: 3, v0: 5, u1: 9, v1: 6 }, { u0: 4, v0: 1, u1: 8, v1: 3 }] },
+  meeting_table: { height: 0.75, rect: { u0: 1, v0: 1, u1: 23, v1: 11 } },
+  meeting_round: { height: 0.76, rect: { u0: 3, v0: 3, u1: 13, v1: 13 } },
+  meeting_long: { height: 0.77, rect: { u0: 1, v0: 1, u1: 31, v1: 11 } },
+  coffee_table: { height: 0.445, rect: { u0: 1, v0: 1, u1: 7, v1: 7 } },
+  side_table: { height: 0.54, rect: { u0: 1, v0: 1, u1: 3, v1: 3 } },
+  high_table: { height: 1.08, rect: { u0: 1, v0: 1, u1: 11, v1: 7 } },
+  cafe_table: { height: 0.765, rect: { u0: 2, v0: 2, u1: 6, v1: 6 } },
+  folding_table: { height: 0.765, rect: { u0: 1, v0: 1, u1: 15, v1: 7 } },
+  pod_huddle_table: { height: 0.725, rect: { u0: 2, v0: 0, u1: 10, v1: 8 } },
+  pod_credenza: { height: 0.76, rect: { u0: 0, v0: 1, u1: 6, v1: 20 } },
+  shelf_low: { height: 0.94, rect: { u0: 1, v0: 0, u1: 15, v1: 4 } },
+  sideboard: { height: 0.89, rect: { u0: 1, v0: 0, u1: 15, v1: 4 } },
+  cabinet: { height: 1.2, rect: { u0: 1, v0: 0, u1: 7, v1: 4 } },
+  cubby: { height: 1.1, rect: { u0: 1, v0: 0, u1: 11, v1: 3 } },
+  filing: { height: 1.3, rect: { u0: 0, v0: 0, u1: 4, v1: 4 } },
+  bookshelf: { height: 2.0, rect: { u0: 1, v0: 0, u1: 15, v1: 3 } },
+};
+// Existing floor defs that are small enough to stand on a surface too.
+const ALSO_ON_TOP: Readonly<Record<string, { placement: Placement; top: { w: number; d: number } }>> = {
+  lamp_desk: { placement: 'both', top: { w: 3, d: 3 } },
+  plant_small: { placement: 'both', top: { w: 3, d: 3 } },
+  plant_cactus: { placement: 'both', top: { w: 4, d: 4 } },
+  coffee_machine: { placement: 'both', top: { w: 4, d: 3 } },
+};
+
+const withTops = (d: ItemDef): ItemDef => ({ ...d, ...(SURFACES[d.id] && { surface: SURFACES[d.id] }), ...ALSO_ON_TOP[d.id] });
+
+export const ITEM_DEFS: Readonly<Record<string, ItemDef>> = Object.freeze(Object.fromEntries([...defs, ...more, ...tabletop, ...pod].map((d) => [d.id, withTops(d)])));
 
 export const layerOf = (def: ItemDef): ItemLayer => def.layer ?? 'object';
+export const placementOf = (def: ItemDef): Placement => def.placement ?? 'floor';
 
 export const YAW: readonly number[] = [0, -Math.PI / 2, Math.PI, Math.PI / 2];
 

@@ -16,12 +16,13 @@ const PANEL = '#e2d1b3';
 // White parts take the instance color, so a team's chairs come out in the team's color.
 const TINT: [number, number, number] = [1, 1, 1];
 
-// With `body` false only what sits on the desk is built: the textured desk prop supplies the top, legs and drawers.
+// With `body` false only what sits on the desk is built: the textured desk prop supplies the top, legs and drawers. What is left on
+// the top is the computer (screen, keyboard, mouse and a notepad) and the cable behind it. The rest of a desk's clutter, the mug,
+// lamp, plant and papers, are small items now that the owner places: `ITEM_DEFS.bench_desk.surface.blocked` is exactly this computer.
 function desk(po: boolean, body = true) {
   const parts = body ? [bbox(1.46, 0.06, 0.94, 0, 0.72, 0, WOOD, 0.025), bbox(1.3, 0.4, 0.03, 0, 0.5, 0.4, PANEL, 0.01)] : [];
   parts.push(
     box(0.5, 0.025, 0.16, 0, 0.755, -0.12, '#2b2e38'),
-    cyl(0.05, 0.045, 0.1, 0.58, 0.8, -0.12, '#fbf6ec', 12),
     // A low, slim monitor: its top stays under a seated sitter's eyes, so faces read across the desk.
     box(0.06, 0.1, 0.06, 0, 0.8, 0.2, '#2b2e38'),
     bbox(0.7, 0.38, 0.04, 0, 0.98, 0.2, '#1c1f27', 0.015),
@@ -30,26 +31,15 @@ function desk(po: boolean, body = true) {
   parts.push(
     box(0.3, 0.02, 0.1, 0.34, 0.76, -0.3, '#fbf6ec'),
     box(0.3, 0.021, 0.025, 0.34, 0.765, -0.3, po ? '#d97757' : '#3a3f4e'),
-    box(0.16, 0.025, 0.2, 0.58, 0.76, -0.02, '#f4f0e6'),
-    cyl(0.07, 0.09, 0.02, -0.62, 0.77, 0.3, '#2b2e38', 10),
-    box(0.02, 0.24, 0.02, -0.62, 0.9, 0.3, '#2b2e38'),
-    box(0.14, 0.05, 0.1, -0.62, 1.03, 0.27, '#f2b84b'),
   );
   if (po) parts.push(box(0.32, 0.02, 0.12, -0.5, 0.76, -0.22, '#d97757'));
-  // Desk life: a mug with a handle and coffee, a mouse on a pad, loose papers, sticky notes, a cable run and a small plant.
   parts.push(
-    cyl(0.04, 0.04, 0.012, 0.58, 0.855, -0.12, '#4a2f20', 10),
-    box(0.03, 0.05, 0.015, 0.63, 0.82, -0.12, '#fbf6ec'),
     box(0.2, 0.006, 0.18, 0.36, 0.76, -0.12, '#2b2e38'),
     box(0.055, 0.025, 0.09, 0.36, 0.775, -0.12, '#e8e6e0'),
-    box(0.22, 0.012, 0.3, -0.42, 0.77, -0.2, '#f7f4ec'),
-    box(0.2, 0.012, 0.28, -0.4, 0.782, -0.16, '#e3ecf5'),
     box(0.07, 0.07, 0.006, -0.3, 1.1, 0.172, '#f7d94c'),
     box(0.06, 0.06, 0.006, -0.22, 1.04, 0.172, '#f29bb5'),
     box(0.02, 0.02, 0.42, 0.1, 0.74, 0.42, '#1c1f27'),
     box(0.02, 0.62, 0.02, 0.1, 0.4, 0.62, '#1c1f27'),
-    cyl(0.05, 0.04, 0.07, -0.58, 0.8, 0.0, '#c9a77c', 8),
-    blob(0.07, -0.58, 0.88, 0.0, '#5f9f6c'),
   );
   return merge(parts);
 }
@@ -152,6 +142,11 @@ export const PROP_DEFS: Readonly<Record<string, { prop: PropName; onTop?: (def: 
   plant_fern: { prop: 'plant_syngonium' },
   plant_small: { prop: 'plant_succulent' },
   plant_cactus: { prop: 'plant_succulent' },
+  lamp_desk: { prop: 'desk_lamp' },
+  laptop: { prop: 'laptop' },
+  picture_frame: { prop: 'picture_frame' },
+  vase: { prop: 'vase' },
+  desk_clock: { prop: 'desk_clock' },
   bench_desk: { prop: 'desk', onTop: () => desk(false, false) },
   po_desk: { prop: 'desk', onTop: () => desk(true, false) },
 };

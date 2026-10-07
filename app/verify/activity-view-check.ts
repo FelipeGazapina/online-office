@@ -1,0 +1,75 @@
+// No browser. The sentences the task screens print about the people on a task and the entries of its log, from the pure
+// helpers in hud/tasks/activityView.ts. A person who is waiting must read as waiting on whom for what, never as idle.
+// Run from app/: node verify/activity-view-check.ts   Exits 1 on any failed check.
+import type { ActivityEntry, OpenQuestion, PersonLive, TaskLive } from '../src/shared/activity.ts';
+import type { MessageId } from '../src/shared/mail.ts';
+import type { EmployeeId } from '../src/shared/protocol.ts';
+import { answerKind, cardLine, cut, questionCount, sayEntry, sayLive } from '../src/renderer/src/hud/tasks/activityView.ts';
+import { check, finish } from './check.ts';
+
+const e = (s: string) => s as EmployeeId;
+const m = (s: string) => s as MessageId;
+const names: Record<string, string> = { owner: 'You', mailroom: 'The office', rui: 'Rui', tess: 'Tess', jo: 'Jo', quin: 'Quin' };
+const name = (id: string) => names[id] ?? id;
+const piece = (title: string) => ({ id: m('p'), title, intent: 'work' as const });
+
+const waiting: PersonLive = {
+  employeeId: e('rui'),
+  state: 'waiting',
+  piece: piece('Team meeting'),
+  since: 0,
+  on: [
+    { who: e('tess'), piece: piece('Piece 1 of 4: the office side'), state: 'building', round: 1, since: 0 },
+    { who: e('jo'), piece: piece('Piece 2 of 4: the scene'), state: 'working', since: 0 },
+  ],
+};
+const said = sayLive(waiting, name).text;
+check(/^Waiting since \d.* on\n• Tess \(building round 1\) for “Piece 1 of 4: the office side”\n• Jo for “Piece 2 of 4: the scene”$/.test(said), 'a waiting person reads as waiting on whom, doing what, for which piece', said);
+check(sayLive({ ...waiting, on: [] } as PersonLive, name).text.startsWith('Holding “Team meeting”'), 'a person holding a request with nothing out says so');
+const working = sayLive({ employeeId: e('tess'), state: 'working', piece: piece('Piece 1'), since: 0, on: [] }, name);
+check(working.state === 'working' && /^Working on “Piece 1” since \d/.test(working.text), 'working says on what and since when', working.text);
+check(/, waiting on Jo$/.test(sayLive({ employeeId: e('tess'), state: 'working', piece: piece('Piece 1'), since: 0, on: [{ who: e('jo'), piece: piece('x'), state: 'queued', since: 0 }] }, name).text), 'a person who works while a teammate holds their piece says both');
+const question: OpenQuestion = { ref: { kind: 'mail', id: m('q1') }, asker: e('quin'), to: 'owner', at: 0, text: 'Chefe, which one do you want, the first or the second option we talked about earlier today in the meeting?', how: 'blocked', piece: piece('README') };
+const blocked = sayLive({ employeeId: e('quin'), state: 'blocked', question }, name).text;
+check(blocked.startsWith('Blocked: “Chefe, which one') && blocked.endsWith('…”'), 'blocked carries the question, cut to a line', blocked);
+check(sayLive({ employeeId: e('quin'), state: 'queued', piece: piece('README'), since: 0, behind: 'Another task' }, name).text === 'Next up: “README”, after “Another task”', 'queued says what it is behind');
+check(sayLive({ employeeId: e('quin'), state: 'done', piece: piece('README'), at: 0, artifact: ['a', 'b'] }, name).text === 'Done “README”, 2 files', 'done counts the files');
+check(sayLive({ employeeId: e('quin'), state: 'stopped', outcome: 'failed', piece: piece('README'), at: 0 }, name).text === 'Failed: “README”', 'a stopped person says how it ended');
+check(sayLive({ employeeId: e('quin'), state: 'idle' }, name).text === 'Idle', 'idle is idle only when nothing else is true');
+
+const live = (...people: PersonLive[]): TaskLive => ({ people, questions: [], open: 0 });
+check(cardLine(undefined, name) === undefined && cardLine(live({ employeeId: e('rui'), state: 'idle' }), name) === undefined, 'a task nobody is on says nothing on its card');
+check(cardLine(live(waiting, { employeeId: e('tess'), state: 'working', piece: piece('p'), since: 0, on: [] }, { employeeId: e('jo'), state: 'working', piece: piece('p'), since: 0, on: [] }), name)?.text === 'Tess, Jo working', 'the card names who is working before who waits');
+check(cardLine(live(waiting), name)?.text === 'Rui waiting on Tess, Jo', 'with nobody working the card says who waits on whom');
+check(cardLine(live({ ...waiting, on: [] } as PersonLive), name)?.text === 'Rui holding', 'and what a holder holds');
+check(cardLine(live({ employeeId: e('quin'), state: 'queued', piece: piece('p'), since: 0 }), name)?.text === 'Quin queued', 'queued shows too');
+check(cardLine(live(...['a', 'b', 'c', 'd'].map((id): PersonLive => ({ employeeId: e(id), state: 'working', piece: piece('p'), since: 0, on: [] }))), name)?.text === 'a, b +2 working', 'a crowd is cut to two names');
+check(questionCount(undefined) === 0 && questionCount({ ...live(), questions: [question, question] }) === 2, 'the badge counts the questions');
+
+check(answerKind(question) === 'text', 'a blocked question takes words');
+check(answerKind({ ...question, how: 'ask', options: ['A', 'B'] } as OpenQuestion) === 'options', 'a question with options takes a choice');
+check(answerKind({ ...question, how: 'ask' } as OpenQuestion) === 'text', 'an ask with no options takes words');
+check(answerKind({ ...question, how: 'permission', tool: 'Bash', detail: 'ls' } as OpenQuestion) === 'permission', 'a permission card takes allow or deny');
+
+const stamp = { id: 'x', at: 1, n: 1 };
+type Body<T> = T extends unknown ? Omit<T, 'id' | 'at' | 'n'> : never;
+const entry = (x: Body<ActivityEntry>): ActivityEntry => ({ ...stamp, ...x }) as ActivityEntry;
+const request = sayEntry(entry({ kind: 'request', msg: m('r'), from: 'owner', to: e('rui'), intent: 'work', title: 'Do it', text: 'Do it', parent: null }), name);
+check(request.head === 'You asked Rui' && request.title === 'Do it', 'a request reads as who asked whom');
+const gauntlet = sayEntry(entry({ kind: 'request', msg: m('r'), from: 'mailroom', to: e('tess'), intent: 'work', title: 'Piece', text: 't', parent: m('g'), round: { gauntlet: m('g'), n: 2, role: 'build' } }), name);
+check(gauntlet.head === 'The office asked Tess' && gauntlet.tag === 'Build round 2', 'a gauntlet round is tagged');
+const pass = sayEntry(entry({ kind: 'reply', msg: m('a'), request: m('r'), title: 'Review', from: e('jo'), to: 'mailroom', outcome: 'done', text: 'ok', verdict: { pass: true, findings: [] }, round: { gauntlet: m('g'), n: 1, role: 'review' } }), name);
+const fail = sayEntry(entry({ kind: 'reply', msg: m('a'), request: m('r'), title: 'Review', from: e('jo'), to: 'mailroom', outcome: 'done', text: 'no', verdict: { pass: false, findings: ['gap'] } }), name);
+check(pass.head === 'Jo passed it' && pass.tone === 'ok' && pass.tag === 'Review round 1' && fail.head === 'Jo failed it' && fail.tone === 'bad', 'a verdict reads as a pass or a fail, in its own tone');
+const blockedReply = sayEntry(entry({ kind: 'reply', msg: m('a'), request: m('r'), title: 'x', from: e('quin'), to: 'owner', outcome: 'blocked', text: 'q' }), name);
+check(blockedReply.head === 'Quin is blocked' && blockedReply.tone === 'warn', 'a blocked reply is a warning, not a failure');
+check(sayEntry(entry({ kind: 'stage', from: 'doing', to: 'review', by: 'mailroom' }), name).head === 'Moved to In Review by the office', 'a stage move says who made it');
+check(sayEntry(entry({ kind: 'stage', from: 'todo', to: 'doing', by: 'owner' }), name).head === 'Moved to In Progress by you', 'the owner\'s own move is "you"');
+check(sayEntry(entry({ kind: 'hours', employeeId: e('tess'), date: '2026-10-06', hours: 0.25 }), name).head === 'Sent 0.25 h for Tess (2026-10-06) to CronoSpark', 'an hours send is in the log');
+const failedHours = sayEntry(entry({ kind: 'hours', employeeId: e('tess'), date: '2026-10-06', hours: 0.25, error: 'offline' }), name);
+check(/^Could not send 0\.25 h/.test(failedHours.head) && failedHours.tone === 'bad', 'a failed send is in the log as one');
+check(/^The app restarted\. Back in the queue: Tess’s “Piece”/.test(sayEntry(entry({ kind: 'recovered', requeued: [{ msg: m('r'), who: e('tess'), title: 'Piece' }] }), name).head), 'a restart says what went back in the queue');
+check(sayEntry(entry({ kind: 'started', msg: m('r'), who: e('tess'), title: 'Piece', again: true }), name).head === 'Tess picked it up again', 'a second pickup says again');
+check(cut('a  b\n c', 20) === 'a b c' && cut('x'.repeat(50), 10) === `${'x'.repeat(9)}…`, 'cut flattens white space and ends with an ellipsis');
+
+finish();

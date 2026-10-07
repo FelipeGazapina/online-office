@@ -1,5 +1,5 @@
 export * from './types.ts';
-export { FLOOR_PAINTS, PAINT, WALL_STYLES, ITEM_DEFS, YAW, footprint, layerOf, rotateLocal } from './catalog.ts';
+export { FLOOR_PAINTS, PAINT, WALL_STYLES, ITEM_DEFS, YAW, footprint, layerOf, placementOf, rotateLocal } from './catalog.ts';
 export { emptyBuilding, emptyStory, makeStory } from './story.ts';
 export { deriveFloors } from './derive.ts';
 export { applyOps, checkOps, validate, entryOf, BuildHistory } from './validate.ts';
@@ -13,5 +13,8 @@ export { parseBuilding, encodeBuilding } from './codec.ts';
 export { legacyBuilding, legacyLot } from './legacy.ts';
 export { rectWalls, paintRect, drawRoom, removeWalls } from './builders.ts';
 export type { TileRect } from './builders.ts';
-export { blockItems, cellBounds, turnBlock, placeBlock, blockPose, moveBlockOps, blockAt } from './blocks.ts';
+export { blockItems, cellBounds, turnBlock, placeBlock, blockPose, moveBlockOps, blockAt, topsOn } from './blocks.ts';
+export { floorItems, isFloor, isTop } from './geom.ts';
+export { poseIn, relativeRot, surfaceAt, topItemAt, surfaceBox, topPose, topRect, topSize, topSpot, hostToWorld, topViolation, worldRotOf, worldToHost } from './surface.ts';
+export type { PickRay, TopPose } from './surface.ts';
 export type { BlockPose } from './blocks.ts';

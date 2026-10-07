@@ -20,6 +20,7 @@ import {
   drawRoom,
   emptyBuilding,
   encodeBuilding,
+  floorItems,
   freeDesk,
   inferSlotPose,
   layerOf,
@@ -35,7 +36,10 @@ import {
   route,
   seatPose,
   shellItems,
+  surfaceAt,
   teamKit,
+  topItemAt,
+  topPose,
   turnBlock,
   validate,
   wallName,
@@ -43,8 +47,10 @@ import {
   type Building,
   type BuildOp,
   type EmployeeId,
+  type FloorItem,
   type Item,
   type ItemId,
+  type PickRay,
   type ShellOutcome,
   type SpaceContext,
   type ViolationKind,
@@ -267,7 +273,7 @@ const flat = (stories = 1, size = 20): Building => {
   if (placed?.ok) check(freeDesk(placed.building, sixSeats, 'b3', false)?.id === 'b3:bench_desk:06', 'the new desk is the next bench desk');
   const swapped = validate(grown, { ...kitCtx, seats: new Map([['k0', id('b3:po_desk:00')]]) });
   check(swapped.some((v) => v.kind === 'desk_wrong_kind'), 'a bench employee at a PO desk is desk_wrong_kind');
-  const other = applyOps(grown, [put(0, item('b3:bench_desk:00', 'bench_desk', grown.stories[0].items.find((i) => i.id === 'b3:bench_desk:00')!.x, grown.stories[0].items.find((i) => i.id === 'b3:bench_desk:00')!.z, 0, 'b1'))], kitCtx);
+  const other = applyOps(grown, [put(0, item('b3:bench_desk:00', 'bench_desk', (floorItems(grown.stories[0]).find((i) => i.id === 'b3:bench_desk:00')!).x, (floorItems(grown.stories[0]).find((i) => i.id === 'b3:bench_desk:00')!).z, 0, 'b1'))], kitCtx);
   check(kinds(other).includes('desk_wrong_block'), 'giving a seated desk to another team is desk_wrong_block');
   const dbl = validate(grown, { ...kitCtx, seats: new Map([['k0', id('b3:bench_desk:01')], ['k1', id('b3:bench_desk:01')]]) });
   check(dbl.some((v) => v.kind === 'desk_double_occupied'), 'two employees on one desk is desk_double_occupied');
@@ -301,7 +307,7 @@ const flat = (stories = 1, size = 20): Building => {
   check(eq(turnBlock(turned(1), 1), turned(2)) && eq(turned(3), turnBlock(turned(2), 1)), 'turning by n is n single turns');
   const tb = cellBounds(turned(1))!;
   check(tb.x1 - tb.x0 === box.z1 - box.z0 && tb.z1 - tb.z0 === box.x1 - box.x0 && tb.x0 === box.x0 && tb.z0 === box.z0, 'a quarter turn swaps the bounding box sides and keeps its corner');
-  const world = (it: Item, p: { x: number; z: number }) => {
+  const world = (it: FloorItem, p: { x: number; z: number }) => {
     const l = rotateLocal(ITEM_DEFS[it.def], it.rot, p);
     return { x: it.x + l.x, z: it.z + l.z };
   };
@@ -437,10 +443,10 @@ const flat = (stories = 1, size = 20): Building => {
   const away = applyOps(legacy.building, moveBlockOps(story, 0, 'p1', { quarter: 0, origin: { x: box.x0 - 24, z: box.z0 - 40 } }), ctx);
   if (!away.ok) check(false, 'the block moves to the free slot', JSON.stringify(away.violations.slice(0, 3)));
   else {
-    const left = away.building.stories[0].items.filter((i) => i.blockId === 'p1' && i.x < box.x1 && i.x + 1 > box.x0 && i.z < box.z1 && i.z + 1 > box.z0);
+    const left = floorItems(away.building.stories[0]).filter((i) => i.blockId === 'p1' && i.x < box.x1 && i.x + 1 > box.x0 && i.z < box.z1 && i.z + 1 > box.z0);
     check(left.length === 0, 'after a move no item of the block is inside its old footprint');
     check(blockAt(away.building.stories[0], { x: (box.x0 + box.x1) / 4, z: (box.z0 + box.z1) / 4 }) !== 'p1', 'and the old middle no longer picks it');
-    const rug = away.building.stories[0].items.find((i) => i.id === shellItems('p1', 1)[0].id)!;
+    const rug = floorItems(away.building.stories[0]).find((i) => i.id === shellItems('p1', 1)[0].id)!;
     check(blockAt(away.building.stories[0], { x: rug.x / 2 + 2, z: rug.z / 2 + 2 }) === 'p1', 'a point on the bare rug picks the block');
   }
 
@@ -481,17 +487,17 @@ const flat = (stories = 1, size = 20): Building => {
   const ground = must(applyOps(emptyBuilding(lot), [paintRect(0, { x: lot.x0, z: lot.z0, w: lot.w, h: lot.h }, PAINT.woodLight)], noCtx));
   const stage = (items: readonly Item[], shelled?: 1 | 2, from = ground): Building => ({ ...must(applyOps(from, [put(0, ...items)], noCtx)), ...(shelled && { shelled }) });
   const podOf = (blockId: string, slot: number) => shellItems(blockId, slot);
-  const byId = (list: readonly Item[]) => [...list].sort((a, c) => (a.id < c.id ? -1 : 1));
+  const byId = <T extends Item>(list: readonly T[]) => [...list].sort((a, c) => (a.id < c.id ? -1 : 1));
   const shellNow = (b: Building, blockId: string, slot: number) => {
     const mine = new Set(podOf(blockId, slot).map((i) => i.id));
-    return b.stories[0].items.filter((i) => mine.has(i.id));
+    return floorItems(b.stories[0]).filter((i) => mine.has(i.id));
   };
-  const itemsOf = (b: Building) => b.stories[0].items;
+  const itemsOf = (b: Building) => floorItems(b.stories[0]);
   const A = { id: 'a', slot: 1 };
   const bare = stage(coreItems(A.id, A.slot));
   const move = (b: Building, id: string, quarter: 0 | 1 | 2 | 3, origin: { x: number; z: number }) => must(applyOps(b, moveBlockOps(b.stories[0], 0, id, { quarter, origin }), noCtx));
   // What moving the whole block, pod and all, to where its desks went would do to the pod: the app's own block move, apart from the migration.
-  const reference = (moved: Building, blockId: string, slot: number, quarter: 0 | 1 | 2 | 3): Item[] => {
+  const reference = (moved: Building, blockId: string, slot: number, quarter: 0 | 1 | 2 | 3): FloorItem[] => {
     const cores = coreItems(blockId, slot);
     const probe = placeBlock([...cores, ...podOf(blockId, slot)], { quarter, origin: { x: 0, z: 0 } });
     const anchor = itemsOf(moved).find((i) => i.id === probe[0].id)!;
@@ -524,7 +530,7 @@ const flat = (stories = 1, size = 20): Building => {
 
   // One desk moved alone and another turned alone are outvoted by the eight pieces that moved as a block.
   const turned = move(bare, A.id, 1, { x: 30, z: -50 });
-  const strays: Record<string, Partial<Item>> = { 'a:bench_desk:00': { x: 60 }, 'a:bench_desk:03': { z: -60, rot: 2 } };
+  const strays: Record<string, Partial<FloorItem>> = { 'a:bench_desk:00': { x: 60 }, 'a:bench_desk:03': { z: -60, rot: 2 } };
   const scattered = stage(itemsOf(turned).map((i) => ({ ...i, ...strays[i.id] })));
   const scatteredRun = run(scattered);
   const reading = scatteredRun.seen[0];
@@ -644,6 +650,154 @@ const flat = (stories = 1, size = 20): Building => {
   check(g2[1] === before[1] && g2[2] === before[2] && g2[0] !== before[0], 'editing the ground floor leaves floors above identical when there are no stairs');
   const r = before[0].render;
   check(r.floor.index.length === 12 * 12 * 6 && r.floor.position.length === 12 * 12 * 4 * 3, 'floor mesh is one merged quad per tile');
+}
+
+// ---------------------------------------------------------------- the surface layer: small items on desks, tables and shelves
+{
+  const top = (name: string, def: string, on: string, u: number, v: number, rot: 0 | 1 | 2 | 3 = 0): Item => ({ id: id(name), def, on: id(on), u, v, rot });
+  const defsOnTop = Object.values(ITEM_DEFS).filter((d) => d.placement === 'surface' || d.placement === 'both');
+  const hosts = Object.values(ITEM_DEFS).filter((d) => d.surface);
+  check(defsOnTop.length >= 12 && defsOnTop.every((d) => d.top && d.top.w >= 1 && d.top.d >= 1), `${defsOnTop.length} defs can stand on a surface, each with a footprint on it`);
+  check(hosts.length >= 12, `${hosts.length} defs have a top`);
+  check(
+    hosts.every((d) => {
+      const r = d.surface!.rect;
+      const inside = (q: { u0: number; v0: number; u1: number; v1: number }) => q.u0 >= 0 && q.v0 >= 0 && q.u1 <= d.w * 4 && q.v1 <= d.d * 4 && q.u0 < q.u1 && q.v0 < q.v1;
+      return inside(r) && (d.surface!.blocked ?? []).every(inside);
+    }),
+    'every top, and every fixed thing on it, lies inside its host footprint',
+  );
+  check(defsOnTop.every((d) => d.placement !== 'surface' || (d.w === 1 && d.d === 1)), 'a def for a surface only has a one cell footprint on the floor');
+
+  const base = must(applyOps(flat(2), [put(0, item('desk', 'bench_desk', 10, 10), item('table', 'meeting_table', 20, 20, 1), item('chair1', 'chair', 4, 4), item('shelf', 'shelf_low', 30, 4)), put(1, item('desk2', 'bench_desk', 10, 10))], noCtx));
+  const valid = (b: Building) => validate(b, noCtx).filter((v) => v.kind !== 'story_unreachable').length === 0;
+  const ok = (b: Building, ...ops: Item[]) => applyOps(b, [put(0, ...ops)], noCtx);
+
+  // where it lands
+  const mug = top('mug1', 'mug', 'desk', 0, 6);
+  const withMug = must(ok(base, mug));
+  const hostOf = (b: Building, hostId: string) => floorItems(b.stories[0]).find((i) => i.id === hostId)!;
+  const poseOf = (b: Building, hostId: string, it: Item) => {
+    const host = hostOf(b, hostId);
+    return topPose(host, ITEM_DEFS[host.def], it as never, ITEM_DEFS[it.def]);
+  };
+  const p0 = poseOf(withMug, 'desk', mug);
+  check(Math.abs(p0.y - ITEM_DEFS.bench_desk.surface!.height) < 1e-9 && p0.box.x0 >= 5 && p0.box.x1 <= 5 + 1.5 && p0.box.z0 >= 5 && p0.box.z1 <= 5 + 1, 'a mug on a desk stands at the height of the desk top, inside the desk footprint');
+
+  // moving and turning the host: the top item needs no edit and stays on the top, at the same spot of the host
+  for (const rot of [0, 1, 2, 3] as const) {
+    const moved = must(ok(withMug, item('desk', 'bench_desk', 30, 24, rot)));
+    const host = hostOf(moved, 'desk');
+    const pose = poseOf(moved, 'desk', mug);
+    const f = ITEM_DEFS.bench_desk;
+    const w = rot % 2 ? f.d / 2 : f.w / 2;
+    const d = rot % 2 ? f.w / 2 : f.d / 2;
+    const inside = pose.box.x0 >= host.x! / 2 - 1e-9 && pose.box.x1 <= host.x! / 2 + w + 1e-9 && pose.box.z0 >= host.z! / 2 - 1e-9 && pose.box.z1 <= host.z! / 2 + d + 1e-9;
+    check(inside && Math.abs(pose.box.x1 - pose.box.x0 - 0.125) < 1e-9 && valid(moved), `the host moved and turned ${rot} quarter(s): the mug rode along, on its top, and the building is valid`, JSON.stringify({ inside, pose: pose.box, host, v: validate(moved, noCtx) }));
+  }
+  // the same corner of the desk before and after a half turn is the opposite one in the world
+  const half = must(ok(withMug, item('desk', 'bench_desk', 10, 10, 2)));
+  const [pa, pb] = [p0, poseOf(half, 'desk', mug)];
+  check(Math.abs(pa.x + pb.x - 2 * (5 + 0.75)) < 1e-9 && Math.abs(pa.z + pb.z - 2 * (5 + 0.5)) < 1e-9, 'a half turn of the host carries the mug to the opposite spot of the top');
+  check(pb.rot === 2, 'and turns the mug with it');
+
+  // rules
+  const bad = (name: string, r: Applied, kind: ViolationKind) => check(kinds(r).includes(kind), name, JSON.stringify(kinds(r)));
+  bad('off the edge of the desk is off_surface', ok(base, top('m', 'mug', 'desk', -1, 6)), 'off_surface');
+  bad('past the far edge is off_surface', ok(base, top('m', 'mug', 'desk', 12, 6)), 'off_surface');
+  bad('a laptop that sticks out by one unit is off_surface', ok(base, top('lap', 'laptop', 'desk', 10, 6)), 'off_surface');
+  bad('where the monitor stands is refused', ok(base, top('m', 'mug', 'desk', 5, 5)), 'overlap');
+  bad('on top of another top item is refused', ok(withMug, top('m2', 'mug', 'desk', 0, 6)), 'overlap');
+  bad('half on top of another is refused', ok(withMug, top('b1', 'books', 'desk', 1, 5)), 'overlap');
+  check(ok(withMug, top('m3', 'mug', 'desk', 1, 6)).ok, 'next to it is fine, down to one unit');
+  check(ok(withMug, top('m4', 'mug', 'desk2', 0, 6)).ok === false, 'a top item names a host of its own story');
+  check(applyOps(withMug, [{ t: 'items', story: 1, put: [top('m5', 'mug', 'desk2', 0, 6)], del: [] }], noCtx).ok, 'the same spot on another desk is free: overlap is checked on one top only');
+  bad('a mug on a chair has nothing to stand on', ok(base, top('m', 'mug', 'chair1', 0, 0)), 'not_surface');
+  bad('a mug on nothing has no host', ok(base, top('m', 'mug', 'ghost', 0, 0)), 'no_host');
+  bad('a tall plant does not go on a desk', ok(base, top('pl', 'plant_large', 'desk', 0, 0)), 'floor_only');
+  bad('a mug cannot stand on a mug', ok(withMug, top('m7', 'mug', 'mug1', 0, 0)), 'no_host');
+  bad('a mug on the bare floor is refused', ok(base, item('m8', 'mug', 36, 36)), 'needs_surface');
+  check(ok(base, item('lamp1', 'lamp_desk', 36, 36)).ok, 'a desk lamp may stand on the floor');
+  check(ok(base, top('lamp2', 'lamp_desk', 'desk', 0, 5)).ok, 'and on a desk');
+
+  // ids that can change between floor and top with one put
+  const moveUp = must(ok(must(ok(base, item('lamp1', 'lamp_desk', 36, 36))), top('lamp1', 'lamp_desk', 'desk', 0, 5)));
+  const lamp = moveUp.stories[0].items.find((i) => i.id === 'lamp1')!;
+  check(lamp.on === 'desk' && lamp.x === undefined && lamp.z === undefined, 'the same lamp lifted from the floor onto a desk is one put, and has no floor cell left');
+
+  // delete the host: what stood on it goes, and undo brings both back
+  const loaded = must(ok(withMug, top('books1', 'books', 'desk', 0, 0), top('plant1', 'plant_small', 'shelf', 2, 0)));
+  const gone = applyOps(loaded, [{ t: 'items', story: 0, put: [], del: [id('desk')] }], noCtx);
+  check(gone.ok && !gone.building.stories[0].items.some((i) => i.id === 'mug1' || i.id === 'books1' || i.id === 'desk') && gone.building.stories[0].items.some((i) => i.id === 'plant1'), 'deleting a desk deletes what stands on it and nothing else');
+  const back = gone.ok && applyOps(gone.building, gone.inverse, noCtx);
+  check(back && back.ok && eq(back.building, loaded), 'its inverse puts the desk and every item on it back exactly');
+  const hist = new BuildHistory();
+  if (gone.ok) hist.push({ forward: gone.forward, inverse: gone.inverse, label: 'delete' });
+  const undone = gone.ok ? hist.undo(gone.building, noCtx) : null;
+  check(undone?.ok === true && eq(undone.building, loaded), 'undo restores the desk with its items');
+  const redone = undone?.ok ? hist.redo(undone.building, noCtx) : null;
+  check(redone?.ok === true && redone.building.stories[0].items.every((i) => i.id !== 'mug1'), 'redo drops them again');
+  // a rule-breaking add of a block's furniture by its id: the office's own `dropItems` shape
+  const team = must(applyOps(base, [put(0, item('t:desk', 'bench_desk', 20, 4, 0, 'blk'))], noCtx));
+  const teamTop = must(applyOps(team, [put(0, top('t:mug', 'mug', 't:desk', 0, 6))], noCtx));
+  const dropped = must(applyOps(teamTop, [{ t: 'items', story: 0, put: [], del: floorItems(teamTop.stories[0]).filter((i) => i.blockId === 'blk').map((i) => i.id) }], noCtx));
+  check(!dropped.stories[0].items.some((i) => i.id === 't:mug'), 'removing a block by its pieces takes what stood on them');
+
+  // a block move keeps them, on the same floor and to another floor
+  const decorated = must(applyOps(base, [put(0, item('b:desk1', 'bench_desk', 4, 30, 0, 'blk'), item('b:desk2', 'bench_desk', 10, 30, 0, 'blk')), put(0, top('b:mug', 'mug', 'b:desk1', 0, 6), top('b:books', 'books', 'b:desk2', 1, 0, 1))], noCtx));
+  const blockStory = decorated.stories[0];
+  const here = moveBlockOps(blockStory, 0, 'blk', blockPose(blockItems(blockStory, 'blk'), 1, { x: 30, z: 30 }));
+  const movedHere = must(applyOps(decorated, here, noCtx));
+  check(movedHere.stories[0].items.some((i) => i.id === 'b:mug' && i.on === 'b:desk1') && valid(movedHere) && here.every((o) => o.t !== 'items' || o.put.every((i) => i.on === undefined)), 'turning and moving a block on its floor edits only its pieces and leaves what stands on them on top');
+  const up = moveBlockOps(blockStory, 0, 'blk', blockPose(blockItems(blockStory, 'blk'), 0, { x: 20, z: 12 }), 1);
+  const movedUp = must(applyOps(decorated, up, noCtx));
+  const onTwo = movedUp.stories[1].items.filter((i) => i.on !== undefined).map((i) => i.id).sort();
+  check(onTwo.join() === 'b:books,b:mug' && !movedUp.stories[0].items.some((i) => i.id === 'b:mug' || i.id === 'b:books'), 'a block moved to another floor takes what stands on its desks');
+  check(valid(movedUp), 'and the building is valid there');
+  const undoUp = applyOps(movedUp, applyOps(decorated, up, noCtx).ok ? (applyOps(decorated, up, noCtx) as Extract<Applied, { ok: true }>).inverse : [], noCtx);
+  check(undoUp.ok && eq(undoUp.building, decorated), 'undoing the move to another floor restores everything');
+
+  // persistence
+  const wire = JSON.parse(JSON.stringify(encodeBuilding(loaded)));
+  const reread = parseBuilding(wire);
+  check(eq(reread, loaded) && reread.stories[0].items.filter((i) => i.on !== undefined).length === 3, 'save and load keeps every item on its host');
+  wire.stories[0].items = wire.stories[0].items.filter((i: { id: string }) => i.id !== 'desk');
+  let dropped2 = '';
+  const stale = parseBuilding(wire, (m) => (dropped2 += m));
+  check(!stale.stories[0].items.some((i) => i.id === 'mug1') && dropped2.includes('mug1') && stale.stories[0].items.some((i) => i.id === 'plant1'), 'a file whose desk is gone drops what stood on it, and says so');
+
+  // picking
+  // A ray that comes in slanted and meets the plane of the desk top at (x, z): the floor plane would put it a quarter meter off.
+  const slanted = (x: number, z: number, y: number): PickRay => ({ o: { x: x - 1, y: y + 3, z: z - 1 }, d: { x: 1 / Math.hypot(1, 3, 1), y: -3 / Math.hypot(1, 3, 1), z: 1 / Math.hypot(1, 3, 1) } });
+  const surfaceHit = surfaceAt(withMug.stories[0], { o: { x: 5.75, y: 4, z: 5.5 }, d: { x: 0, y: -1, z: 0 } });
+  check(surfaceHit?.host.id === 'desk' && Math.abs(surfaceHit.point.x - 5.75) < 1e-9, 'a ray down onto a desk top finds the desk and the point');
+  check(surfaceAt(withMug.stories[0], { o: { x: 5.75, y: 4, z: 8.5 }, d: { x: 0, y: -1, z: 0 } }) === null, 'a ray down onto bare floor finds no surface');
+  const front = surfaceAt(withMug.stories[0], slanted(5.2, 5.2, ITEM_DEFS.bench_desk.surface!.height));
+  check(front?.host.id === 'desk' && Math.abs(front.point.x - 5.2) < 1e-9 && Math.abs(front.point.z - 5.2) < 1e-9, 'a slanted ray finds the desk by the plane of its top, at the point it meets it, not at the floor under it');
+  const hit = topItemAt(withMug.stories[0], { o: { x: p0.x, y: 3, z: p0.z }, d: { x: 0, y: -1, z: 0 } });
+  check(hit?.id === 'mug1', 'a ray down onto a mug picks the mug');
+  check(topItemAt(withMug.stories[0], { o: { x: 8, y: 3, z: 8 }, d: { x: 0, y: -1, z: 0 } }) === null, 'and a ray beside it picks nothing');
+
+  // twelve items, six desks and a table, no rule broken, and the old floor items still collide as before
+  const row = must(applyOps(flat(1, 40), [put(0, ...[0, 1, 2, 3, 4, 5].map((n) => item(`row${n}`, 'bench_desk', 4 + n * 6, 4)), item('big', 'meeting_table', 4, 20))], noCtx));
+  const names = ['laptop', 'books', 'mug', 'picture_frame', 'vase', 'pen_cup', 'desk_clock', 'trophy', 'papers', 'lamp_desk', 'plant_small', 'plant_cactus'];
+  const placed: Item[] = names.map((def, n) => (n < 6 ? top(`it${n}`, def, `row${n}`, 0, 6) : top(`it${n}`, def, 'big', 2 + (n - 6) * 3, 2)));
+  const full = applyOps(row, [put(0, ...placed)], noCtx);
+  check(full.ok && valid(full.building), `${placed.length} small items across six desks and a table are accepted`, full.ok ? '' : JSON.stringify(full.violations));
+  const chairOnDesk = applyOps(row, [put(0, item('c9', 'chair', 4, 4))], noCtx);
+  check(!chairOnDesk.ok, 'a floor item still cannot stand where a desk stands');
+  const geo = deriveFloors(full.ok ? full.building : row)[0];
+  const lapMatrix = geo.render.items.get('laptop');
+  check(!!lapMatrix && lapMatrix.ids.length === 1 && Math.abs(lapMatrix.matrices[1] - ITEM_DEFS.bench_desk.surface!.height) < 1e-6, 'the render list gives a top item its host height');
+
+  // speed of the verdict that drives the ghost
+  const ghostOps = [put(0, top('probe', 'mug', 'row3', 0, 6))];
+  checkOps(full.ok ? full.building : row, ghostOps, noCtx);
+  const t0 = performance.now();
+  for (let n = 0; n < 500; n++) checkOps(full.ok ? full.building : row, [put(0, top('probe', 'mug', 'row3', n % 12, 6))], noCtx);
+  const mean = (performance.now() - t0) / 500;
+  console.log(`checkOps one top item: mean ${mean.toFixed(3)} ms`);
+  check(mean < 1, 'checkOps for one top item under 1 ms');
 }
 
 // ---------------------------------------------------------------- performance

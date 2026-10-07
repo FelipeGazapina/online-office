@@ -13,8 +13,23 @@ const fileOf = (name: string) => {
   return url;
 };
 
-export type PropName = 'armchair' | 'bookshelf' | 'chair' | 'desk' | 'lamp' | 'plant_ficus' | 'plant_succulent' | 'plant_syngonium' | 'plant_tall' | 'sofa';
-const NAMES: readonly PropName[] = ['armchair', 'bookshelf', 'chair', 'desk', 'lamp', 'plant_ficus', 'plant_succulent', 'plant_syngonium', 'plant_tall', 'sofa'];
+export type PropName =
+  | 'armchair'
+  | 'bookshelf'
+  | 'chair'
+  | 'desk'
+  | 'desk_clock'
+  | 'desk_lamp'
+  | 'lamp'
+  | 'laptop'
+  | 'picture_frame'
+  | 'plant_ficus'
+  | 'plant_succulent'
+  | 'plant_syngonium'
+  | 'plant_tall'
+  | 'sofa'
+  | 'vase';
+const NAMES: readonly PropName[] = ['armchair', 'bookshelf', 'chair', 'desk', 'desk_clock', 'desk_lamp', 'lamp', 'laptop', 'picture_frame', 'plant_ficus', 'plant_succulent', 'plant_syngonium', 'plant_tall', 'sofa', 'vase'];
 // The photographed albedo of dark woods and leather is lower than the stylised light the scene is lit for; a gain lifts it.
 const GAIN: Partial<Record<PropName, number>> = { desk: 1.6, sofa: 1.2, bookshelf: 1.4, armchair: 1.6, lamp: 1.7 };
 export type Prop = { geometry: BufferGeometry; material: MeshStandardMaterial };

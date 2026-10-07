@@ -2,6 +2,7 @@
 // Main is the source of truth for *logical* state. The renderer derives every avatar pose from it:
 // an employee whose status is `blocked_on_owner` walks to the owner; everyone else walks back to their desk.
 
+import type { ActivityEntry, QuestionRef, TaskLive } from './activity.ts';
 import type { Building, BuildOp, ItemId, Violation } from './space/types.ts';
 import type { MailClientMessage, MailServerMessage, MailView } from './mail.ts';
 import type { Board, BoardId, BoardPatch, BoardSpec, BoardSync, Priority, Task, TaskId, TaskStage, TaskTime } from './tasks.ts';
@@ -272,6 +273,11 @@ export type ClientMessage =
   | { type: 'delete_task'; taskId: TaskId }
   // `employeeId` is the block's PO or any employee of the block. Posts one root request to them, so they start at once.
   | { type: 'assign_task'; taskId: TaskId; employeeId: EmployeeId }
+  // Asks for everything that happened on a task. The answer arrives as an `activity` message, and the renderer asks again
+  // whenever the mailroom or the task changed under an open task.
+  | { type: 'load_activity'; taskId: TaskId }
+  // The owner's answer to a question the board shows: a blocked reply, a help request, or an employee waiting on them.
+  | { type: 'answer_question'; taskId: TaskId; ref: QuestionRef; text: string }
   // Sends the time a CronoSpark task has worked and not sent yet: closed time only, one hours entry per person and day, and the
   // same time never twice. This is the only way hours leave the app.
   | { type: 'send_hours'; taskId: TaskId }
@@ -310,6 +316,8 @@ export type Snapshot = {
   // Time worked per task with at least one run, derived from the mailroom's ledger. A person in `running` keeps counting
   // after `at`, at `share` of wall time.
   taskTime: Record<TaskId, TaskTime>;
+  // What each person on a task with runs is doing, and the questions waiting on the owner. Derived from the ledger.
+  taskLive: Record<TaskId, TaskLive>;
   taskConnections: Record<TaskProvider, TaskConnectionState>;
   linearPeople: LinearPeople;
   mail: MailView;
@@ -320,6 +328,7 @@ export type ServerMessage =
   | { type: 'said'; employeeId: EmployeeId; text: string }
   | { type: 'log'; employeeId: EmployeeId; line: string; at: number }
   | { type: 'building'; building: Building; rev: number }
+  | { type: 'activity'; taskId: TaskId; entries: ActivityEntry[]; live: TaskLive }
   | { type: 'build_rejected'; violations: readonly Violation[] }
   | { type: 'error'; message: string }
   | MailServerMessage;

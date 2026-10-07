@@ -1,6 +1,6 @@
 import { PAINT } from './catalog.ts';
 import { hasFloorAt, inLotTile, tileIndex } from './geom.ts';
-import type { Building, BuildOp, FloorCell, Item, ItemId, Lot, Rot, Vec2, WallRef, WallSeg } from './types.ts';
+import type { Building, BuildOp, FloorCell, FloorItem, ItemId, Lot, Rot, Vec2, WallRef, WallSeg } from './types.ts';
 import { MAX_LOT } from './types.ts';
 
 export const BLOCK_W = 10;
@@ -44,7 +44,7 @@ export function perimeter(lot: Lot): WallSeg[] {
 }
 
 /** The seven plants in the corners and by the door, as the static office placed them. */
-export function plantItems(lot: Lot): Item[] {
+export function plantItems(lot: Lot): FloorItem[] {
   const right = lot.x0 + lot.w;
   const bottom = lot.z0 + lot.h;
   const spots = [
@@ -70,9 +70,9 @@ export function blockCenter(slot: number): Vec2 {
 }
 
 /** The shared meeting table and its eight chairs, at the middle of the lot just north of the lobby. */
-export function meetingItems(lot: Lot): Item[] {
+export function meetingItems(lot: Lot): FloorItem[] {
   const cx = Math.round(lot.x0 + lot.w / 2) * 2;
-  const items: Item[] = [{ id: globalId('meeting_table', 0), def: 'meeting_table', x: cx - 3, z: -2, rot: 0 }];
+  const items: FloorItem[] = [{ id: globalId('meeting_table', 0), def: 'meeting_table', x: cx - 3, z: -2, rot: 0 }];
   [-3, -1, 1, 2].forEach((dx, n) => {
     items.push({ id: globalId('chair', n), def: 'chair', x: cx + dx, z: -3, rot: 0 }, { id: globalId('chair', n + 4), def: 'chair', x: cx + dx, z: 1, rot: 2 });
   });
@@ -80,7 +80,7 @@ export function meetingItems(lot: Lot): Item[] {
 }
 
 /** Bench desk n of a team: three columns of two desks back to back, south seat first, east column first. */
-export function benchItem(blockId: string, slot: number, n: number): Item {
+export function benchItem(blockId: string, slot: number, n: number): FloorItem {
   const c = blockCenter(slot);
   const column = [0, -3, -6][n >> 1];
   const south = n % 2 === 0;
@@ -88,10 +88,10 @@ export function benchItem(blockId: string, slot: number, n: number): Item {
 }
 
 /** The pieces a team cannot work without: six bench desks, the PO desk, the whiteboard, its terminal and the team sign. */
-export function coreItems(blockId: string, slot: number): Item[] {
+export function coreItems(blockId: string, slot: number): FloorItem[] {
   const c = blockCenter(slot);
   const [cx, cz] = [c.x * 2, c.z * 2];
-  const items: Item[] = Array.from({ length: BENCH_COUNT }, (_, n) => benchItem(blockId, slot, n));
+  const items: FloorItem[] = Array.from({ length: BENCH_COUNT }, (_, n) => benchItem(blockId, slot, n));
   items.push(
     { id: itemId(blockId, 'po_desk', 0), def: 'po_desk', x: cx + 3, z: cz - 2, rot: 1, blockId },
     { id: itemId(blockId, 'whiteboard', 0), def: 'whiteboard', x: cx - 4, z: cz - 7, rot: 0, blockId },
@@ -129,7 +129,7 @@ const SHELL: readonly { def: string; dx: number; dz: number; rot: Rot }[] = [
 ];
 
 /** The pod around a team's desks, as items of the team: rug, boundary, decor and the daily huddle. */
-export function shellItems(blockId: string, slot: number): Item[] {
+export function shellItems(blockId: string, slot: number): FloorItem[] {
   const c = blockCenter(slot);
   const seen = new Map<string, number>();
   return SHELL.map(({ def, dx, dz, rot }) => {
@@ -139,7 +139,7 @@ export function shellItems(blockId: string, slot: number): Item[] {
   });
 }
 
-export const teamItems = (blockId: string, slot: number): Item[] => [...coreItems(blockId, slot), ...shellItems(blockId, slot)];
+export const teamItems = (blockId: string, slot: number): FloorItem[] => [...coreItems(blockId, slot), ...shellItems(blockId, slot)];
 
 const union = (a: Lot, b: Lot): Lot => {
   const x0 = Math.min(a.x0, b.x0);
