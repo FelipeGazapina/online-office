@@ -42,6 +42,9 @@ import {
   liftOf,
   pointAtHeight,
   restingOn,
+  NEIGHBOUR_GAP,
+  SETUP_COUNT,
+  setupsOf,
   stackSpot,
   topItemAt,
   topOfStack,
@@ -62,6 +65,7 @@ import {
   type ViolationKind,
 } from '../src/shared/space/index.ts';
 import { coreItems } from '../src/shared/space/kit.ts';
+import { itemRect } from '../src/shared/space/geom.ts';
 import { check, finish } from './check.ts';
 
 const id = (s: string) => s as ItemId;
@@ -911,6 +915,50 @@ const flat = (stories = 1, size = 20): Building => {
   const mean = (performance.now() - t0) / 500;
   console.log(`checkOps one stacked item: mean ${mean.toFixed(3)} ms`);
   check(mean < 1, 'checkOps for one stacked item under 1 ms');
+}
+
+// ---------------------------------------------------------------- desk setups: the computer a desk wears
+{
+  check(ITEM_DEFS.bench_desk.setups === SETUP_COUNT && ITEM_DEFS.po_desk.setups === SETUP_COUNT && ITEM_DEFS.owner_desk.setups === undefined, 'the team desks wear one of SETUP_COUNT computers, the owner desk is drawn on its own');
+  const gap = (a: FloorItem, b: FloorItem) => {
+    const [p, q] = [itemRect(a, ITEM_DEFS[a.def]), itemRect(b, ITEM_DEFS[b.def])];
+    return Math.max(q.x0 - p.x1, p.x0 - q.x1, q.z0 - p.z1, p.z0 - q.z1, 0);
+  };
+  const clash = (building: Building) => {
+    const story = building.stories[0];
+    const setups = setupsOf(story);
+    const desks = floorItems(story).filter((i) => ITEM_DEFS[i.def].setups);
+    const bad: string[] = [];
+    for (const [n, a] of desks.entries()) for (const b of desks.slice(n + 1)) if (gap(a, b) < NEIGHBOUR_GAP && setups.get(a.id) === setups.get(b.id)) bad.push(`${a.id}~${b.id}`);
+    return { bad, desks, setups };
+  };
+
+  // Seven teams the way the kit lays them out: no two desks within a meter of each other wear the same computer, and a team shows many.
+  let kitted = legacyBuilding([], []).building;
+  const teams = Array.from({ length: 6 }, (_, slot) => ({ id: `blk-${slot}`, slot }));
+  for (const t of teams) kitted = must(applyOps(kitted, teamKit(kitted, t.id, t.slot), noCtx));
+  const kit = clash(kitted);
+  check(kit.desks.length === 7 * teams.length && kit.bad.length === 0, `${kit.desks.length} kit desks of ${teams.length} teams: no two neighbours wear the same computer`, kit.bad.join(','));
+  const seen = (blockId: string) => new Set(blockItems(kitted.stories[0], blockId).filter((i) => ITEM_DEFS[i.def].setups).map((i) => kit.setups.get(i.id)));
+  check(teams.every((t) => seen(t.id).size >= 6), 'a team of seven desks shows at least six different computers', teams.map((t) => seen(t.id).size).join());
+  check(setupsOf(kitted.stories[0]) === kit.setups, 'the setups of a story are made once per story');
+
+  // A packed floor of desks with ids picked to collide: still nothing equal next to anything, over many layouts.
+  let worst = 0;
+  for (let round = 0; round < 60; round++) {
+    const grid: Item[] = [];
+    for (let r = 0; r < 4; r++) for (let c = 0; c < 6; c++) grid.push(item(`d${(round * 7919 + r * 31 + c * 7) % 1000}-${r}${c}`, round % 2 ? 'bench_desk' : 'po_desk', 2 + c * 3, 2 + r * 2, ((r + c) % 2 ? 2 : 0) as 0 | 2));
+    const packed = must(applyOps(emptyBuilding({ x0: 0, z0: 0, w: 14, h: 10 }, 1), [paintRect(0, { x: 0, z: 0, w: 14, h: 10 }, PAINT.woodLight), put(0, ...grid)], noCtx));
+    const r = clash(packed);
+    worst = Math.max(worst, r.bad.length);
+  }
+  check(worst === 0, 'a packed floor of 24 desks, 60 layouts: no two neighbours wear the same computer', String(worst));
+
+  // A desk keeps its computer when a desk far away comes or goes; the setup is a function of the story, not stored in it.
+  const far = must(applyOps(kitted, [put(0, item('aaa-far', 'bench_desk', -30, 12))], noCtx));
+  const moved = [...kit.setups].filter(([id, s]) => setupsOf(far.stories[0]).get(id as ItemId) !== s);
+  check(moved.length === 0, 'a desk far from the rest changes no other desk\'s computer');
+  check(!JSON.stringify(encodeBuilding(kitted)).includes('setup'), 'the setups are not written to the building file');
 }
 
 // ---------------------------------------------------------------- performance

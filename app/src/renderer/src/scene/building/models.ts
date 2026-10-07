@@ -7,9 +7,10 @@ import type { PropName } from '../props.ts';
 import { FURNITURE } from './furniture.ts';
 import { POD_DYNAMIC } from './pod.ts';
 import { TABLETOP_MODELS } from './tabletop.ts';
+import { computerOf, screensOf } from './computer.ts';
 import { at, bbox, blob, box, cyl, merge, paint } from './parts.ts';
 
-export { blob, box, cyl, merge, paint };
+export { blob, box, cyl, merge, paint, screensOf };
 
 const WOOD = '#efe0c6';
 const DARK = '#3a3f4e';
@@ -17,32 +18,14 @@ const PANEL = '#e2d1b3';
 // White parts take the instance color, so a team's chairs come out in the team's color.
 const TINT: [number, number, number] = [1, 1, 1];
 
-// With `body` false only what sits on the desk is built: the textured desk prop supplies the top, legs and drawers. What is left on
-// the top is the computer (screen, keyboard, mouse and a notepad) and the cable behind it. The rest of a desk's clutter, the mug,
-// lamp, plant and papers, are small items now that the owner places: `ITEM_DEFS.bench_desk.surface.blocked` is exactly this computer.
-function desk(po: boolean, body = true) {
-  const parts = body ? [bbox(1.46, 0.06, 0.94, 0, 0.72, 0, WOOD, 0.025), bbox(1.3, 0.4, 0.03, 0, 0.5, 0.4, PANEL, 0.01)] : [];
-  parts.push(
-    box(0.5, 0.025, 0.16, 0, 0.755, -0.12, '#2b2e38'),
-    // A low, slim monitor: its top stays under a seated sitter's eyes, so faces read across the desk.
-    box(0.06, 0.1, 0.06, 0, 0.8, 0.2, '#2b2e38'),
-    bbox(0.7, 0.38, 0.04, 0, 0.98, 0.2, '#1c1f27', 0.015),
-  );
-  if (body) parts.push(...[-1, 1].flatMap((sx) => [-1, 1].map((sz) => box(0.06, 0.7, 0.06, sx * 0.67, 0.35, sz * 0.42, DARK))));
-  parts.push(
-    box(0.3, 0.02, 0.1, 0.34, 0.76, -0.3, '#fbf6ec'),
-    box(0.3, 0.021, 0.025, 0.34, 0.765, -0.3, po ? '#d97757' : '#3a3f4e'),
-  );
-  if (po) parts.push(box(0.32, 0.02, 0.12, -0.5, 0.76, -0.22, '#d97757'));
-  parts.push(
-    box(0.2, 0.006, 0.18, 0.36, 0.76, -0.12, '#2b2e38'),
-    box(0.055, 0.025, 0.09, 0.36, 0.775, -0.12, '#e8e6e0'),
-    box(0.07, 0.07, 0.006, -0.3, 1.1, 0.172, '#f7d94c'),
-    box(0.06, 0.06, 0.006, -0.22, 1.04, 0.172, '#f29bb5'),
-    box(0.02, 0.02, 0.42, 0.1, 0.74, 0.42, '#1c1f27'),
-    box(0.02, 0.62, 0.02, 0.1, 0.4, 0.62, '#1c1f27'),
-  );
-  return merge(parts);
+// With `body` false only what sits on the desk is built: the textured desk prop supplies the top, legs and drawers, and what is left is the
+// computer in one of its setups (`computer.ts`). The rest of a desk's clutter, the mug, lamp, plant and papers, are small items the owner
+// places: `ITEM_DEFS.bench_desk.surface.blocked` is exactly the computer.
+function desk(po: boolean, body = true, setup = 0) {
+  const computer = computerOf(po, setup);
+  if (!body) return computer;
+  const parts = [bbox(1.46, 0.06, 0.94, 0, 0.72, 0, WOOD, 0.025), bbox(1.3, 0.4, 0.03, 0, 0.5, 0.4, PANEL, 0.01), ...[-1, 1].flatMap((sx) => [-1, 1].map((sz) => box(0.06, 0.7, 0.06, sx * 0.67, 0.35, sz * 0.42, DARK)))];
+  return merge([...parts, computer]);
 }
 
 export function chairModel(): BufferGeometry {
@@ -136,7 +119,7 @@ function build(def: string, look: number): BufferGeometry {
 }
 
 /** Defs drawn from a baked prop model; a def whose entry has `onTop` keeps its procedural desk-top clutter on top of the model. */
-export const PROP_DEFS: Readonly<Record<string, { prop: PropName; onTop?: (def: string) => BufferGeometry }>> = {
+export const PROP_DEFS: Readonly<Record<string, { prop: PropName; onTop?: (def: string, setup: number) => BufferGeometry }>> = {
   sofa: { prop: 'sofa' },
   armchair: { prop: 'armchair' },
   bookshelf: { prop: 'bookshelf' },
@@ -150,15 +133,16 @@ export const PROP_DEFS: Readonly<Record<string, { prop: PropName; onTop?: (def: 
   picture_frame: { prop: 'picture_frame' },
   vase: { prop: 'vase' },
   desk_clock: { prop: 'desk_clock' },
-  bench_desk: { prop: 'desk', onTop: () => desk(false, false) },
-  po_desk: { prop: 'desk', onTop: () => desk(true, false) },
+  bench_desk: { prop: 'desk', onTop: (_, setup) => desk(false, false, setup) },
+  po_desk: { prop: 'desk', onTop: (_, setup) => desk(true, false, setup) },
 };
 const onTopCache = new Map<string, BufferGeometry>();
-export const onTopOf = (def: string): BufferGeometry | undefined => {
+export const onTopOf = (def: string, setup = 0): BufferGeometry | undefined => {
   const make = PROP_DEFS[def]?.onTop;
   if (!make) return undefined;
-  let g = onTopCache.get(def);
-  if (!g) onTopCache.set(def, (g = make(def)));
+  const key = `${def}#${setup}`;
+  let g = onTopCache.get(key);
+  if (!g) onTopCache.set(key, (g = make(def, setup)));
   return g;
 };
 
@@ -176,10 +160,3 @@ export const DYNAMIC: ReadonlySet<string> = new Set(['owner_desk', 'board_termin
 
 /** Instance color of a def when its item has no tint. */
 export const DEFAULT_TINT: Readonly<Record<string, number>> = { chair: 0x5c7892 };
-
-export const screenGeometry = (): BufferGeometry => {
-  const g = new PlaneGeometry(0.62, 0.31);
-  g.rotateY(Math.PI);
-  g.translate(0, 0.98, 0.2 - 0.022);
-  return g;
-};

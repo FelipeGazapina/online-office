@@ -18,3 +18,4 @@ export { floorItems, isFloor, isTop } from './geom.ts';
 export { drawKey, levelOf, liftOf, lookOf, MAX_LVL, pointAtHeight, poseIn, relativeRot, restingOn, restsOn, stackSpot, supportViolation, surfaceAt, topItemAt, topOfStack, surfaceBox, topPose, topRect, topSize, topSpot, topsClash, hostToWorld, topViolation, worldRotOf, worldToHost } from './surface.ts';
 export type { PickRay, TopPose } from './surface.ts';
 export type { BlockPose } from './blocks.ts';
+export { NEIGHBOUR_GAP, SETUP_COUNT, setupsOf } from './setups.ts';

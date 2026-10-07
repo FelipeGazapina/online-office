@@ -2,7 +2,7 @@ import { useFrame, type ThreeEvent } from '@react-three/fiber';
 import { memo, useLayoutEffect, useMemo, useRef } from 'react';
 import { AdditiveBlending, BackSide, BoxGeometry, BufferGeometry, Color, DoubleSide, Group, InstancedMesh, Matrix4, MeshBasicMaterial, MeshStandardMaterial, PlaneGeometry, Quaternion, Vector2, Vector3 } from 'three';
 import { PROVIDERS, type Employee } from '../../../../shared/protocol.ts';
-import { ITEM_DEFS, STORY_H, TOP_UNIT, WALL_STYLES, YAW, floorItems, layerOf, placementOf, type FloorGeometry, type ItemId } from '../../../../shared/space/index.ts';
+import { ITEM_DEFS, STORY_H, TOP_UNIT, WALL_STYLES, YAW, floorItems, layerOf, placementOf, setupsOf, type FloorGeometry, type ItemId } from '../../../../shared/space/index.ts';
 import { hasFloorAt, tileIndex } from '../../../../shared/space/geom.ts';
 import { runtime } from '../../runtime.ts';
 import { buildView, draft } from '../../hud/build/state.ts';
@@ -16,7 +16,7 @@ import { reflective } from '../Lighting.tsx';
 import { floorGeometry } from './floor.ts';
 import { inVoid, lobbyVoid } from '../lobbyVoid.ts';
 import { propOf } from '../props.ts';
-import { box, cyl, merge, DEFAULT_TINT, DYNAMIC, modelOf, onTopOf, PROP_DEFS, screenGeometry } from './models.ts';
+import { box, cyl, merge, DEFAULT_TINT, DYNAMIC, modelOf, onTopOf, PROP_DEFS, screensOf } from './models.ts';
 import { trimOf, TRIMMED } from './pod.ts';
 import { crossesView, curbModel, facesCamera, frameModel, glassModel, occludes, octantOf, VARIANTS, wallMatrix, wallModel, wallRecords, ZERO, type Variant, type WallRecord } from './walls.ts';
 
@@ -258,6 +258,7 @@ function Furniture({ geom }: { geom: FloorGeometry }) {
   const trimTint = useMemo(() => (id: ItemId) => trim.get(teamOf.get(id) ?? '') ?? null, [trim, teamOf]);
   const defs = useMemo(() => [...geom.render.items].filter(([def]) => !DYNAMIC.has(def)), [geom]);
   const desks = useMemo(() => floorItems(geom.story).filter((i) => ITEM_DEFS[i.def]?.seat), [geom]);
+  const setups = useMemo(() => setupsOf(geom.story), [geom]);
 
   const pick = (ids: readonly ItemId[]) => (e: ThreeEvent<MouseEvent>) => {
     if (e.delta >= 6 || e.instanceId === undefined) return;
@@ -270,7 +271,7 @@ function Furniture({ geom }: { geom: FloorGeometry }) {
   return (
     <>
       {defs.map(([def, data]) => (
-        <ModelInstances key={def} def={def} matrices={data.matrices} ids={data.ids} onClick={pick(data.ids)} tintOf={TRIMMED.has(def) ? trimTint : undefined} />
+        <ModelInstances key={def} def={def} matrices={data.matrices} ids={data.ids} pick={pick} setups={setups} tintOf={TRIMMED.has(def) ? trimTint : undefined} />
       ))}
       <Instances
         geometry={propOf('chair').geometry}
@@ -297,9 +298,10 @@ function Furniture({ geom }: { geom: FloorGeometry }) {
 }
 
 // A def drawn in a look other than its first is keyed `def#look` in the render list: one draw call per look, however many there are.
-function ModelInstances({ def: key, matrices, ids, onClick, tintOf }: { def: string; matrices: Float32Array; ids: readonly ItemId[]; onClick: (e: ThreeEvent<MouseEvent>) => void; tintOf?: (id: ItemId) => Color | null }) {
+function ModelInstances({ def: key, matrices, ids, pick, tintOf, setups }: { def: string; matrices: Float32Array; ids: readonly ItemId[]; pick: (ids: readonly ItemId[]) => (e: ThreeEvent<MouseEvent>) => void; tintOf?: (id: ItemId) => Color | null; setups: ReadonlyMap<ItemId, number> }) {
   const [def, lookText] = key.split('#');
   const look = Number(lookText ?? 0);
+  const onClick = useMemo(() => pick(ids), [pick, ids]);
   const fill = useMemo(
     () => (mesh: InstancedMesh) => {
       const m = new Matrix4();
@@ -318,13 +320,47 @@ function ModelInstances({ def: key, matrices, ids, onClick, tintOf }: { def: str
   if (BOUNDARY.has(def)) return <Instances geometry={modelOf(def)} material={boundaryMaterial} count={ids.length} fill={fill} onClick={onClick} castShadow={false} />;
   if (!baked) return <Instances geometry={modelOf(def, look)} material={furnitureMaterial} count={ids.length} fill={fill} onClick={onClick} castShadow={cast} probe={probe} />;
   const { geometry, material } = propOf(baked.prop);
-  const onTop = onTopOf(def);
   return (
     <>
       <Instances geometry={geometry} material={material} count={ids.length} fill={fill} onClick={onClick} castShadow={cast} />
-      {onTop && <Instances geometry={onTop} material={furnitureMaterial} count={ids.length} fill={fill} onClick={onClick} />}
+      {baked.onTop && <OnTop def={def} matrices={matrices} ids={ids} setups={setups} pick={pick} />}
     </>
   );
+}
+
+// What stands on a baked prop and differs from one prop to the next: a desk's computer, in the setup its desk wears. One draw call per setup in use.
+function OnTop({ def, matrices, ids, setups, pick }: { def: string; matrices: Float32Array; ids: readonly ItemId[]; setups: ReadonlyMap<ItemId, number>; pick: (ids: readonly ItemId[]) => (e: ThreeEvent<MouseEvent>) => void }) {
+  const groups = useMemo(() => {
+    const by = new Map<number, number[]>();
+    ids.forEach((id, i) => {
+      const setup = ITEM_DEFS[def].setups ? (setups.get(id) ?? 0) : 0;
+      (by.get(setup) ?? by.set(setup, []).get(setup)!).push(i);
+    });
+    return [...by].sort(([a], [b]) => a - b);
+  }, [def, ids, setups]);
+  return (
+    <>
+      {groups.map(([setup, at]) => (
+        <SetupInstances key={setup} def={def} setup={setup} at={at} matrices={matrices} ids={ids} pick={pick} />
+      ))}
+    </>
+  );
+}
+
+function SetupInstances({ def, setup, at, matrices, ids, pick }: { def: string; setup: number; at: readonly number[]; matrices: Float32Array; ids: readonly ItemId[]; pick: (ids: readonly ItemId[]) => (e: ThreeEvent<MouseEvent>) => void }) {
+  const mine = useMemo(() => at.map((i) => ids[i]), [at, ids]);
+  const fill = useMemo(
+    () => (mesh: InstancedMesh) => {
+      const m = new Matrix4();
+      at.forEach((i, n) => {
+        mesh.setMatrixAt(n, place(m, matrices[i * 5], matrices[i * 5 + 1], matrices[i * 5 + 2], matrices[i * 5 + 3]));
+        mesh.setColorAt(n, color.setHex(0xffffff));
+      });
+    },
+    [at, matrices],
+  );
+  const onClick = useMemo(() => pick(mine), [pick, mine]);
+  return <Instances geometry={onTopOf(def, setup)!} material={furnitureMaterial} count={at.length} fill={fill} onClick={onClick} />;
 }
 
 // A soft dark patch under each piece of furniture, one draw for the whole story. It grounds the objects the way ambient occlusion would.
@@ -362,49 +398,57 @@ function ContactShadows({ geom }: { geom: FloorGeometry }) {
   return <Instances geometry={blobGeometry} material={blobMaterial} count={spots.length} fill={fill} castShadow={false} receiveShadow={false} />;
 }
 
-// A desk's screen shows what its sitter is doing. One mesh draws them all, and each frame sets each one's brightness.
+// A desk's screens show what its sitter is doing. One mesh draws the screens of every desk in a setup, and each frame sets each one's brightness.
 function Screens({ geom }: { geom: FloorGeometry }) {
-  const mesh = useRef<InstancedMesh>(null);
+  const meshes = useRef(new Map<number, InstancedMesh>());
   const desks = useMemo(() => floorItems(geom.story).filter((i) => i.def === 'bench_desk' || i.def === 'po_desk'), [geom]);
   const sitters = useRef<{ company: unknown; bySeat: Map<string, Employee> }>({ company: null, bySeat: new Map() });
-  const geo = useMemo(() => screenGeometry(), []);
+  // Each desk's place in the mesh of its setup, so a frame can colour it without searching.
+  const slots = useMemo(() => {
+    const setups = setupsOf(geom.story);
+    const counts = new Map<number, number>();
+    return desks.map((d) => {
+      const setup = setups.get(d.id) ?? 0;
+      const local = counts.get(setup) ?? 0;
+      counts.set(setup, local + 1);
+      return { desk: d, setup, local };
+    });
+  }, [desks, geom]);
+  const used = useMemo(() => [...new Set(slots.map((s) => s.setup))].sort((a, b) => a - b), [slots]);
   const glow = useRef<InstancedMesh>(null);
-  const fill = useMemo(
-    () => (m: InstancedMesh) => {
-      const mat = new Matrix4();
-      desks.forEach((d, i) => {
-        const def = ITEM_DEFS[d.def];
-        const f = d.rot % 2 === 0 ? { w: def.w, d: def.d } : { w: def.d, d: def.w };
-        m.setMatrixAt(i, place(mat, (d.x + f.w / 2) / 2, 0, (d.z + f.d / 2) / 2, YAW[d.rot]));
-        m.setColorAt(i, color.setRGB(0.05, 0.05, 0.06));
-      });
-    },
-    [desks],
-  );
+
+  const matrixOf = (mat: Matrix4, d: (typeof desks)[number]) => {
+    const def = ITEM_DEFS[d.def];
+    const f = d.rot % 2 === 0 ? { w: def.w, d: def.d } : { w: def.d, d: def.w };
+    return place(mat, (d.x + f.w / 2) / 2, 0, (d.z + f.d / 2) / 2, YAW[d.rot]);
+  };
 
   useLayoutEffect(() => {
+    const mat = new Matrix4();
+    for (const [setup, mesh] of meshes.current) {
+      for (const s of slots) {
+        if (s.setup !== setup) continue;
+        mesh.setMatrixAt(s.local, matrixOf(mat, s.desk));
+        mesh.setColorAt(s.local, color.setRGB(0.05, 0.05, 0.06));
+      }
+      mesh.instanceMatrix.needsUpdate = true;
+      if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+    }
     const g = glow.current;
     if (!g) return;
-    const mat = new Matrix4();
-    desks.forEach((d, i) => {
-      const def = ITEM_DEFS[d.def];
-      const f = d.rot % 2 === 0 ? { w: def.w, d: def.d } : { w: def.d, d: def.w };
-      g.setMatrixAt(i, place(mat, (d.x + f.w / 2) / 2, 0, (d.z + f.d / 2) / 2, YAW[d.rot]));
-    });
+    desks.forEach((d, i) => g.setMatrixAt(i, matrixOf(mat, d)));
     g.instanceMatrix.needsUpdate = true;
-  }, [desks]);
+  }, [slots, desks]);
 
   useFrame((state, dt) => {
-    const m = mesh.current;
-    if (!m) return;
     const { company } = get();
     if (sitters.current.company !== company) {
       sitters.current = { company, bySeat: new Map((company?.employees ?? []).flatMap((e) => (e.seat ? [[e.seat as string, e] as const] : []))) };
     }
     const t = state.clock.elapsedTime;
     codeTexture().offset.y -= dt * 0.1;
-    desks.forEach((d, i) => {
-      const e = sitters.current.bySeat.get(d.id);
+    slots.forEach(({ desk, setup, local }, i) => {
+      const e = sitters.current.bySeat.get(desk.id);
       const kind = e?.status.kind ?? 'none';
       if (kind === 'working') {
         color.set(PROVIDERS[e!.provider].color).lerp(new Color('#ffffff'), 0.3).multiplyScalar(0.9 + Math.sin(t * 3 + i) * 0.15);
@@ -417,16 +461,26 @@ function Screens({ geom }: { geom: FloorGeometry }) {
       } else {
         color.setRGB(0.04, 0.04, 0.05);
       }
-      m.setColorAt(i, color);
+      meshes.current.get(setup)?.setColorAt(local, color);
       glow.current?.setColorAt(i, color.multiplyScalar(0.28));
     });
-    if (m.instanceColor) m.instanceColor.needsUpdate = true;
+    for (const m of meshes.current.values()) if (m.instanceColor) m.instanceColor.needsUpdate = true;
     if (glow.current?.instanceColor) glow.current.instanceColor.needsUpdate = true;
   });
 
   return (
     <>
-      <Instances geometry={geo} material={screenMaterial} count={desks.length} fill={fill} castShadow={false} receiveShadow={false} />
+      {used.map((setup) => {
+        const count = slots.filter((s) => s.setup === setup).length;
+        return (
+          <instancedMesh
+            key={`${setup}:${count}`}
+            ref={(m: InstancedMesh | null) => void (m ? meshes.current.set(setup, m) : meshes.current.delete(setup))}
+            args={[screensOf(setup), screenMaterial, count]}
+            frustumCulled={false}
+          />
+        );
+      })}
       {desks.length > 0 && <instancedMesh key={`glow${desks.length}`} ref={glow} args={[glowGeometry, glowMaterial, desks.length]} frustumCulled={false} renderOrder={3} />}
     </>
   );

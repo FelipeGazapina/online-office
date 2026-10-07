@@ -1,5 +1,8 @@
 import type { ItemDef, ItemLayer, Placement, Rot, Surface } from './types.ts';
 
+// How many computers a desk can wear (`setups.ts`). Kept here so the catalog does not import the module that imports it.
+const SETUP_COUNT = 8;
+
 export const FLOOR_PAINTS: readonly { name: string; color: string }[] = [
   { name: 'none', color: '#000000' },
   { name: 'wood_light', color: '#d9b98a' },
@@ -40,6 +43,7 @@ const desk = (id: string, kind: 'bench_desk' | 'po_desk' | 'owner_desk'): ItemDe
   d: 2,
   height: 0.75,
   walkable: false,
+  setups: kind === 'owner_desk' ? undefined : SETUP_COUNT,
   seat: { chair: { x: 1.5, z: -0.8 }, exit: { x: 1.5, z: -3 }, yaw: 0 },
 });
 

@@ -74,6 +74,8 @@ export type ItemDef = {
   top?: { w: number; d: number };
   /** How many looks (colours or styles) the model has. A look never changes the footprint or the height. */
   looks?: number;
+  /** A desk draws its computer in one of this many setups, which `setupsOf` hands out so that desks next to each other differ. Not stored. */
+  setups?: number;
   /** Other small things may rest on this one, as a notebook or a book carries a mug. */
   stackable?: boolean;
   surface?: Surface;
