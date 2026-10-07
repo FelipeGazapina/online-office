@@ -2,7 +2,7 @@
 // store on purpose: a model writing a paragraph pushes ten times a second, and nothing but the monitors and the open terminal reads it.
 // It subscribes to the office by itself, the way hud/tasks/live.ts does.
 import { useSyncExternalStore } from 'react';
-import { applyPush, modelName, type TermBlock, type TermLive } from '../../../../shared/terminal.ts';
+import { applyPush, modelName, type TermBlock, type TermLive, type TerminalPush } from '../../../../shared/terminal.ts';
 
 type Held = { blocks: Map<number, TermBlock>; sorted: readonly TermBlock[]; live: TermLive; version: number };
 
@@ -14,18 +14,22 @@ let started = false;
 
 const emit = () => listeners.forEach((l) => l());
 
+function apply(employeeId: string, push: TerminalPush) {
+  const h = held.get(employeeId) ?? { blocks: new Map<number, TermBlock>(), sorted: NONE, live: NO_LIVE, version: 0 };
+  applyPush(h.blocks, push);
+  h.sorted = [...h.blocks.values()].sort((a, b) => a.n - b.n);
+  h.live = push.live;
+  h.version++;
+  held.set(employeeId, h);
+  emit();
+}
+
 export function startTerminalFeed() {
   if (started) return;
   started = true;
   window.office.subscribe((m) => {
     if (m.type === 'terminal') {
-      const h = held.get(m.employeeId) ?? { blocks: new Map<number, TermBlock>(), sorted: NONE, live: NO_LIVE, version: 0 };
-      applyPush(h.blocks, m);
-      h.sorted = [...h.blocks.values()].sort((a, b) => a.n - b.n);
-      h.live = m.live;
-      h.version++;
-      held.set(m.employeeId, h);
-      emit();
+      apply(m.employeeId, m);
     } else if (m.type === 'snapshot') {
       const ids = new Set(m.company.employees.map((e) => e.id as string));
       let gone = false;
@@ -33,6 +37,8 @@ export function startTerminalFeed() {
       if (gone) emit();
     }
   });
+  // For the tests, which cannot make main push to people main does not know.
+  (window as unknown as { __officeTerminalPush: unknown }).__officeTerminalPush = (m: { employeeId: string } & TerminalPush) => apply(m.employeeId, m);
   window.office.send({ type: 'load_terminal' });
 }
 
