@@ -57,7 +57,6 @@ export default async function (s) {
   for (let i = 0; i < 50 && !JSON.parse(readFileSync(file, 'utf8')).building; i++) await s.sleep(200);
   assert(tops(onDisk()).length === start.length, 'the building file holds no small thing the owner did not put there');
 
-  // The owner decorates one desk: a mug and a duck, drawn once each where they were put, and nothing else appears or moves.
   const desk = bareDesks[0];
   const things = [
     { id: 'owner-mug', def: 'mug', on: desk.id, u: 1, v: 6, rot: 0 },

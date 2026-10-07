@@ -315,7 +315,6 @@ export default async function (s, { launch }) {
     await s.press('Escape');
     await park();
   }
-  // The props desks used to wear on their own are cards of the tab like the rest: each is picked from its card and lands like the others.
   for (const [entry, u, v] of [['phone', 19, 1], ['puzzle_cube', 21, 1], ['rubber_duck', 21, 3], ['cactus', 19, 4], ['snake_plant', 21, 5], ['pothos', 12, 9]]) {
     assert(cards.includes(entry), `${entry} is a card of the Tabletop tab`);
     await dress(entry, entry, TABLE, u, v, 0);

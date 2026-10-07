@@ -32,7 +32,6 @@ const first = legacyBuilding([{ id: 'blk-a', slot: 0 }], [{ id: 'e1', blockId: '
 const firstDesks = floorItems(first).filter((i) => ITEM_DEFS[i.def].setups);
 check(firstDesks.length >= 2 && !first.items.some(isTop), `and so does the default office (${firstDesks.length} desks)`);
 
-// The computers still vary: every setup is in use, each team shows at least five of its seven, and no two desks within a meter of each other share one.
 const setups = setupsOf(story);
 check(new Set(desks.map((d) => setups.get(d.id))).size === SETUP_COUNT, `all ${SETUP_COUNT} computers are in use across ${desks.length} desks`);
 const perTeam = teams.map((t) => new Set(blockItems(story, t.id).filter((i) => ITEM_DEFS[i.def].setups).map((d) => setups.get(d.id))).size);
@@ -40,7 +39,6 @@ check(perTeam.every((n) => n >= 5), `each team shows at least five different com
 const alike = desks.flatMap((a, n) => desks.slice(n + 1).filter((b) => gap(a, b) < NEIGHBOUR_GAP && setups.get(a.id) === setups.get(b.id)).map((b) => `${a.id}~${b.id}`));
 check(alike.length === 0, 'no two neighbouring desks share a computer', alike.slice(0, 6).join(' '));
 
-// What the owner puts on a desk is the only thing on it, it is stored, and taking it away leaves the desk bare again.
 {
   const [a, b] = desks;
   const mug = { id: 'owner-mug', def: 'mug', on: a.id, u: 1, v: 6, rot: 0 };
@@ -56,7 +54,6 @@ check(alike.length === 0, 'no two neighbouring desks share a computer', alike.sl
   check(setupsOf(s).get(a.id) === setups.get(a.id), "and putting things on a desk does not change its computer");
 }
 
-// Everything the owner can set on a top is a card in the Tabletop tab: the small things that only stand on a surface, and each set.
 {
   const listed = new Set(ENTRIES.filter((e) => e.kind === 'item' && e.tab === 'tabletop').map((e) => e.def));
   const missing = Object.values(ITEM_DEFS).filter((d) => d.placement === 'surface' && !d.group && !listed.has(d.id)).map((d) => d.id);
@@ -66,7 +63,6 @@ check(alike.length === 0, 'no two neighbouring desks share a computer', alike.sl
   check(new Set(names).size === names.length, 'and no two cards of the tab share a name', names.filter((n, i) => names.indexOf(n) !== i).join(' '));
 }
 
-// The owner's dressing plan of tables and shelves, as the shots and e2e-tabletop put it down, is accepted by the rules.
 {
   const { building } = legacyBuilding([{ id: 'blk-a', slot: 0 }, { id: 'blk-b', slot: 1 }], [{ id: 'e1', blockId: 'blk-a', desk: 0, orchestrator: true }, { id: 'e2', blockId: 'blk-a', desk: 0, orchestrator: false }, { id: 'e3', blockId: 'blk-a', desk: 1, orchestrator: false }, { id: 'e4', blockId: 'blk-b', desk: 0, orchestrator: false }]);
   const ctx = { blocks: new Set(['blk-a', 'blk-b']), employees: new Map(), seats: new Map() };
