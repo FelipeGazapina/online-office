@@ -1,5 +1,5 @@
 import { useFrame, type ThreeEvent } from '@react-three/fiber';
-import { memo, useLayoutEffect, useMemo, useRef } from 'react';
+import { memo, useEffect, useLayoutEffect, useMemo, useRef } from 'react';
 import { AdditiveBlending, BackSide, BoxGeometry, BufferGeometry, Color, DoubleSide, Group, InstancedMesh, Matrix4, MeshBasicMaterial, MeshStandardMaterial, PlaneGeometry, Quaternion, Vector2, Vector3 } from 'three';
 import { PROVIDERS, type Employee } from '../../../../shared/protocol.ts';
 import { ITEM_DEFS, STORY_H, TOP_UNIT, WALL_STYLES, YAW, floorItems, layerOf, placementOf, setupsOf, type FloorGeometry, type ItemId } from '../../../../shared/space/index.ts';
@@ -70,6 +70,9 @@ const aoGeometry = new PlaneGeometry(1, 1.1).rotateX(-Math.PI / 2);
 // The light a screen throws on the desk in front of it, tinted by what the screen shows.
 const glowMaterial = new MeshBasicMaterial({ map: poolTexture(), transparent: true, depthWrite: false, blending: AdditiveBlending, toneMapped: false, polygonOffset: true, polygonOffsetFactor: -4 });
 const glowGeometry = new PlaneGeometry(1.2, 0.8).rotateX(-Math.PI / 2).translate(0, 0.78, -0.12);
+// A lit candle and a desk lamp warm the top they stand on: a soft pool of light round each, in meters across and how strong.
+const WARM: Readonly<Record<string, readonly [number, number]>> = { candle: [0.34, 0.5], lamp_desk: [0.7, 0.75] };
+const warmMaterial = new MeshBasicMaterial({ map: poolTexture(), color: '#ffb865', transparent: true, depthWrite: false, blending: AdditiveBlending, toneMapped: false, polygonOffset: true, polygonOffsetFactor: -5, fog: false });
 // No blob under these: the stairs make their own shade and the daily sign hangs in the air. Floor items are skipped by their layer.
 const NO_BLOB: ReadonlySet<string> = new Set(['rail', 'stairs', 'pod_daily_sign']);
 const CEILING_Y = STORY_H - 0.3;
@@ -293,6 +296,7 @@ function Furniture({ geom }: { geom: FloorGeometry }) {
         )}
       />
       <ContactShadows geom={geom} />
+      <WarmPools geom={geom} />
       <Screens geom={geom} />
     </>
   );
@@ -411,6 +415,8 @@ function ContactShadows({ geom }: { geom: FloorGeometry }) {
   );
   const cut = useMemo(() => shadowMesh(shaped.length), [shaped]);
   const cutMaterial = useMemo(() => shadowMaterial(), []);
+  useEffect(() => () => cut.dispose(), [cut]);
+  useEffect(() => () => cutMaterial.dispose(), [cutMaterial]);
   const fillShaped = useMemo(
     () => (mesh: InstancedMesh) => {
       const m = new Matrix4();
@@ -430,6 +436,33 @@ function ContactShadows({ geom }: { geom: FloorGeometry }) {
       <Instances geometry={cut} material={cutMaterial} count={shaped.length} fill={fillShaped} castShadow={false} receiveShadow={false} />
     </>
   );
+}
+
+// The warm pools under lit candles and lamps standing on a top, one draw for the story.
+function WarmPools({ geom }: { geom: FloorGeometry }) {
+  const pools = useMemo(() => {
+    const out: { x: number; y: number; z: number; size: number; power: number }[] = [];
+    for (const [key, data] of geom.render.items) {
+      const warm = WARM[key.split('#')[0]];
+      if (!warm) continue;
+      for (let i = 0; i < data.ids.length; i++) {
+        const y = data.matrices[i * 5 + 1];
+        if (y > 0) out.push({ x: data.matrices[i * 5], y: y + 0.004, z: data.matrices[i * 5 + 2], size: warm[0], power: warm[1] });
+      }
+    }
+    return out;
+  }, [geom]);
+  const fill = useMemo(
+    () => (mesh: InstancedMesh) => {
+      const m = new Matrix4();
+      pools.forEach((p, i) => {
+        mesh.setMatrixAt(i, m.compose(p3.set(p.x, p.y, p.z), q.identity(), s3.set(p.size, 1, p.size)));
+        mesh.setColorAt(i, color.setScalar(p.power));
+      });
+    },
+    [pools],
+  );
+  return <Instances geometry={blobGeometry} material={warmMaterial} count={pools.length} fill={fill} castShadow={false} receiveShadow={false} />;
 }
 
 // A desk's screens show what its sitter is doing. One mesh draws the screens of every desk in a setup, and each frame sets each one's brightness.

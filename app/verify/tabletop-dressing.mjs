@@ -67,12 +67,12 @@ const PO = [
   ['frame_small', 11, 4, { look: 3, ang: -5 }],
 ];
 
-// A round top: everything stays within the circle.
+// A round top: a runner along one side with the plant, candles and the cat, a tray and a bowl on the other, and the middle left open.
 const HUDDLE = [
-  ['vg_coffee', 5, 3, { look: 1 }],
-  ['succulent', 3, 6, { look: 3, ang: 15 }],
-  ['snack_bowl', 6, 6, { look: 2 }],
-  ['headphones', 3, 2, { look: 1, ang: 40 }],
+  ['vg_runner', 2, 0, { look: 1 }],
+  ['vg_coffee', 2, 5, { look: 1 }],
+  ['snack_bowl', 7, 6, { look: 2 }],
+  ['headphones', 8, 3, { look: 1, ang: 40 }],
 ];
 
 const TABLE = [

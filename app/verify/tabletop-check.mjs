@@ -6,8 +6,8 @@
 // Run from app/: node verify/tabletop-check.mjs   Exits 1 on any failed check. (An .mjs for the same reason as pod-check.mjs.)
 import { readFileSync } from 'node:fs';
 import { Box3, Vector3 } from 'three';
-import { CELL, ITEM_DEFS, TOP_UNIT, placementOf } from '../src/shared/space/index.ts';
-import { PROP_DEFS, modelOf } from '../src/renderer/src/scene/building/models.ts';
+import { CELL, ITEM_DEFS, SETUP_COUNT, TOP_UNIT, placementOf } from '../src/shared/space/index.ts';
+import { PROP_DEFS, computerOf, modelOf } from '../src/renderer/src/scene/building/models.ts';
 import { check, finish } from './check.ts';
 
 const SLACK = 0.02;
@@ -54,6 +54,29 @@ const bakedBox = (prop) => {
   const { min, max } = json.accessors[json.meshes[0].primitives[0].attributes.POSITION];
   return new Box3(new Vector3(...min), new Vector3(...max));
 };
+
+// A desk's computer stays within what the desk declares `blocked`: what stands lower than a screen's clearance, on the top, lies inside those rects (give or
+// take two centimeters), so a thing the owner puts beside it never stands inside a keyboard or a screen's foot. What is higher than that floats over the top.
+for (const id of ['bench_desk', 'po_desk']) {
+  const def = ITEM_DEFS[id];
+  const { rect, blocked, height } = def.surface;
+  const box = (r) => ({ x0: r.u0 * TOP_UNIT - (def.w * CELL) / 2 - 0.02, x1: r.u1 * TOP_UNIT - (def.w * CELL) / 2 + 0.02, z0: r.v0 * TOP_UNIT - (def.d * CELL) / 2 - 0.02, z1: r.v1 * TOP_UNIT - (def.d * CELL) / 2 + 0.02 });
+  const on = box(rect);
+  const allowed = blocked.map(box);
+  check(def.setups === SETUP_COUNT, `${id}: ${SETUP_COUNT} setups`);
+  for (let setup = 0; setup < SETUP_COUNT; setup++) {
+    const pos = computerOf(id === 'po_desk', setup).getAttribute('position');
+    const stray = [];
+    for (let i = 0; i < pos.count; i++) {
+      const [x, y, z] = [pos.getX(i), pos.getY(i), pos.getZ(i)];
+      // Higher than a screen's clearance floats over the top; a cable lies flat under half a centimeter; the back edge of the desk is where a clamp holds an arm.
+      if (y > height + 0.075 || y < height + 0.0055 || z >= 0.465 || x < on.x0 || x > on.x1 || z < on.z0 || z > on.z1) continue;
+      if (!allowed.some((r) => x >= r.x0 && x <= r.x1 && z >= r.z0 && z <= r.z1)) stray.push(`(${x.toFixed(2)}, ${y.toFixed(2)}, ${z.toFixed(2)})`);
+    }
+    const tall = new Box3().setFromBufferAttribute(pos).max.y;
+    check(stray.length === 0 && tall <= height + 0.48, `${id} setup ${setup}: what stands low on the top is inside the declared rects, and its highest point is ${tall.toFixed(2)} m`, stray.slice(0, 4).join(' '));
+  }
+}
 
 const small = Object.values(ITEM_DEFS).filter((d) => placementOf(d) !== 'floor');
 check(small.length >= 44, `${small.length} defs may stand on a surface`);

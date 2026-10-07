@@ -27,11 +27,11 @@ function monitor({ w, h, x, z, yaw = 0, bezel = INK, edge = 0.012, depth = 0.026
   const lift = depth / 2 + 0.0012;
   const stand = arm
     ? piece(
-        box(0.07, 0.07, 0.07, x, TOP + 0.03, 0.48, GRAPHITE),
+        box(0.07, 0.07, 0.06, x, TOP + 0.03, 0.5, GRAPHITE),
         cyl(0.016, 0.016, y - TOP + 0.02, x, TOP + (y - TOP + 0.02) / 2, 0.5, SILVER, 10),
         box(0.03, 0.026, 0.5 - z + 0.02, x, y + 0.02, (0.5 + z) / 2 + 0.02, SILVER),
       )
-    : piece(bbox(footW, 0.012, 0.14, x, TOP + 0.006, z + 0.01, foot, 0.005), box(0.045, clear + 0.03, 0.022, x, TOP + 0.012 + (clear + 0.03) / 2, z + 0.016, foot));
+    : piece(bbox(footW, 0.012, 0.1, x, TOP + 0.006, z, foot, 0.005), box(0.045, clear + 0.03, 0.022, x, TOP + 0.012 + (clear + 0.03) / 2, z + 0.016, foot));
   return join(piece(turned(bbox(w, h, depth, 0, 0, 0, bezel, 0.008), yaw, x, y, z)), stand, {
     parts: [],
     screens: [{ x: x + front[0] * lift, y, z: z + front[1] * lift, w: w - edge * 2, h: h - edge * 2, yaw, tilt: 0 }],
@@ -41,7 +41,7 @@ function monitor({ w, h, x, z, yaw = 0, bezel = INK, edge = 0.012, depth = 0.026
 type Keys = { w?: number; base?: string; key?: string; accent?: string; legend?: string };
 
 /** Rows of keys on a slim board: 15 units across, five rows, the space bar along the bottom. `accent` colours a few of the keys. */
-function keyboard(x: number, z: number, yaw: number, { w = 0.36, base = INK, key = GRAPHITE, accent = key, legend = SILVER }: Keys = {}): Piece {
+function keyboard(x: number, z: number, yaw: number, { w = 0.4, base = INK, key = GRAPHITE, accent = key, legend = SILVER }: Keys = {}): Piece {
   const rows: number[][] = [
     [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 2],
     [1.5, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1.5],
@@ -114,16 +114,16 @@ const RECIPES: readonly (() => Piece)[] = [
   () => join(monitor({ w: 0.74, h: 0.32, x: 0, z: 0.2, bezel: SILVER, edge: 0.008, foot: SILVER, footW: 0.26 }), pad(0.1, -0.2, 0.55, 0.22, '#8c6a4a', '#d8b47d'), keyboard(0.14, -0.21, -0.03, { base: '#c9cdd8', key: CREAM, accent: '#d97757', legend: '#dfe3ea' }), mouse(-0.22, -0.2, 0.2, GRAPHITE, '#f2b84b'), cable(0.1, 0.2, '#f4f0e6')),
   // 2: two screens in a V, a cream keyboard and a mouse on a blue pad
   () => join(monitor({ w: 0.4, h: 0.27, x: 0.19, z: 0.21, yaw: 0.38, edge: 0.01, footW: 0.14 }), monitor({ w: 0.4, h: 0.27, x: -0.19, z: 0.21, yaw: -0.38, edge: 0.01, footW: 0.14 }), keyboard(0.02, -0.22, 0, { base: '#d6cfbf', key: CREAM, accent: '#4f7ea3', legend: '#e8e1d0' }), mouse(0.33, -0.2, -0.15, CREAM, '#4f7ea3'), pad(0.33, -0.2, 0.18, 0.16, '#4f7ea3', '#f4f0e6'), webcam(0.19, TOP + 0.08 + 0.27 + 0.01, 0.21)),
-  // 3: a laptop on a riser, a slim keyboard in front of it, a mouse on a pad
-  () => join(riser(0, 0.25, 0.07), laptop(0, TOP + 0.076, 0.25), keyboard(0, -0.22, 0, { w: 0.34, base: '#e8e6e0', key: '#f7f4ec', accent: '#8fb6ff', legend: '#d6d2c8' }), mouse(0.32, -0.2, 0.12, '#e8e6e0', '#8fb6ff'), pad(0.32, -0.2, 0.2, 0.16, '#5a6070', '#8fb6ff'), notes(-0.12, TOP + 0.076 + 0.13, 0.33, ['#8fd0f2'])),
+  // 3: a laptop on a riser in the keyboard end, a mouse on a pad, and the back of the desk left bare
+  () => join(riser(0.12, -0.17, 0.07), laptop(0.12, TOP + 0.076, -0.17), mouse(0.4, -0.2, 0.12, '#e8e6e0', '#8fb6ff'), pad(0.4, -0.2, 0.18, 0.16, '#5a6070', '#8fb6ff'), notes(0.12, TOP + 0.076 + 0.2, -0.07, ['#8fd0f2'])),
   // 4: a screen on an arm over the back edge, keys with pink accents, a grey mat, a webcam
-  () => join(monitor({ w: 0.6, h: 0.34, x: 0, z: 0.2, bezel: GRAPHITE, edge: 0.008, depth: 0.02, arm: true }), keyboard(0.02, -0.21, 0.04, { base: '#3a3f4e', key: INK, accent: '#e8828f', legend: '#8fd0b8' }), mouse(0.36, -0.19, -0.2, INK, '#8fd0b8'), pad(0.12, -0.2, 0.46, 0.2, '#5a6070', '#8fd0b8'), webcam(0, TOP + 0.08 + 0.34 + 0.01, 0.2)),
+  () => join(monitor({ w: 0.6, h: 0.34, x: 0, z: 0.2, bezel: GRAPHITE, edge: 0.008, depth: 0.02, arm: true }), keyboard(0.02, -0.21, 0.04, { base: INK, key: '#3a3f4e', accent: '#e8828f', legend: '#6aa8a0' }), mouse(0.36, -0.19, -0.2, INK, '#8fd0b8'), pad(0.12, -0.2, 0.46, 0.2, '#5a6070', '#8fd0b8'), webcam(0, TOP + 0.08 + 0.34 + 0.01, 0.2)),
   // 5: a tall screen beside a wide one, a mouse on an orange pad
   () => join(monitor({ w: 0.24, h: 0.4, x: 0.24, z: 0.2, clear: 0.05, edge: 0.01, footW: 0.14 }), monitor({ w: 0.44, h: 0.27, x: -0.14, z: 0.2, bezel: GRAPHITE, edge: 0.01 }), keyboard(0, -0.23, -0.02, { base: '#2b2e38', key: '#3a3f4e', accent: '#f2b84b', legend: '#c9cdd8' }), mouse(0.34, -0.2, 0, GRAPHITE, '#f2b84b'), pad(0.34, -0.2, 0.18, 0.18, '#d97757', '#f4f0e6'), cable(0.24, 0.2)),
   // 6: an all in one with a pale chin, a white keyboard, a trackpad and two notes
-  () => join(monitor({ w: 0.56, h: 0.4, x: 0, z: 0.2, bezel: '#e8e6e0', edge: 0.012, depth: 0.022, clear: 0.05, foot: SILVER, footW: 0.22 }), keyboard(0.04, -0.22, 0, { base: '#d6d2c8', key: '#f7f4ec', accent: '#f2b84b', legend: '#e8e6e0' }), trackpad(-0.28, -0.2), notes(0.14, TOP + 0.05 + 0.4 - 0.03, 0.17, ['#9fe0a0', '#f7d94c'])),
+  () => join(monitor({ w: 0.56, h: 0.4, x: 0, z: 0.2, bezel: '#e8e6e0', edge: 0.012, depth: 0.022, clear: 0.05, foot: SILVER, footW: 0.22 }), keyboard(0, -0.22, 0, { base: '#d6d2c8', key: '#f7f4ec', accent: '#f2b84b', legend: '#e8e6e0' }), trackpad(0.33, -0.2), notes(0.14, TOP + 0.05 + 0.4 - 0.03, 0.17, ['#9fe0a0', '#f7d94c'])),
   // 7: a dark wide screen, a big pad, a mouse, keys lit teal
-  () => join(monitor({ w: 0.72, h: 0.31, x: 0, z: 0.2, depth: 0.03, edge: 0.007, foot: INK, footW: 0.3 }), pad(0, -0.2, 0.52, 0.24, '#1c1f27', '#4f9aa8'), keyboard(0.08, -0.2, 0, { base: '#14161c', key: '#252a35', accent: '#4f9aa8', legend: '#4f9aa8' }), mouse(-0.3, -0.18, 0.1, '#14161c', '#4f9aa8'), cable(-0.2, 0.2)),
+  () => join(monitor({ w: 0.72, h: 0.31, x: 0, z: 0.2, depth: 0.03, edge: 0.007, foot: INK, footW: 0.3 }), pad(0, -0.2, 0.52, 0.24, '#1c1f27', '#4f9aa8'), keyboard(0.08, -0.2, 0, { base: '#14161c', key: '#252a35', accent: '#4f9aa8', legend: '#4f9aa8' }), mouse(-0.2, -0.18, 0.1, '#14161c', '#4f9aa8'), cable(-0.2, 0.2)),
 ];
 
 const at = (setup: number) => RECIPES[((setup % RECIPES.length) + RECIPES.length) % RECIPES.length]();
