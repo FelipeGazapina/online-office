@@ -252,7 +252,6 @@ export default async (s, { launch }) => {
   await s.waitFor(`${state}.boardSync[${JSON.stringify(sprint.id)}]?.kind === 'ready' && ${state}.boardSync[${JSON.stringify(sprint.id)}].lastFetchedAt > ${syncedAt}`);
   assert((await sent('refresh_board')).length >= 1, 'the Sync button sends refresh_board and the board syncs again');
 
-  // The error state: Linear answers that the team is not there. Its message, not an empty board, is what the owner sees.
   await s.clickOn('[aria-label="Board settings"]');
   await s.waitFor("!!document.querySelector('[data-testid=board-settings]')");
   await s.clickOn('.tb-source [aria-label="Remove source"]');
@@ -579,7 +578,6 @@ export default async (s, { launch }) => {
   await s.waitFor("!!document.querySelector('[data-testid=task-board]')");
   assert(await s.eval("!!document.querySelector('.tb-card')"), 'F at the 3D board opens the same board with its cards');
 
-  // ── a Linear board: whose issues, which cycle, how many, hidden columns, a restart ──
   await linearBoardFlow(s, { fake: linear, world: linearWorldData, launch, env });
   assert(linear.auth.every((a) => a === `Bearer ${LINEAR_TOKEN}`), 'every call to Linear carried the token');
 };

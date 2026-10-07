@@ -10,10 +10,9 @@ import { ME } from './fake-linear.ts';
 
 const state = '__office.store.getState()';
 const CLOSED = new Set(['Done', 'Canceled', 'Duplicate']);
-// The four columns of the board, as the statuses of the fake map into them.
 const columnOf = (status) => (CLOSED.has(status) ? 'done' : status === 'In Progress' ? 'doing' : status === 'In Review' ? 'review' : 'todo');
 
-export async function linearBoardFlow(s, { fake, world, launch, env, afterRestart }) {
+export async function linearBoardFlow(s, { fake, world, launch, env }) {
   const recent = [...world.issues].sort((a, b) => b.updatedAt - a.updatedAt);
   const want = (match, limit) => recent.filter(match).slice(0, limit);
   const idents = (rows) => rows.map((i) => i.identifier).sort();
@@ -56,7 +55,6 @@ export async function linearBoardFlow(s, { fake, world, launch, env, afterRestar
 
   await tap();
 
-  // ── a Linear board, set up from the board ──
   await s.clickOn('[aria-label="New board"]');
   await s.waitFor("!!document.querySelector('.tb-newboard')");
   await s.type('Linear');
@@ -78,7 +76,6 @@ export async function linearBoardFlow(s, { fake, world, launch, env, afterRestar
   assert(JSON.stringify(await onBoard(id)) === JSON.stringify(idents(baseline)), 'the board holds the 50 most recent issues, what the board always pulled');
   assert(JSON.stringify(lastIssuesCall()) === JSON.stringify({ team: 'BLOOM', limit: 50 }), 'from one call that names the team and the limit', JSON.stringify(lastIssuesCall()));
 
-  // ── whose issues ──
   await pick('Me');
   await pick('200 issues');
   assert((await checked()) === 'Me|Any|200 issues', 'the segments show what was picked');
@@ -101,7 +98,6 @@ export async function linearBoardFlow(s, { fake, world, launch, env, afterRestar
   assert(JSON.stringify(anaSave.sources[0].filters.assignee) === JSON.stringify({ id: 'u-ana', name: 'Ana' }), 'the person is sent with the id and the name');
   assert(JSON.stringify(await onBoard(id)) === JSON.stringify(idents(want(ana, 200))) && lastIssuesCall().assignee === 'u-ana', 'a picked person brings only their issues, asked by id');
 
-  // ── which cycle ──
   await pick('Anyone');
   await pick('Current cycle');
   await saveAndSync(id);
@@ -117,14 +113,12 @@ export async function linearBoardFlow(s, { fake, world, launch, env, afterRestar
   await s.eval('document.activeElement?.blur()');
   await shot('filters');
 
-  // ── back to the defaults ──
   await pick('Anyone');
   await pick('Any');
   await pick('50 issues');
   const [resetSave] = await saveAndSync(id);
   assert(!('filters' in resetSave.sources[0]) && JSON.stringify(await onBoard(id)) === JSON.stringify(idents(baseline)), 'set back to the defaults the filters are gone and the board is what it was');
 
-  // ── hide a column: nothing is pulled for it, and its share of the limit goes to the open ones ──
   await s.press('Escape');
   await s.waitFor("!document.querySelector('[data-testid=board-settings]')");
   assert(baseline.filter((i) => CLOSED.has(i.status.name)).length === 22 && (await s.eval("document.querySelector('.tb-col[data-stage=done]').querySelectorAll('.tb-card').length")) === 22, 'with every column open, 22 of the 50 are in Done');
@@ -148,14 +142,12 @@ export async function linearBoardFlow(s, { fake, world, launch, env, afterRestar
   await s.eval('document.activeElement?.blur()');
   await shot('collapsed');
 
-  // ── show it again ──
   const beforeShow = await syncedAt(id);
   await s.clickOn('.tb-hidden-row[data-stage=done]');
   await settled(id, beforeShow);
   assert(JSON.stringify(await onBoard(id)) === JSON.stringify(idents(baseline)) && !(await s.eval("!!document.querySelector('[data-testid=hidden-columns]')")), 'showing Done pulls its issues back on the next sync, and the rail goes');
   assert((await s.eval("document.querySelector('.tb-col[data-stage=done]').querySelectorAll('.tb-card').length")) === 22, 'Done holds its 22 again');
 
-  // ── all of it survives a restart ──
   await s.clickOn('[aria-label="Board settings"]');
   await s.waitFor("!!document.querySelector('[data-testid=board-settings]')");
   await pick('Me');
@@ -185,6 +177,5 @@ export async function linearBoardFlow(s, { fake, world, launch, env, afterRestar
   await again.waitFor("!!document.querySelector('[data-testid=linear-filters]')");
   assert((await again.eval("[...document.querySelectorAll('[data-testid=linear-filters] [role=radio][aria-checked=true]')].map((b) => b.innerText.trim()).join('|')")) === 'Me|Any|200 issues', 'and its settings show Me and 200 issues');
   await again.press('Escape');
-  await afterRestart?.(again);
   return again;
 }

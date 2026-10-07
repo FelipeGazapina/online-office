@@ -44,8 +44,6 @@ const linearConnection = linearService.connectionStates().linear;
 if (linearConnection.kind !== 'ready' || JSON.stringify(linearConnection).includes('test-linear-token')) throw new Error(`Linear OAuth credentials did not restore safely: ${JSON.stringify(linearConnection)}`);
 console.log('ok: Linear OAuth credentials restore as a ready private connection');
 
-// ───────────────────────────── Linear's filters, against a fake with Linear's schema ─────────────────────────────
-
 const expect = (cond: boolean, msg: string, detail?: unknown) => {
   if (!cond) throw new Error(`${msg}${detail === undefined ? '' : `: ${JSON.stringify(detail)}`}`);
   console.log('ok:', msg);
@@ -54,7 +52,6 @@ const expect = (cond: boolean, msg: string, detail?: unknown) => {
 const world = linearWorld();
 const recent = [...world.issues].sort((a, b) => b.updatedAt - a.updatedAt);
 const closed = (i: FakeIssue) => i.status.type === 'completed' || i.status.type === 'canceled';
-// What a filter must return, worked out here from the data and not from the app: the matching issues, newest first, up to the limit.
 const want = (match: (i: FakeIssue) => boolean, limit: number) => recent.filter(match).slice(0, limit).map((i) => i.identifier);
 const idsOf = (cards: TaskCard[]) => cards.map((c) => c.identifier);
 
@@ -70,7 +67,6 @@ const pull = async (fake: { url: string; calls: unknown[] }, source: TaskBoardSo
 const fake = await startFakeLinear(world);
 const calls = () => fake.calls.map((c) => `${c.tool} ${JSON.stringify(c.args)}`);
 
-// Today's behaviour: the app asked for the team and nothing else, and Linear's first page is 50.
 const baselineClient = new Client({ name: 'baseline', version: '0' });
 await baselineClient.connect(new StreamableHTTPClientTransport(new URL(fake.url), { requestInit: { headers: { Authorization: `Bearer ${TOKEN}` } } }));
 const baseline = normalizeTaskPayload('linear', await baselineClient.callTool({ name: 'list_issues', arguments: { team: TEAM } }), linear());
@@ -112,7 +108,6 @@ const afterPaged = await pull(older, linear({ limit: 200 }));
 expect(JSON.stringify(idsOf(afterPaged.cards)) === JSON.stringify(want(() => true, 200)) && older.calls[1]!.args.after === 'iss-099', 'a tool that pages with `after` and returns no cursor is continued from the last issue it gave', older.calls.map((c) => JSON.stringify(c.args)));
 await older.close();
 
-// Folding a column: its issues are never taken, and the limit goes to the open columns.
 const firstPage = recent.slice(0, 50);
 expect(firstPage.filter(closed).length === 22, 'without folding, 22 of the 50 are done or canceled');
 const noDone = await pull(fake, linear(), ['done']);
@@ -129,7 +124,6 @@ expect(JSON.stringify(idsOf(expanded.cards)) === JSON.stringify(idsOf(baseline))
 const mineNoDone = await pull(fake, linear({ assignee: 'me', limit: 200 }), ['done']);
 expect(JSON.stringify(idsOf(mineNoDone.cards)) === JSON.stringify(want((i) => i.assignee === ME.id && !closed(i), 200)), 'a fold and an assignee filter work together');
 
-// What the tool does not offer is said, not ignored.
 const noAssignee = await startFakeLinear({ ...world, without: ['assignee'] });
 const refusedMe = await pull(noAssignee, linear({ assignee: 'me' }));
 expect(!refusedMe.cards.length && /cannot filter by assignee/.test(refusedMe.errors.join()), 'a tool with no assignee filter makes the sync fail instead of showing everyone\'s issues', refusedMe.errors);
@@ -139,7 +133,6 @@ const noCycle = await startFakeLinear({ ...world, without: ['cycle'] });
 expect(/cannot filter by cycle/.test((await pull(noCycle, linear({ cycle: 'current' }))).errors.join()), 'likewise for the cycle');
 await noCycle.close();
 
-// A source that is a project has no team to look a cycle up for, so the word is handed to the tool as it is.
 const lenient = await startFakeLinear({ ...world, acceptsCurrent: true });
 const viaWord = await pull(lenient, linear({ cycle: 'current', limit: 200 }, 'project:ROADMAP'));
 expect(lenient.calls.length === 1 && lenient.calls[0]!.args.cycle === 'current' && viaWord.cards.length === 150, 'a project source asks for the cycle "current" in so many words', lenient.calls.map((c) => JSON.stringify(c.args)));
@@ -152,7 +145,6 @@ const unauthorized = await pull(fake, linear());
 process.env.LINEAR_MCP_TOKEN = TOKEN;
 expect(wrong.cards.length === 50 && !unauthorized.cards.length && unauthorized.errors.length === 1, 'a bad token is an error, not an empty board', unauthorized.errors);
 
-// The assignee picker.
 process.env.LINEAR_MCP_URL = fake.url;
 fake.calls.splice(0);
 const people = await new TaskBoardService().linearPeople();
@@ -167,4 +159,3 @@ await narrow.close();
 delete process.env.LINEAR_MCP_TOKEN;
 delete process.env.LINEAR_MCP_URL;
 
-// CronoSpark's tool takes a project and a status and nothing about people, so its source cannot carry filters and its call is what it was.
