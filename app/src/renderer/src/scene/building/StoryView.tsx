@@ -463,7 +463,7 @@ function Screens({ geom }: { geom: FloorGeometry }) {
       for (const s of slots) {
         if (s.setup !== setup) continue;
         mesh.setMatrixAt(s.local, matrixOf(mat, s.desk));
-        mesh.setColorAt(s.local, color.set('#6a7898').multiplyScalar(0.2));
+        mesh.setColorAt(s.local, color.set('#6a7898').multiplyScalar(0.45));
       }
       mesh.instanceMatrix.needsUpdate = true;
       if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
@@ -494,7 +494,7 @@ function Screens({ geom }: { geom: FloorGeometry }) {
         color.set('#6a7898').multiplyScalar(0.3);
       } else {
         // A desk nobody sits at has its screen on standby: lit dimly, so a row of empty desks is not a row of black slabs.
-        color.set('#6a7898').multiplyScalar(0.2);
+        color.set('#6a7898').multiplyScalar(0.45);
       }
       meshes.current.get(setup)?.setColorAt(local, color);
       glow.current?.setColorAt(i, color.multiplyScalar(0.28));
