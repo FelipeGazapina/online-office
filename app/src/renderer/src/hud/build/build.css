@@ -591,3 +591,54 @@ html[data-building] .labels * {
   outline: 2px solid white;
   outline-offset: 2px;
 }
+
+/* The question before a whole block is deleted. */
+.bh-confirm-veil {
+  position: absolute;
+  inset: 0;
+  z-index: 8;
+  display: grid;
+  place-items: center;
+  background: rgba(24, 18, 44, 0.32);
+  pointer-events: auto;
+}
+.bh-confirm {
+  width: min(420px, calc(100vw - 48px));
+  padding: 18px 20px 16px;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: rgba(251, 249, 245, 0.98);
+  color: var(--ink);
+  box-shadow: 0 18px 48px rgba(24, 18, 44, 0.4);
+}
+.bh-confirm b {
+  font: 700 17px/1.2 var(--display);
+}
+.bh-confirm p {
+  margin: 8px 0 16px;
+  font-size: 13.5px;
+  line-height: 1.45;
+}
+.bh-confirm-row {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.bh-confirm-row button {
+  height: 36px;
+  padding: 0 14px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: white;
+  color: var(--ink);
+  font-weight: 600;
+  cursor: pointer;
+}
+.bh-confirm-row .bh-confirm-yes {
+  border-color: #d93a3a;
+  background: #ff4d4d;
+  color: white;
+}
+.bh-confirm-row kbd {
+  margin-left: 4px;
+}

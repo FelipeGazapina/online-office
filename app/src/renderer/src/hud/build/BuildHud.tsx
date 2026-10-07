@@ -4,6 +4,7 @@ import { get, useStore, type BuildTool } from '../../store.ts';
 import { addFloor, canTurn, chooseEntry, enterBuild, exitBuild, isActive, patchBuild, peek, redo, rotate, selectTab, setLevel, setTool, undo } from './actions.ts';
 import { footprintText, TABS, visibleEntries, type Entry } from './catalog.ts';
 import { BlockIcon, BuildIcon, FillIcon, FloorIcon, PieceIcon, Redo, Search, TabIcon, ToolIcon, Turn, Undo, WALL_MODES, WallsIcon } from './icons.tsx';
+import { consequences, keepBlock, removal, removeBlock } from './removal.ts';
 import { floorSwatch, wallSwatch } from './swatches.ts';
 import { useThumbs } from './thumbs.ts';
 import './build.css';
@@ -218,6 +219,29 @@ function EnterButton() {
   );
 }
 
+// The question asked before a block is deleted: who would be fired. Enter says yes, Esc says no.
+function RemoveBlockDialog() {
+  const blockId = removal((s) => s.blockId);
+  const ask = blockId ? consequences(blockId) : null;
+  if (!ask) return null;
+  const { name, people } = ask;
+  const who = people.length === 0 ? 'Nobody works there.' : `${people.join(', ')} would be fired.`;
+  return (
+    <div className="bh-confirm-veil" role="presentation">
+      <div className="bh-confirm" role="alertdialog" aria-labelledby="bh-confirm-title" data-testid="remove-block-dialog">
+        <b id="bh-confirm-title">Remove {name}?</b>
+        <p data-testid="remove-block-people">{who} Every piece of the block goes with it: its desks, board, rug and decor. This cannot be undone.</p>
+        <div className="bh-confirm-row">
+          <button className="bh-confirm-keep" onClick={keepBlock} data-testid="remove-block-keep">Keep it <kbd>Esc</kbd></button>
+          <button className="bh-confirm-yes" onClick={removeBlock} data-testid="remove-block-yes">
+            {people.length ? `Fire ${people.length} and remove` : 'Remove'} <kbd>Enter</kbd>
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function BuildHud() {
   const on = useStore((s) => !!s.build);
   useEffect(() => {
@@ -231,6 +255,7 @@ export function BuildHud() {
       <Levels />
       <Dock />
       <Readout />
+      <RemoveBlockDialog />
     </>
   );
 }
