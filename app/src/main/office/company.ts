@@ -591,8 +591,8 @@ export class Office {
       case 'send_hours':
         return void this.tasks.sendHours(msg.taskId);
       case 'load_activity': {
-        const { entries, live } = this.tasks.activityOf(msg.taskId, this.liveInputs(this.mail.view()));
-        return this.events.activity?.(msg.taskId, entries, live);
+        const found = this.tasks.activityOf(msg.taskId, this.liveInputs(this.mail.view()));
+        return found && this.events.activity?.(msg.taskId, found.entries, found.live);
       }
       case 'answer_question':
         return this.answerQuestion(msg);

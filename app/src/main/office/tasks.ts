@@ -165,9 +165,10 @@ export class Tasks {
   }
 
   // Everything that happened on a task and what is happening now. Folded from the ledger and the task's history each time it is asked.
-  activityOf(taskId: TaskId, inputs: LiveInputs): { entries: ActivityEntry[]; live: TaskLive } {
-    const task = this.task(taskId);
-    return { entries: logOf(task, this.activity), live: liveOf(task, this.activity, inputs) };
+  // A task deleted while its detail was asking has no log, and that is not an error.
+  activityOf(taskId: TaskId, inputs: LiveInputs): { entries: ActivityEntry[]; live: TaskLive } | undefined {
+    const task = this.tasks.find((t) => t.id === taskId);
+    return task && { entries: logOf(task, this.activity), live: liveOf(task, this.activity, inputs) };
   }
 
   boardsOf(blockId: BlockId): Board[] {

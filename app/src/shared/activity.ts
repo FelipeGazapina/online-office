@@ -101,7 +101,11 @@ export function answeredBy(key: string | undefined): MessageId | undefined {
   return (run?.[1] ?? note?.[1]) as MessageId | undefined;
 }
 
-const add = <K, V>(m: Map<K, V[]>, k: K, v: V) => m.set(k, [...(m.get(k) ?? []), v]);
+const add = <K, V>(m: Map<K, V[]>, k: K, v: V) => {
+  const list = m.get(k);
+  if (list) list.push(v);
+  else m.set(k, [v]);
+};
 
 export function foldActivity(ix: ActivityIndex, entry: LedgerEntry): ActivityIndex {
   const i = ix.seq++;
@@ -290,7 +294,7 @@ export function liveOf(task: Task, ix: ActivityIndex, inputs: LiveInputs = noInp
   };
   const serving = (who: EmployeeId) => !!turnOn(who)?.ids.some((id) => roots.has(ix.msgs.get(id)!.rootId));
 
-  const questions = task.stage === 'done' ? [] : questionsOf(ix, chain, requests, inputs, serving);
+  const questions = task.stage === 'done' ? [] : questionsOf(task, ix, chain, requests, inputs, serving);
 
   const people: EmployeeId[] = [];
   const see = (a: ActorId) => isEmployee(a) && !people.includes(a) && people.push(a);
@@ -364,17 +368,19 @@ export function liveOf(task: Task, ix: ActivityIndex, inputs: LiveInputs = noInp
 // ───────────────────────────── Questions ─────────────────────────────
 
 // What the owner can still answer. A blocked reply is open until the person who sent it was given something new, or the
-// owner spoke to them, or the request it blocked is no longer anyone's; a help request until it is replied to. Both close
-// when the board answered them. An employee waiting on the owner in person is open for as long as they wait.
-function questionsOf(ix: ActivityIndex, chain: readonly Message[], requests: readonly Req[], inputs: LiveInputs, serving: (who: EmployeeId) => boolean): OpenQuestion[] {
+// owner spoke to them or moved the card, or the request it blocked is no longer anyone's; a help request until it is replied
+// to. Both close when the board answered them. An employee waiting on the owner in person is open for as long as they wait.
+function questionsOf(task: Task, ix: ActivityIndex, chain: readonly Message[], requests: readonly Req[], inputs: LiveInputs, serving: (who: EmployeeId) => boolean): OpenQuestion[] {
   const out: OpenQuestion[] = [];
+  // Moving the card to another column is the owner's own answer to a run that stopped: it is read, and decided on.
+  const movedAt = Math.max(0, ...(task.history ?? []).flatMap((h) => (h.kind === 'stage' && h.by === 'owner' ? [h.at] : [])));
   const lastGiven = new Map<EmployeeId, number>();
   for (const r of requests) if (isEmployee(r.to)) lastGiven.set(r.to, Math.max(lastGiven.get(r.to) ?? -1, ix.ord.get(r.id)!));
   for (const m of chain) {
     if (ix.answered.has(m.id)) continue;
     if (m.kind === 'reply' && m.outcome === 'blocked' && isEmployee(m.from) && m.to !== 'mailroom') {
       const at = ix.ord.get(m.id)!;
-      if ((lastGiven.get(m.from) ?? -1) > at) continue;
+      if ((lastGiven.get(m.from) ?? -1) > at || movedAt > m.at) continue;
       const asked = ix.msgs.get(m.requestId);
       if (asked?.kind !== 'request') continue;
       if (m.to === 'owner' ? (ix.ownerTo.get(m.from) ?? -1) > at : !asked.parentId || !ix.unsettled.has(asked.parentId)) continue;

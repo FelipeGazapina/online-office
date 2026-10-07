@@ -529,7 +529,8 @@ console.log('\n# the activity of a task, and the owner answering its questions')
   check(live().people.find((p) => p.employeeId === ANA)?.state === 'done', 'and Ana is done');
   const time = view().taskTime[made.id]!;
   check(time.byEmployee[ANA]! > 0 && !time.running.length, 'the answer\'s time counts for the task like any run');
-  const log = x.tasks.activityOf(made.id, noAsks);
+  const log = x.tasks.activityOf(made.id, noAsks)!;
+  check(x.tasks.activityOf('gone' as TaskId, noAsks) === undefined, 'the log of a task that does not exist is nothing, not an error');
   const tags = log.entries.map((e) => (e.kind === 'stage' ? `stage:${e.by}:${e.to}` : e.kind === 'reply' ? `reply:${e.outcome}` : e.kind === 'request' ? `request:${e.answers ? 'answer' : 'run'}` : e.kind));
   check(tags.join() === 'created,request:run,started,stage:owner:doing,reply:blocked,stage:mailroom:todo,request:answer,started,stage:owner:doing,reply:done,stage:mailroom:review', 'the log reads: asked, picked up, blocked, answered, resumed, done, each stage move with who made it', tags.join());
   const moved = log.entries.filter((e) => e.kind === 'stage' && e.by === 'mailroom');

@@ -174,6 +174,16 @@ console.log('\n# a blocked reply is a question the owner answers');
   ledgers.push({ name: 'assign again', ledger: again2.persisted });
 
   check(live(taskOf([r2], { stage: 'done' }), chat).questions.length === 0 && live(taskOf([root], { stage: 'done' }), w).questions.length === 0, 'a done task shows no questions');
+
+  const moved = fresh();
+  const r4 = ownerPost(moved, 'ana', 'Add the report');
+  reply(moved, ANA, r4, { outcome: 'blocked', text: 'Which quarter?' });
+  moved.room.turnEnded(ANA, 'blocked', true);
+  const parked = taskOf([r4], { stage: 'todo' });
+  check(live(parked, moved).questions.length === 1, 'a card left in todo keeps the question');
+  check(live(restage(parked, 'review', 'owner', clock + 1e9), moved).questions.length === 0, 'the owner moving the card to another column closes it: they read it and decided');
+  check(live(restage(parked, 'doing', 'mailroom', clock + 1e9), moved).questions.length === 1, 'the office moving it does not');
+  ledgers.push({ name: 'moved', ledger: moved.persisted });
 }
 
 console.log('\n# a question put to a teammate');
@@ -191,11 +201,10 @@ console.log('\n# a question put to a teammate');
   check(q?.asker === ANA && q.to === PO, 'a blocked piece is a question from the teammate to the PO', JSON.stringify(l.questions));
   check(who(l, PO).state === 'working' || who(l, PO).state === 'waiting', 'the PO is not shown blocked: the question is Ana\'s');
   check(who(l, ANA).state === 'blocked', 'Ana is blocked');
-  const resent = ask(w, PO, 'ana', 'Write the exporter, schema is in schema.ts');
+  ask(w, PO, 'ana', 'Write the exporter, schema is in schema.ts');
   l = live(t, w);
   check(!l.questions.some((x) => x.how === 'blocked'), 'the PO sending the piece again closes the question', JSON.stringify(l.questions));
   check(who(l, ANA).state === 'working', 'Ana is working again');
-  void resent;
 
   const w2 = fresh();
   const root2 = ownerPost(w2, 'po', 'Ship the import');
@@ -211,12 +220,11 @@ console.log('\n# a question put to a teammate');
 
   const h = fresh();
   const hr = ownerPost(h, 'po', 'Ship the thing');
-  const hp = ask(h, PO, 'ana', 'Build it');
+  ask(h, PO, 'ana', 'Build it');
   const help = ask(h, ANA, 'bruno', 'Which port does the dev server use?', 'help');
   let hl = live(taskOf([hr]), h);
   const hq = hl.questions.find((x) => x.how === 'help');
   check(hq?.asker === ANA && hq.to === BRUNO && hq.ref.kind === 'mail' && hq.ref.id === help && hq.text === 'Which port does the dev server use?', 'a help request to a teammate inside the chain is an open question', JSON.stringify(hl.questions));
-  void hp;
   const note = h.room.post({ from: 'owner', to: 'ana', parentId: help, key: noteKey(tid, help), body: { kind: 'say', text: 'Port 5173.', urgency: 'next' } });
   hl = live(taskOf([hr]), h);
   check(note.ok && hl.questions.length === 0, 'the owner answering the asker closes the help question', JSON.stringify(hl.questions));
@@ -229,7 +237,6 @@ console.log('\n# a question put to a teammate');
   const help2 = ask(h2, ANA, 'bruno', 'Which port?', 'help');
   reply(h2, BRUNO, help2, { outcome: 'done', text: '5173' });
   check(live(taskOf([r5]), h2).questions.length === 0, 'a help request the teammate replied to is not a question any more');
-  void r5;
   ledgers.push({ name: 'help replied', ledger: h2.persisted });
 }
 
@@ -252,7 +259,7 @@ console.log('\n# an employee asking the owner in person');
 console.log('\n# queued behind other work, and a crash');
 {
   const w = fresh();
-  const other = ownerPost(w, 'ana', 'Another task entirely');
+  ownerPost(w, 'ana', 'Another task entirely');
   const root = ownerPost(w, 'po', 'The task');
   const piece = ask(w, PO, 'ana', 'Piece for Ana');
   w.room.turnEnded(PO, 'delegated', true);
@@ -267,7 +274,6 @@ console.log('\n# queued behind other work, and a crash');
   const before = w.persisted.length;
   w.room.recoverOnStart();
   check(w.persisted.length > before, 'the crash left a recover entry');
-  void other;
   const crash = fresh();
   const cr = ownerPost(crash, 'ana', 'Long job');
   crash.room.recoverOnStart();
