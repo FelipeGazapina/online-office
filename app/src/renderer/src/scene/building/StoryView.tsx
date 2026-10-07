@@ -69,7 +69,7 @@ const aoGeometry = new PlaneGeometry(1, 1.1).rotateX(-Math.PI / 2);
 // The light a screen throws on the desk in front of it, tinted by what the screen shows.
 const glowMaterial = new MeshBasicMaterial({ map: poolTexture(), transparent: true, depthWrite: false, blending: AdditiveBlending, toneMapped: false, polygonOffset: true, polygonOffsetFactor: -4 });
 const glowGeometry = new PlaneGeometry(1.2, 0.8).rotateX(-Math.PI / 2).translate(0, 0.78, -0.12);
-// A floor item lies flat on the ground and has nothing to ground; the daily sign hangs in the air and the stairs make their own shade.
+// No blob under these: the stairs make their own shade and the daily sign hangs in the air. Floor items are skipped by their layer.
 const NO_BLOB: ReadonlySet<string> = new Set(['rail', 'stairs', 'pod_daily_sign']);
 const CEILING_Y = STORY_H - 0.3;
 // Walnut beams on the pendants' 4 m grid divide the ceiling into coffers, each lamp in the middle of one.
