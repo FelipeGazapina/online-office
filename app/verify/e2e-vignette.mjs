@@ -121,6 +121,21 @@ export default async function (s) {
     await s.press('Escape');
   }
 
+  // Over the bare floor a set is told where it can go, like any small thing.
+  {
+    await choose('vg_stack');
+    const bare = hostToWorld(host, hostDef, 6, 4);
+    const floor = await bring(bare.x + 4.5, 0, bare.z + 4.5);
+    await hoverPx(floor);
+    const said = await verdict();
+    const before = await building();
+    assert(said?.ok === false && said.text === 'Put it on a desk, table or shelf', `a set held over the bare floor is red: "${said?.text}"`);
+    await s.click(floor.x, floor.y);
+    await s.sleep(300);
+    assert(JSON.stringify((await building()).stories[0].items.map((i) => i.id)) === JSON.stringify(before.stories[0].items.map((i) => i.id)), 'and a click on the floor places nothing');
+    await s.press('Escape');
+  }
+
   // Turned a quarter, the set stands turned: its members turn with it and stay inside the table.
   {
     await choose('vg_stack');

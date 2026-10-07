@@ -996,6 +996,8 @@ const flat = (stories = 1, size = 20): Building => {
   }
   const lone = applyOps(table, [put(0, { id: 'bare' as ItemId, def: 'vg_stack', on: host.id, u: 3, v: 3, rot: 0 })], noCtx);
   check(!lone.ok && kinds(lone).includes('unknown_item'), 'a vignette is never an item: only its members are');
+  const onFloor = applyOps(table, [put(0, item('bare-floor', 'vg_stack', 20, 20))], noCtx);
+  check(!onFloor.ok && kinds(onFloor).includes('needs_surface') && !kinds(onFloor).includes('unknown_item'), 'held over the bare floor a vignette is told to go on a desk, table or shelf');
   const set = must(applyOps(table, [{ t: 'items', story: 0, put: composeVignette(ITEM_DEFS.vg_coffee, host.id, { rot: 0, u: 3, v: 3 }, 1, ids), del: [] }], noCtx));
   check(set.stories[0].items.filter((i) => i.on === host.id).length === ITEM_DEFS.vg_coffee.group!.length, 'a set lands as its members on the host');
   const base = set.stories[0].items.find((i) => i.def === 'tray')!;
