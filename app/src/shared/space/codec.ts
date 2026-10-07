@@ -94,11 +94,23 @@ export function parseBuilding(raw: unknown, warn: (msg: string) => void = (m) =>
       }
       const rot = int(it.rot, `${ip}.rot`);
       if (rot < 0 || rot > 3) return fail(`${ip}.rot`, 'must be 0 to 3');
-      const item: Item = { id: it.id as ItemId, def: it.def, x: int(it.x, `${ip}.x`), z: int(it.z, `${ip}.z`), rot: rot as Rot };
+      const item: Item =
+        it.on === undefined
+          ? { id: it.id as ItemId, def: it.def, x: int(it.x, `${ip}.x`), z: int(it.z, `${ip}.z`), rot: rot as Rot }
+          : { id: it.id as ItemId, def: it.def, on: typeof it.on === 'string' ? (it.on as ItemId) : fail(`${ip}.on`, 'must be an item id'), u: int(it.u, `${ip}.u`), v: int(it.v, `${ip}.v`), rot: rot as Rot };
       if (it.blockId !== undefined) item.blockId = typeof it.blockId === 'string' ? it.blockId : fail(`${ip}.blockId`, 'must be a string');
       if (it.tint !== undefined) item.tint = typeof it.tint === 'number' ? it.tint : fail(`${ip}.tint`, 'must be a number');
       items.set(item.id, item);
     });
+    // A top item whose host is gone (a file edited by hand) has nowhere to stand: it is dropped, like an unknown def.
+    for (const item of [...items.values()]) {
+      if (item.on === undefined) continue;
+      const host = items.get(item.on);
+      if (!host || host.on !== undefined) {
+        warn(`building: dropped ${item.id}, nothing to stand on`);
+        items.delete(item.id);
+      }
+    }
     return makeStory(
       paint,
       halfB,

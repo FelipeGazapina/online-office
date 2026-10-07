@@ -1,7 +1,7 @@
 // No model, no Electron, no three. Where a task card held over the office lands: the desk a camera ray points at, and what
 // dropping there would do (assign, hire, refuse). Run from app/: node verify/desk-drop-check.ts   Exits 1 on any failed check.
 import type { BlockId, Company, Employee, EmployeeId, ModelId } from '../src/shared/protocol.ts';
-import { ITEM_DEFS, STORY_H, legacyBuilding, seatPose, type Building, type ItemId } from '../src/shared/space/index.ts';
+import { ITEM_DEFS, STORY_H, floorItems, legacyBuilding, seatPose, type Building, type ItemId } from '../src/shared/space/index.ts';
 import { barOf, hangCard, type Box } from '../src/renderer/src/carry.ts';
 import { deskUnder, labelOf, toneOf, verdictFor, type Ray } from '../src/renderer/src/deskDrop.ts';
 import { check, finish } from './check.ts';
@@ -74,7 +74,7 @@ console.log('# the desk under a ray');
   const chair = deskPose(bench(B1, 0)).chair;
   check(deskUnder(building, 0, ray(chair.x, 0.75, chair.z))?.item.id === bench(B1, 0), 'the chair and the person in it count as the desk');
   // Two desks that touch: a point just inside either one belongs to that one, though each reaches a little into the other.
-  const benches = building.stories[0]!.items.filter((i) => i.def === 'bench_desk' && i.blockId === B1);
+  const benches = floorItems(building.stories[0]!).filter((i) => i.def === 'bench_desk' && i.blockId === B1);
   const edge = (i: (typeof benches)[number]) => {
     const d = ITEM_DEFS.bench_desk!;
     const w = i.rot % 2 === 0 ? d.w : d.d;
@@ -87,11 +87,11 @@ console.log('# the desk under a ray');
     const zMid = (a.z0 + a.z1) / 2;
     check(deskUnder(building, 0, ray(a.x1 - 0.05, 0.75, zMid))?.item.id === pair[0].id && deskUnder(building, 0, ray(c.x0 + 0.05, 0.75, zMid))?.item.id === pair[1].id, 'two desks that touch each get the points just inside their own edge');
   } else check(false, 'the fixture has two bench desks side by side');
-  const wb = building.stories[0]!.items.find((i) => i.def === 'whiteboard' && i.blockId === B1)!;
+  const wb = floorItems(building.stories[0]!).find((i) => i.def === 'whiteboard' && i.blockId === B1)!;
   check(deskUnder(building, 0, ray((wb.x + 4) / 2, 1, (wb.z + 0.5) / 2)) === null, 'furniture that is not a desk is not a target');
   check(deskUnder(building, 0, { o: [0, 8, 0], d: [0, 1, 0] }) === null, 'a ray pointing up finds nothing');
   check(deskUnder(building, 0, { o: [0, 8, 0], d: [1, 0, 0] }) === null, 'a level ray finds nothing');
-  const ownerDesk = building.stories[0]!.items.find((i) => i.def === 'owner_desk')!;
+  const ownerDesk = floorItems(building.stories[0]!).find((i) => i.def === 'owner_desk')!;
   check(deskUnder(building, 0, ray(ownerDesk.x / 2 + 0.7, 0.75, ownerDesk.z / 2 + 0.5))?.item.def !== 'owner_desk', 'the owner\'s own desk is not a target');
 }
 
@@ -112,7 +112,7 @@ console.log('\n# what a drop does');
 {
   const c = company();
   const none = new Set<EmployeeId>();
-  const desk = (d: ItemId) => building.stories[0]!.items.find((i) => i.id === d)!;
+  const desk = (d: ItemId) => floorItems(building.stories[0]!).find((i) => i.id === d)!;
 
   const onAna = verdictFor(desk(bench(B1, 0)), B1, c, none);
   check(onAna.kind === 'assign' && onAna.to.name === 'Ana' && !onAna.to.po && !onAna.already && labelOf(onAna) === 'Ana' && toneOf(onAna) === 'go', 'an employee\'s desk assigns to them, labelled with their name, lit green', JSON.stringify(onAna));
@@ -141,7 +141,7 @@ console.log('\n# the words on the bar and on the card in hand');
 {
   const c = company();
   const none = new Set<EmployeeId>();
-  const desk = (d: ItemId) => building.stories[0]!.items.find((i) => i.id === d)!;
+  const desk = (d: ItemId) => floorItems(building.stories[0]!).find((i) => i.id === d)!;
   const aim = (d: ItemId, running = none) => ({ deskId: d, story: 0, verdict: verdictFor(desk(d), B1, c, running) });
   const ana = barOf(aim(bench(B1, 0)), null, 'todo');
   check(ana.tone === 'go' && ana.chip === 'Give it to Ana' && /give it to Ana/.test(ana.text) && /starts at once/.test(ana.text), 'over Ana: the card says "Give it to Ana" and the bar says she starts at once', JSON.stringify(ana));
