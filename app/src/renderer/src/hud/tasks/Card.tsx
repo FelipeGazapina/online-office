@@ -4,6 +4,8 @@ import type { Employee, EmployeeId } from '../../../../shared/protocol.ts';
 import type { Task, TaskStage, TaskTime } from '../../../../shared/tasks.ts';
 import { fmtClock, fmtHours, isRunning, originOf, providerNote, sharesOf, taskMs } from '../../boardView.ts';
 import { avatarColor, isPo } from '../chat/model.ts';
+import { cardLine, namerOf, questionCount } from './activityView.ts';
+import { useTaskLive } from './live.ts';
 import { Alert, Check, Clock, External, OriginTile } from './icons.tsx';
 
 export function Avatar({ person, size = 22, layer }: { person: Employee | undefined; size?: number; layer?: number }) {
@@ -88,6 +90,9 @@ export const Card = memo(function Card({ task, stage, time, now, people, selecte
   const hoursError = task.hours?.error;
   const unsent = Object.values(time?.unsent ?? {}).reduce<number>((sum, ms) => sum + (ms ?? 0), 0);
   const providerStatus = providerNote(task, stage);
+  const live = useTaskLive(task.id);
+  const line = cardLine(live, namerOf(people));
+  const asks = questionCount(live);
   return (
     <div
       className={`tb-card ${selected ? 'selected' : ''} ${dragging ? 'dragging' : ''} ${running ? 'running' : ''}`}
@@ -119,6 +124,13 @@ export const Card = memo(function Card({ task, stage, time, now, people, selecte
       <p className="tb-card-title">{task.title}</p>
       <div className="tb-chips">
         <TimeChip time={time} now={now} people={people} />
+        {asks > 0 && (
+          <span className="tb-chip ask" data-testid="question-badge" data-count={asks} title={live?.questions.map((q) => `${people.get(q.asker)?.name ?? 'Someone'}: ${q.text.slice(0, 160)}`).join('\n')}>
+            <b aria-hidden="true">?</b>
+            {asks} {asks === 1 ? 'question' : 'questions'}
+          </span>
+        )}
+        {line && <span className={`tb-chip live st-${line.state}`} data-testid="card-live" data-state={line.state}>{line.text}</span>}
         {outcome === 'done' && stage !== 'done' && <span className="tb-chip ok" title={task.lastOutcome?.text.slice(0, 200)}><Check size={11} />Run done</span>}
         {outcome && outcome !== 'done' && <span className="tb-chip bad" title={task.lastOutcome?.text.slice(0, 200)}><Alert size={11} />Run {outcome}</span>}
         {origin.priority && <span className="tb-chip">{origin.priority}</span>}
