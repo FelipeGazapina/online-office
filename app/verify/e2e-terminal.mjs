@@ -107,7 +107,7 @@ export default async function (s) {
   assert(/Claude Code/.test(body) && /Create a file named hello\.txt/.test(body) && /Write\(hello\.txt\)/.test(body), 'the terminal holds the whole session: header, prompt and the calls');
   assert(await s.eval(`document.activeElement?.tagName === 'TEXTAREA'`), 'the prompt has the cursor');
   const type = await s.eval(`(() => { const el = document.querySelector('.term-screen'); const r = document.querySelector('.term-frame').getBoundingClientRect(); return { px: parseFloat(getComputedStyle(el).fontSize), line: parseFloat(getComputedStyle(el).lineHeight), h: r.height }; })()`);
-  assert(type.px >= 18 && type.line / type.px >= 1.4, `the panel uses the room it has: ${type.px}px type on ${type.line}px lines in a panel ${Math.round(type.h)}px high`);
+  assert(type.px >= Math.min(24, Math.round(type.h / 35)) - 1 && type.px >= 15 && type.line / type.px >= 1.4, `the panel uses the room it has: ${type.px}px type on ${type.line}px lines in a panel ${Math.round(type.h)}px high`);
   await s.shot('terminal-zoom');
 
   // A message typed in the terminal reaches the employee: the ledger holds the owner post and she answers in the terminal.
@@ -144,8 +144,10 @@ export default async function (s) {
   assert(!(await s.eval(`document.querySelector('.term-scroll').innerText.includes('Write(hello.txt)')`)), 'and their calls are not in the log');
   await s.clickOn('.term-past .term-row', 'hello.txt');
   await s.waitFor(`!!document.querySelector('.term-past.loose')`, 3000);
+  await s.sleep(300);
   assert(await s.eval(`document.querySelector('.term-past.loose').innerText.includes('Write(hello.txt)')`), 'a click on a turn opens it, with its calls');
-  assert((await s.eval(`parseFloat(getComputedStyle(document.querySelector('.term-past.loose .term-row:not(.term-act)')).opacity)`)) < 0.9, 'and what it shows is dimmer than the turn in progress');
+  assert(await s.eval(`(() => { const a = document.querySelector('.term-past.loose').getBoundingClientRect(); const b = document.querySelector('.term-scroll').getBoundingClientRect(); return a.top >= b.top - 2 && a.top < b.top + 40; })()`), 'and the log shows it from its first row');
+  assert((await s.eval(`parseFloat(getComputedStyle([...document.querySelectorAll('.term-past.loose .term-row')].find((r) => r.innerText.includes('Write(hello.txt)'))).opacity)`)) < 0.9, 'and what it shows is dimmer than the turn in progress');
   await s.clickOn('.term-past .term-row', 'hello.txt');
   await s.waitFor(`!document.querySelector('.term-past.loose')`, 3000);
   // A result that printed more than it shows says so, and a click opens it.
@@ -214,16 +216,18 @@ export default async function (s) {
   await s.shot('terminal-permission');
   await s.press('1', '1');
   await s.waitFor(`!document.querySelector('.term-dialog')`, 5000);
+  const workspace = await s.eval(`${state}.company.employees[0].workspace?.path ?? ''`);
+  const present = (name) => existsSync(join(repo, name)) || (!!workspace && existsSync(join(workspace, name)));
   const touched = Date.now();
-  while (!existsSync(join(repo, 'permission-ok.txt')) && Date.now() - touched < 30000) await s.sleep(200);
-  assert(existsSync(join(repo, 'permission-ok.txt')) || existsSync(join(await s.eval(`${state}.company.employees[0].workspace?.path ?? ''`), 'permission-ok.txt')), 'answering 1 releases the tool: the command ran and the dialog went away');
+  while (!present('permission-ok.txt') && Date.now() - touched < 30000) await s.sleep(200);
+  assert(present('permission-ok.txt'), 'answering 1 releases the tool: the command ran and the dialog went away');
   assert((await rule()).length === 0, 'and stored no rule');
   await s.waitFor(`${state}.company.employees[0].status.kind === 'idle'`, 60000);
 
   // B: yes, and do not ask again. The rule stored is the one the choice named.
-  dialog = await ask('git status --short');
+  dialog = await ask('touch always-ok.txt');
   const scope = /don't ask again for: (.+)$/m.exec(dialog)?.[1];
-  assert(scope === 'git status *', `the choice names its scope: ${scope}`);
+  assert(scope === 'touch *', `the choice names its scope: ${scope}`);
   await s.press('2', '2');
   await s.waitFor(`!document.querySelector('.term-dialog')`, 5000);
   const stored = await rule();
@@ -231,7 +235,7 @@ export default async function (s) {
   await s.waitFor(`${state}.company.employees[0].status.kind === 'idle'`, 60000);
 
   // C: no, with words. Tab opens them under No.
-  dialog = await ask('touch denied.txt');
+  dialog = await ask('mkdir denied-dir');
   assert(!/what to do differently/.test(dialog), 'the dialog opens with no words typed under No');
   await s.chord('Tab');
   await s.waitFor(`document.querySelector('.term-dialog')?.innerText.includes('3. No, and tell them what to do differently:')`, 3000);
@@ -241,7 +245,7 @@ export default async function (s) {
   await s.press('Enter');
   await s.waitFor(`!document.querySelector('.term-dialog')`, 5000);
   await s.waitFor(`${state}.company.employees[0].status.kind === 'idle'`, 60000);
-  assert(!existsSync(join(repo, 'denied.txt')), 'No keeps the command from running');
+  assert(!present('denied-dir'), 'No keeps the command from running');
   assert(await s.eval(`document.querySelector('.term-scroll')?.innerText.includes('They said: No, use ls instead')`), 'and the words go back to the employee');
 
   // Esc on someone with nothing to stop leaves, and the camera comes back.

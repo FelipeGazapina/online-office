@@ -273,9 +273,20 @@ function Panel({ employee }: { employee: Employee }) {
     return next;
   };
   const act = (a: Act) => {
-    if ('option' in a) choose(a.option);
-    else if ('turn' in a) setOpen((o) => ({ ...o, turns: flip(o.turns, a.turn) }));
-    else setOpen((o) => ({ ...o, calls: flip(o.calls, a.block) }));
+    // The click took the cursor out of the prompt, and what the owner types next still goes there.
+    field.current?.focus();
+    if ('option' in a) return choose(a.option);
+    if ('turn' in a) {
+      const next = flip(open.turns, a.turn);
+      setOpen({ ...open, turns: next });
+      // An opened turn is read from its first row. When the last one closes, the log follows the newest row again.
+      pinned.current = next.size === 0;
+      if (next.size > open.turns.size) requestAnimationFrame(() => past.current?.scrollIntoView({ block: 'start' }));
+      return;
+    }
+    // A result opens where the owner clicked, and the log stays where it is.
+    pinned.current = false;
+    setOpen({ ...open, calls: flip(open.calls, a.block) });
   };
 
   return (
