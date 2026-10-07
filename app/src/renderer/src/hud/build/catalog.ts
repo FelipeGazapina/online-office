@@ -25,8 +25,11 @@ export const TABS: readonly { id: TabId; label: string }[] = [
 ];
 
 const furniture: readonly [string, string, TabId, boolean][] = [
+  ['owner_desk', 'Your desk', 'desks', false],
   ['bench_desk', 'Team desk', 'desks', true],
   ['po_desk', 'PO desk', 'desks', true],
+  ['whiteboard', 'Team whiteboard', 'desks', true],
+  ['board_terminal', 'Board computer', 'desks', true],
   ['standing_desk', 'Standing desk', 'desks', false],
   ['l_desk', 'L-desk', 'desks', false],
   ['corner_desk', 'Corner desk', 'desks', false],

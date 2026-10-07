@@ -4,6 +4,8 @@ export { emptyBuilding, emptyStory, makeStory } from './story.ts';
 export { deriveFloors } from './derive.ts';
 export { applyOps, checkOps, validate, entryOf, BuildHistory } from './validate.ts';
 export { seatPose, deskOf, freeDesk, placeDesk } from './seats.ts';
+export { assignSeats, clearOps, missingEssentials } from './essentials.ts';
+export type { Missing } from './essentials.ts';
 export { teamKit, blockCenter, shellItems, DOOR_X, BLOCK_W, BLOCK_D } from './kit.ts';
 export { addShells, inferSlotPose } from './migrate.ts';
 export type { LeftPiece, ShellBlock, ShellOutcome, SlotPose, SlotReading } from './migrate.ts';

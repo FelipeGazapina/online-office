@@ -38,8 +38,8 @@ import {
   type TaskBoardSource,
 } from '../../shared/protocol.ts';
 import type { LegacySources } from '../../shared/tasks.ts';
-import { addShells, applyOps, BuildHistory, deskOf, encodeBuilding, freeDesk, legacyBuilding, parseBuilding, placeDesk, shellItems, teamKit, ITEM_DEFS } from '../../shared/space/index.ts';
-import type { Building, BuildOp, EmployeeId as SpaceEmployeeId, ItemId, SpaceContext, Violation } from '../../shared/space/index.ts';
+import { addShells, applyOps, assignSeats, BuildHistory, clearOps, deskOf, encodeBuilding, missingEssentials, freeDesk, legacyBuilding, parseBuilding, placeDesk, shellItems, teamKit, ITEM_DEFS } from '../../shared/space/index.ts';
+import type { Applied, Building, BuildOp, EmployeeId as SpaceEmployeeId, ItemId, Missing, SpaceContext, Violation } from '../../shared/space/index.ts';
 import type { ActorId, ConvoKey, LedgerEntry, MailView, MessageId } from '../../shared/mail.ts';
 import { HARNESSES } from './adapters/index.ts';
 import type { EmployeeSession, SessionHost } from './adapters/types.ts';
@@ -74,6 +74,7 @@ export type OfficeEvents = {
   log(employeeId: EmployeeId, line: string, at: number): void;
   building(building: Building, rev: number): void;
   rejected(violations: readonly Violation[]): void;
+  incomplete?(missing: readonly Missing[]): void;
   // Mail changed, or an employee is writing a bubble. Both go past the snapshot coalescer.
   mail?(view: MailView): void;
   stream?(employeeId: EmployeeId, replyingTo: MessageId | null, delta: string, done: boolean): void;
@@ -207,26 +208,16 @@ const seatsOf = (company: Company): Map<SpaceEmployeeId, ItemId> =>
 // Gives every employee a desk of the right kind in their own block. A seat that is gone, shared or in the wrong
 // block is dropped and the employee goes to the team's next free desk, or with `grow` to a new one beside the team.
 function seatEveryone(company: Company, building: Building, grow = true): Building {
-  const seats = new Map<SpaceEmployeeId, ItemId>();
-  const ok = (e: Employee) => {
-    const item = e.seat ? deskOf(building, new Map([[e.id, e.seat]]), e.id) : null;
-    const kind = e.role === 'orchestrator' ? 'po_desk' : 'bench_desk';
-    return !!item && ITEM_DEFS[item.def]?.kind === kind && item.blockId === e.blockId;
-  };
-  for (const e of company.employees) if (ok(e) && ![...seats.values()].includes(e.seat!)) seats.set(e.id, e.seat!);
+  const seats = assignSeats(building, spaceCtx(company, seatsOf(company)));
   let b = building;
   for (const e of company.employees) {
-    if (seats.has(e.id)) continue;
+    if (seats.has(e.id) || !grow || !company.blocks.some((x) => x.id === e.blockId)) continue;
     const orchestrator = e.role === 'orchestrator';
-    let desk = freeDesk(b, seats, e.blockId, orchestrator);
-    if (!desk) {
-      const put = grow && company.blocks.some((x) => x.id === e.blockId) ? placeDesk(b, e.blockId, orchestrator, spaceCtx(company, seats)) : null;
-      const applied = put && applyOps(b, put, spaceCtx(company, seats));
-      if (applied?.ok) {
-        b = applied.building;
-        desk = freeDesk(b, seats, e.blockId, orchestrator);
-      }
-    }
+    const put = placeDesk(b, e.blockId, orchestrator, spaceCtx(company, seats));
+    const applied = put && applyOps(b, put, spaceCtx(company, seats));
+    if (!applied?.ok) continue;
+    b = applied.building;
+    const desk = freeDesk(b, seats, e.blockId, orchestrator);
     if (desk) seats.set(e.id, desk.id);
   }
   for (const e of company.employees) e.seat = seats.get(e.id) ?? null;
@@ -312,6 +303,8 @@ export class Office {
   // Counts changes in this run, so the renderer can tell a building it already holds from a new one.
   private buildingRev = 1;
   private history = new BuildHistory();
+  // An open build session. Its edits stay out of company.json until a save finds nothing essential missing.
+  private draft: { building: Building; history: BuildHistory } | null = null;
   // Deliberately not persisted with company.json. Every app session starts with an open door.
   private meetingDoor: MeetingDoor = 'open';
   private sessions = new Map<EmployeeId, EmployeeSession>();
@@ -510,13 +503,13 @@ export class Office {
 
   snapshot(): Snapshot {
     return {
-      type: 'snapshot', company: this.company, harnesses: this.harnesses, catalogs: this.catalogs, meetingDoor: this.meetingDoor, buildingRev: this.buildingRev,
+      type: 'snapshot', company: this.company, harnesses: this.harnesses, catalogs: this.catalogs, meetingDoor: this.meetingDoor, buildingRev: this.buildingRev, buildDraft: this.draft !== null,
       ...this.tasks.view(Date.now()), taskConnections: this.services.taskBoards.connectionStates(), mail: this.mail.view(),
     };
   }
 
   buildingState(): { building: Building; rev: number } {
-    return { building: this.building, rev: this.buildingRev };
+    return { building: this.draft?.building ?? this.building, rev: this.buildingRev };
   }
 
   shutdown() {
@@ -614,9 +607,20 @@ export class Office {
       case 'build':
         return this.build(msg.ops);
       case 'undo':
+        if (this.draft) return this.rewriteDraft(this.draft.history.undo(this.draft.building, this.draftCtx()));
         return this.rewrite(this.history.undo(this.building, this.ctx()));
       case 'redo':
+        if (this.draft) return this.rewriteDraft(this.draft.history.redo(this.draft.building, this.draftCtx()));
         return this.rewrite(this.history.redo(this.building, this.ctx()));
+      case 'build_begin':
+        return this.beginBuild();
+      case 'build_clear':
+        if (!this.draft) throw new OfficeError('Open build mode to clear the office.');
+        return this.build(clearOps(this.draft.building));
+      case 'build_save':
+        return this.saveBuild();
+      case 'build_discard':
+        return this.discardBuild();
       default: {
         const unreachable: never = msg;
         throw new OfficeError(`Unhandled message ${JSON.stringify(unreachable)}`);
@@ -672,13 +676,63 @@ export class Office {
     return spaceCtx(this.company, seatsOf(this.company));
   }
 
+  // People stand while the office is rebuilt, so a draft edit never answers to who sits where. The save checks the seats.
+  private draftCtx(): SpaceContext {
+    return spaceCtx(this.company, new Map());
+  }
+
   private setBuilding(building: Building) {
     this.building = seatEveryone(this.company, building, false);
+    this.buildingRev++;
+    this.events.building(this.draft?.building ?? building, this.buildingRev);
+  }
+
+  private showDraft(building: Building) {
+    this.draft!.building = building;
     this.buildingRev++;
     this.events.building(building, this.buildingRev);
   }
 
+  private beginBuild() {
+    if (this.draft) return;
+    this.draft = { building: this.building, history: new BuildHistory() };
+    this.events.changed();
+  }
+
+  private saveBuild() {
+    if (!this.draft) return;
+    const missing = missingEssentials(this.draft.building, this.ctx());
+    if (missing.length) return this.events.incomplete?.(missing);
+    const { building } = this.draft;
+    this.draft = null;
+    // Undoing past a save could take away what the save required.
+    this.history = new BuildHistory();
+    this.setBuilding(building);
+    this.commit();
+  }
+
+  private discardBuild() {
+    if (!this.draft) return;
+    this.draft = null;
+    this.buildingRev++;
+    this.events.building(this.building, this.buildingRev);
+    this.events.changed();
+  }
+
+  private rewriteDraft(applied: Applied | null) {
+    if (!applied) return;
+    if (!applied.ok) return this.events.rejected(applied.violations);
+    this.showDraft(applied.building);
+  }
+
   private build(ops: BuildOp[]) {
+    if (this.draft) {
+      if (!ops.length) return;
+      const applied = applyOps(this.draft.building, ops, this.draftCtx());
+      if (!applied.ok) return this.events.rejected(applied.violations);
+      this.draft.history.push({ forward: applied.forward, inverse: applied.inverse, label: 'build' });
+      return this.showDraft(applied.building);
+    }
     const applied = applyOps(this.building, ops, this.ctx());
     if (!applied.ok) return this.events.rejected(applied.violations);
     this.history.push({ forward: applied.forward, inverse: applied.inverse, label: 'build' });
@@ -700,8 +754,17 @@ export class Office {
       console.warn(`The office could not change the building: ${applied.violations.map((v) => v.kind).join(', ')}`);
       return false;
     }
+    this.mirror(ops);
     this.setBuilding(applied.building);
     return true;
+  }
+
+  // An office-made edit during a build session lands in the draft too where it fits, so a removed team leaves no pieces
+  // behind in it. One that does not fit is left out: the save then names what is missing.
+  private mirror(ops: BuildOp[]) {
+    if (!this.draft) return;
+    const applied = applyOps(this.draft.building, ops, this.draftCtx());
+    if (applied.ok) this.draft.building = applied.building;
   }
 
   private employee(id: EmployeeId): Employee {
@@ -1036,7 +1099,9 @@ export class Office {
     let b = this.building;
     for (const piece of shellItems(block.id, block.slot)) {
       const placed = applyOps(b, [{ t: 'items', story: 0, put: [piece], del: [] }], this.ctx());
-      if (placed.ok) b = placed.building;
+      if (!placed.ok) continue;
+      b = placed.building;
+      this.mirror([{ t: 'items', story: 0, put: [piece], del: [] }]);
     }
     if (b !== this.building) this.setBuilding(b);
   }
@@ -1168,6 +1233,7 @@ export class Office {
     const fresh = seed();
     this.company = fresh.company;
     this.history = new BuildHistory();
+    this.draft = null;
     this.setBuilding(fresh.building);
     rmSync(this.ledgerFile, { force: true });
     this.tasks.reset();

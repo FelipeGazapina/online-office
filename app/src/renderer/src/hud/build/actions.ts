@@ -1,9 +1,9 @@
-import { blockItems, cellBounds, CELL, ITEM_DEFS, type BuildOp, type Item, type ItemId, type Rot, type Vec2 } from '../../../../shared/space/index.ts';
+import { blockItems, cellBounds, CELL, ITEM_DEFS, missingEssentials, type BuildOp, type Item, type ItemId, type Rot, type Vec2 } from '../../../../shared/space/index.ts';
 import { leaveComputer } from '../../computer.ts';
 import { runtime } from '../../runtime.ts';
-import { get, send, set, setSetting, useStore, type BuildState, type BuildTool } from '../../store.ts';
+import { get, send, set, setSetting, toast, useStore, type BuildState, type BuildTool } from '../../store.ts';
 import { ENTRIES, type Entry, type TabId } from './catalog.ts';
-import { BUILD_DIST, buildView, modifiers, setGhost } from './state.ts';
+import { BUILD_DIST, buildView, modifiers, setGhost, spaceContext } from './state.ts';
 
 const FRESH: Omit<BuildState, 'level'> = { tool: { kind: 'select' }, tab: 'desks', search: '', searching: false, peek: null, fill: false, paint: 1, style: 0, wallsMode: 'cutaway' };
 
@@ -25,9 +25,10 @@ export function enterBuild() {
   buildView.dist = runtime.view.isoDist;
   runtime.view.isoDist = Math.min(runtime.view.isoDist, BUILD_DIST);
   set({ build: { ...FRESH, level }, story: level, selectedId: null, menu: null });
+  send({ type: 'build_begin' });
 }
 
-export function exitBuild() {
+function leaveBuild() {
   if (!get().build) return;
   setGhost(null);
   buildView.keys.clear();
@@ -35,7 +36,29 @@ export function exitBuild() {
   set({ build: null, buildCursor: { readout: null, verdict: null, hover: null } });
 }
 
-export const toggleBuild = () => (get().build ? exitBuild() : enterBuild());
+/** Keeps the draft and leaves, or stays and says what is missing. Main checks the same rules again before it saves. */
+export function saveBuild() {
+  const s = get();
+  if (!s.build || !s.building) return;
+  const missing = missingEssentials(s.building, spaceContext(s.company));
+  if (missing.length) {
+    toast('The office cannot be saved yet. The checklist shows what is missing.', 'warn');
+    return;
+  }
+  send({ type: 'build_save' });
+  leaveBuild();
+}
+
+/** Leaves without keeping anything done since build mode opened. */
+export function discardBuild() {
+  if (!get().build) return;
+  send({ type: 'build_discard' });
+  leaveBuild();
+}
+
+export const clearBuild = () => send({ type: 'build_clear' });
+
+export const toggleBuild = () => (get().build ? saveBuild() : enterBuild());
 
 /** Esc and a right click. A block in hand goes back and the block tool stays, so the next block is one click away. */
 export function stepBack() {

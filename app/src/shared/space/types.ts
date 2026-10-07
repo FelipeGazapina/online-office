@@ -34,7 +34,8 @@ export type Story = {
  * `shelled` says how far the pod migration got: 1 once every project block's own pieces (rug, pod boundary, decor, huddle) exist
  * as items, 2 once they also stand with the block's desks. A building below 2 is migrated on load, once.
  */
-export type Building = { v: 1; lot: Lot; stories: readonly Story[]; shelled?: 1 | 2 };
+/** `bare` drops the stock reception, kitchen, lounge, lobby and rug the scene draws on every lot, for an office the owner builds from nothing. */
+export type Building = { v: 1; lot: Lot; stories: readonly Story[]; shelled?: 1 | 2; bare?: true };
 
 export type Item = {
   id: ItemId;
@@ -67,7 +68,8 @@ export type BuildOp =
   | { t: 'stories'; count: number }
   | { t: 'walls'; story: number; put: readonly WallSeg[]; del: readonly WallRef[] }
   | { t: 'floor'; story: number; cells: readonly FloorCell[] }
-  | { t: 'items'; story: number; put: readonly Item[]; del: readonly ItemId[] };
+  | { t: 'items'; story: number; put: readonly Item[]; del: readonly ItemId[] }
+  | { t: 'bare'; on: boolean };
 
 export type ViolationKind =
   | 'out_of_lot'

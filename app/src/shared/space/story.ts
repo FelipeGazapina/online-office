@@ -99,6 +99,12 @@ function droppedContent(story: Story, to: Lot, from: Lot, index: number, out: Vi
 /** Applies one op. Problems the op itself causes (bad indices, dropped content) go to `report`. Returns the same building when nothing changes. */
 export function applyOp(b: Building, op: BuildOp, report: Violation[]): { b: Building; inverse: BuildOp } {
   switch (op.t) {
+    case 'bare': {
+      const inverse: BuildOp = { t: 'bare', on: !!b.bare };
+      if (op.on === !!b.bare) return { b, inverse };
+      const { bare: _, ...rest } = b;
+      return { b: op.on ? { ...rest, bare: true } : rest, inverse };
+    }
     case 'lot': {
       const to = op.lot;
       const ok = Number.isInteger(to.x0) && Number.isInteger(to.z0) && Number.isInteger(to.w) && Number.isInteger(to.h) && to.w >= 1 && to.h >= 1 && to.w <= MAX_LOT && to.h <= MAX_LOT;

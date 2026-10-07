@@ -11,7 +11,7 @@ export type VoidRect = { x0: number; x1: number; z0: number; z1: number };
  * one-story building has it; a second story would sit in the void.
  */
 export function lobbyVoid(b: Building | null): VoidRect | null {
-  if (!b || b.stories.length !== 1 || b.lot.w < 24) return null;
+  if (!b || b.bare || b.stories.length !== 1 || b.lot.w < 24) return null;
   return { x0: b.lot.x0, x1: b.lot.x0 + b.lot.w, z0: LOBBY_Z0 + 3, z1: b.lot.z0 + b.lot.h };
 }
 
