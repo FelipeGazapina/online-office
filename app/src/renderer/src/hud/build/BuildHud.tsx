@@ -12,7 +12,7 @@ import './build.css';
 type Hint = [key: string, does: string, danger?: true];
 const HINTS: Record<BuildTool['kind'], (t: BuildTool) => Hint[]> = {
   select: () => [['Click or drag', 'move furniture'], ['Shift-click', 'move its whole block'], ['E', 'copy it'], ['Delete', 'delete the piece under the pointer', true]],
-  block: (t) => (t.kind === 'block' && t.carry ? [['Click', 'drop the block here'], [', .', 'turn'], ['Esc', 'put it back']] : [['Click or drag', 'pick up a block'], ['Esc', 'back to furniture']]),
+  block: (t) => (t.kind === 'block' && t.carry ? [['Click', 'drop the block here'], [', .', 'turn'], ['PgUp PgDn', 'change floor'], ['Esc', 'put it back'], ['Delete', 'remove the block and its people', true]] : [['Click or drag', 'pick up a block'], ['Esc', 'back to furniture']]),
   wall: () => [['Drag', 'draw a wall'], ['Ctrl-drag', 'delete walls']],
   room: () => [['Drag', 'draw a room'], ['Ctrl-drag', 'delete its walls'], ['Shift', 'wall tool']],
   floor: () => [['Click or drag', 'paint'], ['Shift', 'fill the room']],

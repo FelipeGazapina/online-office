@@ -87,7 +87,8 @@ export function benchItem(blockId: string, slot: number, n: number): Item {
   return { id: itemId(blockId, 'bench_desk', n), def: 'bench_desk', x: c.x * 2 + column, z: c.z * 2 - (south ? 0 : 2), rot: (south ? 2 : 0) as Rot, blockId };
 }
 
-export function teamItems(blockId: string, slot: number): Item[] {
+/** The pieces a team cannot work without: six bench desks, the PO desk, the whiteboard, its terminal and the team sign. */
+export function coreItems(blockId: string, slot: number): Item[] {
   const c = blockCenter(slot);
   const [cx, cz] = [c.x * 2, c.z * 2];
   const items: Item[] = Array.from({ length: BENCH_COUNT }, (_, n) => benchItem(blockId, slot, n));
@@ -100,11 +101,45 @@ export function teamItems(blockId: string, slot: number): Item[] {
   return items;
 }
 
-/** Carpet tiles of a team's rug, as the static office drew it (9 by 7 tiles). */
-export function rugTiles(slot: number): { x0: number; z0: number; x1: number; z1: number } {
+// Everything else a team's pod holds, as cells from the block's middle (the minimum corner of the footprint once turned) and
+// the turn. It is where the static pod drew each piece, snapped to the half-meter grid; a def's model carries the few
+// centimeters the snap moved it, so nothing looks different. The floor pieces lie under the rest: the rug in the middle, the
+// low boundary in the ring of cells around it, the glass rail at the front. Two of the same piece get numbers in this order.
+const SHELL: readonly { def: string; dx: number; dz: number; rot: Rot }[] = [
+  { def: 'pod_rug', dx: -9, dz: -7, rot: 0 },
+  { def: 'pod_rail_back', dx: -10, dz: -8, rot: 0 },
+  { def: 'pod_rail_side', dx: -10, dz: -7, rot: 1 },
+  { def: 'pod_rail_side', dx: 9, dz: -7, rot: 1 },
+  { def: 'pod_glass_rail', dx: -3, dz: 7, rot: 0 },
+  { def: 'pod_slat_wall', dx: -6, dz: -10, rot: 0 },
+  { def: 'pod_credenza', dx: 8, dz: -2, rot: 0 },
+  { def: 'lamp_floor', dx: -9, dz: -6, rot: 0 },
+  { def: 'pod_printer', dx: 5, dz: -8, rot: 0 },
+  { def: 'pod_cooler', dx: -6, dz: -8, rot: 0 },
+  { def: 'pod_bin', dx: -4, dz: -8, rot: 0 },
+  { def: 'pod_shelf', dx: -10, dz: -1, rot: 0 },
+  { def: 'pod_boxes', dx: -10, dz: -3, rot: 0 },
+  { def: 'pod_pouf', dx: 3, dz: 6, rot: 0 },
+  { def: 'plant', dx: -9, dz: 6, rot: 0 },
+  { def: 'plant', dx: 8, dz: -7, rot: 0 },
+  { def: 'pod_huddle_table', dx: 5, dz: 3, rot: 0 },
+  { def: 'chair', dx: 4, dz: 4, rot: 3 },
+  { def: 'chair', dx: 8, dz: 4, rot: 1 },
+  { def: 'pod_daily_sign', dx: 5, dz: 2, rot: 0 },
+];
+
+/** The pod around a team's desks, as items of the team: rug, boundary, decor and the daily huddle. */
+export function shellItems(blockId: string, slot: number): Item[] {
   const c = blockCenter(slot);
-  return { x0: c.x - 5, x1: c.x + 4, z0: c.z - 3, z1: c.z + 4 };
+  const seen = new Map<string, number>();
+  return SHELL.map(({ def, dx, dz, rot }) => {
+    const n = seen.get(def) ?? 0;
+    seen.set(def, n + 1);
+    return { id: itemId(blockId, def, n), def, x: c.x * 2 + dx, z: c.z * 2 + dz, rot, blockId };
+  });
 }
+
+export const teamItems = (blockId: string, slot: number): Item[] => [...coreItems(blockId, slot), ...shellItems(blockId, slot)];
 
 const union = (a: Lot, b: Lot): Lot => {
   const x0 = Math.min(a.x0, b.x0);
@@ -113,8 +148,9 @@ const union = (a: Lot, b: Lot): Lot => {
 };
 
 /**
- * Everything a new team needs in its 10 by 8 slot: floor where there is none, a carpet rug, a PO desk, six bench desks,
- * a whiteboard with the board terminal beside it, and the team sign. Grows the lot when the slot sticks out of it.
+ * Everything a new team needs in its 10 by 8 slot: floor where there is none, a PO desk, six bench desks, a whiteboard with
+ * the board terminal beside it, and the team sign. The pod around them (`shellItems`) goes in piece by piece afterwards, so a
+ * piece the owner's furniture is in the way of is skipped and does not cost the team its desks. Grows the lot when the slot sticks out of it.
  * When the lot grows, the outer walls and corner plants move to the new edge and the new ground is floored. Ids derive
  * from (blockId, kind, index), so a repeated kit is a no-op.
  */
@@ -126,17 +162,14 @@ export function teamKit(b: Building, blockId: string, slot: number): BuildOp[] {
   const grew = lot.w !== b.lot.w || lot.h !== b.lot.h || lot.x0 !== b.lot.x0 || lot.z0 !== b.lot.z0;
   const made = grew && lot.w <= MAX_LOT && lot.h <= MAX_LOT ? lot : null;
   if (grew) ops.push({ t: 'lot', lot: made ?? { ...b.lot } });
-  const rug = rugTiles(slot);
   const cells: FloorCell[] = [];
   for (let z = area.z0; z < area.z0 + area.h; z++) {
     for (let x = area.x0; x < area.x0 + area.w; x++) {
       const bare = !grew && inLotTile(b.lot, x, z) ? !hasFloorAt(b.stories[0], tileIndex(b.lot, x, z)) : true;
-      const onRug = x >= rug.x0 && x < rug.x1 && z >= rug.z0 && z < rug.z1;
-      if (onRug) cells.push({ x, z, half: 0, paint: PAINT.carpetBlue });
-      else if (bare) cells.push({ x, z, half: 0, paint: PAINT.woodLight });
+      if (bare) cells.push({ x, z, half: 0, paint: PAINT.woodLight });
     }
   }
-  const items = teamItems(blockId, slot);
+  const items = coreItems(blockId, slot);
   if (made) {
     const seen = new Set(cells.map((c) => `${c.x},${c.z}`));
     for (let z = made.z0; z < made.z0 + made.h; z++) {

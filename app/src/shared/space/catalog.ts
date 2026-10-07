@@ -1,4 +1,4 @@
-import type { ItemDef, Rot } from './types.ts';
+import type { ItemDef, ItemLayer, Rot } from './types.ts';
 
 export const FLOOR_PAINTS: readonly { name: string; color: string }[] = [
   { name: 'none', color: '#000000' },
@@ -55,13 +55,13 @@ const defs: ItemDef[] = [
   { id: 'coffee_machine', kind: 'decor', w: 1, d: 1, height: 1.0, walkable: false },
   { id: 'meeting_table', kind: 'table', w: 6, d: 3, height: 0.75, walkable: false },
   { id: 'chair', kind: 'seat', w: 1, d: 1, height: 0.9, walkable: false },
-  { id: 'rug', kind: 'decor', w: 6, d: 4, height: 0.02, walkable: true },
+  { id: 'rug', kind: 'decor', w: 6, d: 4, height: 0.02, walkable: true, layer: 'floor' },
   { id: 'bookshelf', kind: 'decor', w: 4, d: 1, height: 2.0, walkable: false },
   { id: 'stairs', kind: 'stairs', w: 2, d: 8, height: 3.2, walkable: false, stairs: { rise: 1, holeLen: 3 } },
 ];
 
 // The rest of the build catalog, in half-meter cells. These are furnishings: nobody sits at them, and only the rugs can be walked over.
-const piece = (id: string, kind: ItemDef['kind'], w: number, d: number, height: number, walkable = false): ItemDef => ({ id, kind, w, d, height, walkable });
+const piece = (id: string, kind: ItemDef['kind'], w: number, d: number, height: number, walkable = false): ItemDef => ({ id, kind, w, d, height, walkable, ...(walkable && { layer: 'floor' as const }) });
 
 const more: ItemDef[] = [
   // desks
@@ -112,7 +112,29 @@ const more: ItemDef[] = [
   piece('cubby', 'decor', 3, 1, 1.1),
 ];
 
-export const ITEM_DEFS: Readonly<Record<string, ItemDef>> = Object.freeze(Object.fromEntries([...defs, ...more].map((d) => [d.id, d])));
+// What a project block brings besides its desks, board, terminal and sign. The kit places these around the block's middle
+// (kit.ts shellItems); each is an ordinary item, so the owner can pick, move and delete it alone. The floor ones lie under
+// everything else: the rug, the low boundary around it, the glass rail at its front.
+const pod: ItemDef[] = [
+  piece('pod_rug', 'decor', 18, 14, 0.03, true),
+  piece('pod_rail_back', 'decor', 20, 1, 0.56, true),
+  piece('pod_rail_side', 'decor', 14, 1, 0.56, true),
+  piece('pod_glass_rail', 'decor', 6, 1, 0.78, true),
+  piece('pod_slat_wall', 'decor', 13, 2, 2.84),
+  piece('pod_credenza', 'decor', 2, 6, 0.76),
+  piece('pod_printer', 'decor', 1, 1, 1.0),
+  piece('pod_cooler', 'decor', 1, 1, 1.35),
+  piece('pod_bin', 'decor', 1, 1, 0.34),
+  piece('pod_shelf', 'decor', 1, 5, 1.65),
+  piece('pod_boxes', 'decor', 1, 1, 0.65),
+  piece('pod_pouf', 'seat', 2, 2, 0.4),
+  piece('pod_huddle_table', 'table', 3, 3, 0.73),
+  piece('pod_daily_sign', 'decor', 3, 1, 1.37),
+];
+
+export const ITEM_DEFS: Readonly<Record<string, ItemDef>> = Object.freeze(Object.fromEntries([...defs, ...more, ...pod].map((d) => [d.id, d])));
+
+export const layerOf = (def: ItemDef): ItemLayer => def.layer ?? 'object';
 
 export const YAW: readonly number[] = [0, -Math.PI / 2, Math.PI, Math.PI / 2];
 

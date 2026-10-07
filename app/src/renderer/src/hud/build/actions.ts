@@ -112,9 +112,9 @@ export function setLevel(level: number) {
   const next = Math.max(0, Math.min(s.building.stories.length - 1, level));
   if (next === s.build.level) return;
   setGhost(null);
-  // A moved item or block belongs to the story it was picked up on.
+  // A moved item belongs to the story it was picked up on. A block in hand goes with the owner to the new floor: that is how it changes floors.
   const t = s.build.tool;
-  const tool: BuildTool = t.kind === 'item' && t.carry ? { kind: 'select' } : t.kind === 'block' && t.carry ? { kind: 'block', carry: null } : t;
+  const tool: BuildTool = t.kind === 'item' && t.carry ? { kind: 'select' } : t;
   set({ build: { ...s.build, level: next, tool }, story: next });
 }
 

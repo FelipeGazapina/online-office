@@ -6,8 +6,10 @@ import {
   ITEM_DEFS,
   PAINT,
   WALL_STYLES,
+  addShells,
   applyOps,
   blockAt,
+  blockCenter,
   blockItems,
   blockPose,
   cellBounds,
@@ -19,8 +21,9 @@ import {
   emptyBuilding,
   encodeBuilding,
   freeDesk,
+  layerOf,
   legacyBuilding,
-  moveBlockOp,
+  moveBlockOps,
   navOf,
   openDoor,
   paintRect,
@@ -30,6 +33,7 @@ import {
   rotateLocal,
   route,
   seatPose,
+  shellItems,
   teamKit,
   turnBlock,
   validate,
@@ -230,7 +234,7 @@ const flat = (stories = 1, size = 20): Building => {
   check(a.building.lot.w === 36 && a.building.lot.h === 19 && a.building.lot.x0 === -18 && a.building.lot.z0 === -10, 'lot matches getLayout bounds for 2 blocks');
   const plants = a.building.stories[0].items.filter((i) => i.def === 'plant').length;
   const terminals = a.building.stories[0].items.filter((i) => i.def === 'board_terminal').length;
-  check(plants === 7 && terminals === 2, `7 plants and a board terminal per block (${plants}, ${terminals})`);
+  check(plants === 7 + 2 * blocks.length && terminals === 2, `7 plants for the office, 2 more and a board terminal for each team (${plants}, ${terminals})`);
 
   const nav = navOf(floors[0]);
   const room = { floor: 0, ...seatPose(a.building, owner!.id).exit };
@@ -286,7 +290,7 @@ const flat = (stories = 1, size = 20): Building => {
   const story = a.building.stories[0];
   const items = blockItems(story, 'b2');
   const box = cellBounds(items)!;
-  check(items.length === 10 && items.every((i) => i.blockId === 'b2'), 'blockItems is every item of the block and nothing else');
+  check(items.length === 10 + shellItems('b2', 1).length && items.every((i) => i.blockId === 'b2'), 'blockItems is every item of the block, pod included, and nothing else');
 
   const turned = (q: 0 | 1 | 2 | 3) => turnBlock(items, q);
   check(eq(turned(0), items), 'no turn leaves the block as it was');
@@ -310,14 +314,14 @@ const flat = (stories = 1, size = 20): Building => {
   });
   check(turnedOk, 'every desk chair lands where the whole block turned it');
 
-  const shift = (dx: number, dz: number, quarter: 0 | 1 | 2 | 3 = 0) => moveBlockOp(story, 0, 'b2', { quarter, origin: { x: box.x0 + dx, z: box.z0 + dz } });
-  check(shift(0, 0) === null, 'a pose that changes nothing makes no op');
-  const east = shift(16, 0)!;
+  const shift = (dx: number, dz: number, quarter: 0 | 1 | 2 | 3 = 0) => moveBlockOps(story, 0, 'b2', { quarter, origin: { x: box.x0 + dx, z: box.z0 + dz } });
+  check(shift(0, 0).length === 0, 'a pose that changes nothing makes no op');
+  const [east] = shift(16, 0);
   const moved = applyOps(a.building, [east], ctx);
-  check(moved.ok && east.t === 'items' && east.put.length === 10 && east.del.length === 0, 'moving a block is one items op over all ten pieces', moved.ok ? '' : JSON.stringify(moved.violations));
+  check(moved.ok && east.t === 'items' && east.put.length === items.length && east.del.length === 0, 'moving a block is one items op over every piece, pod included', moved.ok ? '' : JSON.stringify(moved.violations));
   if (moved.ok) {
     const after = blockItems(moved.building.stories[0], 'b2');
-    check(after.length === 10 && after.every((n, k) => n.id === items[k].id && n.x === items[k].x + 16 && n.z === items[k].z && n.rot === items[k].rot && n.blockId === 'b2'), 'every piece keeps its id, team and turn, and moves 8 m east together');
+    check(after.length === items.length && after.every((n, k) => n.id === items[k].id && n.x === items[k].x + 16 && n.z === items[k].z && n.rot === items[k].rot && n.blockId === 'b2'), 'every piece keeps its id, team and turn, and moves 8 m east together');
     check(eq(blockItems(moved.building.stories[0], 'b1'), blockItems(story, 'b1')), 'the other block did not move');
     const seatsHold = [...a.seats].every(([emp, desk]) => deskOf(moved.building, a.seats, emp)?.id === desk) && validate(moved.building, ctx).length === 0;
     check(seatsHold, 'every employee still sits at the same desk id and the building validates clean');
@@ -332,10 +336,10 @@ const flat = (stories = 1, size = 20): Building => {
     check(undone?.ok === true && eq(undone.building, a.building) && redone?.ok === true && eq(redone.building, moved.building), 'undo and redo carry the whole block');
   }
 
-  const bad: [string, BuildOp | null, ViolationKind][] = [
-    ['onto the other block', shift(-24, 0), 'overlap'],
-    ['out of the lot', shift(60, 0), 'out_of_lot'],
-    ['over bare ground', shift(16, 0), 'no_floor'],
+  const bad: [string, BuildOp | undefined, ViolationKind][] = [
+    ['onto the other block', shift(-24, 0)[0], 'overlap'],
+    ['out of the lot', shift(60, 0)[0], 'out_of_lot'],
+    ['over bare ground', shift(16, 0)[0], 'no_floor'],
   ];
   const holed = must(applyOps(a.building, [{ t: 'floor', story: 0, cells: [{ x: 8, z: -5, half: 0, paint: PAINT.none }] }], ctx));
   for (const [name, op, kind] of bad) {
@@ -343,13 +347,13 @@ const flat = (stories = 1, size = 20): Building => {
     const r = op && applyOps(on, [op], ctx);
     check(!!op && !!r && !r.ok && kinds(r).includes(kind) && eq(checkOps(on, [op], ctx), r.ok ? [] : r.violations), `a block moved ${name} is rejected as ${kind}, and checkOps agrees`, r ? JSON.stringify(kinds(r)) : 'no op');
   }
-  check(applyOps(a.building, [shift(2, 0)!], ctx).ok, "a nudge that lands on the block's own old cells is not an overlap");
+  check(applyOps(a.building, shift(2, 0), ctx).ok, "a nudge that lands on the block's own old cells is not an overlap");
 
   const dropped = blockPose(items, 1, { x: 24, z: -20 });
   const turnedAt = placeBlock(items, dropped);
   const turnedBox = cellBounds(turnedAt)!;
   check(turnedBox.x1 - turnedBox.x0 === depth && Math.abs((turnedBox.x0 + turnedBox.x1) / 2 - 24) <= 0.5 && Math.abs((turnedBox.z0 + turnedBox.z1) / 2 + 20) <= 0.5, 'blockPose puts the turned block on the asked middle');
-  const spun = applyOps(a.building, [moveBlockOp(story, 0, 'b2', dropped)!], ctx);
+  const spun = applyOps(a.building, moveBlockOps(story, 0, 'b2', dropped), ctx);
   check(!spun.ok && kinds(spun).length > 0, 'a block turned where it does not fit is rejected', spun.ok ? 'accepted' : '');
 
   const desk = items.find((i) => i.def === 'bench_desk')!;
@@ -357,6 +361,115 @@ const flat = (stories = 1, size = 20): Building => {
   check(blockAt(story, { x: (box.x0 + box.x1) / 4, z: (box.z0 + box.z1) / 4 }) === 'b2', 'a point on the floor between the pieces picks the block whose bounding box holds it');
   check(blockAt(story, { x: 14, z: 7 }) === null, 'a point outside every block picks nothing');
   check(blockAt(story, { x: (box.x0 - 0.5) / 2, z: (box.z0 + box.z1) / 4 }) !== 'b2', 'a point just outside the block does not pick it');
+}
+
+// ---------------------------------------------------------------- the pod around a block
+{
+  const mismatch = Object.values(ITEM_DEFS).filter((d) => d.walkable !== (layerOf(d) === 'floor')).map((d) => d.id);
+  check(mismatch.length === 0, 'a def is on the floor layer exactly when people can walk over it', mismatch.join());
+  const floorDefs = Object.values(ITEM_DEFS).filter((d) => layerOf(d) === 'floor').map((d) => d.id);
+  check(['rug', 'rug_small', 'rug_round', 'pod_rug', 'pod_rail_back', 'pod_rail_side', 'pod_glass_rail'].every((d) => floorDefs.includes(d)), 'the rugs and the pod boundary are floor items');
+
+  const slots = [0, 1, 2, 3, 4, 5, 7];
+  const blocks = slots.map((slot) => ({ id: `p${slot}`, slot }));
+  const employees = blocks.flatMap((b) => [{ id: `${b.id}-po`, blockId: b.id, desk: 0, orchestrator: true }, { id: `${b.id}-e`, blockId: b.id, desk: 1, orchestrator: false }]);
+  const legacy = legacyBuilding(blocks, employees);
+  const ctx: SpaceContext = {
+    blocks: new Set(blocks.map((b) => b.id)),
+    employees: new Map(employees.map((e) => [e.id, { blockId: e.blockId, orchestrator: e.orchestrator }])),
+    seats: legacy.seats,
+  };
+  const problems = validate(legacy.building, ctx);
+  check(problems.length === 0 && legacy.building.shelled === true, 'seven pods in two rows of slots validate clean: no overlap, nothing off the floor or the lot', JSON.stringify(problems.slice(0, 4)));
+  const pod = shellItems('p0', 0);
+  check(new Set(pod.map((i) => i.id)).size === pod.length && pod.every((i) => ITEM_DEFS[i.def] && i.blockId === 'p0'), 'a pod is a set of distinct known items of its team');
+  check(['pod_rug', 'pod_rail_back', 'pod_glass_rail', 'pod_huddle_table', 'pod_daily_sign', 'chair', 'plant', 'lamp_floor', 'pod_slat_wall', 'pod_shelf'].every((d) => pod.some((i) => i.def === d)), 'the pod has its rug, boundary, huddle and decor');
+
+  // The kit of every slot, one after the other on the office as it starts, goes through the rules.
+  let kitted = legacyBuilding([], []).building;
+  for (const b of blocks) {
+    kitted = must(applyOps(kitted, teamKit(kitted, b.id, b.slot), noCtx));
+    for (const piece of shellItems(b.id, b.slot)) kitted = must(applyOps(kitted, [put(0, piece)], noCtx));
+  }
+  check(blocks.every((b) => blockItems(kitted.stories[0], b.id).length === 10 + pod.length), 'a new team gets its desks and its whole pod from the kit, in every slot');
+
+  // Floor items share nothing with each other, and objects stand on them.
+  const rugged = must(applyOps(legacy.building, [put(0, item('r1', 'rug', 30, -50), item('d9', 'bench_desk', 30, -50))], ctx));
+  check(rugged.stories[0].items.some((i) => i.id === 'd9'), 'a desk stands on a rug');
+  const twoRugs = applyOps(rugged, [put(0, item('r2', 'rug_small', 32, -48))], ctx);
+  check(!twoRugs.ok && kinds(twoRugs).includes('overlap'), 'a second rug on a rug is an overlap');
+  const rugUnderPod = applyOps(legacy.building, [put(0, item('r3', 'rug', -22, -20))], ctx);
+  check(!rugUnderPod.ok && kinds(rugUnderPod).includes('overlap'), "a rug cannot lie on the pod's own rug");
+  check(eq(checkOps(legacy.building, [put(0, item('r3', 'rug', -22, -20))], ctx), kinds(rugUnderPod).length ? (rugUnderPod.ok ? [] : rugUnderPod.violations) : []), 'checkOps and applyOps agree on the floor layer');
+
+  // The migration: the office before pods were items, with its carpet painted under the rug, comes back as the office with them.
+  const strip = (b: Building): Building => {
+    const gone = new Set(blocks.flatMap((x) => shellItems(x.id, x.slot).map((i) => i.id)));
+    const story = b.stories[0];
+    const items = story.items.filter((i) => !gone.has(i.id));
+    const cells = blocks.flatMap((x) => {
+      const c = blockCenter(x.slot);
+      return Array.from({ length: 7 }, (_, dz) => Array.from({ length: 9 }, (_, dx) => ({ x: c.x - 5 + dx, z: c.z - 3 + dz, half: 0 as const, paint: PAINT.carpetBlue }))).flat();
+    });
+    const old = must(applyOps({ ...b, stories: [{ ...story, items }] }, [{ t: 'floor', story: 0, cells }], noCtx));
+    return { v: 1, lot: old.lot, stories: old.stories };
+  };
+  const before = strip(legacy.building);
+  check(before.shelled === undefined && blockItems(before.stories[0], 'p0').length === 10, 'the stripped office has the desks and none of the pod');
+  const migrated = addShells(before, blocks);
+  check(eq(migrated, legacy.building), 'migrating gives each block its pod where it was and clears the carpet painted under the rug');
+  check(addShells(migrated, blocks) === migrated, 'migrating a migrated office changes nothing');
+  const half = must(applyOps(before, [{ t: 'items', story: 0, put: [shellItems('p1', 1)[0]], del: [] }], noCtx));
+  check(eq(addShells(half, blocks), legacy.building), 'a run that stopped half way finishes without doubling a piece');
+  const rugId = shellItems('p0', 0)[0].id;
+  const trimmed = must(applyOps(migrated, [{ t: 'items', story: 0, put: [], del: [rugId] }], ctx));
+  check(addShells(trimmed, blocks) === trimmed && !trimmed.stories[0].items.some((i) => i.id === rugId), 'a piece the owner deleted stays deleted');
+  const wire = parseBuilding(JSON.parse(JSON.stringify(encodeBuilding(trimmed))));
+  check(wire.shelled === true && eq(wire, trimmed), 'the migrated flag survives the file');
+
+  // A block leaves nothing behind, and goes to another floor and back.
+  const story = legacy.building.stories[0];
+  const mine = blockItems(story, 'p1');
+  const box = cellBounds(mine)!;
+  const away = applyOps(legacy.building, moveBlockOps(story, 0, 'p1', { quarter: 0, origin: { x: box.x0 - 24, z: box.z0 - 40 } }), ctx);
+  if (!away.ok) check(false, 'the block moves to the free slot', JSON.stringify(away.violations.slice(0, 3)));
+  else {
+    const left = away.building.stories[0].items.filter((i) => i.blockId === 'p1' && i.x < box.x1 && i.x + 1 > box.x0 && i.z < box.z1 && i.z + 1 > box.z0);
+    check(left.length === 0, 'after a move no item of the block is inside its old footprint');
+    check(blockAt(away.building.stories[0], { x: (box.x0 + box.x1) / 4, z: (box.z0 + box.z1) / 4 }) !== 'p1', 'and the old middle no longer picks it');
+    const rug = away.building.stories[0].items.find((i) => i.id === shellItems('p1', 1)[0].id)!;
+    check(blockAt(away.building.stories[0], { x: rug.x / 2 + 2, z: rug.z / 2 + 2 }) === 'p1', 'a point on the bare rug picks the block');
+  }
+
+  const two = must(applyOps(legacy.building, [{ t: 'stories', count: 2 }, paintRect(1, { x: -18, z: -30, w: 36, h: 39 }, PAINT.woodLight)], ctx));
+  const toFloor = (b: Building, pose: { quarter: 0 | 1 | 2 | 3; origin: { x: number; z: number } }, from: number, to: number) => moveBlockOps(b.stories[from], from, 'p1', pose, to);
+  const same = { quarter: 0 as const, origin: { x: box.x0, z: box.z0 } };
+  const strand = applyOps(two, toFloor(two, same, 0, 1), ctx);
+  check(!strand.ok && kinds(strand).includes('would_strand_desks'), 'a block with people moves only to a floor they can reach: no stairs, no move');
+  let stairsAt: Item | null = null;
+  for (let tz = -9; tz < 6 && !stairsAt; tz++) {
+    for (let tx = 6; tx < 16 && !stairsAt; tx++) {
+      const s = item('st', 'stairs', tx * 2, tz * 2, 0);
+      if (applyOps(two, [put(0, s)], ctx).ok) stairsAt = s;
+    }
+  }
+  check(!!stairsAt, 'there is room for stairs in the lobby');
+  if (stairsAt) {
+    const climbed = must(applyOps(two, [put(0, stairsAt)], ctx));
+    const up = applyOps(climbed, toFloor(climbed, same, 0, 1), ctx);
+    check(up.ok, 'with stairs, the block moves to floor 2', up.ok ? '' : JSON.stringify(up.violations.slice(0, 3)));
+    if (up.ok) {
+      check(blockItems(up.building.stories[0], 'p1').length === 0 && blockItems(up.building.stories[1], 'p1').length === mine.length, 'every piece of the block, pod included, is on floor 2 and none is left on floor 1');
+      const seat = [...legacy.seats].find(([e]) => e === 'p1-e')![1];
+      check(seatPose(up.building, seat).floor === 1, 'its people sit on floor 2');
+      const down = applyOps(up.building, toFloor(up.building, same, 1, 0), ctx);
+      check(down.ok && eq(blockItems(down.building.stories[0], 'p1'), mine), 'and it comes back down to the same cells');
+      const history = new BuildHistory();
+      history.push({ forward: up.forward, inverse: up.inverse, label: 'build' });
+      const undone = history.undo(up.building, ctx);
+      check(undone?.ok === true && eq(undone.building, climbed), 'undo of the floor change puts the block back on floor 1');
+    }
+  }
 }
 
 // ---------------------------------------------------------------- persistence boundary

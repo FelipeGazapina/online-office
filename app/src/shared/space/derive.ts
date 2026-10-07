@@ -1,4 +1,4 @@
-import { ITEM_DEFS, YAW, footprint } from './catalog.ts';
+import { ITEM_DEFS, YAW, footprint, layerOf } from './catalog.ts';
 import { defOf, hasFloorAt, inLotTile, itemRect, sameLot, stairsInfo, tileIndex, wkey } from './geom.ts';
 import type { Building, FloorGeometry, FloorRender, ItemId, Lot, Room, Story, WallDir, WallRef, WallSeg } from './types.ts';
 
@@ -61,19 +61,22 @@ function buildFloor(b: Building, index: number, hole: Uint8Array): FloorGeometry
     side === 'N' ? wkey(tx, tz, 'e') : side === 'S' ? wkey(tx, tz + 1, 'e') : side === 'W' ? wkey(tx, tz, 's') : wkey(tx + 1, tz, 's');
 
   const cw = lot.w * 2;
+  // Objects take cells in `occ`, floor items in `floorOcc`: an object may stand on a floor item, two of the same layer may not share a cell.
   const occ = new Uint16Array(cw * lot.h * 2);
+  const floorOcc = new Uint16Array(cw * lot.h * 2);
   const overlaps: [ItemId, ItemId][] = [];
   const seenPair = new Set<string>();
   story.items.forEach((item, n) => {
     const def = defOf(item);
-    if (!def || def.walkable) return;
+    if (!def) return;
+    const grid = layerOf(def) === 'floor' ? floorOcc : occ;
     const r = itemRect(item, def);
     for (let cz = Math.max(r.z0, lot.z0 * 2); cz < Math.min(r.z1, (lot.z0 + lot.h) * 2); cz++) {
       for (let cx = Math.max(r.x0, lot.x0 * 2); cx < Math.min(r.x1, (lot.x0 + lot.w) * 2); cx++) {
         const at = (cz - lot.z0 * 2) * cw + (cx - lot.x0 * 2);
-        const other = occ[at];
+        const other = grid[at];
         if (!other) {
-          occ[at] = n + 1;
+          grid[at] = n + 1;
           continue;
         }
         const a = story.items[other - 1].id;
@@ -176,6 +179,7 @@ function buildFloor(b: Building, index: number, hole: Uint8Array): FloorGeometry
     story,
     hole,
     occ,
+    floorOcc,
     overlaps,
     wallAt,
     roomOf,

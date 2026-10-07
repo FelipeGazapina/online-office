@@ -1,6 +1,6 @@
 // The static office the app shipped with, as a Building. A company.json without a building migrates through this.
 import { PAINT } from './catalog.ts';
-import { BENCH_COUNT, DOOR_X, LOBBY_Z0, globalId, itemId, lotForSlot, meetingItems, perimeter, plantItems, rugTiles, teamItems } from './kit.ts';
+import { BENCH_COUNT, DOOR_X, LOBBY_Z0, globalId, itemId, lotForSlot, meetingItems, perimeter, plantItems, teamItems } from './kit.ts';
 import { freeDesk, placeDesk } from './seats.ts';
 import { applyAll, emptyBuilding } from './story.ts';
 import { wrefKey } from './geom.ts';
@@ -94,11 +94,6 @@ export function legacyBuilding(
     return PAINT.woodLight;
   };
   for (let z = lot.z0; z < bottom; z++) for (let x = lot.x0; x < right; x++) cells.push({ x, z, half: 0, paint: zonePaint(x, z) });
-  const rugPaints = [PAINT.carpetBlue, PAINT.carpetRed, PAINT.carpetGray];
-  for (const b of blocks) {
-    const r = rugTiles(b.slot);
-    for (let z = r.z0; z < r.z1; z++) for (let x = r.x0; x < r.x1; x++) cells.push({ x, z, half: 0, paint: rugPaints[b.slot % rugPaints.length] });
-  }
 
   const items: Item[] = [{ id: globalId('owner_desk', 0), def: 'owner_desk', x: -34, z: 9, rot: 1 }, ...plantItems(lot), ...meetingItems(lot), ...lobbyItems(lot)];
   for (const b of blocks) items.push(...teamItems(b.id, b.slot));
@@ -108,7 +103,7 @@ export function legacyBuilding(
     { t: 'walls', story: 0, put: [...walls.values()], del: [] },
     { t: 'items', story: 0, put: items, del: [] },
   ];
-  let building = applyAll(emptyBuilding(lot), ops, []).b;
+  let building: Building = { ...applyAll(emptyBuilding(lot), ops, []).b, shelled: true };
 
   const known = new Set(blocks.map((b) => b.id));
   const seated = employees.filter((e) => known.has(e.blockId));

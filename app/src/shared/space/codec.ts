@@ -106,7 +106,7 @@ export function parseBuilding(raw: unknown, warn: (msg: string) => void = (m) =>
       [...items.values()].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0)),
     );
   });
-  return { v: 1, lot, stories };
+  return { v: 1, lot, stories, ...(raw.shelled === true && { shelled: true as const }) };
 }
 
 /** Plain JSON: paint as a run-length string, everything else as it is. */
@@ -114,6 +114,7 @@ export function encodeBuilding(b: Building): unknown {
   return {
     v: 1,
     lot: { ...b.lot },
+    ...(b.shelled && { shelled: true }),
     stories: b.stories.map((s) => ({ paint: encodePaint(s.paint), halfB: { ...s.halfB }, walls: s.walls.map((w) => ({ ...w })), items: s.items.map((i) => ({ ...i })) })),
   };
 }

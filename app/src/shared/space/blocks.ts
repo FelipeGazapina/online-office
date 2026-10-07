@@ -1,5 +1,5 @@
 // Moving a project block as one unit. A block is every item of one story that carries its blockId (desks, PO desk,
-// board, terminal, sign, decor). A move turns them together in quarter turns and shifts them together, then goes
+// board, terminal, sign, and the pod around them: rug, boundary, decor, huddle). A move turns them together in quarter turns and shifts them together, then goes
 // through the same `items` op and rules as a single piece, so overlap, lot, wall and desk checks need no second path.
 import { footprint, ITEM_DEFS } from './catalog.ts';
 import { itemAt } from './buildersGesture.ts';
@@ -62,11 +62,22 @@ export function blockPose(items: readonly Item[], quarter: Rot, center: Vec2): B
 
 const sameSpot = (a: Item, b: Item) => a.x === b.x && a.z === b.z && a.rot === b.rot;
 
-/** One op that puts every item of the block that changes into its new place, or null when the pose changes nothing. */
-export function moveBlockOp(story: Story, storyIndex: number, blockId: BlockId, pose: BlockPose): BuildOp | null {
+/**
+ * The ops that put every item of the block that changes into its new place, none when the pose changes nothing. With `toStory`
+ * the block also changes floors: its pieces leave `storyIndex` and arrive on `toStory`, keeping their ids.
+ */
+export function moveBlockOps(story: Story, storyIndex: number, blockId: BlockId, pose: BlockPose, toStory = storyIndex): BuildOp[] {
   const items = blockItems(story, blockId);
-  const put = placeBlock(items, pose).filter((moved, i) => !sameSpot(moved, items[i]));
-  return put.length ? { t: 'items', story: storyIndex, put, del: [] } : null;
+  const placed = placeBlock(items, pose);
+  if (toStory === storyIndex) {
+    const put = placed.filter((moved, i) => !sameSpot(moved, items[i]));
+    return put.length ? [{ t: 'items', story: storyIndex, put, del: [] }] : [];
+  }
+  if (!items.length) return [];
+  return [
+    { t: 'items', story: storyIndex, put: [], del: items.map((i) => i.id) },
+    { t: 'items', story: toStory, put: placed, del: [] },
+  ];
 }
 
 /** The block a point in meters picks: the one whose piece lies under it, else the smallest block whose bounding box holds it. */
