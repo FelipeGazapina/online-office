@@ -7,6 +7,8 @@ import { get, useStore } from '../store.ts';
 import { stepSim } from '../sim.ts';
 import { crowd } from './people/crowd.ts';
 import { buildView } from '../hud/build/state.ts';
+import { useMonitor } from '../computer.ts';
+import { monitorPoses, zoomFrame } from './monitorPose.ts';
 import { STORY_H } from '../../../shared/space/index.ts';
 
 const ISO_PITCH = 0.58;
@@ -28,6 +30,8 @@ const SPAWN_LOOK = Math.PI / 2;
 const SPAWN_REACH = 0.3;
 // Seconds the camera takes to fly between the overview and the owner's eyes.
 const FLIGHT = 0.8;
+// Seconds the camera takes to fly into a monitor and back.
+const ZOOM_TIME = 0.55;
 const MAX_DT = 1 / 20;
 const LOOK_SPEED = 0.0024;
 const DRAG_PX = 6;
@@ -41,13 +45,14 @@ export function SimDriver() { useFrame((_, dt) => stepSim(dt), -2); return null;
 // Anything on screen that wants the cursor: the mouse must be free for it.
 const uiOpen = () => {
   const s = get();
-  return Boolean(s.modal || s.menu || s.helpOpen || s.computerMenu || s.portalMode || s.selectedId);
+  return Boolean(s.modal || s.menu || s.helpOpen || s.computerMenu || s.portalMode || s.selectedId || useMonitor.getState().open);
 };
 
 export function CameraRig() {
   const { gl } = useThree();
   const mode = useStore((s) => s.camera);
   const ui = useStore(() => uiOpen());
+  const monitor = useMonitor((s) => s.open);
   const focus = useRef(new Vector3());
   const snap = useRef(true);
   const placed = useRef(false);
@@ -56,7 +61,9 @@ export function CameraRig() {
   const isoBefore = useRef<number | null>(null);
   const drag = useRef<{ x: number; y: number; ox: number; oy: number; far: boolean } | null>(null);
   const locked = useRef(false);
-  const scratch = useRef({ iso: new Vector3(), isoPos: new Vector3(), isoLook: new Vector3(), eye: new Vector3(), eyeLook: new Vector3(), look: new Vector3(), want: new Vector3() });
+  // How far the camera has flown into the monitor of the open terminal (1) and the pose it flew to, kept while it flies back.
+  const zoom = useRef({ t: 0, id: null as string | null });
+  const scratch = useRef({ zoomPos: new Vector3(), zoomLook: new Vector3(), iso: new Vector3(), isoPos: new Vector3(), isoLook: new Vector3(), eye: new Vector3(), eyeLook: new Vector3(), look: new Vector3(), want: new Vector3() });
 
   useEffect(() => { runtime.view.isoDist = ISO_START; }, []);
 
@@ -81,8 +88,8 @@ export function CameraRig() {
   }, [gl, mode]);
 
   useEffect(() => {
-    if (ui && document.pointerLockElement === gl.domElement) document.exitPointerLock();
-  }, [gl, ui]);
+    if ((ui || monitor) && document.pointerLockElement === gl.domElement) document.exitPointerLock();
+  }, [gl, ui, monitor]);
 
   useEffect(() => {
     const el = gl.domElement;
@@ -203,8 +210,24 @@ export function CameraRig() {
     cam.position.lerpVectors(isoPos, eye, t);
     look.lerpVectors(isoLook, eyeLook, t);
     snap.current = false;
+    let fov = FOV_ISO + (FOV_FIRST - FOV_ISO) * t;
+    // Zoomed into a monitor: the camera flies to a spot in front of the screen and looks at its middle.
+    const wanted = useMonitor.getState().open;
+    const z = zoom.current;
+    if (wanted) z.id = wanted;
+    z.t = clamp(z.t + (wanted ? dt : -dt) / ZOOM_TIME, 0, 1);
+    const pose = z.id ? monitorPoses.get(z.id) : undefined;
+    if (z.t > 0 && pose) {
+      const { zoomPos, zoomLook } = scratch.current;
+      const frame = zoomFrame(pose, state.size.width / state.size.height);
+      zoomPos.copy(pose.normal).multiplyScalar(frame.dist).add(pose.center);
+      zoomLook.copy(pose.center);
+      const k = smooth(z.t);
+      cam.position.lerp(zoomPos, k);
+      look.lerp(zoomLook, k);
+      fov += (frame.fov - fov) * k;
+    } else if (z.t === 0) z.id = null;
     cam.lookAt(look);
-    const fov = FOV_ISO + (FOV_FIRST - FOV_ISO) * t;
     if (Math.abs(cam.fov - fov) > 0.001 || cam.near !== 0.1) { cam.fov = fov; cam.near = 0.1; cam.updateProjectionMatrix(); }
     // Read by verify/e2e-camera.mjs. ownerVisible asks the scene graph itself whether the owner's body would be drawn.
     const ownerVisible = () => {

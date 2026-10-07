@@ -39,6 +39,7 @@ import {
   type TaskBoardSource,
 } from '../../shared/protocol.ts';
 import type { ActivityEntry, LiveInputs, TaskLive } from '../../shared/activity.ts';
+import { TerminalBuffer, type TermEvent, type TerminalPush } from '../../shared/terminal.ts';
 import type { LegacySources, TaskId } from '../../shared/tasks.ts';
 import { addShells, applyOps, BuildHistory, deskOf, encodeBuilding, freeDesk, legacyBuilding, parseBuilding, placeDesk, shellItems, teamKit, ITEM_DEFS } from '../../shared/space/index.ts';
 import type { Building, BuildOp, EmployeeId as SpaceEmployeeId, ItemId, SpaceContext, Violation } from '../../shared/space/index.ts';
@@ -84,6 +85,8 @@ export type OfficeEvents = {
   activity?(taskId: TaskId, entries: ActivityEntry[], live: TaskLive): void;
   // Something the owner must hear about that no request is open for, like a folder that was deleted.
   error?(message: string): void;
+  // What changed on an employee's terminal, a few times a second at most.
+  terminal?(employeeId: EmployeeId, push: TerminalPush): void;
 };
 
 // What the office needs from the acknowledger. Without `triage` every owner message is work.
@@ -100,6 +103,9 @@ const PR_POLL_MS = Number(process.env.OFFICE_PR_POLL_MS) || 3 * 60_000;
 type Resume = { status: EmployeeStatus; activity: string; activityReported: boolean };
 
 const debug = logger('office');
+
+// How long a terminal waits to send what changed, so a model writing a paragraph is one push per tenth of a second, not one per token.
+const TERMINAL_FLUSH_MS = 100;
 
 type HireRequest = { provider: Provider; blockId: BlockId; name?: string; model?: ModelId; role?: EmployeeRole; bypassLimit?: boolean; deskId?: ItemId };
 
@@ -340,6 +346,10 @@ export class Office {
   private ownerPosts = { waiting: 0, tail: Promise.resolve(), closed: false };
   // The last thing each employee said in the turn they are on. It is the reply when the harness gives no final text.
   private lastSaid = new Map<EmployeeId, string>();
+  // What each employee's monitor shows, and which of them changed since the last push.
+  private terminals = new Map<EmployeeId, TerminalBuffer>();
+  private terminalsDirty = new Set<EmployeeId>();
+  private terminalTimer: NodeJS.Timeout | undefined;
 
   constructor(dataFile: string, harnesses: Record<Provider, HarnessStatus>, events: OfficeEvents, services: OfficeServices) {
     this.dataFile = dataFile;
@@ -474,7 +484,26 @@ export class Office {
     this.lastSaid.delete(id);
     const note = this.syncNote(e, this.aboutNow(id));
     trace(id, 'assign');
-    this.sessionOf(e).assign(note + prompt, title);
+    this.sessionOf(e).assign(note + prompt, title, this.shownOf(this.aboutNow(id)) || title);
+  }
+
+  // What the terminal echoes as the prompt of a turn: what the owner and teammates wrote, without the office's headers.
+  private shownOf(about: readonly Message[]): string {
+    const nameOf = (a: ActorId) => (a === 'owner' ? 'the owner' : a === 'mailroom' ? 'the office' : (this.company.employees.find((e) => e.id === a)?.name ?? 'someone who left'));
+    return about
+      .map((m) => {
+        const from = m.from === 'owner' ? '' : `${nameOf(m.from)}: `;
+        switch (m.kind) {
+          case 'say':
+          case 'request':
+            return `${from}${m.text}`;
+          case 'reply':
+            return `${nameOf(m.from)} replied (${m.outcome}): ${m.text}`;
+          case 'event':
+            return m.text;
+        }
+      })
+      .join('\n\n');
   }
 
   // What this person is working on right now: the messages of their turn, else the requests they are serving.
@@ -572,6 +601,7 @@ export class Office {
 
   shutdown() {
     clearInterval(this.prTimer);
+    clearTimeout(this.terminalTimer);
     this.ownerPosts.closed = true;
     for (const id of [...this.sessions.keys()]) this.stopSession(id);
     this.acker.stop();
@@ -668,6 +698,10 @@ export class Office {
         return this.removeAllowRule(msg.employeeId, msg.rule);
       case 'fresh_session':
         return this.freshSession(msg.employeeId);
+      case 'interrupt':
+        return this.interrupt(msg.employeeId);
+      case 'load_terminal':
+        return this.sendTerminals();
       case 'reset_company':
         return this.reset();
       case 'build':
@@ -897,9 +931,62 @@ export class Office {
       streamed: live((delta, done = false) => this.mail.streamed(employee.id, delta, done)),
       subagentStarted: live((subagent) => this.startSubagent(employee, subagent)),
       subagentFinished: live((id) => this.finishSubagent(employee, id)),
+      terminal: live((event) => this.terminalEvent(employee, event)),
+      taskInterrupted: live(() => {
+        this.events.log(employee.id, 'Interrupted from the terminal', Date.now());
+        this.report(employee, { activity: 'Interrupted by the owner' });
+        this.report(employee, { status: { kind: 'idle' } });
+        endTurn('The owner interrupted this before it was finished.', false);
+      }),
     };
+    this.terminalOf(employee);
     session = create(host);
     this.sessions.set(employee.id, session);
+  }
+
+  // ---- the terminal on each employee's monitor
+
+  private terminalOf(e: Employee): TerminalBuffer {
+    let buffer = this.terminals.get(e.id);
+    if (!buffer) {
+      const block = this.block(e.blockId);
+      buffer = new TerminalBuffer(e.workspace?.path ?? block.cwd, PROVIDERS[e.provider].label, e.model);
+      this.terminals.set(e.id, buffer);
+      this.terminalsDirty.add(e.id);
+      this.scheduleTerminals();
+    }
+    return buffer;
+  }
+
+  private terminalEvent(e: Employee, event: TermEvent) {
+    this.terminalOf(e).apply(event);
+    this.terminalsDirty.add(e.id);
+    this.scheduleTerminals();
+  }
+
+  private scheduleTerminals() {
+    this.terminalTimer ??= setTimeout(() => {
+      this.terminalTimer = undefined;
+      for (const id of this.terminalsDirty) {
+        const push = this.terminals.get(id)?.take();
+        if (push) this.events.terminal?.(id, push);
+      }
+      this.terminalsDirty.clear();
+    }, TERMINAL_FLUSH_MS);
+  }
+
+  // A window that just opened holds none of it.
+  private sendTerminals() {
+    for (const e of this.company.employees) this.events.terminal?.(e.id, this.terminalOf(e).full());
+  }
+
+  // Esc on the terminal. Someone who is not in the middle of something has nothing to stop.
+  private interrupt(id: EmployeeId) {
+    const e = this.employee(id);
+    if (e.status.kind !== 'working' && e.status.kind !== 'blocked_on_owner') return;
+    const session = this.sessionOf(e);
+    if (!session.interrupt) return this.events.log(id, `${PROVIDERS[e.provider].label} cannot be interrupted from the terminal`, Date.now());
+    session.interrupt();
   }
 
   private startSubagent(e: Employee, subagent: Subagent) {
@@ -1054,6 +1141,8 @@ export class Office {
     this.tasks.rememberPerson(e.id, e.name);
     this.mail.employeeFired(e.id);
     this.stopSession(e.id);
+    this.terminals.delete(e.id);
+    this.terminalsDirty.delete(e.id);
     const block = this.company.blocks.find((b) => b.id === e.blockId);
     if (e.workspace && block) removeWorkspace(block.cwd, e.workspace, e.name);
     this.company.employees = this.company.employees.filter((x) => x.id !== e.id);
@@ -1224,6 +1313,7 @@ export class Office {
     e.status = { kind: 'idle' };
     e.activity = 'Started a fresh session';
     this.events.log(id, 'Started a fresh session', Date.now());
+    this.terminals.delete(id);
     this.startSession(e);
     this.sessionOf(e).warm?.();
     // What it was serving is over. Anything queued behind goes to the new session.
@@ -1233,6 +1323,8 @@ export class Office {
 
   private reset() {
     for (const id of [...this.sessions.keys()]) this.stopSession(id);
+    this.terminals.clear();
+    this.terminalsDirty.clear();
     const fresh = seed();
     this.company = fresh.company;
     this.history = new BuildHistory();

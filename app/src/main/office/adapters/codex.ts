@@ -1,6 +1,8 @@
 import { homedir } from 'node:os';
+import { relative } from 'node:path';
 import { isAllow } from '../../../shared/permissions.ts';
 import type { InterruptStyle, ModelCatalog, ModelId, PermissionPolicy, QuestionBody } from '../../../shared/protocol.ts';
+import type { TermEvent } from '../../../shared/terminal.ts';
 import { logger } from '../debug.ts';
 import { persona } from '../persona.ts';
 import {
@@ -18,6 +20,7 @@ import {
   ownerCodexHome,
   patchBody,
   policyFor,
+  unwrapShell,
   readOwnerConfig,
   short,
   subagentLabel,
@@ -68,6 +71,33 @@ const officeServer = (mcp: SessionHost['mcp']) => ({
 
 const text = (t: string) => [{ type: 'text', text: t, text_elements: [] }];
 
+// What Codex's items look like on the terminal: the tool each stands for, in Claude Code's words.
+function termCall(item: Item, cwd: string): { id: string; name: string; input: Record<string, unknown> } | undefined {
+  switch (item.type) {
+    case 'commandExecution':
+      return { id: item.id, name: 'Bash', input: { command: unwrapShell(item.command) } };
+    case 'fileChange':
+      return { id: item.id, name: 'Patch', input: { paths: item.changes.map((c) => relative(cwd, c.path).startsWith('..') ? c.path : relative(cwd, c.path)) } };
+    case 'mcpToolCall':
+      return { id: item.id, name: `mcp__${item.server}__${item.tool}`, input: item.arguments && typeof item.arguments === 'object' ? (item.arguments as Record<string, unknown>) : {} };
+    default:
+      return undefined;
+  }
+}
+
+function termResult(item: Item): { id: string; ok: boolean; text: string } | undefined {
+  switch (item.type) {
+    case 'commandExecution':
+      return { id: item.id, ok: item.exitCode == null || item.exitCode === 0, text: item.aggregatedOutput ?? '' };
+    case 'fileChange':
+      return { id: item.id, ok: true, text: '' };
+    case 'mcpToolCall':
+      return { id: item.id, ok: item.error == null, text: item.error == null ? '' : typeof item.error === 'string' ? item.error : JSON.stringify(item.error) };
+    default:
+      return undefined;
+  }
+}
+
 export class CodexSession implements EmployeeSession, CodexUser {
   private readonly host: SessionHost;
   private readonly pool: CodexPool;
@@ -85,6 +115,7 @@ export class CodexSession implements EmployeeSession, CodexUser {
   private stopping: (() => void) | undefined;
   private task = '';
   private startedAt = 0;
+  private turnStartedAt = 0;
   private lastSaid = '';
   // Codex streams assistant text as deltas before the complete item arrives. Keep the partial text for the activity line;
   // the complete item is still the single spoken/chat message so a sentence is not read aloud once per delta.
@@ -109,9 +140,14 @@ export class CodexSession implements EmployeeSession, CodexUser {
     this.pool = pool;
   }
 
-  assign(task: string) {
+  assign(task: string, title?: string, shown?: string) {
     this.beginTask(task);
-    this.enqueue(() => this.startTurn(task));
+    this.enqueue(() => this.startTurn(task, shown ?? title ?? task));
+  }
+
+  // Esc on the terminal: what is running is interrupted, and the turn ends when Codex reports it. Nothing follows it.
+  interrupt() {
+    this.enqueue(() => this.interruptThenSend(undefined));
   }
 
   interject(text: string, style: InterruptStyle) {
@@ -120,11 +156,11 @@ export class CodexSession implements EmployeeSession, CodexUser {
     this.host.log(`Boss said: ${text}`);
     if (kind === 'idle' || kind === 'error') {
       this.beginTask(short(text, 80));
-      this.enqueue(() => this.startTurn(framed));
+      this.enqueue(() => this.startTurn(framed, text));
     } else if (style === 'now') {
-      this.enqueue(() => this.interruptThenSend(framed));
+      this.enqueue(() => this.interruptThenSend(framed, text));
     } else {
-      this.enqueue(() => this.steer(framed));
+      this.enqueue(() => this.steer(framed, text));
     }
   }
 
@@ -277,10 +313,13 @@ export class CodexSession implements EmployeeSession, CodexUser {
     };
   }
 
-  private async startTurn(message: string) {
+  private async startTurn(message: string, shown?: string) {
     const { server, threadId } = await this.ready();
     message = this.withNotices(message);
     this.lastSaid = '';
+    this.turnStartedAt = Date.now();
+    this.host.terminal({ k: 'banner', title: 'Codex', model: this.host.model, cwd: this.host.block.cwd });
+    if (shown !== undefined) this.host.terminal({ k: 'prompt', text: shown });
     // Set before the request goes out: a turn that fails at once can end before this function is resumed.
     this.turn = { id: undefined };
     const started = await server.call('turn/start', this.turnParams(threadId, message), turnStarted);
@@ -289,11 +328,12 @@ export class CodexSession implements EmployeeSession, CodexUser {
 
   // Codex takes the message at its next step, up to about half a minute later while a command runs. If the turn ended in the
   // meantime there is nothing to steer, so the message starts one.
-  private async steer(message: string) {
+  private async steer(message: string, shown?: string) {
     const { server, threadId } = await this.ready();
     if (this.turn?.id) {
       try {
         await server.call('turn/steer', { threadId, expectedTurnId: this.turn.id, input: text(message) }, anything);
+        if (shown !== undefined) this.host.terminal({ k: 'prompt', text: shown });
         return;
       } catch (e) {
         if (!(e instanceof RpcError)) throw e;
@@ -301,11 +341,11 @@ export class CodexSession implements EmployeeSession, CodexUser {
       }
     }
     if (this.host.employee.status.kind !== 'working') this.beginTask(short(message, 80));
-    await this.startTurn(message);
+    await this.startTurn(message, shown);
   }
 
   // turn/interrupt ends the turn but not the commands it started, so those are ended too. Only then does the boss's message go in.
-  private async interruptThenSend(message: string) {
+  private async interruptThenSend(message: string | undefined, shown?: string) {
     const { server, threadId } = await this.ready();
     if (this.turn?.id) {
       const ended = new Promise<void>((resolve) => (this.stopping = resolve));
@@ -316,7 +356,13 @@ export class CodexSession implements EmployeeSession, CodexUser {
     }
     for (const thread of [threadId, ...this.subagents.keys()]) await this.endTerminals(server, thread);
     this.turn = undefined;
-    await this.startTurn(message);
+    this.host.terminal({ k: 'end', how: 'interrupted' });
+    if (message === undefined) {
+      // Nothing follows an interruption from the terminal, so this is where the turn ends.
+      this.host.taskInterrupted();
+      return;
+    }
+    await this.startTurn(message, shown);
   }
 
   private async endTerminals(server: CodexServer, threadId: string) {
@@ -387,6 +433,7 @@ export class CodexSession implements EmployeeSession, CodexUser {
     switch (turn.status) {
       case 'completed': {
         const message = (turn.items ?? []).findLast((i): i is Extract<Item, { type: 'agentMessage' }> => i.type === 'agentMessage')?.text.trim() ?? this.lastSaid;
+        host.terminal({ k: 'end', how: 'done', ms: Date.now() - this.turnStartedAt });
         host.taskCompleted();
         host.setActivity(short(message, 120) || 'Finished the task');
         host.setStatus({ kind: 'idle' });
@@ -411,6 +458,10 @@ export class CodexSession implements EmployeeSession, CodexUser {
     const { host } = this;
     if (item.type === 'fileChange') this.patches.set(item.id, changedPaths(item));
     if (item.type === 'subAgentActivity') return this.onSubagentActivity(threadId, item, own);
+    if (own) {
+      const call = termCall(item, host.block.cwd);
+      if (call) host.terminal({ k: 'tool', ...call });
+    }
     const line = describeItem(item, host.block.cwd);
     if (!line) return;
     host.setActivity(line);
@@ -420,12 +471,19 @@ export class CodexSession implements EmployeeSession, CodexUser {
   private onAgentMessageDelta(itemId: string, delta: string) {
     const text = (this.messageDeltas.get(itemId) ?? '') + delta;
     this.messageDeltas.set(itemId, text);
-    if (text.trim()) this.host.setActivity(short(text, 120));
+    if (text.trim()) {
+      this.host.setActivity(short(text, 120));
+      this.host.terminal({ k: 'text', id: itemId, text });
+    }
   }
 
   private onItemCompleted(item: Item, own: boolean) {
     if (item.type === 'fileChange') this.patches.delete(item.id);
     if (item.type === 'subAgentActivity') return;
+    if (own) {
+      const done = termResult(item);
+      if (done) this.host.terminal({ k: 'result', ...done });
+    }
     // What a subagent says is for its parent.
     if (item.type !== 'agentMessage' || !own) return;
     const message = item.text.trim();
@@ -434,6 +492,7 @@ export class CodexSession implements EmployeeSession, CodexUser {
     this.lastSaid = message;
     this.host.said(message);
     this.host.log(`Said: ${message}`);
+    this.host.terminal({ k: 'text', id: item.id, text: message });
   }
 
   // The employee's own thread carries an item for each subagent it starts and one for the end of each. A subagent that starts
@@ -467,6 +526,7 @@ export class CodexSession implements EmployeeSession, CodexUser {
 
   private reportError(message: string) {
     debug('error:', message);
+    this.host.terminal({ k: 'end', how: 'error', message });
     this.host.setStatus({ kind: 'error', message });
     this.host.setActivity(`Something went wrong: ${short(message, 80)}`);
     this.host.log(`Error: ${message}`);

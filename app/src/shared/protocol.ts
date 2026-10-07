@@ -3,6 +3,7 @@
 // an employee whose status is `blocked_on_owner` walks to the owner; everyone else walks back to their desk.
 
 import type { ActivityEntry, QuestionRef, TaskLive } from './activity.ts';
+import type { TerminalPush } from './terminal.ts';
 import type { Building, BuildOp, ItemId, Violation } from './space/types.ts';
 import type { MailClientMessage, MailServerMessage, MailView } from './mail.ts';
 import type { Board, BoardId, BoardPatch, BoardSpec, BoardSync, Priority, Task, TaskId, TaskStage, TaskTime } from './tasks.ts';
@@ -292,6 +293,11 @@ export type ClientMessage =
   | { type: 'remove_allow_rule'; employeeId: EmployeeId; rule: AllowRule }
   // Stops the employee's session and starts another with no memory of the conversation. Notes, model and rules stay.
   | { type: 'fresh_session'; employeeId: EmployeeId }
+  // Esc on an employee's terminal: the step that is running stops and the turn ends, with nothing sent after it. Ignored
+  // for someone who is not working. The owner's words to a terminal take the same paths as the chat: `post` and `answer`.
+  | { type: 'interrupt'; employeeId: EmployeeId }
+  // Asks for everything every terminal holds. The answer arrives as one `terminal` message per employee, and after it only changes do.
+  | { type: 'load_terminal' }
   | { type: 'reset_company' }
   // Edits to the building. Main applies them all or none and answers a refusal with `build_rejected`.
   | { type: 'build'; ops: BuildOp[] }
@@ -330,6 +336,8 @@ export type ServerMessage =
   | { type: 'building'; building: Building; rev: number }
   | { type: 'activity'; taskId: TaskId; entries: ActivityEntry[]; live: TaskLive }
   | { type: 'build_rejected'; violations: readonly Violation[] }
+  // What changed on an employee's terminal (shared/terminal.ts). Throttled to a few a second per employee.
+  | ({ type: 'terminal'; employeeId: EmployeeId } & TerminalPush)
   | { type: 'error'; message: string }
   | MailServerMessage;
 

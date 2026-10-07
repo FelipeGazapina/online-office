@@ -3,7 +3,7 @@
 // at y = TOP. Every setup keeps to what `ITEM_DEFS.bench_desk.surface.blocked` declares (the keyboard end at x -0.375..0.5, z -0.375..0, the
 // screen end at x -0.375..0.375, z 0.125..0.25) so a thing the owner puts down never stands in it, and keeps its panels under a seated
 // sitter's eyes (the top of a screen at 1.19 m at the most) so faces read across the desk.
-import { BufferGeometry, PlaneGeometry } from 'three';
+import { BufferGeometry, Float32BufferAttribute, PlaneGeometry } from 'three';
 import { bbox, box, cyl, lean, merge } from './parts.ts';
 
 const TOP = 0.72;
@@ -144,9 +144,36 @@ export function computerOf(po: boolean, setup: number): BufferGeometry {
 
 const planes = new Map<number, BufferGeometry>();
 
-/** The lit screens of setup `setup`, planes that face the sitter, for the instanced mesh that shows what the sitter is doing. */
+/** The screen of a setup that shows the terminal: the biggest one. */
+const primaryOf = (screens: readonly Screen[]) => screens.reduce((best, s, i) => (s.w * s.h > screens[best]!.w * screens[best]!.h ? i : best), 0);
+
+/** The lit screens of setup `setup`, planes that face the sitter, for the instanced mesh that shows what the sitter is doing. `aTerm` is 1 on the
+ * screen that shows the sitter's terminal and 0 on any other. */
 export function screensOf(setup: number): BufferGeometry {
   let g = planes.get(setup);
-  if (!g) planes.set(setup, (g = merge(at(setup).screens.map((s) => new PlaneGeometry(s.w, s.h).rotateY(Math.PI).rotateX(s.tilt).rotateY(s.yaw).translate(s.x, s.y, s.z)))));
+  if (!g) {
+    const { screens } = at(setup);
+    const main = primaryOf(screens);
+    planes.set(
+      setup,
+      (g = merge(
+        screens.map((s, i) => {
+          const plane = new PlaneGeometry(s.w, s.h).rotateY(Math.PI).rotateX(s.tilt).rotateY(s.yaw).translate(s.x, s.y, s.z);
+          plane.setAttribute('aTerm', new Float32BufferAttribute(new Array<number>(plane.getAttribute('position').count).fill(i === main ? 1 : 0), 1));
+          return plane;
+        }),
+      )),
+    );
+  }
   return g;
+}
+
+/** Where the terminal screen of a setup stands in the desk's own frame: its middle, the way it faces, and its size in meters. */
+export function terminalScreenOf(setup: number): { x: number; y: number; z: number; nx: number; ny: number; nz: number; w: number; h: number } {
+  const { screens } = at(setup);
+  const s = screens[primaryOf(screens)]!;
+  // The plane faces -z, leans back by `tilt` and turns by `yaw`.
+  const ny = Math.sin(s.tilt);
+  const nz = -Math.cos(s.tilt);
+  return { x: s.x, y: s.y, z: s.z, nx: Math.sin(s.yaw) * nz, ny, nz: Math.cos(s.yaw) * nz, w: s.w, h: s.h };
 }

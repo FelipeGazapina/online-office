@@ -1,7 +1,6 @@
 import { useFrame, type ThreeEvent } from '@react-three/fiber';
 import { memo, useEffect, useLayoutEffect, useMemo, useRef } from 'react';
 import { AdditiveBlending, BackSide, BoxGeometry, BufferGeometry, Color, DoubleSide, Group, InstancedMesh, Matrix4, MeshBasicMaterial, MeshStandardMaterial, PlaneGeometry, Quaternion, Vector2, Vector3 } from 'three';
-import { PROVIDERS, type Employee } from '../../../../shared/protocol.ts';
 import { ITEM_DEFS, STORY_H, TOP_UNIT, WALL_STYLES, YAW, floorItems, layerOf, placementOf, setupsOf, type FloorGeometry, type ItemId } from '../../../../shared/space/index.ts';
 import { hasFloorAt, tileIndex } from '../../../../shared/space/geom.ts';
 import { runtime } from '../../runtime.ts';
@@ -9,15 +8,16 @@ import { buildView, draft } from '../../hud/build/state.ts';
 import { get, set, useStore } from '../../store.ts';
 import { walkTo } from '../../sim.ts';
 import { chairOf } from '../../world.ts';
-import { blobShadowTexture, ceilingTexture, codeTexture, poolTexture, wallAoTexture } from '../textures.ts';
+import { blobShadowTexture, ceilingTexture, poolTexture, wallAoTexture } from '../textures.ts';
 import { carpetSurface, concreteSurface, PLASTER_MEAN, PLASTER_METRES, plasterSurface, tileSurface, woodSurface, type Surface } from '../surfaceTextures.ts';
 import { detail, showAo } from '../shading.ts';
 import { reflective } from '../Lighting.tsx';
 import { floorGeometry } from './floor.ts';
 import { inVoid, lobbyVoid } from '../lobbyVoid.ts';
 import { propOf } from '../props.ts';
-import { box, computerOf, cyl, merge, DEFAULT_TINT, DYNAMIC, modelOf, onTopOf, PROP_DEFS, screensOf } from './models.ts';
+import { box, computerOf, cyl, merge, DEFAULT_TINT, DYNAMIC, modelOf, onTopOf, PROP_DEFS } from './models.ts';
 import { shadowMaterial, shadowMesh, shapeOf, throwOf, type Spot } from './shadows.ts';
+import { Screens } from './MonitorScreens.tsx';
 import { trimOf, TRIMMED } from './pod.ts';
 import { crossesView, curbModel, facesCamera, frameModel, glassModel, occludes, octantOf, VARIANTS, wallMatrix, wallModel, wallRecords, ZERO, type Variant, type WallRecord } from './walls.ts';
 
@@ -67,9 +67,6 @@ const blobMaterial = new MeshBasicMaterial({ map: blobShadowTexture(), transpare
 const blobGeometry = new PlaneGeometry(1, 1).rotateX(-Math.PI / 2);
 const aoMaterial = new MeshBasicMaterial({ map: wallAoTexture(), transparent: true, depthWrite: false, opacity: 0.9, polygonOffset: true, polygonOffsetFactor: -1 });
 const aoGeometry = new PlaneGeometry(1, 1.1).rotateX(-Math.PI / 2);
-// The light a screen throws on the desk in front of it, tinted by what the screen shows.
-const glowMaterial = new MeshBasicMaterial({ map: poolTexture(), transparent: true, depthWrite: false, blending: AdditiveBlending, toneMapped: false, polygonOffset: true, polygonOffsetFactor: -4 });
-const glowGeometry = new PlaneGeometry(1.2, 0.8).rotateX(-Math.PI / 2).translate(0, 0.78, -0.12);
 // A lit candle and a desk lamp warm the top they stand on: a soft pool of light round each, in meters across and how strong.
 const WARM: Readonly<Record<string, readonly [number, number]>> = { candle: [0.34, 0.5], lamp_desk: [0.7, 0.75] };
 const warmMaterial = new MeshBasicMaterial({ map: poolTexture(), color: '#ffb865', transparent: true, depthWrite: false, blending: AdditiveBlending, toneMapped: false, polygonOffset: true, polygonOffsetFactor: -5, fog: false });
@@ -79,7 +76,6 @@ const CEILING_Y = STORY_H - 0.3;
 // Walnut beams on the pendants' 4 m grid divide the ceiling into coffers, each lamp in the middle of one.
 const beamGeometry = new BoxGeometry(1.04, 0.16, 0.12).translate(0, -0.08, 0);
 const beamMaterial = new MeshStandardMaterial({ color: '#c19a70', roughness: 0.6, emissive: '#6b4a2c', emissiveIntensity: 0.25 });
-const screenMaterial = new MeshBasicMaterial({ map: codeTexture(), toneMapped: false });
 
 function Instances({
   geometry,
@@ -463,105 +459,6 @@ function WarmPools({ geom }: { geom: FloorGeometry }) {
     [pools],
   );
   return <Instances geometry={blobGeometry} material={warmMaterial} count={pools.length} fill={fill} castShadow={false} receiveShadow={false} />;
-}
-
-// A desk's screens show what its sitter is doing. One mesh draws the screens of every desk in a setup, and each frame sets each one's brightness.
-function Screens({ geom }: { geom: FloorGeometry }) {
-  const meshes = useRef(new Map<number, InstancedMesh>());
-  const desks = useMemo(() => floorItems(geom.story).filter((i) => i.def === 'bench_desk' || i.def === 'po_desk'), [geom]);
-  const sitters = useRef<{ company: unknown; bySeat: Map<string, Employee> }>({ company: null, bySeat: new Map() });
-  // Each desk's place in the mesh of its setup, so a frame can colour it without searching.
-  const slots = useMemo(() => {
-    const setups = setupsOf(geom.story);
-    const counts = new Map<number, number>();
-    return desks.map((d) => {
-      const setup = setups.get(d.id) ?? 0;
-      const local = counts.get(setup) ?? 0;
-      counts.set(setup, local + 1);
-      return { desk: d, setup, local };
-    });
-  }, [desks, geom]);
-  const used = useMemo(() => [...new Set(slots.map((s) => s.setup))].sort((a, b) => a - b), [slots]);
-  const glow = useRef<InstancedMesh>(null);
-
-  const matrixOf = (mat: Matrix4, d: (typeof desks)[number]) => {
-    const def = ITEM_DEFS[d.def];
-    const f = d.rot % 2 === 0 ? { w: def.w, d: def.d } : { w: def.d, d: def.w };
-    return place(mat, (d.x + f.w / 2) / 2, 0, (d.z + f.d / 2) / 2, YAW[d.rot]);
-  };
-
-  useLayoutEffect(() => {
-    const mat = new Matrix4();
-    for (const [setup, mesh] of meshes.current) {
-      for (const s of slots) {
-        if (s.setup !== setup) continue;
-        mesh.setMatrixAt(s.local, matrixOf(mat, s.desk));
-        mesh.setColorAt(s.local, color.set('#6a7898').multiplyScalar(0.45));
-      }
-      mesh.instanceMatrix.needsUpdate = true;
-      if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
-    }
-    const g = glow.current;
-    if (!g) return;
-    desks.forEach((d, i) => g.setMatrixAt(i, matrixOf(mat, d)));
-    g.instanceMatrix.needsUpdate = true;
-  }, [slots, desks]);
-
-  useFrame((state, dt) => {
-    const { company } = get();
-    if (sitters.current.company !== company) {
-      sitters.current = { company, bySeat: new Map((company?.employees ?? []).flatMap((e) => (e.seat ? [[e.seat as string, e] as const] : []))) };
-    }
-    const t = state.clock.elapsedTime;
-    codeTexture().offset.y -= dt * 0.1;
-    slots.forEach(({ desk, setup, local }, i) => {
-      const e = sitters.current.bySeat.get(desk.id);
-      const kind = e?.status.kind ?? 'none';
-      if (kind === 'working') {
-        color.set(PROVIDERS[e!.provider].color).lerp(new Color('#ffffff'), 0.3).multiplyScalar(0.9 + Math.sin(t * 3 + i) * 0.15);
-      } else if (kind === 'blocked_on_owner') {
-        color.set('#ffb340').multiplyScalar(0.55 + (Math.sin(t * 6) + 1) * 0.3);
-      } else if (kind === 'error') {
-        color.set('#ff4d4d');
-      } else if (kind === 'idle') {
-        color.set('#6a7898').multiplyScalar(0.45);
-      } else {
-        // A desk nobody sits at has its screen on standby: lit dimly, so a row of empty desks is not a row of black slabs.
-        color.set('#6a7898').multiplyScalar(0.45);
-      }
-      meshes.current.get(setup)?.setColorAt(local, color);
-      glow.current?.setColorAt(i, color.multiplyScalar(0.28));
-    });
-    for (const m of meshes.current.values()) if (m.instanceColor) m.instanceColor.needsUpdate = true;
-    if (glow.current?.instanceColor) glow.current.instanceColor.needsUpdate = true;
-  });
-
-  return (
-    <>
-      {used.map((setup) => {
-        const mine = slots.filter((s) => s.setup === setup);
-        // For the tests: which desk each screen of this mesh belongs to and the colour it is lit with right now.
-        const probe = {
-          probe: 'screens',
-          setup,
-          desks: mine.map((s) => s.desk.id),
-          get colors() {
-            return Array.from(meshes.current.get(setup)?.instanceColor?.array ?? []);
-          },
-        };
-        return (
-          <instancedMesh
-            key={`${setup}:${mine.length}`}
-            ref={(m: InstancedMesh | null) => void (m ? meshes.current.set(setup, m) : meshes.current.delete(setup))}
-            args={[screensOf(setup), screenMaterial, mine.length]}
-            frustumCulled={false}
-            userData={probe}
-          />
-        );
-      })}
-      {desks.length > 0 && <instancedMesh key={`glow${desks.length}`} ref={glow} args={[glowGeometry, glowMaterial, desks.length]} frustumCulled={false} renderOrder={3} />}
-    </>
-  );
 }
 
 function Rails({ geom }: { geom: FloorGeometry }) {
