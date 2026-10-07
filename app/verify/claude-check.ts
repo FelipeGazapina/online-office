@@ -323,6 +323,18 @@ esc.session.assign('next job', 'Next', 'next job');
 await feed(escProc, init('sess-esc2'), sdk({ type: 'system', subtype: 'task_started', task_id: 'bash-next', is_backgrounded: true, task_type: 'local_bash' }), turnEnd());
 check(escProc.calls.at(-1) !== 'stopTask bash-next', 'a command of the next turn is left alone');
 check(esc.completed.length === 1 && esc.interrupted.length === 1, 'the next turn is an ordinary one: it completes, and the interruption is not counted again');
+console.log('\n# the owner says something now');
+const now = scripted();
+now.session.assign('first job', 'First', 'first job');
+const nowProc = processes.at(-1)!;
+await feed(nowProc, init('sess-now'), assistant([{ type: 'tool_use', id: 'slow2', name: 'Bash', input: { command: 'make' } }]));
+now.session.interject('stop that, do this instead', 'now');
+await until(() => nowProc.sent.length === 2);
+const order = now.terminal.filter((e) => ['prompt', 'end'].includes(e.k)).map((e) => (e.k === 'end' ? `end:${e.how}` : `prompt:${(e as { text: string }).text}`));
+check(order.join('|') === 'prompt:first job|end:interrupted|prompt:stop that, do this instead', `a message that cuts in is on the terminal after the step it cut short (${order.join('|')})`);
+check(now.interrupted.length === 0, 'and the office is not told the turn ended, because another follows');
+now.session.stop();
+
 esc.session.stop();
 rec.session.stop();
 
