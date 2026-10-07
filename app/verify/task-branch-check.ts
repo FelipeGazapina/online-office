@@ -301,6 +301,9 @@ console.log('\n# the office, with real git, a bare origin and a fake gh');
   git(repo, 'checkout', '-q', 'main');
 
   console.log('\n## the owner merges on GitHub');
+  fake.markReady(1);
+  const stageBefore = theTask('Write the docs').stage;
+  check(await until(() => theTask('Write the docs').git?.pr?.state === 'open', 15000) && theTask('Write the docs').stage === stageBefore, 'marking the draft ready for review on GitHub shows the pull request open, and leaves the task where it was');
   fake.setState(1, 'MERGED');
   check(await until(() => theTask('Write the docs').git?.pr?.state === 'merged', 15000), 'the pull request shows merged on the next check');
   check(theTask('Write the docs').stage === 'done', 'and the task moves to done');
