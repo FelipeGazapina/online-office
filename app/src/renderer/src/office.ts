@@ -20,7 +20,7 @@ function settlePending(view: MailView) {
 export function applyServerMessage(msg: ServerMessage) {
   switch (msg.type) {
     case 'snapshot':
-      set({ company: msg.company, harnesses: msg.harnesses, catalogs: msg.catalogs, meetingDoor: msg.meetingDoor, boards: msg.boards, tasks: msg.tasks, boardSync: msg.boardSync, taskTime: msg.taskTime, taskConnections: msg.taskConnections, mail: msg.mail });
+      set({ company: msg.company, harnesses: msg.harnesses, catalogs: msg.catalogs, meetingDoor: msg.meetingDoor, boards: msg.boards, tasks: msg.tasks, boardSync: msg.boardSync, taskTime: msg.taskTime, taskConnections: msg.taskConnections, linearPeople: msg.linearPeople, mail: msg.mail });
       settlePending(msg.mail);
       if (msg.buildingRev !== get().buildingRev) void fetchBuilding();
       break;

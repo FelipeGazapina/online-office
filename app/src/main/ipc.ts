@@ -6,11 +6,13 @@ import {
   type ClientMessage,
   type EmployeeId,
   type HarnessStatus,
+  type LinearFilters,
   type MeetingDoor,
   type ModelId,
   type Provider,
   type QuestionId,
   type ServerMessage,
+  type TaskBoardSource,
   type TaskProvider,
 } from '../shared/protocol.ts';
 import { PRIORITIES, type BoardId, type BoardSpec, type Priority, type TaskId, type TaskStage } from '../shared/tasks.ts';
@@ -37,7 +39,22 @@ const boardId = z.string().min(1).transform((s) => s as BoardId);
 const taskId = z.string().min(1).transform((s) => s as TaskId);
 const taskStage = z.enum(['todo', 'doing', 'review', 'done']) satisfies z.ZodType<TaskStage>;
 const priority = z.enum(PRIORITIES) satisfies z.ZodType<Priority>;
-const taskSources = z.array(z.object({ provider: taskProvider, projectId: z.string().min(1).max(200), label: z.string().max(120).optional() })).max(8);
+const linearFilters = z.object({
+  assignee: z.union([z.enum(['anyone', 'me']), z.object({ id: z.string().min(1).max(200), name: z.string().min(1).max(200) })]),
+  cycle: z.enum(['any', 'current']),
+  limit: z.union([z.literal(50), z.literal(200)]),
+}) satisfies z.ZodType<LinearFilters>;
+const sourceProject = z.string().min(1).max(200);
+const sourceLabel = z.string().max(120).optional();
+// CronoSpark's tool has no filters to offer, so a filter sent along with its source is refused here instead of dropped.
+const taskSources = z
+  .array(
+    z.discriminatedUnion('provider', [
+      z.strictObject({ provider: z.literal('cronospark'), projectId: sourceProject, label: sourceLabel }),
+      z.object({ provider: z.literal('linear'), projectId: sourceProject, label: sourceLabel, filters: linearFilters.optional() }),
+    ]),
+  )
+  .max(8) satisfies z.ZodType<TaskBoardSource[]>;
 // A quick board is strict: a source sent along with one is refused here instead of dropped.
 const boardSpec = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('quick') }),
@@ -97,7 +114,7 @@ const clientMessage = z.discriminatedUnion('type', [
   z.object({ type: z.literal('remove_block'), blockId }),
   z.object({ type: z.literal('configure_linear_board'), blockId, url: z.string().url().max(1000) }),
   z.object({ type: z.literal('create_board'), blockId, name: z.string().min(1).max(120), spec: boardSpec }),
-  z.object({ type: z.literal('update_board'), boardId, name: z.string().min(1).max(120).optional(), sources: taskSources.optional() }),
+  z.object({ type: z.literal('update_board'), boardId, name: z.string().min(1).max(120).optional(), sources: taskSources.optional(), collapsed: z.array(taskStage).max(4).optional() }),
   z.object({ type: z.literal('delete_board'), boardId }),
   z.object({ type: z.literal('refresh_board'), boardId }),
   z.object({ type: z.literal('create_task'), boardId, title: z.string().min(1).max(500), notes: z.string().max(20_000).optional(), stage: taskStage.optional(), assignee: employeeId.optional(), priority: priority.optional() }),
@@ -106,6 +123,7 @@ const clientMessage = z.discriminatedUnion('type', [
   z.object({ type: z.literal('assign_task'), taskId, employeeId }),
   z.object({ type: z.literal('send_hours'), taskId }),
   z.object({ type: z.literal('connect_task_provider'), provider: taskProvider }),
+  z.object({ type: z.literal('load_linear_people') }),
   z.object({ type: z.literal('configure_task_provider'), provider: z.literal('cronospark'), apiKey: z.string().max(2000), userId: z.string().max(200) }),
   z.object({
     type: z.literal('post'),

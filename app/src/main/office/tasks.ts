@@ -7,7 +7,7 @@
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 import type { LedgerEntry, MessageId } from '../../shared/mail.ts';
-import type { BlockId, EmployeeId, TaskBoardSource, TaskCard } from '../../shared/protocol.ts';
+import type { BlockId, EmployeeId, LinearPeople, LinearPerson, TaskBoardSource, TaskCard } from '../../shared/protocol.ts';
 import {
   closedDayWork,
   emptyTurnLog,
@@ -25,6 +25,7 @@ import {
   timeFromSlices,
   turnLogOf,
   unsentOf,
+  wantsCard,
   type Board,
   type BoardId,
   type BoardPatch,
@@ -53,7 +54,9 @@ export type TasksHost = {
   // Everyone who works anywhere, PO included.
   members(): readonly { id: EmployeeId; name: string; blockId: BlockId }[];
   provider: {
-    fetchSources(sources: readonly TaskBoardSource[]): Promise<{ cards: TaskCard[]; errors: string[] }>;
+    // `keep` says which cards the board wants. A provider drops the others before it counts anything against a limit.
+    fetchSources(sources: readonly TaskBoardSource[], keep: (card: TaskCard) => boolean): Promise<{ cards: TaskCard[]; errors: string[] }>;
+    linearPeople(): Promise<LinearPerson[]>;
     logHours(entry: HoursCall): Promise<void>;
   };
   changed(): void;
@@ -64,7 +67,10 @@ type TasksFile = { v: 1; boards: Board[]; tasks: Task[]; people: Record<string, 
 // What a task made by hand may carry beyond its title. `assignee` hands it over in the same step.
 export type NewTask = { notes?: string; stage?: TaskStage; priority?: Priority; assignee?: EmployeeId };
 
-export type TasksView = { boards: Board[]; tasks: Task[]; boardSync: Record<BoardId, BoardSync>; taskTime: Record<TaskId, TaskTime> };
+export type TasksView = { boards: Board[]; tasks: Task[]; boardSync: Record<BoardId, BoardSync>; taskTime: Record<TaskId, TaskTime>; linearPeople: LinearPeople };
+
+// What pulling a board depends on: its sources, filters included, and the columns it has folded away.
+const pulls = (board: Board): string => (board.kind === 'quick' ? '' : JSON.stringify([board.sources, board.collapsed ?? []]));
 
 // The state of a root request as a task cares about it.
 function runStateOf(mail: MailState, id: MessageId): RunState | undefined {
@@ -85,6 +91,7 @@ export class Tasks {
   // The names of people who left, so hours they worked still go out under their name.
   private people: Record<string, string> = {};
   private readonly sync = new Map<BoardId, BoardSync>();
+  private linearPeople: LinearPeople = { kind: 'unknown' };
   private log: TurnLog;
   private readonly file: string;
   private readonly host: TasksHost;
@@ -143,7 +150,7 @@ export class Tasks {
       const unsent = t.origin.kind === 'cronospark' ? unsentOf(t, mine) : undefined;
       taskTime[t.id] = unsent ? { ...time, unsent } : time;
     }
-    return { boards: this.boards, tasks: this.tasks, boardSync: Object.fromEntries(this.sync) as Record<BoardId, BoardSync>, taskTime };
+    return { boards: this.boards, tasks: this.tasks, boardSync: Object.fromEntries(this.sync) as Record<BoardId, BoardSync>, taskTime, linearPeople: this.linearPeople };
   }
 
   boardsOf(blockId: BlockId): Board[] {
@@ -219,7 +226,8 @@ export class Tasks {
     if (!made.ok) throw new OfficeError(made.reason);
     this.boards = this.boards.map((b) => (b === board ? made.board : b));
     this.save();
-    if (made.board.kind !== 'quick' && board.kind !== 'quick' && JSON.stringify(made.board.sources) !== JSON.stringify(board.sources)) void this.refresh(boardId);
+    // What a board pulls is its sources and the columns it has open: changing either asks for a round of its own.
+    if (made.board.kind !== 'quick' && pulls(made.board) !== pulls(board)) void this.refresh(boardId);
   }
 
   deleteBoard(boardId: BoardId) {
@@ -267,15 +275,30 @@ export class Tasks {
     const last = this.sync.get(boardId);
     this.sync.set(boardId, { kind: 'loading', ...(last && 'lastFetchedAt' in last && last.lastFetchedAt ? { lastFetchedAt: last.lastFetchedAt } : {}) });
     this.host.changed();
-    const result = await this.host.provider.fetchSources(before.sources).catch((err: unknown) => ({ cards: [] as TaskCard[], errors: [err instanceof Error ? err.message : String(err)] }));
+    const result = await this.host.provider.fetchSources(before.sources, (card) => wantsCard(before, card)).catch((err: unknown) => ({ cards: [] as TaskCard[], errors: [err instanceof Error ? err.message : String(err)] }));
     const board = this.boards.find((b) => b.id === boardId);
     if (!board || board.kind === 'quick') return;
-    // The sources changed while this was out, and the change asked for its own round.
-    if (JSON.stringify(board.sources) !== JSON.stringify(before.sources)) return;
+    // What the board pulls changed while this was out, and the change asked for its own round.
+    if (pulls(board) !== pulls(before)) return;
     const synced = syncCards(board, this.tasks, result.cards, { now: this.host.now(), complete: result.errors.length === 0, newId: () => this.taskId() });
     this.tasks = synced.tasks;
     if (synced.changed) this.save();
     this.sync.set(boardId, result.errors.length && !result.cards.length ? { kind: 'error', message: result.errors.join(' ') } : { kind: 'ready', lastFetchedAt: this.host.now() });
+    this.host.changed();
+  }
+
+  // ── who the Linear assignee picker offers ──
+
+  // Asks Linear for its users. Two asks at once are one: the second sees `loading` and leaves.
+  async loadLinearPeople() {
+    if (this.linearPeople.kind === 'loading') return;
+    this.linearPeople = { kind: 'loading' };
+    this.host.changed();
+    try {
+      this.linearPeople = { kind: 'ready', people: await this.host.provider.linearPeople() };
+    } catch (err) {
+      this.linearPeople = { kind: 'error', message: err instanceof Error ? err.message : String(err) };
+    }
     this.host.changed();
   }
 

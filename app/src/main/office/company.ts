@@ -576,6 +576,8 @@ export class Office {
         this.services.taskBoards.configureCronoSpark(msg.apiKey, msg.userId);
         this.events.changed();
         return;
+      case 'load_linear_people':
+        return void this.tasks.loadLinearPeople();
       case 'post':
         return this.postFromOwner(msg);
       case 'cancel_message':

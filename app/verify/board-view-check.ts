@@ -1,9 +1,9 @@
 // No model, no Electron. The pure rules the task screens draw by: columns, held stages, which board a block shows, when the
 // 3D board turns into the task board, and how time reads.
 // Run from app/: node verify/board-view-check.ts   Exits 1 on any failed check.
-import type { BlockId, Employee, EmployeeId } from '../src/shared/protocol.ts';
+import type { BlockId, Employee, EmployeeId, TaskBoardSource } from '../src/shared/protocol.ts';
 import type { Board, BoardId, Task, TaskId, TaskTime } from '../src/shared/tasks.ts';
-import { assigneeOf, blocksWithTasks, boardFor, columnsOf, fmtAgo, fmtClock, landingStage, listStep, newTaskMessage, nextDraft, originOf, peopleOf, presenceOf, providerNote, safeUrl, sharesOf, stageOf, statsOf, stageStep, type Draft } from '../src/renderer/src/boardView.ts';
+import { assigneeOf, blocksWithTasks, boardFor, columnsOf, findPeople, fmtAgo, fmtClock, foldStep, foldedOf, landingStage, listStep, withFilters, newTaskMessage, nextDraft, originOf, peopleOf, presenceOf, providerNote, safeUrl, sharesOf, stageOf, statsOf, stageStep, type Draft } from '../src/renderer/src/boardView.ts';
 
 let failed = 0;
 const check = (cond: boolean, msg: string) => {
@@ -115,6 +115,25 @@ check(!('assignee' in nextDraft(draft({ title: 'a' }))), 'and nothing it never h
 // ── keys in a list ──
 check(listStep(0, 4, 'ArrowDown') === 1 && listStep(3, 4, 'ArrowDown') === 0 && listStep(0, 4, 'ArrowUp') === 3, 'arrows step and wrap');
 check(listStep(2, 4, 'Home') === 0 && listStep(1, 4, 'End') === 3 && listStep(2, 4, 'x') === 2 && listStep(0, 0, 'ArrowDown') === -1, 'Home and End jump, other keys stay, an empty list has no option');
+
+// ── folded columns ──
+check(stageStep('todo', 1, ['doing']) === 'review' && stageStep('review', -1, ['doing']) === 'todo' && stageStep('review', 1, ['done']) === undefined && stageStep('done', -1, ['review', 'doing']) === 'todo', 'a card steps over a folded column, and stops where nothing open is left');
+check(foldedOf(undefined).length === 0 && foldedOf(board('b', block(1))).length === 0 && foldedOf(board('b', block(1), { collapsed: ['done'] })).join() === 'done', 'a board with nothing folded has an empty list');
+check(foldStep([], 'done')?.join() === 'done' && foldStep(['done'], 'done')?.join() === '' && foldStep(['done'], 'todo')?.join() === 'done,todo', 'folding adds a column, unfolding takes it off');
+check(foldStep(['todo', 'doing', 'review'], 'done') === undefined && foldStep(['todo', 'doing', 'review'], 'todo')?.join() === 'doing,review', 'the last open column cannot be folded, though one can always be unfolded');
+
+// ── a Linear source's filters ──
+const lin: TaskBoardSource = { provider: 'linear', projectId: 'team:BLOOM', label: 'Mine' };
+const me = withFilters(lin, { assignee: 'me' });
+check(me.provider === 'linear' && me.filters?.assignee === 'me' && me.filters.cycle === 'any' && me.filters.limit === 50 && me.label === 'Mine', 'one filter changed leaves the others at their defaults and the source as it was');
+const both = withFilters(me, { limit: 200, cycle: 'current' });
+check(both.provider === 'linear' && JSON.stringify(both.filters) === JSON.stringify({ assignee: 'me', cycle: 'current', limit: 200 }), 'filters accumulate');
+const back = withFilters(withFilters(both, { assignee: 'anyone', cycle: 'any' }), { limit: 50 });
+check(JSON.stringify(back) === JSON.stringify(lin), 'set back to the defaults the source is the one saved, so the settings do not read as edited');
+const crono: TaskBoardSource = { provider: 'cronospark', projectId: 'p' };
+check(withFilters(crono, { limit: 200 }) === crono, 'a CronoSpark source takes no filters');
+const names = [{ id: 'a', name: 'Ana Souza' }, { id: 'b', name: 'Bruno' }, { id: 'c', name: 'Joana' }];
+check(findPeople(names, '  ana ').map((p) => p.id).join() === 'a,c' && findPeople(names, '').length === 3 && findPeople(names, 'zz').length === 0, 'the people list narrows to names that contain what was typed, in any case');
 
 if (failed) {
   console.error(`${failed} check(s) failed`);
