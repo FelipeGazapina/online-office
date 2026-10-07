@@ -15,6 +15,6 @@ export { rectWalls, paintRect, drawRoom, removeWalls } from './builders.ts';
 export type { TileRect } from './builders.ts';
 export { blockItems, cellBounds, turnBlock, placeBlock, blockPose, moveBlockOps, blockAt, topsOn } from './blocks.ts';
 export { floorItems, isFloor, isTop } from './geom.ts';
-export { poseIn, relativeRot, surfaceAt, topItemAt, surfaceBox, topPose, topRect, topSize, topSpot, hostToWorld, topViolation, worldRotOf, worldToHost } from './surface.ts';
+export { drawKey, levelOf, liftOf, lookOf, MAX_LVL, pointAtHeight, poseIn, relativeRot, restingOn, restsOn, stackSpot, supportViolation, surfaceAt, topItemAt, topOfStack, surfaceBox, topPose, topRect, topSize, topSpot, topsClash, hostToWorld, topViolation, worldRotOf, worldToHost } from './surface.ts';
 export type { PickRay, TopPose } from './surface.ts';
 export type { BlockPose } from './blocks.ts';

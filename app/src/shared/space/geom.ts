@@ -30,7 +30,7 @@ export function floorItems(s: Story): readonly FloorItem[] {
 }
 
 export const sameItem = (a: Item | undefined, b: Item | undefined): boolean =>
-  !a || !b ? a === b : a.def === b.def && a.x === b.x && a.z === b.z && a.rot === b.rot && a.blockId === b.blockId && a.tint === b.tint && a.on === b.on && a.u === b.u && a.v === b.v;
+  !a || !b ? a === b : a.def === b.def && a.x === b.x && a.z === b.z && a.rot === b.rot && a.blockId === b.blockId && a.tint === b.tint && a.on === b.on && a.u === b.u && a.v === b.v && a.look === b.look && a.ang === b.ang && a.lvl === b.lvl;
 
 export function itemRect(item: FloorItem, def: ItemDef): CellRect {
   const f = footprint(def, item.rot);
@@ -129,6 +129,9 @@ export function hashStory(paint: Uint8Array, halfB: Readonly<Record<number, numb
       mix(it.v);
     }
     mix(it.rot);
+    mix(it.look ?? 0);
+    mix(it.ang ?? 0);
+    mix(it.lvl ?? 0);
     str(it.blockId ?? '');
     mix(it.tint ?? -1);
   }

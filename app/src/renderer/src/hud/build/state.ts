@@ -43,6 +43,23 @@ export function setGhost(g: Ghost | null, level = 0) {
   draft.version++;
 }
 
+/**
+ * How the next small thing the owner puts down will look and stand: one of its looks and a few degrees of turn, rolled again for every
+ * piece so a row of mugs is not a row of the same mug. The ghost shows exactly this, so the piece in hand is the piece that lands.
+ */
+export const hand = { def: '', look: 0, ang: 0 };
+const MAX_ANG = 12;
+
+export function rollHand(def: string) {
+  const looks = ITEM_DEFS[def]?.looks ?? 1;
+  const before = hand.def === def ? hand.look : -1;
+  let look = Math.floor(Math.random() * looks);
+  if (looks > 1 && look === before) look = (look + 1 + Math.floor(Math.random() * (looks - 1))) % looks;
+  hand.def = def;
+  hand.look = look;
+  hand.ang = Math.round((Math.random() * 2 - 1) * MAX_ANG);
+}
+
 export const modifiers = { shift: false, ctrl: false };
 
 // Where the build camera looks. Panning moves it; the camera rig eases toward it.
@@ -80,6 +97,7 @@ export const VIOLATION_TEXT: Readonly<Record<ViolationKind, string>> = {
   off_surface: 'It would hang over the edge',
   floor_only: 'That one stands on the floor',
   needs_surface: 'Put it on a desk, table or shelf',
+  unsupported: 'Nothing under it to rest on',
   desk_wrong_block: 'A desk belongs to its team',
   desk_wrong_kind: 'Wrong kind of desk',
   desk_double_occupied: 'Two people on one desk',

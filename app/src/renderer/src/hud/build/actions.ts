@@ -3,7 +3,7 @@ import { leaveComputer } from '../../computer.ts';
 import { runtime } from '../../runtime.ts';
 import { get, send, set, setSetting, useStore, type BuildState, type BuildTool } from '../../store.ts';
 import { ENTRIES, TOP_PREFIX, type Entry, type TabId } from './catalog.ts';
-import { BUILD_DIST, buildView, modifiers, setGhost } from './state.ts';
+import { BUILD_DIST, buildView, hand, modifiers, rollHand, setGhost } from './state.ts';
 
 const FRESH: Omit<BuildState, 'level'> = { tool: { kind: 'select' }, tab: 'desks', search: '', searching: false, peek: null, fill: false, paint: 1, style: 0, wallsMode: 'cutaway' };
 
@@ -54,6 +54,7 @@ export function pickUpBlock(blockId: string, at: Vec2): boolean {
 
 export function setTool(tool: BuildTool) {
   setGhost(null);
+  if (tool.kind === 'item' && !tool.carry) rollHand(tool.def);
   patchBuild({ tool });
 }
 
@@ -156,9 +157,13 @@ export function newItemId(def: string): ItemId {
   return `${def}:b${Date.now().toString(36)}${(serial++).toString(36)}` as ItemId;
 }
 
-/** The small item as the tool would stand it on `host`, new or moved. */
-export function toolTopItem(tool: Extract<BuildTool, { kind: 'item' }>, host: ItemId, spot: { rot: Rot; u: number; v: number }, existing: Item | null): TopItem {
-  const item: TopItem = { id: tool.carry ?? newItemId(tool.def), def: tool.def, on: host, ...spot };
+/** The small item as the tool would stand it on `host`, new or moved. A moved one keeps its look and its turn; a new one takes the hand's. */
+export function toolTopItem(tool: Extract<BuildTool, { kind: 'item' }>, host: ItemId, spot: { rot: Rot; u: number; v: number; lvl?: number }, existing: Item | null): TopItem {
+  const item: TopItem = { id: tool.carry ?? newItemId(tool.def), def: tool.def, on: host, rot: spot.rot, u: spot.u, v: spot.v };
+  const from = existing ?? (hand.def === tool.def ? hand : null);
+  if (from?.look) item.look = from.look;
+  if (from?.ang) item.ang = from.ang;
+  if (spot.lvl) item.lvl = spot.lvl;
   if (existing?.tint !== undefined) item.tint = existing.tint;
   return item;
 }

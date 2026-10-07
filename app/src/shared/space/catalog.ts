@@ -113,19 +113,47 @@ const more: ItemDef[] = [
 ];
 
 // Small things for the top of a desk, a table, a counter or a shelf. On the floor they have a nominal one cell footprint, which only
-// the ghost shows when the pointer is not over a surface. Their real footprint is `top`, in TOP_UNITs (12.5 cm).
-const small = (id: string, w: number, d: number, height: number): ItemDef => ({ id, kind: 'decor', w: 1, d: 1, height, walkable: false, placement: 'surface', top: { w, d } });
+// the ghost shows when the pointer is not over a surface. Their real footprint is `top`, in TOP_UNITs (12.5 cm). `looks` is how many
+// colours or styles the model has (none changes the footprint or the height), `stackable` says other small things may rest on it.
+const small = (id: string, w: number, d: number, height: number, extra: Pick<ItemDef, 'looks' | 'stackable'> = {}): ItemDef => ({ id, kind: 'decor', w: 1, d: 1, height, walkable: false, placement: 'surface', top: { w, d }, ...extra });
+const flat = { stackable: true } as const;
 
 const tabletop: ItemDef[] = [
   small('laptop', 3, 2, 0.28),
-  small('books', 3, 2, 0.1),
-  small('papers', 3, 2, 0.04),
-  small('mug', 1, 1, 0.09),
+  small('books', 3, 2, 0.1, { looks: 3, ...flat }),
+  small('papers', 3, 2, 0.04, { looks: 2, ...flat }),
+  small('mug', 1, 1, 0.09, { looks: 5 }),
   small('picture_frame', 2, 1, 0.25),
   small('vase', 2, 2, 0.34),
-  small('pen_cup', 1, 1, 0.16),
+  small('pen_cup', 1, 1, 0.16, { looks: 3 }),
   small('desk_clock', 2, 1, 0.15),
-  small('trophy', 2, 2, 0.22),
+  small('trophy', 2, 2, 0.22, { looks: 2 }),
+  small('notebook', 3, 2, 0.03, { looks: 4, ...flat }),
+  small('folder', 3, 2, 0.03, { looks: 4, ...flat }),
+  small('magazine', 2, 3, 0.012, { looks: 4, ...flat }),
+  small('coaster', 1, 1, 0.012, { looks: 3, ...flat }),
+  small('lunchbox', 3, 2, 0.08, { looks: 3, ...flat }),
+  small('books_row', 3, 2, 0.26, { looks: 3 }),
+  small('sticky_notes', 1, 1, 0.03, { looks: 4 }),
+  small('headphones', 2, 2, 0.1, { looks: 3 }),
+  small('water_bottle', 1, 1, 0.23, { looks: 4 }),
+  small('tumbler', 1, 1, 0.17, { looks: 4 }),
+  small('takeaway_cup', 1, 1, 0.14, { looks: 3 }),
+  small('desk_organizer', 3, 2, 0.13, { looks: 3 }),
+  small('frame_small', 1, 1, 0.14, { looks: 4 }),
+  small('succulent', 2, 2, 0.16, { looks: 4 }),
+  small('succulent_trio', 3, 1, 0.14, { looks: 2 }),
+  small('cable_tray', 3, 1, 0.07, { looks: 2 }),
+  small('snack_bowl', 2, 2, 0.09, { looks: 3 }),
+  small('calculator', 1, 2, 0.025, { looks: 2 }),
+  small('phone_stand', 1, 1, 0.14, { looks: 2 }),
+  small('tablet', 2, 1, 0.17, { looks: 2 }),
+  small('candle', 1, 1, 0.09, { looks: 4 }),
+  small('cat_statue', 1, 1, 0.15, { looks: 2 }),
+  small('letter_tray', 3, 2, 0.1, { looks: 2 }),
+  small('glasses', 2, 1, 0.04, { looks: 3 }),
+  small('stapler', 2, 1, 0.06, { looks: 3 }),
+  small('speaker', 1, 1, 0.12, { looks: 3 }),
 ];
 
 // What a project block brings besides its desks, board, terminal and sign. The kit places these around the block's middle
