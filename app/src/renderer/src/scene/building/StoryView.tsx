@@ -16,7 +16,8 @@ import { reflective } from '../Lighting.tsx';
 import { floorGeometry } from './floor.ts';
 import { inVoid, lobbyVoid } from '../lobbyVoid.ts';
 import { propOf } from '../props.ts';
-import { box, cyl, merge, DEFAULT_TINT, DYNAMIC, modelOf, onTopOf, PROP_DEFS, screensOf } from './models.ts';
+import { box, computerOf, cyl, merge, DEFAULT_TINT, DYNAMIC, modelOf, onTopOf, PROP_DEFS, screensOf } from './models.ts';
+import { shadowMaterial, shadowMesh, shapeOf, throwOf, type Spot } from './shadows.ts';
 import { trimOf, TRIMMED } from './pod.ts';
 import { crossesView, curbModel, facesCamera, frameModel, glassModel, occludes, octantOf, VARIANTS, wallMatrix, wallModel, wallRecords, ZERO, type Variant, type WallRecord } from './walls.ts';
 
@@ -364,18 +365,31 @@ function SetupInstances({ def, setup, at, matrices, ids, pick }: { def: string; 
 }
 
 // A soft dark patch under each piece of furniture, one draw for the whole story. It grounds the objects the way ambient occlusion would.
+// What stands on a desk or a table gets one that has its own shape (`shadows.ts`), cast a little away from the sun by its height.
 function ContactShadows({ geom }: { geom: FloorGeometry }) {
-  const spots = useMemo(() => {
+  const { spots, shaped } = useMemo(() => {
     const out: { x: number; y: number; z: number; yaw: number; w: number; d: number }[] = [];
+    const cast: Spot[] = [];
+    const setups = setupsOf(geom.story);
     for (const [key, data] of geom.render.items) {
       const def = key.split('#')[0];
       const dims = ITEM_DEFS[def];
       if (!dims || NO_BLOB.has(def) || layerOf(dims) === 'floor') continue;
       for (let i = 0; i < data.ids.length; i++) {
-        const y = data.matrices[i * 5 + 1];
-        // A small item on a top gets a soft patch just wide enough to ground it on the top; on the floor the patch is wide.
-        const [w, d] = y > 0 && dims.top ? [dims.top.w * TOP_UNIT + 0.1, dims.top.d * TOP_UNIT + 0.1] : [dims.w / 2 + 0.3, dims.d / 2 + 0.3];
-        out.push({ x: data.matrices[i * 5], y: y + (y > 0 ? 0.006 : 0.02), z: data.matrices[i * 5 + 2], yaw: data.matrices[i * 5 + 3], w, d });
+        const [x, y, z, yaw] = [data.matrices[i * 5], data.matrices[i * 5 + 1], data.matrices[i * 5 + 2], data.matrices[i * 5 + 3]];
+        const shape = y > 0 && dims.top ? shapeOf(def, () => ({ geometry: modelOf(def), height: dims.height })) : null;
+        if (shape) {
+          const to = throwOf(dims.height);
+          cast.push({ x: x + to.x, y: y + 0.006, z: z + to.z, yaw, shape });
+          continue;
+        }
+        // Where a desk's computer stands on it, it throws its own: the keys, the mouse and the foot of the screen.
+        if (dims.setups && dims.surface) {
+          const setup = setups.get(data.ids[i]) ?? 0;
+          const computer = shapeOf(`computer:${def}:${setup}`, () => ({ geometry: computerOf(def === 'po_desk', setup), height: 0.12 }));
+          if (computer) cast.push({ x, y: dims.surface.height + 0.004, z, yaw, shape: computer });
+        }
+        out.push({ x, y: y + 0.02, z, yaw, w: dims.w / 2 + 0.3, d: dims.d / 2 + 0.3 });
       }
     }
     for (const d of floorItems(geom.story)) {
@@ -383,7 +397,7 @@ function ContactShadows({ geom }: { geom: FloorGeometry }) {
       const c = chairOf(d);
       if (c) out.push({ x: c.x, y: 0.02, z: c.z, yaw: 0, w: 0.7, d: 0.7 });
     }
-    return out;
+    return { spots: out, shaped: cast };
   }, [geom]);
   const fill = useMemo(
     () => (mesh: InstancedMesh) => {
@@ -395,7 +409,27 @@ function ContactShadows({ geom }: { geom: FloorGeometry }) {
     },
     [spots],
   );
-  return <Instances geometry={blobGeometry} material={blobMaterial} count={spots.length} fill={fill} castShadow={false} receiveShadow={false} />;
+  const cut = useMemo(() => shadowMesh(shaped.length), [shaped]);
+  const cutMaterial = useMemo(() => shadowMaterial(), []);
+  const fillShaped = useMemo(
+    () => (mesh: InstancedMesh) => {
+      const m = new Matrix4();
+      const rect = mesh.geometry.getAttribute('uvRect');
+      shaped.forEach((sp, i) => {
+        q.setFromAxisAngle(up, sp.yaw);
+        mesh.setMatrixAt(i, m.compose(p3.set(sp.x, sp.y, sp.z), q, s3.set(sp.shape.half * 2, 1, sp.shape.half * 2)));
+        rect.setXYZW(i, ...sp.shape.rect);
+      });
+      rect.needsUpdate = true;
+    },
+    [shaped],
+  );
+  return (
+    <>
+      <Instances geometry={blobGeometry} material={blobMaterial} count={spots.length} fill={fill} castShadow={false} receiveShadow={false} />
+      <Instances geometry={cut} material={cutMaterial} count={shaped.length} fill={fillShaped} castShadow={false} receiveShadow={false} />
+    </>
+  );
 }
 
 // A desk's screens show what its sitter is doing. One mesh draws the screens of every desk in a setup, and each frame sets each one's brightness.
