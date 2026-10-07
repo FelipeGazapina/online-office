@@ -3,7 +3,7 @@
 // Run: pnpm build:verify && OFFICE_SHOTS_DIR=... OFFICE_OUT_DIR=out/verify OFFICE_CDP_PORT=9341 node verify/cdp.mjs verify/shots-tabletop.mjs
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { checkOps, footprint, floorItems, ITEM_DEFS, hostToWorld, parseBuilding } from '../src/shared/space/index.ts';
+import { checkOps, footprint, floorItems, ITEM_DEFS, hostToWorld, parseBuilding, seatPose } from '../src/shared/space/index.ts';
 import { assert, scratch } from './lib.mjs';
 import { acceptedDressing } from './tabletop-dressing.mjs';
 import { drive } from './tabletop-drive.mjs';
@@ -72,6 +72,19 @@ export default async function (s) {
   await d.zoom(-closer);
   await d.shotTo('decorated');
   await d.zoom(closer);
+
+  // close.png: a person's-eye view of a dressed desk
+  const freeDesk = desks.find((i) => !taken.has(i.id)) ?? desks[0];
+  const seat = seatPose(b, freeDesk.id);
+  await s.press('Tab');
+  await s.waitFor('window.__officeCamera && Math.abs(window.__officeCamera.blend - 1) < 0.001', 10000);
+  await s.eval(`__office.teleport(${seat.chair.x}, ${seat.chair.z}, ${seat.yaw})`);
+  await s.sleep(500);
+  await s.drag({ x: 700, y: 360 }, { x: 700, y: 560 });
+  await s.sleep(600);
+  await d.shotTo('close');
+  await s.press('Tab');
+  await s.waitFor('window.__officeCamera && Math.abs(window.__officeCamera.blend) < 0.001', 10000);
 
 
   // place.png: the item in hand over a table, its footprint green on the top, the catalog folded to its bar
