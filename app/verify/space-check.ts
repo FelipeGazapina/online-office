@@ -22,6 +22,7 @@ import {
   encodeBuilding,
   floorItems,
   freeDesk,
+  inferSlotPose,
   layerOf,
   legacyBuilding,
   moveBlockOps,
@@ -50,9 +51,11 @@ import {
   type Item,
   type ItemId,
   type PickRay,
+  type ShellOutcome,
   type SpaceContext,
   type ViolationKind,
 } from '../src/shared/space/index.ts';
+import { coreItems } from '../src/shared/space/kit.ts';
 import { check, finish } from './check.ts';
 
 const id = (s: string) => s as ItemId;
@@ -386,7 +389,7 @@ const flat = (stories = 1, size = 20): Building => {
     seats: legacy.seats,
   };
   const problems = validate(legacy.building, ctx);
-  check(problems.length === 0 && legacy.building.shelled === true, 'seven pods in two rows of slots validate clean: no overlap, nothing off the floor or the lot', JSON.stringify(problems.slice(0, 4)));
+  check(problems.length === 0 && legacy.building.shelled === 2, 'seven pods in two rows of slots validate clean: no overlap, nothing off the floor or the lot', JSON.stringify(problems.slice(0, 4)));
   const pod = shellItems('p0', 0);
   check(new Set(pod.map((i) => i.id)).size === pod.length && pod.every((i) => ITEM_DEFS[i.def] && i.blockId === 'p0'), 'a pod is a set of distinct known items of its team');
   check(['pod_rug', 'pod_rail_back', 'pod_glass_rail', 'pod_huddle_table', 'pod_daily_sign', 'chair', 'plant', 'lamp_floor', 'pod_slat_wall', 'pod_shelf'].every((d) => pod.some((i) => i.def === d)), 'the pod has its rug, boundary, huddle and decor');
@@ -431,7 +434,7 @@ const flat = (stories = 1, size = 20): Building => {
   const trimmed = must(applyOps(migrated, [{ t: 'items', story: 0, put: [], del: [rugId] }], ctx));
   check(addShells(trimmed, blocks) === trimmed && !trimmed.stories[0].items.some((i) => i.id === rugId), 'a piece the owner deleted stays deleted');
   const wire = parseBuilding(JSON.parse(JSON.stringify(encodeBuilding(trimmed))));
-  check(wire.shelled === true && eq(wire, trimmed), 'the migrated flag survives the file');
+  check(wire.shelled === 2 && eq(wire, trimmed), 'the migrated flag survives the file');
 
   // A block leaves nothing behind, and goes to another floor and back.
   const story = legacy.building.stories[0];
@@ -476,6 +479,130 @@ const flat = (stories = 1, size = 20): Building => {
       check(undone?.ok === true && eq(undone.building, climbed), 'undo of the floor change puts the block back on floor 1');
     }
   }
+}
+
+// ---------------------------------------------------------------- the pod goes where the desks went
+{
+  const lot = { x0: -40, z0: -40, w: 80, h: 60 };
+  const ground = must(applyOps(emptyBuilding(lot), [paintRect(0, { x: lot.x0, z: lot.z0, w: lot.w, h: lot.h }, PAINT.woodLight)], noCtx));
+  const stage = (items: readonly Item[], shelled?: 1 | 2, from = ground): Building => ({ ...must(applyOps(from, [put(0, ...items)], noCtx)), ...(shelled && { shelled }) });
+  const podOf = (blockId: string, slot: number) => shellItems(blockId, slot);
+  const byId = <T extends Item>(list: readonly T[]) => [...list].sort((a, c) => (a.id < c.id ? -1 : 1));
+  const shellNow = (b: Building, blockId: string, slot: number) => {
+    const mine = new Set(podOf(blockId, slot).map((i) => i.id));
+    return floorItems(b.stories[0]).filter((i) => mine.has(i.id));
+  };
+  const itemsOf = (b: Building) => floorItems(b.stories[0]);
+  const A = { id: 'a', slot: 1 };
+  const bare = stage(coreItems(A.id, A.slot));
+  const move = (b: Building, id: string, quarter: 0 | 1 | 2 | 3, origin: { x: number; z: number }) => must(applyOps(b, moveBlockOps(b.stories[0], 0, id, { quarter, origin }), noCtx));
+  // What moving the whole block, pod and all, to where its desks went would do to the pod: the app's own block move, apart from the migration.
+  const reference = (moved: Building, blockId: string, slot: number, quarter: 0 | 1 | 2 | 3): FloorItem[] => {
+    const cores = coreItems(blockId, slot);
+    const probe = placeBlock([...cores, ...podOf(blockId, slot)], { quarter, origin: { x: 0, z: 0 } });
+    const anchor = itemsOf(moved).find((i) => i.id === probe[0].id)!;
+    const placed = probe.map((i) => ({ ...i, x: i.x + anchor.x - probe[0].x, z: i.z + anchor.z - probe[0].z }));
+    const lands = cores.every((c) => eq(itemsOf(moved).find((i) => i.id === c.id), placed.find((i) => i.id === c.id)));
+    if (!lands) throw new Error('the reference turn does not land on the desks');
+    return byId(placed.slice(cores.length));
+  };
+  const run = (b: Building, blocks: { id: string; slot: number }[] = [A]) => {
+    const seen: ShellOutcome[] = [];
+    return { out: addShells(b, blocks, (o) => seen.push(o)), seen };
+  };
+  const whyOf = (o: ShellOutcome | undefined) => (o?.kind === 'fell_back' ? o.why : '');
+
+  for (const quarter of [0, 1, 2, 3] as const) {
+    const moved = move(bare, A.id, quarter, { x: 30 + quarter * 7, z: -50 + quarter * 3 });
+    const { out, seen } = run(moved);
+    const want = reference(moved, A.id, A.slot, quarter);
+    const got = shellNow(out, A.id, A.slot);
+    const turn = `${quarter * 90} degrees`;
+    check(eq(got, want), `${turn}: the pod of a block moved by a block move lands where moving the whole block would put it`, `${got.length} of ${want.length} pieces; first miss ${JSON.stringify(got.find((g, i) => !eq(g, want[i])))}`);
+    const [outcome] = seen;
+    check(seen.length === 1 && outcome.kind === 'placed' && outcome.pose.quarter === quarter && outcome.agree === 10 && outcome.of === 10, `${turn}: all 10 core pieces give the same pose and the pod is placed`, JSON.stringify(seen));
+    const left = podOf(A.id, A.slot).filter((p) => got.some((g) => g.id === p.id && g.x === p.x && g.z === p.z && g.rot === p.rot));
+    check(out.shelled === 2 && left.length === 0, `${turn}: not one piece of the pod is left at the slot spot`, left.map((i) => i.id).join());
+    const broken = validate(out, noCtx);
+    check(broken.length === 0, `${turn}: the office with the pod in place breaks no rule`, JSON.stringify(broken.slice(0, 3)));
+    check(addShells(out, [A]) === out && eq(addShells({ ...out, shelled: 1 }, [A]), out), `${turn}: running the migration again, even without its flag, changes nothing`);
+  }
+
+  // One desk moved alone and another turned alone are outvoted by the eight pieces that moved as a block.
+  const turned = move(bare, A.id, 1, { x: 30, z: -50 });
+  const strays: Record<string, Partial<FloorItem>> = { 'a:bench_desk:00': { x: 60 }, 'a:bench_desk:03': { z: -60, rot: 2 } };
+  const scattered = stage(itemsOf(turned).map((i) => ({ ...i, ...strays[i.id] })));
+  const scatteredRun = run(scattered);
+  const reading = scatteredRun.seen[0];
+  check(eq(shellNow(scatteredRun.out, A.id, A.slot), reference(turned, A.id, A.slot, 1)), 'a desk moved alone and one turned alone do not pull the pod: it follows the pieces that agree');
+  check(reading.kind === 'placed' && reading.agree === 8 && reading.of === 10, 'the reading says 8 of 10', JSON.stringify(reading));
+
+  // Pieces that cannot agree: half the block stayed and half moved. The pod stays where the static pod stood and says why.
+  const half = stage(itemsOf(bare).map((i) => (/bench_desk:0[0-3]|whiteboard/.test(i.id) ? { ...i, x: i.x + 20 } : i)));
+  const split = run(half);
+  check(eq(shellNow(split.out, A.id, A.slot), byId(podOf(A.id, A.slot))) && split.out.shelled === 2, 'when the pieces split evenly the pod goes to the slot spot, as it always did');
+  check(split.seen.length === 1 && /do not agree/.test(whyOf(split.seen[0])), 'and the block that fell back is reported with the reason', JSON.stringify(split.seen));
+  const noCores = run(stage(podOf(A.id, A.slot)));
+  check(/none of its desks/.test(whyOf(noCores.seen[0])) && eq(shellNow(noCores.out, A.id, A.slot), byId(podOf(A.id, A.slot))), 'a team with no desks, board or sign left gets its pod at the slot spot and a reason');
+
+  // The rules turn a piece away: a plant where the huddle table would stand, and desks so near the lot edge that part of the pod would stick out.
+  // That piece stays at its slot spot and the rest of the pod stands with the desks.
+  const split2 = (b: Building, want: readonly Item[], left: readonly { id: string }[]) => {
+    const gone = new Set(left.map((l) => l.id));
+    const now = shellNow(b, A.id, A.slot);
+    return eq(now.filter((i) => !gone.has(i.id)), want.filter((i) => !gone.has(i.id))) && eq(now.filter((i) => gone.has(i.id)), byId(podOf(A.id, A.slot).filter((i) => gone.has(i.id))));
+  };
+  const huddle = reference(turned, A.id, A.slot, 1).find((i) => i.def === 'pod_huddle_table')!;
+  const blocked = run(stage([...itemsOf(turned), item('plant:in-the-way', 'plant', huddle.x, huddle.z)]));
+  const blockedOutcome = blocked.seen[0];
+  const blockedLeft = blockedOutcome.kind === 'placed' ? blockedOutcome.left : [];
+  check(blockedLeft.length === 1 && blockedLeft[0].id === huddle.id && /overlap with plant:in-the-way/.test(blockedLeft[0].why), 'a plant where the huddle table would stand turns away that table alone: overlap', JSON.stringify(blocked.seen));
+  check(split2(blocked.out, reference(turned, A.id, A.slot, 1), blockedLeft) && itemsOf(blocked.out).some((i) => i.id === 'plant:in-the-way'), 'the table stays at the slot spot, the other 19 pieces stand with the desks, and the plant stays where it was');
+  const atEdge = move(bare, A.id, 0, { x: lot.x0 * 2, z: -50 });
+  const edge = run(atEdge);
+  const edgeLeft = edge.seen[0].kind === 'placed' ? edge.seen[0].left : [];
+  check(edgeLeft.length > 0 && edgeLeft.every((l) => /out_of_lot/.test(l.why)), 'desks against the lot edge leave no room for part of the pod: those pieces are out_of_lot', JSON.stringify(edge.seen));
+  check(split2(edge.out, reference(atEdge, A.id, A.slot, 0), edgeLeft) && edge.out.shelled === 2, 'only those pieces stay at the slot spot, the rest stand with the desks');
+  check(addShells(edge.out, [A]) === edge.out && eq(addShells({ ...edge.out, shelled: 1 }, [A]), edge.out), 'a second run, flag or no flag, changes nothing: a piece refused once is refused again');
+
+  // Carpet painted under the old rug is cleared at the slot spot, and none is painted where the pod goes.
+  const carpeted = must(applyOps(bare, [paintRect(0, { x: -5, z: -8, w: 9, h: 7 }, PAINT.carpetBlue)], noCtx));
+  const carpetRun = run(move(carpeted, A.id, 0, { x: 40, z: -50 }));
+  const paintAt = (b: Building, x: number, z: number) => b.stories[0].paint[(z - b.lot.z0) * b.lot.w + (x - b.lot.x0)];
+  check(paintAt(carpeted, 0, -5) === PAINT.carpetBlue && paintAt(carpetRun.out, 0, -5) === PAINT.woodLight && paintAt(carpetRun.out, 20, -25) === PAINT.woodLight, 'the carpet under the old rug is cleared and the new place is plain floor');
+
+  // An office migrated by the build that put the pod at the slot spot whatever the desks did: fixed once, owner edits untouched.
+  const movedA = turned;
+  const staleItems = [...itemsOf(movedA), ...podOf(A.id, A.slot)];
+  const credenza = podOf(A.id, A.slot).find((i) => i.def === 'pod_credenza')!;
+  const rugId = podOf(A.id, A.slot).find((i) => i.def === 'pod_rug')!.id;
+  const daily = podOf(A.id, A.slot).find((i) => i.def === 'pod_daily_sign')!;
+  const wantPod = reference(movedA, A.id, A.slot, 1);
+  const full = run(stage(staleItems, 1));
+  check(eq(shellNow(full.out, A.id, A.slot), wantPod) && validate(full.out, noCtx).length === 0, 'an office migrated the old way gets its whole pod around its desks');
+  const edited = stage(staleItems.filter((i) => i.id !== rugId).map((i) => (i.id === credenza.id ? { ...i, x: 60, z: 20 } : i.id === daily.id ? { ...i, tint: 3 } : i)), 1);
+  const fixed = run(edited);
+  const fixedPod = shellNow(fixed.out, A.id, A.slot);
+  check(!fixedPod.some((i) => i.id === rugId), 'a piece the owner deleted stays deleted');
+  check(eq(fixedPod.find((i) => i.id === credenza.id), { ...credenza, x: 60, z: 20 }), 'a piece the owner moved stays where the owner put it');
+  const rest = (list: readonly Item[]) => list.filter((i) => ![credenza.id, daily.id, rugId].includes(i.id));
+  check(eq(rest(fixedPod), rest(wantPod)), 'every other piece that sat at the slot spot is carried to the desks');
+  check(eq(fixedPod.find((i) => i.id === daily.id), { ...wantPod.find((i) => i.id === daily.id)!, tint: 3 }), 'a carried piece keeps its tint');
+  check(addShells(fixed.out, [A]) === fixed.out && eq(addShells({ ...fixed.out, shelled: 1 }, [A]), fixed.out), 'a second run, flag or no flag, changes nothing');
+
+  // Two teams swapped places: each pod is about to leave the spot the other one's pod needs.
+  const C = { id: 'c', slot: 2 };
+  const swapped = run(stage([...coreItems(A.id, A.slot).map((i) => ({ ...i, x: i.x + 24 })), ...coreItems(C.id, C.slot).map((i) => ({ ...i, x: i.x - 24 })), ...podOf(A.id, A.slot), ...podOf(C.id, C.slot)], 1), [A, C]);
+  const shifted = (blockId: string, slot: number, dx: number) => byId(podOf(blockId, slot).map((i) => ({ ...i, x: i.x + dx })));
+  check(swapped.seen.length === 2 && swapped.seen.every((o) => o.kind === 'placed'), 'two teams that swapped slots are both placed', JSON.stringify(swapped.seen.map((o) => whyOf(o))));
+  check(eq(shellNow(swapped.out, A.id, A.slot), shifted(A.id, A.slot, 24)) && eq(shellNow(swapped.out, C.id, C.slot), shifted(C.id, C.slot, -24)), 'and neither pod is turned away by the other one it is about to replace');
+
+  // A team that never moved is not touched, and a building already at level 2 is returned as it is.
+  const home = stage([...coreItems(A.id, A.slot), ...podOf(A.id, A.slot)], 1);
+  const homeRun = run(home);
+  check(eq({ ...homeRun.out, shelled: 1 }, home) && homeRun.seen.length === 1 && homeRun.seen[0].kind === 'placed', 'a team still at its slot reads as the identity pose and nothing moves');
+  const oldFile = { ...(encodeBuilding(home) as object), shelled: true };
+  check(parseBuilding(JSON.parse(JSON.stringify(oldFile))).shelled === 1 && parseBuilding(JSON.parse(JSON.stringify(encodeBuilding(homeRun.out)))).shelled === 2, 'the file says true for the old migration and 2 for this one');
 }
 
 // ---------------------------------------------------------------- persistence boundary

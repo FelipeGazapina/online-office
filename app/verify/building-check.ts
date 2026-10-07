@@ -54,7 +54,7 @@ check(typeof office.snapshot().buildingRev === 'number', 'the snapshot carries b
 const POD = ['pod_rug', 'pod_rail_back', 'pod_rail_side', 'pod_glass_rail', 'pod_slat_wall', 'pod_credenza', 'pod_shelf', 'pod_huddle_table', 'pod_daily_sign', 'chair', 'plant', 'lamp_floor'];
 const podOf = (b: Building, blockId: string) => items(b).filter((i) => i.blockId === blockId);
 check(['blk-a', 'blk-b'].every((id) => POD.every((def) => podOf(office.buildingState().building, id).some((i) => i.def === def))), 'each team has its rug, boundary, decor and huddle as items');
-check(stored().building && (stored().building as { shelled?: boolean }).shelled === true, 'the saved building says the pods are items now');
+check(stored().building && (stored().building as { shelled?: number }).shelled === 2, 'the saved building says the pods are items now');
 
 console.log('# idempotent');
 const first = readFileSync(file, 'utf8');

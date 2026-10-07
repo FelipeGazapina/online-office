@@ -149,7 +149,7 @@ export default async function (s, { launch }) {
 
   // ---- every piece of every team is an item, from the first launch
   let b = await building();
-  assert(b.shelled === true && disk().building.shelled === true, 'the building says the pods are items, in memory and on disk');
+  assert(b.shelled === 2 && disk().building.shelled === 2, 'the building says the pods are items, in memory and on disk');
   for (const block of company.blocks) {
     const have = new Set(ofBlock(b, block.id).map((i) => i.def));
     const missing = POD.filter((d) => !have.has(d));
@@ -495,6 +495,6 @@ export default async function (s, { launch }) {
   assert(reopenedItems.length === expected.length && reopenedItems.every((i) => same(i, expected.find((e) => e.id === i.id))), 'after a restart the building is the one left behind');
   assert(gone.every((id) => !reopenedItems.some((i) => i.id === id)), `the ${gone.length} deleted pieces are still gone`);
   assert(!reopenedItems.some((i) => i.blockId === moveId) && !(await app.eval(`${store}.company.blocks.some((b) => b.id === ${JSON.stringify(moveId)})`)), 'the deleted block is still gone, with its people');
-  assert(reopened.shelled === true, 'and the migration did not run again');
+  assert(reopened.shelled === 2, 'and the migration did not run again');
   await app.close();
 }
