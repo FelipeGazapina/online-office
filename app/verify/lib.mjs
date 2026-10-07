@@ -155,3 +155,32 @@ export function wallTime(ledgerFile, rootIds, now = Date.now()) {
   }
   return total;
 }
+
+// company.mail.jsonl as its entries, oldest first. A line cut by a write in progress is skipped.
+export function readLedger(ledgerFile) {
+  if (!existsSync(ledgerFile)) return [];
+  return readFileSync(ledgerFile, 'utf8')
+    .split('\n')
+    .filter(Boolean)
+    .flatMap((line) => {
+      try {
+        return [JSON.parse(line)];
+      } catch {
+        return [];
+      }
+    });
+}
+
+// Every request of the chains started by `roots` (a task's runs), each with the reply that settled it, if one came.
+export function requestsOfChains(ledger, roots) {
+  const posts = ledger.flatMap((e) => (e.t === 'post' ? [e.msg] : []));
+  const replyTo = new Map(posts.filter((m) => m.kind === 'reply').map((m) => [m.requestId, m]));
+  return posts.filter((m) => m.kind === 'request' && m.intent !== 'gauntlet' && roots.includes(m.rootId)).map((m) => ({ ...m, reply: replyTo.get(m.id) }));
+}
+
+// The requests of those chains still waiting for their reply at `at`, leaving out the ones addressed to `holder`: someone who
+// moves their own card does so while their own request is open, and the rules ask about everyone else's.
+export const openAt = (requests, at, holder) => requests.filter((r) => r.at <= at && !(r.reply && r.reply.at <= at) && r.to !== holder);
+
+// Where a task's stage changed, oldest first.
+export const stageMoves = (task) => (task.history ?? []).filter((h) => h.kind === 'stage');

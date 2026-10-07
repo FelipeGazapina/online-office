@@ -4,7 +4,9 @@
 //   "Empty desk: hire", or why it is refused), Esc and open floor change nothing, a desk of another block is refused,
 //   a drop on the tray moves the stage, a drop on an employee's desk assigns once and they react within 2 s, a drop on the
 //   PO's desk (in first person) assigns the PO who delegates, and a drop on an empty desk opens the hire panel for that
-//   block and desk, whose Hire seats the new employee there and starts the task.
+//   block and desk, whose Hire seats the new employee there and starts the task. A run started by a drop is posted within
+//   2 s and is answered done, and its card ends in review or done by a move that task.history records and the mail
+//   allows: the office's after the reply, or the employee's own with a reason while no one else's request of it is open.
 //   While the card is carried it never covers a name tag (screen rectangles of the card, its line and every tag showing),
 //   and the bar at the bottom says what letting go does for each target: give it to Ana, hire for this desk, move to a
 //   stage, or why it is refused. After a drop on a person the board stays folded as a tray of the cards still waiting, and
@@ -16,7 +18,7 @@ import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileS
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { carryClearance } from './carry-rects.mjs';
-import { HAIKU, assert } from './lib.mjs';
+import { HAIKU, assert, openAt, readLedger, requestsOfChains, stageMoves } from './lib.mjs';
 
 const WAIT_MS = Number(process.env.OFFICE_DRAG_WAIT_MIN ?? 6) * 60_000;
 const REACT_MS = 2000;
@@ -38,16 +40,7 @@ export const env = { OFFICE_DATA_DIR: dataDir, OFFICE_START_LEVEL: '5', OFFICE_C
 
 const state = '__office.store.getState()';
 const ledgerFile = join(dataDir, 'company.mail.jsonl');
-const ledger = () =>
-  existsSync(ledgerFile)
-    ? readFileSync(ledgerFile, 'utf8').split('\n').filter(Boolean).flatMap((l) => {
-        try {
-          return [JSON.parse(l)];
-        } catch {
-          return [];
-        }
-      })
-    : [];
+const ledger = () => readLedger(ledgerFile);
 const requestsTo = (who) => ledger().flatMap((e) => (e.t === 'post' && e.msg.kind === 'request' && e.msg.to === who ? [e.msg] : []));
 const taskBy = (title) => `${state}.tasks.find((t) => t.title === ${JSON.stringify(title)})`;
 
@@ -85,16 +78,19 @@ async function unattended(s) {
   }
 }
 
-async function inReview(s, title, label) {
+// The run of a task is over when its latest run was answered done and the card has left doing. Which stage it left for is not
+// the test's to say: the office moves it to review, and an employee may take it to review or done themselves.
+async function untilAnswered(s, title, label) {
   const t0 = Date.now();
+  let t;
   while (Date.now() - t0 < WAIT_MS) {
     await unattended(s);
-    const t = await s.eval(`(() => { const t = ${taskBy(title)}; return { stage: t.stage, out: t.lastOutcome?.outcome, running: ${state}.taskTime[t.id]?.running.length ?? 0 }; })()`);
-    if (t.stage === 'review' && t.out === 'done') return t;
-    if (t.stage === 'todo' && t.out) throw new Error(`${label}: the task went back to todo (${t.out})`);
+    t = await s.eval(`${taskBy(title)}`);
+    if (t.lastOutcome?.outcome === 'done' && (t.stage === 'review' || t.stage === 'done')) return t;
+    if (t.stage === 'todo' && t.lastOutcome) throw new Error(`${label}: the task went back to todo (${t.lastOutcome.outcome})`);
     await s.sleep(2500);
   }
-  throw new Error(`${label}: not in review after ${Math.round(WAIT_MS / 1000)} s`);
+  throw new Error(`${label}: no run answered done with the card in review or done after ${Math.round(WAIT_MS / 1000)} s (stage ${t.stage}, last outcome ${t.lastOutcome?.outcome})`);
 }
 
 const deliverable = (file, line) => `Create a file named ${file} in the project folder whose only line is: ${line}. Then reply done naming the file. Do not hire anyone.`;
@@ -130,6 +126,30 @@ export default async (s) => {
   for (const [key, title] of Object.entries(titles)) await send({ type: 'create_task', boardId: quick, title, ...(notes[key] ? { notes: notes[key] } : {}) });
   await s.waitFor(`${state}.tasks.length === ${Object.keys(titles).length}`);
   const task = (key) => s.eval(`${taskBy(titles[key])}`);
+  const nameOf = async (id) => (id === 'owner' || id === 'mailroom' ? id : await s.eval(`${state}.company.employees.find((e) => e.id === ${JSON.stringify(id)})?.name ?? ${JSON.stringify(id)}`));
+  // A task whose run is over, read against the mail and its history. The run was answered done and every request of its chains
+  // has its reply. The card left doing for review or done by a move the history records, and the move was legal: the office's
+  // own right after the reply, or a teammate's of the task with a reason, made while nobody else's request of the task was
+  // open and with no pull request waiting to be merged.
+  const finished = async (key, who, label) => {
+    const t = await untilAnswered(s, titles[key], label);
+    const chain = requestsOfChains(ledger(), t.runs);
+    const root = chain.find((r) => r.id === t.runs[0]);
+    const took = root?.reply ? ((root.reply.at - root.at) / 1000).toFixed(1) : '?';
+    assert(t.runs.length === 1 && root?.to === who.id && root.reply?.outcome === 'done' && chain.every((r) => !!r.reply), `${label}: ${who.name}'s one run was answered done after ${took} s, and all ${chain.length} request(s) of its chains are settled`);
+    const moves = stageMoves(t);
+    const last = moves.at(-1);
+    const trail = await Promise.all(moves.map(async (m) => `${m.from} to ${m.to} by ${await nameOf(m.by)}`));
+    assert(last?.from === 'doing' && last.to === t.stage, `${label}: the card left doing for ${t.stage} and its history says so (${trail.join(', ')})`);
+    const people = [who.id, ...chain.flatMap((r) => [r.from, r.to])];
+    const byOffice = last.by === 'mailroom';
+    assert(byOffice ? last.to === 'review' && last.cause === root.reply.id && last.at >= root.reply.at : people.includes(last.by) && !!last.reason?.trim(), `${label}: ${byOffice ? 'the office moved it to review once the reply came' : `${await nameOf(last.by)} moved it themselves and said why: "${last.reason}"`}`);
+    for (const m of moves.filter((m) => m.by !== 'owner' && m.by !== 'mailroom' && m.by !== 'provider')) {
+      const open = openAt(chain, m.at, m.by);
+      assert(open.length === 0 && !(m.to === 'done' && ['draft', 'open'].includes(t.git?.pr?.state)), `${label}: ${await nameOf(m.by)} took it to ${m.to} with nobody else's request of it open (${open.map((r) => `"${r.title}" to ${r.to}`).join(', ') || 'none'}) and no pull request waiting`);
+    }
+    return t;
+  };
   // The owner stands at the front of the pods, where both blocks' desks are in view and nobody is within earshot.
   const still = async () => {
     let last = null;
@@ -299,6 +319,7 @@ export default async (s) => {
   await pickUp(titles.ana);
   await hover(anaAt, `${state}.aim?.deskId === ${JSON.stringify(ana.seat)}`);
   await s.shot('t3-before-drop');
+  const dropAt = Date.now();
   await s.mouse('mouseReleased', anaAt.x, anaAt.y);
   const released = Date.now();
   await s.waitFor(`[...document.querySelectorAll('.toast')].some((t) => t.innerText.includes('"Add ana.txt" goes to Ana'))`, 1500);
@@ -326,7 +347,7 @@ export default async (s) => {
   assert(await s.eval("!!document.querySelector('[data-testid=tray-open]') && !!document.querySelector('[data-testid=tasks-chip]')"), 'and it says how to get the whole board back: an Open board button, and the Tasks chip still opens it');
   await s.waitFor(`${taskBy(titles.ana)}.stage === 'doing' && ${taskBy(titles.ana)}.assignees.includes(${JSON.stringify(ana.id)}) && ${taskBy(titles.ana)}.runs.length === 1`);
   const run = requestsTo(ana.id).find((m) => m.from === 'owner' && m.title === titles.ana);
-  assert(!!run && run.intent === 'work' && (await task('ana')).runs[0] === run.id, 'mail.jsonl has one work request from the owner to Ana, and it is the task\'s run');
+  assert(!!run && run.intent === 'work' && (await task('ana')).runs[0] === run.id && run.at - dropAt <= REACT_MS, `mail.jsonl has one work request from the owner to Ana, it is the task's run and it was posted ${run?.at - dropAt} ms after the drop (limit ${REACT_MS} ms)`);
   await s.waitFor(`${state}.taskTime[${JSON.stringify(anaTask.id)}]?.running.some((r) => r.employeeId === ${JSON.stringify(ana.id)})`, 20000);
   await openBoard();
   const cardOf = "[...document.querySelectorAll('.tb-col[data-stage=doing] .tb-card')].find((c) => c.innerText.includes('Add ana.txt'))";
@@ -359,6 +380,7 @@ export default async (s) => {
   assert((await aim()).verdict.to.id === pia.id && (await s.eval("document.querySelector('[data-testid=desk-aim]').innerText.trim()")) === 'Pia · PO', 'in first person too, the PO\'s desk is the aim and says Pia');
   await barIs('go', /^Let go to give it to Pia, the PO\./, 'in first person over the PO desk');
   await clear(piaFp, 'in first person over the PO desk', 1);
+  const poDropAt = Date.now();
   await s.mouse('mouseReleased', piaFp.x, piaFp.y);
   const poReleased = Date.now();
   let poReacted = null;
@@ -372,15 +394,16 @@ export default async (s) => {
   assert(poReacted !== null && poReacted <= REACT_MS, `the PO's bubble shows ${poReacted} ms after the drop (limit ${REACT_MS} ms)`);
   const poAssigns = await s.eval(`window.__sent.slice(${mark}).filter((m) => m.type === 'assign_task')`);
   assert(poAssigns.length === 1 && poAssigns[0].taskId === poTask.id && poAssigns[0].employeeId === pia.id, 'one assign_task, for the PO');
+  await s.waitFor(`${taskBy(titles.po)}.runs.length === 1`, 5000);
+  const poRun = requestsTo(pia.id).find((m) => m.from === 'owner' && m.title === titles.po);
+  assert(!!poRun && poRun.intent === 'work' && (await task('po')).runs[0] === poRun.id && poRun.at - poDropAt <= REACT_MS, `mail.jsonl has one work request from the owner to Pia, it is the task's run and it was posted ${poRun?.at - poDropAt} ms after the drop (limit ${REACT_MS} ms)`);
   await s.eval("__office.set({ camera: 'iso' })");
   await standAt(-4, 1.5);
-  await inReview(s, titles.ana, 'ana.txt');
-  const ana1 = await task('ana');
-  assert(ana1.lastOutcome.outcome === 'done' && ana1.assignees.length === 1 && ana1.runs.length === 1, 'Ana\'s task went to review on her one run');
-  await inReview(s, titles.po, 'po.txt');
-  const po1 = await task('po');
+  const ana1 = await finished('ana', ana, 'ana.txt');
+  assert(ana1.assignees.length === 1 && ana1.assignees[0] === ana.id, 'Ana\'s task stayed with Ana alone');
+  const po1 = await finished('po', pia, 'po.txt');
   const delegation = requestsTo(ana.id).find((m) => m.from === pia.id);
-  assert(po1.assignees.length === 1 && po1.assignees[0] === pia.id && po1.runs.length === 1 && !!delegation, 'the PO\'s task went to review: Pia took it and delegated a piece to Ana, as usual');
+  assert(po1.assignees.length === 1 && po1.assignees[0] === pia.id && !!delegation, 'the PO\'s task stayed with Pia, who delegated a piece to Ana, as usual');
   mark = await sentCount();
   const hireTask = await task('hire');
   await pickUp(titles.hire);
@@ -418,9 +441,8 @@ export default async (s) => {
     await s.sleep(200);
   }
   assert(await s.eval(`__office.state().avatars.find((a) => a.id === ${JSON.stringify(cleo.id)})?.seated`), 'and they walked in and sat down');
-  await inReview(s, titles.hire, 'hire.txt');
-  const hire1 = await task('hire');
-  assert(hire1.lastOutcome.outcome === 'done' && hire1.assignees.length === 1, 'the new hire finished the task on their first run');
+  const hire1 = await finished('hire', cleo, 'hire.txt');
+  assert(hire1.assignees.length === 1 && hire1.assignees[0] === cleo.id, 'the new hire finished the task on their first run, alone on it');
 
   // Three cards to three people in a row. The board is opened once, for the first card. After it the board stays folded as a
   // tray, and the next two cards are picked from the tray and carried to their desks, with no trip back to the board.
