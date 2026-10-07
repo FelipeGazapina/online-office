@@ -1,6 +1,6 @@
 // Verification hooks: the render loop can be throttled in background tabs, so tests advance the sim by hand.
 import { _roots } from '@react-three/fiber';
-import { Raycaster, Vector2, Vector3, type InstancedMesh, type Mesh, type Object3D } from 'three';
+import { Matrix4, Raycaster, Vector2, Vector3, type InstancedMesh, type Mesh, type Object3D } from 'three';
 import type { Building } from '../../shared/space/index.ts';
 import type { BlockId, Employee, EmployeeId, ModelId, ProjectBlock } from '../../shared/protocol.ts';
 import { DESKS_PER_BLOCK } from '../../shared/protocol.ts';
@@ -11,6 +11,8 @@ import { applyServerMessage } from './office.ts';
 import { loadMailFixture } from './hud/chat/fixture.ts';
 import { renders } from './hud/chat/renders.ts';
 import { KEYS_INTENT, runtime } from './runtime.ts';
+import { modelOf, PROP_DEFS } from './scene/building/models.ts';
+import { propOf } from './scene/props.ts';
 import { floorBase, tripTo, worldFor } from './world.ts';
 import { stepSim, tripEnd, walkTo } from './sim.ts';
 import { get, sendTap, set, setSetting, useStore } from './store.ts';
@@ -24,7 +26,7 @@ const intentState = () => {
 
 // Test-only: replaces the company in the renderer store with `count` fake employees spread over as many blocks as they
 // need, two thirds of them working so their avatars animate. Main never hears about them, so no snapshot may arrive after.
-function injectFake(count: number, floors = 1) {
+function injectFake(count: number, floors = 1, tops = 0) {
   const company = get().company;
   if (!company) throw new Error('no company yet');
   const colors = ['#e07a5f', '#3d85c6', '#81b29a', '#f2cc8f'];
@@ -37,7 +39,8 @@ function injectFake(count: number, floors = 1) {
   }));
   const desks = Array.from({ length: count }, (_, i) => ({ id: `fake-emp-${i}`, blockId: blocks[Math.floor(i / DESKS_PER_BLOCK)].id, desk: i % DESKS_PER_BLOCK, orchestrator: false }));
   const legacy = legacyBuilding(blocks.map((b) => ({ id: b.id, slot: b.slot })), desks);
-  const { building, seats } = floors > 1 ? stackStories(legacy.building, legacy.seats, desks, blocks, floors) : legacy;
+  const stacked = floors > 1 ? stackStories(legacy.building, legacy.seats, desks, blocks, floors) : legacy;
+  const { building, seats } = tops ? { building: decorate(stacked.building, tops), seats: stacked.seats } : stacked;
   const employees: Employee[] = Array.from({ length: count }, (_, i) => ({
     id: `fake-emp-${i}` as EmployeeId,
     name: `Fake ${i}`,
@@ -52,6 +55,24 @@ function injectFake(count: number, floors = 1) {
     hiredAt: Date.now(),
   }));
   set({ company: { ...company, blocks, employees }, building });
+}
+
+// Test-only: up to `count` small things spread over the bench desks, eight to a desk, in the free strips beside the computer.
+function decorate(b: Building, count: number): Building {
+  const spots: [string, number, number, 0 | 1 | 2 | 3][] = [['lamp_desk', 0, 0, 0], ['laptop', 0, 3, 2], ['books', 0, 5, 0], ['mug', 10, 1, 0], ['pen_cup', 11, 2, 0], ['desk_clock', 10, 4, 2], ['vase', 4, 6, 0], ['picture_frame', 7, 6, 2]];
+  let left = count;
+  const ops: BuildOp[] = b.stories.map((story, s) => {
+    const put: Item[] = [];
+    for (const desk of floorItems(story)) {
+      if (desk.def !== 'bench_desk') continue;
+      for (const [def, u, v, rot] of spots) if (left > 0 && left-- > 0) put.push({ id: `${desk.id}:top:${def}` as ItemId, def, on: desk.id, u, v, rot });
+    }
+    return { t: 'items' as const, story: s, put, del: [] };
+  });
+  const noCtx: SpaceContext = { blocks: new Set(), employees: new Map(), seats: new Map() };
+  const applied = applyOps(b, ops, noCtx);
+  if (!applied.ok) throw new Error(`could not decorate: ${applied.violations.map((v) => v.kind).join(', ')}`);
+  return applied.building;
 }
 
 // Test-only: the legacy office with `floors - 1` stories on top, each lot-wide with its own windows, an inner wall, stairs
@@ -204,6 +225,28 @@ function probe(name: string) {
   return found;
 }
 
+/** Where every instance of a def's model stands in the world, read from the meshes the scene draws: the way to tell that a thing is where its data says. */
+function instances(def: string) {
+  const root = _roots.values().next().value;
+  if (!root) return [];
+  const baked = PROP_DEFS[def];
+  const geometry = baked ? propOf(baked.prop).geometry : modelOf(def);
+  const m = new Matrix4();
+  const out: { x: number; y: number; z: number; yaw: number }[] = [];
+  root.store.getState().scene.traverse((o: Object3D) => {
+    const mesh = o as InstancedMesh;
+    if (!mesh.isInstancedMesh || mesh.geometry !== geometry) return;
+    mesh.updateWorldMatrix(true, false);
+    for (let i = 0; i < mesh.count; i++) {
+      mesh.getMatrixAt(i, m);
+      m.premultiply(mesh.matrixWorld);
+      const e = m.elements;
+      out.push({ x: +e[12].toFixed(3), y: +e[13].toFixed(3), z: +e[14].toFixed(3), yaw: +Math.atan2(e[8], e[0]).toFixed(3) });
+    }
+  });
+  return out;
+}
+
 export function installDebug() {
   (window as unknown as { __office: unknown }).__office = {
     step(seconds: number, fps = 30) {
@@ -247,6 +290,7 @@ export function installDebug() {
     },
     wallStats,
     probe,
+    instances,
     // The same walk a floor click starts, aimed at any story. The overview draws only the stories up to the owner's, so a click cannot reach a higher one yet.
     walkTo: (floor: number, x: number, z: number) => walkTo({ kind: 'point', at: { x, z }, floor }),
     injectFake,

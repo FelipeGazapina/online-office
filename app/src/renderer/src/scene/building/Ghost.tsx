@@ -6,7 +6,7 @@ import { Edges, Html } from '@react-three/drei';
 import { useEffect, useMemo, useState } from 'react';
 import { BackSide, BufferGeometry, CircleGeometry, Color, DoubleSide, Float32BufferAttribute, MeshBasicMaterial, MeshStandardMaterial, RingGeometry, ShaderMaterial, Shape, Vector2 } from 'three';
 import { mergeVertices } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
-import { cellBounds, ITEM_DEFS, STORY_H, WALL_HALF, YAW, footprint, rotateLocal, stairsInfo, type FloorItem, type Vec2 } from '../../../../shared/space/index.ts';
+import { cellBounds, ITEM_DEFS, STORY_H, WALL_HALF, YAW, footprint, rotateLocal, stairsInfo, type FloorItem, type TopItem, type TopPose, type Vec2 } from '../../../../shared/space/index.ts';
 import { draft, type Ghost } from '../../hud/build/state.ts';
 import { useStore } from '../../store.ts';
 import { modelOf } from './models.ts';
@@ -274,8 +274,8 @@ const discRim = new RingGeometry(0.46, 0.55, 28);
 
 // The curved arrow that says this piece turns: the keys , and . and the Turn button do it. It sits on the ghost's back
 // right corner, half on the footprint, in the verdict's colour, and grows with the piece: a plant gets a small one.
-function TurnMark({ box, ok }: { box: { x0: number; z0: number; x1: number; z1: number }; ok: boolean }) {
-  const radius = Math.min(0.9, Math.max(0.26, Math.min(box.x1 - box.x0, box.z1 - box.z0) * 0.3));
+function TurnMark({ box, ok, min = 0.26 }: { box: { x0: number; z0: number; x1: number; z1: number }; ok: boolean; min?: number }) {
+  const radius = Math.min(0.9, Math.max(min, Math.min(box.x1 - box.x0, box.z1 - box.z0) * 0.3));
   const at = { x: box.x1, z: box.z0 };
   return (
     <group position={[at.x, 0.09, at.z]} rotation-x={-Math.PI / 2} scale={radius / 0.46} userData={{ probe: 'turn-mark', ...at, r: radius, ok }}>
@@ -292,18 +292,21 @@ function TurnMark({ box, ok }: { box: { x0: number; z0: number; x1: number; z1: 
 }
 
 // The piece itself, tinted by the verdict, outlined, and again through whatever stands in front of it.
-function ItemModel({ item, ok }: { item: FloorItem; ok: boolean }) {
-  const f = footprint(ITEM_DEFS[item.def], item.rot);
-  const at: [number, number, number] = [item.x / 2 + f.w / 4, 0, item.z / 2 + f.d / 4];
-  const hull = hullOf(item.def);
+function Model({ def, at, yaw, ok }: { def: string; at: [number, number, number]; yaw: number; ok: boolean }) {
+  const hull = hullOf(def);
   return (
     <>
-      <mesh geometry={hull} material={RIM.ink} position={at} rotation-y={YAW[item.rot]} renderOrder={6} />
-      <mesh geometry={hull} material={ok ? RIM.ok : RIM.bad} position={at} rotation-y={YAW[item.rot]} renderOrder={7} userData={{ probe: 'ghost-rim', ok }} />
-      <mesh geometry={modelOf(item.def)} material={ok ? XRAY_OK : XRAY_BAD} position={at} rotation-y={YAW[item.rot]} renderOrder={8} />
-      <mesh geometry={modelOf(item.def)} material={ok ? MODEL_OK : MODEL_BAD} position={at} rotation-y={YAW[item.rot]} renderOrder={9} />
+      <mesh geometry={hull} material={RIM.ink} position={at} rotation-y={yaw} renderOrder={6} />
+      <mesh geometry={hull} material={ok ? RIM.ok : RIM.bad} position={at} rotation-y={yaw} renderOrder={7} userData={{ probe: 'ghost-rim', ok }} />
+      <mesh geometry={modelOf(def)} material={ok ? XRAY_OK : XRAY_BAD} position={at} rotation-y={yaw} renderOrder={8} />
+      <mesh geometry={modelOf(def)} material={ok ? MODEL_OK : MODEL_BAD} position={at} rotation-y={yaw} renderOrder={9} />
     </>
   );
+}
+
+function ItemModel({ item, ok }: { item: FloorItem; ok: boolean }) {
+  const f = footprint(ITEM_DEFS[item.def], item.rot);
+  return <Model def={item.def} at={[item.x / 2 + f.w / 4, 0, item.z / 2 + f.d / 4]} yaw={YAW[item.rot]} ok={ok} />;
 }
 
 const CAGE_HEIGHT = 2.4;
@@ -381,6 +384,33 @@ function ItemGhost({ item, ok, outline }: { item: FloorItem; ok: boolean; outlin
           <mesh position={[front.at.x, 0.07, front.at.z]} rotation={[-Math.PI / 2, 0, front.yaw]} material={ok ? MATERIALS.arrowGreen : MATERIALS.arrowRed} renderOrder={7}>
             <shapeGeometry args={[arrowShape]} />
           </mesh>
+        </>
+      )}
+    </>
+  );
+}
+
+// A small item on a desk, table or shelf: the usable part of the top faintly outlined, the item's footprint on it in the verdict's
+// colour, and the item itself standing there. A hovered one in the select tool only gets the footprint, in white.
+function TopGhost({ item, pose, ok, outline, surface }: { item: TopItem; pose: TopPose; ok: boolean; outline: boolean; surface?: { x0: number; z0: number; x1: number; z1: number; y: number } }) {
+  const color = outline ? WHITE : tone(ok);
+  const { x0, z0, x1, z1 } = pose.box;
+  return (
+    <>
+      {surface && !outline && (
+        <group position-y={surface.y - 0.052}>
+          <Rect x0={surface.x0} z0={surface.z0} x1={surface.x1} z1={surface.z1} color={WHITE} fill={MATERIALS.fillWhite} border={0.012} probe={{ probe: 'surface', y: surface.y, x0: surface.x0, z0: surface.z0, x1: surface.x1, z1: surface.z1 }} />
+        </group>
+      )}
+      <group position-y={pose.y - 0.05}>
+        <Rect x0={x0} z0={z0} x1={x1} z1={z1} color={color} fill={outline ? null : ok ? MATERIALS.padGreen : MATERIALS.padRed} border={0.014} ink={!outline} probe={{ probe: 'top-footprint', ok, host: item.on, x0, z0, w: x1 - x0, d: z1 - z0, y: pose.y }} />
+      </group>
+      {!outline && (
+        <>
+          <group position-y={pose.y - 0.045}>
+            <TurnMark box={pose.box} ok={ok} min={0.1} />
+          </group>
+          <Model def={item.def} at={[pose.x, pose.y, pose.z]} yaw={pose.yaw} ok={ok} />
         </>
       )}
     </>
@@ -478,6 +508,8 @@ function Shown({ g, level, stories }: { g: Ghost; level: number; stories: number
           {ITEM_DEFS[g.item.def].stairs && stories > level + 1 && <StairHole item={g.item} />}
         </>
       );
+    case 'top':
+      return <TopGhost item={g.item} pose={g.pose} ok={g.ok} outline={!!g.outline} surface={g.surface} />;
     case 'outline':
       return <ItemGhost item={g.item} ok outline />;
     case 'block':

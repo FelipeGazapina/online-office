@@ -1,9 +1,9 @@
 // The build catalog as data: which tab holds which entry, and what picking an entry does. Furniture entries come from
 // the space module's ITEM_DEFS, so a new def with a name here shows up in the catalog and nowhere else needs to change.
-import { FLOOR_PAINTS, ITEM_DEFS, WALL_STYLES } from '../../../../shared/space/index.ts';
+import { FLOOR_PAINTS, ITEM_DEFS, WALL_STYLES, placementOf } from '../../../../shared/space/index.ts';
 import type { BuildTool } from '../../store.ts';
 
-export type TabId = 'desks' | 'seating' | 'tables' | 'decor' | 'plants' | 'storage' | 'stairs' | 'walls' | 'floors' | 'openings';
+export type TabId = 'desks' | 'seating' | 'tables' | 'decor' | 'plants' | 'storage' | 'tabletop' | 'stairs' | 'walls' | 'floors' | 'openings';
 
 export type Entry =
   | { id: string; name: string; tab: TabId; kind: 'item'; def: string; teamed: boolean }
@@ -18,6 +18,7 @@ export const TABS: readonly { id: TabId; label: string }[] = [
   { id: 'decor', label: 'Decor' },
   { id: 'plants', label: 'Plants' },
   { id: 'storage', label: 'Storage' },
+  { id: 'tabletop', label: 'Tabletop' },
   { id: 'stairs', label: 'Stairs' },
   { id: 'walls', label: 'Walls' },
   { id: 'floors', label: 'Floors' },
@@ -88,12 +89,27 @@ const furniture: readonly [string, string, TabId, boolean][] = [
   ['pod_credenza', 'Credenza', 'storage', false],
   ['pod_shelf', 'Book shelf', 'storage', false],
   ['pod_boxes', 'Supply boxes', 'storage', false],
+  ['laptop', 'Laptop', 'tabletop', false],
+  ['books', 'Books', 'tabletop', false],
+  ['papers', 'Papers', 'tabletop', false],
+  ['mug', 'Mug', 'tabletop', false],
+  ['picture_frame', 'Picture frame', 'tabletop', false],
+  ['vase', 'Vase', 'tabletop', false],
+  ['pen_cup', 'Pen cup', 'tabletop', false],
+  ['desk_clock', 'Desk clock', 'tabletop', false],
+  ['trophy', 'Trophy', 'tabletop', false],
   ['stairs', 'Stairs', 'stairs', false],
 ];
+
+// Furniture that also stands on a surface is listed in the Tabletop tab as well as under its own, so the owner finds a lamp or a plant where
+// they look for things to put on a desk. The second entry is the same def; a search lists each def once.
+export const TOP_PREFIX = 'tabletop:';
+const ALSO_ON_TOPS: readonly string[] = furniture.map(([def]) => def).filter((def) => placementOf(ITEM_DEFS[def]) === 'both' && ITEM_DEFS[def].top!.w * ITEM_DEFS[def].top!.d <= 16);
 
 const tool = (id: string, name: string, tab: TabId, t: BuildTool, icon: 'wall' | 'room' | 'door' | 'window' | 'arch'): Entry => ({ id, name, tab, kind: 'tool', tool: t, icon });
 
 export const ENTRIES: readonly Entry[] = [
+  ...ALSO_ON_TOPS.map((def): Entry => ({ id: `${TOP_PREFIX}${def}`, name: furniture.find(([d]) => d === def)![1], tab: 'tabletop', kind: 'item', def, teamed: false })),
   ...furniture.map(([def, name, tab, teamed]): Entry => ({ id: def, name, tab, kind: 'item', def, teamed })),
   tool('wall', 'Wall', 'walls', { kind: 'wall' }, 'wall'),
   tool('room', 'Room', 'walls', { kind: 'room' }, 'room'),
@@ -112,6 +128,8 @@ function label(name: string): string {
 /** Footprint of a furniture entry in meters, for the card caption. */
 export function footprintText(def: string): string {
   const d = ITEM_DEFS[def];
+  // What only stands on a surface is measured on it, in centimeters: a mug is 13 by 13.
+  if (d.top && placementOf(d) === 'surface') return `${Math.round(d.top.w * 12.5)} × ${Math.round(d.top.d * 12.5)} cm`;
   const fmt = (n: number) => String(n / 2);
   return `${fmt(d.w)} × ${fmt(d.d)} m`;
 }
@@ -120,7 +138,7 @@ export function footprintText(def: string): string {
 export function visibleEntries(tab: TabId, search: string, searching: boolean): readonly Entry[] {
   const words = search.trim().toLowerCase().split(/\s+/).filter(Boolean);
   if (!searching && !words.length) return ENTRIES.filter((e) => e.tab === tab);
-  return ENTRIES.filter((e) => {
+  return ENTRIES.filter((e) => !e.id.startsWith(TOP_PREFIX)).filter((e) => {
     const hay = `${e.name} ${TABS.find((t) => t.id === e.tab)?.label ?? ''} ${e.kind === 'item' ? e.def : ''}`.toLowerCase();
     return words.every((w) => hay.includes(w));
   });

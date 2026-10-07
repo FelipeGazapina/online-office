@@ -142,7 +142,7 @@ export default async function (s) {
   const cardCount = await s.eval(`document.querySelectorAll('.bh-card').length`);
   assert(cardCount >= 8, `the catalog lists its desks (${cardCount} cards)`);
   const labels = await s.eval(`[...document.querySelectorAll('.bh-tab')].map((t) => t.textContent.trim())`);
-  assert(labels.length === 10 && labels.every((l) => l.length > 2), `every category tab shows its name (${labels.join(', ')})`);
+  assert(labels.length === 11 && labels.every((l) => l.length > 2), `every category tab shows its name (${labels.join(', ')})`);
   for (const tab of ['desks', 'seating', 'tables', 'decor', 'plants', 'storage']) {
     await clickSel(`[data-tab="${tab}"]`);
     const n = await s.eval(`document.querySelectorAll('.bh-card').length`);

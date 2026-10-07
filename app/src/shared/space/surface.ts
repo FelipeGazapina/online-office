@@ -94,6 +94,15 @@ export function topViolation(item: TopItem, def: ItemDef, host: Item | undefined
   return null;
 }
 
+/** The usable part of a host's top in the world, in meters, and how high it is. */
+export function surfaceBox(host: FloorItem, def: ItemDef): { x0: number; z0: number; x1: number; z1: number; y: number } | null {
+  const s = def.surface;
+  if (!s) return null;
+  const a = hostToWorld(host, def, s.rect.u0, s.rect.v0);
+  const b = hostToWorld(host, def, s.rect.u1, s.rect.v1);
+  return { x0: Math.min(a.x, b.x), z0: Math.min(a.z, b.z), x1: Math.max(a.x, b.x), z1: Math.max(a.z, b.z), y: s.height };
+}
+
 /** A turn in the world as the turn relative to a host. */
 export const relativeRot = (world: Rot, host: FloorItem): Rot => ((((world - host.rot) % 4) + 4) % 4) as Rot;
 
@@ -156,4 +165,11 @@ export function topItemAt(story: Story, ray: PickRay): TopItem | null {
     if (t0 <= t1 && (!best || t0 < best.t)) best = { item, t: t0 };
   }
   return best?.item ?? null;
+}
+
+/** The way an item faces in the world: its own turn on the floor, the host's and its own on a top. */
+export function worldRotOf(story: Story, item: Item): Rot {
+  if (!isTop(item)) return item.rot;
+  const host = story.items.find((i) => i.id === item.on);
+  return host ? (((host.rot + item.rot) % 4) as Rot) : item.rot;
 }

@@ -122,10 +122,10 @@ const tabletop: ItemDef[] = [
   small('papers', 3, 2, 0.03),
   small('mug', 1, 1, 0.1),
   small('picture_frame', 2, 1, 0.24),
-  small('vase', 2, 2, 0.4),
+  small('vase', 2, 2, 0.42),
   small('pen_cup', 1, 1, 0.15),
   small('desk_clock', 2, 1, 0.14),
-  small('trophy', 2, 2, 0.3),
+  small('trophy', 2, 2, 0.28),
 ];
 
 // What a project block brings besides its desks, board, terminal and sign. The kit places these around the block's middle
@@ -154,7 +154,7 @@ const pod: ItemDef[] = [
 const bench: Surface = { height: 0.73, rect: { u0: 0, v0: 0, u1: 12, v1: 8 }, blocked: [{ u0: 4, v0: 1, u1: 10, v1: 4 }, { u0: 3, v0: 5, u1: 9, v1: 6 }] };
 const SURFACES: Readonly<Record<string, Surface>> = {
   bench_desk: bench,
-  po_desk: { ...bench, blocked: [...bench.blocked!, { u0: 1, v0: 1, u1: 4, v1: 3 }] },
+  po_desk: { ...bench, blocked: [...bench.blocked!, { u0: 0, v0: 1, u1: 4, v1: 3 }] },
   standing_desk: { height: 1.1, rect: { u0: 0, v0: 0, u1: 12, v1: 8 }, blocked: [{ u0: 3, v0: 5, u1: 9, v1: 6 }, { u0: 4, v0: 1, u1: 8, v1: 3 }] },
   meeting_table: { height: 0.75, rect: { u0: 1, v0: 1, u1: 23, v1: 11 } },
   meeting_round: { height: 0.76, rect: { u0: 3, v0: 3, u1: 13, v1: 13 } },
@@ -178,7 +178,6 @@ const ALSO_ON_TOP: Readonly<Record<string, { placement: Placement; top: { w: num
   lamp_desk: { placement: 'both', top: { w: 3, d: 3 } },
   plant_small: { placement: 'both', top: { w: 3, d: 3 } },
   plant_cactus: { placement: 'both', top: { w: 4, d: 4 } },
-  plant_fern: { placement: 'both', top: { w: 4, d: 4 } },
   coffee_machine: { placement: 'both', top: { w: 4, d: 3 } },
 };
 

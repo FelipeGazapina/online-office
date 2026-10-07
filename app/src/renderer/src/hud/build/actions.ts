@@ -1,8 +1,8 @@
-import { blockItems, cellBounds, CELL, ITEM_DEFS, type BuildOp, type FloorItem, type Item, type ItemId, type Rot, type Vec2 } from '../../../../shared/space/index.ts';
+import { blockItems, cellBounds, CELL, ITEM_DEFS, type BuildOp, type FloorItem, type Item, type ItemId, type Rot, type TopItem, type Vec2 } from '../../../../shared/space/index.ts';
 import { leaveComputer } from '../../computer.ts';
 import { runtime } from '../../runtime.ts';
 import { get, send, set, setSetting, useStore, type BuildState, type BuildTool } from '../../store.ts';
-import { ENTRIES, type Entry, type TabId } from './catalog.ts';
+import { ENTRIES, TOP_PREFIX, type Entry, type TabId } from './catalog.ts';
 import { BUILD_DIST, buildView, modifiers, setGhost } from './state.ts';
 
 const FRESH: Omit<BuildState, 'level'> = { tool: { kind: 'select' }, tab: 'desks', search: '', searching: false, peek: null, fill: false, paint: 1, style: 0, wallsMode: 'cutaway' };
@@ -156,6 +156,13 @@ export function newItemId(def: string): ItemId {
   return `${def}:b${Date.now().toString(36)}${(serial++).toString(36)}` as ItemId;
 }
 
+/** The small item as the tool would stand it on `host`, new or moved. */
+export function toolTopItem(tool: Extract<BuildTool, { kind: 'item' }>, host: ItemId, spot: { rot: Rot; u: number; v: number }, existing: Item | null): TopItem {
+  const item: TopItem = { id: tool.carry ?? newItemId(tool.def), def: tool.def, on: host, ...spot };
+  if (existing?.tint !== undefined) item.tint = existing.tint;
+  return item;
+}
+
 /** The item as the tool would put it at the cell, new or moved. */
 export function toolItem(tool: Extract<BuildTool, { kind: 'item' }>, at: { x: number; z: number }, existing: Item | null): FloorItem {
   const item: FloorItem = { id: tool.carry ?? newItemId(tool.def), def: tool.def, x: at.x, z: at.z, rot: tool.rot };
@@ -165,7 +172,7 @@ export function toolItem(tool: Extract<BuildTool, { kind: 'item' }>, at: { x: nu
 }
 
 export function entryOfDef(def: string): Entry | undefined {
-  return ENTRIES.find((e) => e.kind === 'item' && e.def === def);
+  return ENTRIES.find((e) => e.kind === 'item' && e.def === def && !e.id.startsWith(TOP_PREFIX));
 }
 
 export function holdModifier(code: string, down: boolean) {
