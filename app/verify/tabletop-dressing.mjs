@@ -86,11 +86,9 @@ const TABLE = [
 ];
 
 const SHELF = [
-  ['books_row', 1, 0, { look: 0 }],
-  ['succulent', 6, 0, { look: 2 }],
-  ['frame_small', 9, 0, { look: 2, ang: -6 }],
-  ['candle', 11, 0, { look: 1 }],
-  ['cat_statue', 13, 1, { look: 1 }],
+  ['vg_stack', 1, 0, { look: 0 }],
+  ['vg_runner', 4, 0, { look: 2 }],
+  ['frame_small', 13, 1, { look: 2, ang: -6 }],
 ];
 
 /** Every spot this plan fills, as ops for a story: which hosts are dressed and with what. Hosts that are missing are skipped. */
