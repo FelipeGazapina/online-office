@@ -37,20 +37,20 @@ const BACK: readonly (readonly Spot[])[] = [
   [['books_row', 0, 0, { rot: 2, look: 1 }], ['cat_statue', 3, 0, { rot: 3, look: 1 }]],
   [['magazine', 0, 0, { rot: 1, ang: -6 }], ['takeaway_cup', 1, 0, { lvl: 1, ang: 20 }]],
   [['laptop', 0, 0, { rot: 2, ang: 6 }], ['sticky_notes', 3, 0, { look: 2 }]],
-  [['lunchbox', 0, 0, { ang: -4 }], ['tumbler', 3, 0]],
+  [['snack_bowl', 0, 0, { look: 1 }], ['tumbler', 3, 0]],
   [['pen_cup', 0, 0], ['stapler', 1, 1, { ang: 8 }], ['calculator', 3, 0, { ang: -6 }]],
   [['tablet', 0, 1, { rot: 2, ang: -6 }], ['headphones', 2, 0, { ang: 30 }]],
   [['letter_tray', 0, 0, { rot: 2 }], ['candle', 3, 0, { look: 3 }]],
   [['snack_bowl', 0, 0], ['water_bottle', 2, 0]],
 ];
 
-// Beside the keyboard, where the hands work: flat things at an angle, with something standing on them.
+// Beside the keyboard on the side of low u, where the hands work: flat things at an angle, with something standing on them. (u grows toward the mouse.)
 const LEFT: readonly (readonly Spot[])[] = [
   [['papers', 0, 1, { ang: -12 }], ['mug', 1, 1, { lvl: 1, ang: 40 }], ['pen_cup', 3, 3]],
   [['notebook', 0, 0, { ang: 8 }], ['phone_stand', 1, 0, { lvl: 1, rot: 2, ang: -15 }], ['glasses', 0, 3, { ang: 25 }], ['sticky_notes', 3, 2, { ang: -10 }]],
   [['folder', 0, 2, { ang: -5 }], ['notebook', 0, 2, { lvl: 1, ang: 14, look: 2 }], ['sticky_notes', 2, 2, { lvl: 2, ang: 20 }], ['water_bottle', 3, 0]],
   [['magazine', 0, 1, { ang: -9 }], ['takeaway_cup', 1, 2, { lvl: 1 }], ['headphones', 2, 3, { ang: 30 }]],
-  [['lunchbox', 0, 1, { ang: 4 }], ['snack_bowl', 0, 3], ['tumbler', 3, 1]],
+  [['snack_bowl', 0, 3], ['tumbler', 3, 1], ['sticky_notes', 0, 1, { ang: 30, look: 2 }], ['takeaway_cup', 1, 1, { look: 2 }]],
   [['tablet', 0, 0, { ang: -8 }], ['papers', 0, 2, { ang: 6, look: 1 }], ['pen_cup', 3, 2], ['stapler', 0, 4, { ang: 12 }]],
   [['desk_organizer', 0, 2], ['sticky_notes', 3, 0, { ang: 16 }], ['calculator', 3, 3]],
   [['letter_tray', 0, 1, { ang: -4 }], ['coaster', 3, 1], ['stapler', 0, 4, { ang: -10 }]],
@@ -59,10 +59,10 @@ const LEFT: readonly (readonly Spot[])[] = [
   [['notebook', 0, 3, { ang: -6, look: 1 }], ['mug', 1, 3, { lvl: 1, look: 3, ang: 60 }], ['puzzle_cube', 3, 1, { ang: 20 }]],
   [['magazine', 0, 0, { rot: 1, ang: 7, look: 2 }], ['coaster', 3, 2, { look: 1 }], ['rubber_duck', 3, 3, { ang: -30 }]],
   [['papers', 0, 3, { ang: 8 }], ['glasses', 0, 3, { lvl: 1, ang: -18 }], ['water_bottle', 3, 0, { look: 1 }]],
-  [['lunchbox', 0, 3, { ang: -4, look: 1 }], ['stapler', 0, 0, { ang: 9 }], ['sticky_notes', 3, 3, { look: 3 }]],
+  [['folder', 0, 3, { ang: -4, look: 1 }], ['stapler', 0, 0, { ang: 9 }], ['sticky_notes', 3, 3, { look: 3 }]],
 ];
 
-// Beside the mouse: the thing that is drunk, eaten or listened to.
+// Beside the mouse, on the side of high u: the thing that is drunk, eaten or listened to.
 const RIGHT: readonly (readonly Spot[])[] = [
   [['water_bottle', 10, 0], ['coaster', 10, 2], ['mug', 10, 2, { lvl: 1, ang: -30 }]],
   [['notebook', 10, 0, { rot: 1, ang: -6 }], ['mug', 10, 0, { lvl: 1, look: 1, ang: 90 }], ['tumbler', 11, 4]],
@@ -72,7 +72,7 @@ const RIGHT: readonly (readonly Spot[])[] = [
   [['trophy', 10, 0], ['coaster', 10, 3, { look: 2 }], ['takeaway_cup', 10, 3, { lvl: 1, look: 2 }]],
   [['phone_stand', 10, 0, { rot: 2, ang: 14 }], ['sticky_notes', 11, 2, { ang: 25 }], ['water_bottle', 10, 3, { look: 2 }]],
   [['rubber_duck', 11, 0, { ang: -20 }], ['tumbler', 10, 2, { look: 3 }], ['puzzle_cube', 11, 4, { ang: 35 }]],
-  [['lunchbox', 10, 0, { rot: 1, ang: 5 }], ['speaker', 10, 3]],
+  [['tumbler', 10, 0, { look: 2 }], ['speaker', 10, 3]],
 ];
 
 // In front of the keyboard, along the edge the sitter leans on, one thing deep.
@@ -81,7 +81,7 @@ const FRONT: readonly (readonly Spot[])[] = [
   [['sticky_notes', 8, 0, { ang: 20 }], ['pen_cup', 10, 0, { look: 1 }]],
   [['stapler', 6, 0, { ang: -5 }]],
   [['tablet', 5, 0, { ang: 6 }]],
-  [['cable_tray', 5, 0]],
+  [['phone_stand', 5, 0, { rot: 2, ang: 12 }], ['puzzle_cube', 8, 0, { ang: 30, look: 1 }]],
 ];
 
 export const ZONES: readonly Zone[] = [
