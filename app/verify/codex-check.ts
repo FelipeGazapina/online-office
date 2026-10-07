@@ -331,6 +331,7 @@ function scripted(sessionId?: string, policy: PermissionPolicy = { mode: 'ask', 
     employee,
     host,
     terminal,
+    interrupted: () => interrupted,
     asked,
     said,
     logs,
@@ -406,10 +407,18 @@ app().notify('item/started', item('someone-elses-thread', command('c9', 'rm -rf 
 await sleep(30);
 check(!ana.logs.some((l) => l.includes('rm -rf')), 'an event for a thread that is not this employee is not theirs');
 
+const kinds = ana.terminal.map((e) => (e.k === 'tool' ? `tool:${e.name}` : e.k));
+check(kinds.join() === 'banner,prompt,tool:Bash,tool:Patch,tool:mcp__office__ask_owner,tool:mcp__office__remember,text,text', `the terminal gets the prompt, each call in Claude Code's names and the streamed text (${kinds.join()})`);
+check(ana.terminal[1]!.k === 'prompt' && ana.terminal[1]!.text === 'do the thing' && ana.terminal.some((e) => e.k === 'tool' && e.name === 'Bash' && e.input.command === 'npm test -- --watch=false'), 'the shell command comes without the shell wrapper');
+app().notify('item/completed', item(first.threadId, { ...command('c1', "/bin/zsh -lc 'npm test -- --watch=false'"), exitCode: 1, aggregatedOutput: 'FAIL a.test.ts' }, first.turnId));
+await until(() => ana.terminal.some((e) => e.k === 'result'));
+check(JSON.stringify(ana.terminal.find((e) => e.k === 'result')) === JSON.stringify({ k: 'result', id: 'c1', ok: false, text: 'FAIL a.test.ts' }), 'a command that exited non-zero is a failed result with its output');
+
 console.log('\n# a turn ends');
 app().notify('item/completed', item(first.threadId, message('a2', 'All tests pass.'), first.turnId));
 app().notify('turn/completed', turnDone(first.threadId, first.turnId, 'completed', [message('a2', 'All tests pass.')]));
 await until(() => ana.employee.status.kind === 'idle');
+check(ana.terminal.at(-1)!.k === 'end' && (ana.terminal.at(-1) as { how: string }).how === 'done', 'the terminal says the turn is done');
 check(ana.xp() === 1 && ana.employee.activity === 'All tests pass.' && ana.logs.includes('Finished: All tests pass.'), 'a finished turn earns the XP, and the desk and log say what it ended with');
 check(ana.said.join('|') === 'I will run the tests.|All tests pass.', 'and the last message is not spoken twice');
 
@@ -516,6 +525,17 @@ const stopFrames = app().received.slice(before).map((r) => r.method).filter((m) 
 check(stopFrames.join() === 'turn/interrupt,thread/backgroundTerminals/list,thread/backgroundTerminals/terminate,turn/start', 'a hard stop interrupts the turn, ends the commands it left running, and only then sends the message as a new turn', stopFrames.join());
 check(app().last('thread/backgroundTerminals/terminate').processId === 'p-77' && app().last('turn/interrupt').turnId === running.turnId, 'naming the turn and the command');
 check(ana.employee.status.kind === 'working' && ana.xp() === 1, 'the interrupted turn is not a finished task, and the employee is still working');
+check(ana.terminal.some((e) => e.k === 'end' && e.how === 'interrupted') && ana.terminal.at(-1)!.k === 'prompt', 'the terminal shows the stop and then what the boss said instead');
+
+// Esc on the terminal is the same stop with nothing after it: the turn ends as interrupted.
+const esc = { threadId: first.threadId, turnId: `turn-${turns}` };
+app().notify('turn/started', { threadId: esc.threadId, turn: { id: esc.turnId, status: 'inProgress' } });
+await sleep(20);
+const starts = app().sent('turn/start').length;
+ana.session.interrupt?.();
+await until(() => ana.interrupted() === 1);
+check(ana.interrupted() === 1 && app().sent('turn/start').length === starts && app().last('turn/interrupt').turnId === esc.turnId, 'Esc interrupts the turn, reports it ended as interrupted, and starts nothing');
+check(ana.terminal.at(-1)!.k === 'end' && (ana.terminal.at(-1) as { how: string }).how === 'interrupted', 'and the terminal says so');
 app().handlers.set('turn/interrupt', () => ({}));
 app().handlers.set('thread/backgroundTerminals/list', () => ({ data: [] }));
 

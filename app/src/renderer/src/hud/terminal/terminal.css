@@ -60,8 +60,7 @@
 }
 .term-prompt textarea::placeholder { color: #6b6b72; }
 .term-status { display: flex; justify-content: space-between; gap: 1em; color: #8e8e93; white-space: pre; padding-left: 2ch; }
-.term-mode { color: #b4a7f5; }
-.term-status .term-mode:not(:first-child) { color: inherit; }
+.term-dim { color: #8e8e93; }
 .term-who { color: #6b6b72; }
 .term-dialog { border-top: 1px solid #b4a7f5; margin-top: 6px; padding: 6px 0 4px 1ch; }
 .term-title { color: #b4a7f5; font-weight: 700; }

@@ -36,7 +36,8 @@ export type TermEvent =
   | { k: 'tool'; id: string; name: string; input: Record<string, unknown> }
   | { k: 'result'; id: string; ok: boolean; text: string; data?: unknown }
   // The turn is over. `interrupted` is the owner pressing Esc.
-  | { k: 'end'; how: 'done' | 'interrupted' | 'error'; message?: string }
+  // `ms` is how long the turn took.
+  | { k: 'end'; how: 'done' | 'interrupted' | 'error'; message?: string; ms?: number }
   | { k: 'note'; text: string; tone?: Tone }
   | { k: 'tokens'; out: number }
   // The header: which harness, which model, where.
@@ -232,6 +233,15 @@ const TOOLS: Record<string, ToolStyle> = {
     },
   },
   Task: { label: () => 'Task', arg: (f) => cut(flat(str(f.input.description)), 100), done: (_f, r) => head(r.text, undefined, 2) },
+};
+// A change a harness reports by the files it touched and not by what it changed in them.
+TOOLS.Patch = {
+  label: () => 'Update',
+  arg: (f) => cut(((Array.isArray(f.input.paths) ? f.input.paths : [str(f.input.file_path)]).filter((p): p is string => typeof p === 'string' && !!p)).map((p) => relPath(p, f.cwd)).join(', ') || 'files', 100),
+  done: (f) => {
+    const n = Array.isArray(f.input.paths) ? f.input.paths.length : 1;
+    return [[sp('Updated ', 'fg'), sp(String(n), 'bright', { b: true }), sp(n === 1 ? ' file' : ' files', 'fg')]];
+  },
 };
 TOOLS.MultiEdit = TOOLS.Edit!;
 TOOLS.NotebookEdit = TOOLS.Edit!;
@@ -437,6 +447,9 @@ export class TerminalBuffer {
         this.live = { tokens: 0 };
         if (e.how === 'interrupted') {
           if (!said) this.add([line([sp('  ⎿  ', 'dim'), ...interruptedRow()])]);
+        } else if (e.how === 'done' && e.ms !== undefined && e.ms >= 5000) {
+          // A turn that took a while says how long, with a verb in the past, as Claude Code does.
+          this.add([line([sp('✻ ', 'accent'), sp(`${PAST[Math.floor(e.ms / 1000) % PAST.length]} for ${secsText(e.ms)}`, 'dim')])]);
         } else if (e.how === 'error') this.add([line([sp('  ⎿  ', 'dim'), sp(`Error: ${cut(flat(e.message ?? 'The turn failed'), 300)}`, 'err')], { hang: 5 })]);
         return;
       }
@@ -574,6 +587,7 @@ const VERBS = [
   'Puzzling', 'Reticulating', 'Ruminating', 'Simmering', 'Spinning', 'Stewing', 'Synthesizing', 'Transmuting', 'Vibing', 'Working',
 ];
 
+const PAST = ['Baked', 'Brewed', 'Churned', 'Cogitated', 'Cooked', 'Crunched', 'Pondered', 'Simmered', 'Worked'];
 export const verbOf = (startedAt: number): string => VERBS[Math.abs(Math.floor(startedAt / 1000)) % VERBS.length]!;
 export const glyphOf = (now: number): string => GLYPHS[Math.floor(now / 160) % GLYPHS.length]!;
 
@@ -647,7 +661,12 @@ export type ScreenArgs = {
 };
 
 // What Claude Code's status line says of a permission mode. `ask` is its default mode, which says nothing.
-const MODE_LINE: Record<PermissionMode, string | undefined> = { inherit: 'accept edits on', ask: undefined, auto: 'auto mode on', yolo: 'bypass permissions on' };
+export const MODE_LINE: Record<PermissionMode, { glyph: string; text: string; tone: Tone }> = {
+  inherit: { glyph: '▸▸', text: 'accept edits on', tone: 'violet' },
+  ask: { glyph: '⏸', text: 'manual mode on', tone: 'dim' },
+  auto: { glyph: '▸▸', text: 'auto mode on', tone: 'warn' },
+  yolo: { glyph: '▸▸', text: 'bypass permissions on', tone: 'err' },
+};
 
 // The bottom of the screen: what the harness is doing, a question waiting on the owner, the prompt.
 export function footerOf(a: ScreenArgs): Row[] {
@@ -671,7 +690,7 @@ export function footerOf(a: ScreenArgs): Row[] {
   out.push(ruleRow(cols), { spans: [sp('❯ ', 'dim'), sp(a.draft ?? '', 'bright'), sp('█', 'dim')] }, ruleRow(cols));
   if (!a.compact) {
     const mode = a.mode ? MODE_LINE[a.mode] : undefined;
-    const left: Span[] = mode ? [sp('  ▸▸ ', 'violet'), sp(`${mode} `, 'violet'), sp('(shift+tab to cycle)', 'dim')] : [sp('  ? for shortcuts', 'dim')];
+    const left: Span[] = mode ? [sp(`  ${mode.glyph} ${mode.text} `, mode.tone), sp(mode.glyph === '⏸' ? '· ? for shortcuts' : '(shift+tab to cycle)', 'dim')] : [sp('  ? for shortcuts', 'dim')];
     const right = [a.who, a.model].filter(Boolean).join(' · ');
     const used = left.reduce((n, x) => n + x.t.length, 0);
     out.push({ spans: [...left, sp(' '.repeat(Math.max(1, cols - used - right.length - 1)) + right, 'dim')] });

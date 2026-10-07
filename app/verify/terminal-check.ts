@@ -112,6 +112,12 @@ check(screen.length === 14 && screen[0]!.includes('▐▛███▜▌') && sc
 check(screen.some((r) => r.startsWith('  ? for shortcuts') && r.endsWith('Ana · haiku')), 'the status line names who it is');
 const edits = text(screenOf({ blocks: empty.all(), live: empty.live, status: idle, now: 0, cols: 70, rows: 10, mode: 'inherit' }));
 check(edits.some((r) => r.startsWith('  ▸▸ accept edits on (shift+tab to cycle)')), 'and the mode the employee works in, in Claude Code words');
+const manual = text(screenOf({ blocks: empty.all(), live: empty.live, status: idle, now: 0, cols: 70, rows: 10, mode: 'ask' }));
+check(manual.some((r) => r.startsWith('  ⏸ manual mode on · ? for shortcuts')), 'an employee who asks for everything is in manual mode');
+const took = new TerminalBuffer('/work/repo');
+took.apply({ k: 'end', how: 'done', ms: 41_000 });
+took.apply({ k: 'end', how: 'done', ms: 2_000 });
+check(took.all().length === 2 && /^✻ [A-Z][a-z]+ for 41s$/.test(text(took.all()[1]!.lines)[0]!), 'a turn that took a while says for how long, and a short one says nothing');
 const working: EmployeeStatus = { kind: 'working', task: 't', startedAt: 10_000 };
 screen = text(screenOf({ blocks: t.all(), live: { tokens: 1234 }, status: working, now: 16_000, cols: 80, rows: 20 }));
 const spin = screen.find((r) => /esc to interrupt/.test(r));

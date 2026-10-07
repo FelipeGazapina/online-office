@@ -9,6 +9,7 @@ import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/
 import { covers, isAllow, ruleFor, sameRule, type PermissionBody } from '../src/shared/permissions.ts';
 import { SEAT_CEILING, type AllowRule, type Company, type Employee, type EmployeeId, type EmployeeStatus, type HarnessStatus, type ModelCatalog, type ModelId, type PermissionPolicy, type Provider, type Question, type Subagent } from '../src/shared/protocol.ts';
 import type { Message } from '../src/shared/mail.ts';
+import type { TerminalPush } from '../src/shared/terminal.ts';
 import { HARNESSES } from '../src/main/office/adapters/index.ts';
 import type { SessionHost } from '../src/main/office/adapters/types.ts';
 import { Office } from '../src/main/office/company.ts';
@@ -30,7 +31,7 @@ const mcp = await startOfficeMcp();
 const acker = { warm() {}, ack: () => undefined, stop() {} };
 
 // What a harness adapter does, reduced to its calls into the host.
-type Fake = { host: SessionHost; assigned: string[]; interjected: string[]; models: string[]; policies: PermissionPolicy[]; notices: string[]; stopped: boolean };
+type Fake = { host: SessionHost; assigned: string[]; shown: (string | undefined)[]; interjected: string[]; interrupts: number; models: string[]; policies: PermissionPolicy[]; notices: string[]; stopped: boolean };
 const fakes: Fake[] = [];
 let listing: { resolve(catalog: ModelCatalog): void; reject(err: Error): void } | undefined;
 let listCalls = 0;
@@ -42,15 +43,17 @@ HARNESSES['claude-code'] = {
     return new Promise((resolve, reject) => void (listing = { resolve, reject }));
   },
   session: (host) => {
-    const fake: Fake = { host, assigned: [], interjected: [], models: [], policies: [], notices: [], stopped: false };
+    const fake: Fake = { host, assigned: [], shown: [], interjected: [], interrupts: 0, models: [], policies: [], notices: [], stopped: false };
     fakes.push(fake);
     return {
-      assign: (task, title) => {
+      assign: (task, title, shown) => {
         fake.assigned.push(task);
+        fake.shown.push(shown);
         host.setStatus({ kind: 'working', task: title ?? task, startedAt: Date.now() });
         host.setActivity('Getting started');
       },
       interject: (text) => void fake.interjected.push(text),
+      interrupt: () => void fake.interrupts++,
       setModel: (model) => void fake.models.push(model),
       permissionsChanged: (policy) => void fake.policies.push(policy),
       rulesChanged: (text) => void fake.notices.push(text),
@@ -797,6 +800,57 @@ console.log('\n# the owner\'s words: a question or a work order');
   late('help');
   await sleep(10);
   check(!o.snapshot().mail.tail.some((m) => m.kind === 'request' && m.text === 'which commit is this?') && fakes.length === sessions, 'an answer that arrives after shutdown posts nothing and starts no session')
+}
+
+console.log('\n# the terminals');
+{
+  const pushes: { id: string; push: TerminalPush }[] = [];
+  process.env.OFFICE_START_LEVEL = '5';
+  const termOffice = new Office(join(dir, 'term-company.json'), { 'claude-code': { kind: 'ready', version: 'fake' }, codex: { kind: 'missing' }, hermes: { kind: 'missing' } }, { ...noBuild, changed() {}, said() {}, log() {}, terminal: (id, push) => void pushes.push({ id, push }) }, { mcp, memory, acker });
+  process.env.OFFICE_START_LEVEL = '3';
+  termOffice.handle({ type: 'create_block', cwd: repo });
+  const tb = termOffice.snapshot().company.blocks[0]!.id;
+  const before = fakes.length;
+  termOffice.handle({ type: 'hire', provider: 'claude-code', blockId: tb, name: 'Tina' });
+  const tina = { fake: fakes[before]!, id: termOffice.snapshot().company.employees.find((e) => e.name === 'Tina')!.id };
+  await sleep(160);
+  const mine = () => pushes.filter((p) => p.id === tina.id);
+  check(mine().length === 1 && mine()[0]!.push.reset === true && mine()[0]!.push.blocks[0]!.n === 0, 'a hired employee has a terminal with its header, sent once');
+  check(pushes.every((p) => p.push.reset !== undefined || p.id === tina.id), 'and nobody else was sent anything');
+
+  termOffice.handle({ type: 'post', to: tina.id, clientId: 'term-1', as: 'request', text: 'Create hello.txt with the word hi' });
+  check(tina.fake.shown.at(-1) === 'Create hello.txt with the word hi', 'the session is told what to echo as the prompt: the owner words, not the mailroom text');
+  check(/\[Request \w+ from the owner/.test(tina.fake.assigned.at(-1)!), 'while the model gets the mailroom text');
+  const sent = mine().length;
+  for (let i = 0; i < 60; i++) tina.fake.host.terminal({ k: 'text', id: 't', text: `word ${i}` });
+  await sleep(30);
+  check(mine().length === sent, 'a model writing is not sent word by word');
+  await sleep(150);
+  const last = mine().at(-1)!.push;
+  check(mine().length === sent + 1 && last.reset === undefined && last.blocks.length === 1 && last.blocks[0]!.lines[0]!.spans.map((x) => x.t).join('') === '● word 59', 'it is sent once a tenth of a second, with the block that changed and its last words');
+
+  termOffice.handle({ type: 'load_terminal' });
+  const full = mine().at(-1)!.push;
+  check(full.reset === true && full.blocks.length === 2, 'a window that just opened gets everything: the header and the text');
+
+  termOffice.handle({ type: 'interrupt', employeeId: tina.id });
+  check(tina.fake.interrupts === 1 && statusOf2(termOffice, tina.id) === 'working', 'Esc on someone at work reaches their session, and does not end the turn by itself');
+  tina.fake.host.taskInterrupted();
+  await sleep(10);
+  const reply = termOffice.snapshot().mail.tail.find((m) => m.kind === 'reply');
+  check(statusOf2(termOffice, tina.id) === 'idle' && reply?.kind === 'reply' && reply.outcome === 'failed' && /interrupted/i.test(reply.text), `the interrupted turn leaves them idle and settles what it served as failed with the reason (${reply?.kind === 'reply' ? `${reply.outcome}: ${reply.text}` : 'no reply'})`);
+  termOffice.handle({ type: 'interrupt', employeeId: tina.id });
+  check(tina.fake.interrupts === 1, 'Esc on someone with nothing to stop does nothing');
+
+  termOffice.handle({ type: 'fresh_session', employeeId: tina.id });
+  await sleep(160);
+  check(mine().at(-1)!.push.reset === true && mine().at(-1)!.push.blocks.length === 1, 'a fresh session starts a clean screen');
+  const quiet = pushes.length;
+  termOffice.handle({ type: 'fire', employeeId: tina.id });
+  tina.fake.host.terminal({ k: 'text', id: 'late', text: 'from a fired session' });
+  await sleep(160);
+  check(pushes.length === quiet, 'a fired employee sends nothing');
+  termOffice.shutdown();
 }
 
 office.shutdown();

@@ -9,6 +9,7 @@ import { tmpdir } from 'node:os';
 import { join, relative } from 'node:path';
 import { parse } from 'yaml';
 import { launchHermes } from '../src/main/office/adapters/hermes-process.ts';
+import { termTool } from '../src/main/office/adapters/hermes.ts';
 import {
   CATALOG_PROFILE,
   HOOK_FILE,
@@ -343,6 +344,16 @@ const endMissing = () => {
 };
 check(endMissing(), 'and ending it does not throw');
 delete process.env.STAND_IN_OUT;
+
+console.log('\n# the terminal');
+const content = (text: string) => [{ type: 'content' as const, content: { type: 'text' as const, text } }];
+const tool = (title: string, extra: Record<string, unknown> = {}) => termTool(title.split(':')[0]!.trim(), { title, ...extra } as Parameters<typeof termTool>[1], '/work/repo');
+check(JSON.stringify(tool('terminal: git status', { content: content('$ git status --short') })) === '{"name":"Bash","input":{"command":"git status --short"}}', 'a terminal call is a Bash call with its command, without the prompt Hermes prints');
+check(JSON.stringify(tool('terminal: date -u')) === '{"name":"Bash","input":{"command":"date -u"}}', 'or the command from its title when the call has no content');
+check(JSON.stringify(tool('read_file: /work/repo/src/a.ts', { locations: [{ path: '/work/repo/src/a.ts' }] })) === '{"name":"Read","input":{"file_path":"src/a.ts"}}', 'a read is a Read of the file, relative to the folder');
+check(JSON.stringify(tool('patch: /work/repo/src/a.ts', { locations: [{ path: '/work/repo/src/a.ts' }] })) === '{"name":"Patch","input":{"paths":["src/a.ts"]}}' && tool('write_file: /work/repo/b.ts').name === 'Patch', 'a write and a patch are an update of the file');
+check(tool('web_search: pnpm patch').name === 'WebSearch' && tool('delegate_task: read three files').name === 'Task' && tool('search_files: TODO').name === 'Grep', 'searches and helpers have Claude Code names');
+check(tool('mcp_office_message').name === 'mcp_office_message', 'a tool from an MCP server keeps its whole name');
 
 rmSync(scratch, { recursive: true, force: true });
 finish();

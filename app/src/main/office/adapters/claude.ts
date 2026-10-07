@@ -695,7 +695,7 @@ export class ClaudeSession implements EmployeeSession {
       return this.reportError(('errors' in m && m.errors.join('; ')) || ('result' in m && m.result) || m.subtype);
     }
     const text = m.result.trim();
-    host.terminal({ k: 'end', how: 'done' });
+    host.terminal({ k: 'end', how: 'done', ms: Date.now() - this.startedAt });
     host.taskCompleted(text);
     host.setActivity(short(text, 120) || 'Finished the task');
     host.setStatus({ kind: 'idle' });

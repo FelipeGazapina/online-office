@@ -5,7 +5,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import { ALLOW_ANSWER } from '../../../../shared/permissions.ts';
 import type { Employee, Question } from '../../../../shared/protocol.ts';
-import { layoutBlocks, optionsOf, questionTitle, quartersOf, spinnerRow, wrap, type Row, type Span } from '../../../../shared/terminal.ts';
+import { layoutBlocks, MODE_LINE, optionsOf, questionTitle, quartersOf, spinnerRow, wrap, type Row, type Span } from '../../../../shared/terminal.ts';
 import { escapeMonitor, leaveMonitor, useMonitor } from '../../computer.ts';
 import { monitorPoses, zoomFrame } from '../../scene/monitorPose.ts';
 import { get, send, useStore } from '../../store.ts';
@@ -267,11 +267,10 @@ function Panel({ employee }: { employee: Employee }) {
           </div>
           <div className="term-rule" />
           <div className="term-status">
-            {employee.permissions.mode === 'ask' ? (
-              <span>? for shortcuts</span>
-            ) : (
-              <span className="term-mode">▸▸ {employee.permissions.mode === 'inherit' ? 'accept edits on' : employee.permissions.mode === 'auto' ? 'auto mode on' : 'bypass permissions on'} (shift+tab to cycle)</span>
-            )}
+            <span style={{ color: TONES[MODE_LINE[employee.permissions.mode].tone] }}>
+              {MODE_LINE[employee.permissions.mode].glyph} {MODE_LINE[employee.permissions.mode].text}{' '}
+              <span className="term-dim">{employee.permissions.mode === 'ask' ? '· ? for shortcuts' : '(shift+tab to cycle)'}</span>
+            </span>
             <span className="term-who">
               {hint} · {employee.name} · {modelLabel(employee.model)}
             </span>
