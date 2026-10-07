@@ -572,7 +572,7 @@ const cactus = (look: number) => {
   return merge([...clay(look), pad(0, 0.052, 0.04, 0.08, 0.06), pad(0.018, 0.096, 0.02, -0.3, 0.05), pad(-0.022, 0.09, -0.02, 0.36, 0.045), blob(0.008, 0.03, 0.14, 0, '#e8828f')]);
 };
 
-const SNAKE = [['#3f7a52', '#c4d98a'], ['#4d8a5d', '#e8d36a'], ['#4f7f78', '#a9cfc0']] as const;
+const SNAKE = [['#3f7a52', '#9cc08a'], ['#4d8a5d', '#b4d38f'], ['#4f7f78', '#a9cfc0']] as const;
 // A snake plant: nine stiff blades fanned up out of a pot, each with a pale edge, the middle ones tallest.
 const snakePlant = (look: number) => {
   const [pot, rim] = of(PLANTERS, look + 1);

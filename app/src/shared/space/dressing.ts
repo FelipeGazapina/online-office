@@ -167,7 +167,7 @@ export function clustersOf(story: Story): ReadonlyMap<ItemId, readonly Worn[]> {
     const want = plan() < 0.45 ? 2 : 3;
     // Of the clusters of a desk, none, one or two are of five, so desks differ in how full they are: from 6 things to 13.
     const roll = plan();
-    let fives = roll < 0.25 ? 0 : roll < 0.65 ? 1 : 2;
+    let fives = roll < 0.2 ? 0 : roll < 0.55 ? 1 : 2;
     // The two sides of the keyboard first, in either order, so the desk is flanked; the back when a third is wanted or one of the sides found no room.
     const sides = ZONES.filter((z) => z.name !== 'back');
     const order = [...(plan() < 0.5 ? sides : [...sides].reverse()), ...ZONES.filter((z) => z.name === 'back')];
