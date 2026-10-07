@@ -109,7 +109,7 @@ const SHELL: readonly { def: string; dx: number; dz: number; rot: Rot }[] = [
   { def: 'pod_rug', dx: -9, dz: -7, rot: 0 },
   { def: 'pod_rail_back', dx: -10, dz: -8, rot: 0 },
   { def: 'pod_rail_side', dx: -10, dz: -7, rot: 1 },
-  { def: 'pod_rail_side', dx: 9, dz: -7, rot: 1 },
+  { def: 'pod_rail_side', dx: 9, dz: -7, rot: 3 },
   { def: 'pod_glass_rail', dx: -3, dz: 7, rot: 0 },
   { def: 'pod_slat_wall', dx: -6, dz: -10, rot: 0 },
   { def: 'pod_credenza', dx: 8, dz: -2, rot: 0 },
@@ -122,10 +122,10 @@ const SHELL: readonly { def: string; dx: number; dz: number; rot: Rot }[] = [
   { def: 'pod_pouf', dx: 3, dz: 6, rot: 0 },
   { def: 'plant', dx: -9, dz: 6, rot: 0 },
   { def: 'plant', dx: 8, dz: -7, rot: 0 },
-  { def: 'pod_huddle_table', dx: 5, dz: 3, rot: 0 },
-  { def: 'chair', dx: 4, dz: 4, rot: 3 },
-  { def: 'chair', dx: 8, dz: 4, rot: 1 },
-  { def: 'pod_daily_sign', dx: 5, dz: 2, rot: 0 },
+  { def: 'pod_huddle_table', dx: 5, dz: 4, rot: 0 },
+  { def: 'chair', dx: 4, dz: 5, rot: 3 },
+  { def: 'chair', dx: 8, dz: 5, rot: 1 },
+  { def: 'pod_daily_sign', dx: 5, dz: 3, rot: 0 },
 ];
 
 /** The pod around a team's desks, as items of the team: rug, boundary, decor and the daily huddle. */

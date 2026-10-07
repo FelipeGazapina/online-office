@@ -1,7 +1,7 @@
 import { useLayoutEffect, useMemo, useRef } from 'react';
 import { BufferGeometry, Float32BufferAttribute, type InstancedMesh, Matrix4, MeshStandardMaterial, Quaternion, Vector3 } from 'three';
 import { box, blob, cyl, leafMass, merge } from './building/models.ts';
-import { bbox } from './building/parts.ts';
+import { art, shelf } from './building/decorParts.ts';
 import { propOf } from './props.ts';
 import { detail } from './shading.ts';
 
@@ -52,28 +52,6 @@ export function Plants({ spots }: { spots: PlantSpot[] }) {
   }, [spots]);
   if (!spots.length) return null;
   return <instancedMesh key={spots.length} ref={ref} args={[geometry, material, spots.length]} frustumCulled={false} castShadow receiveShadow />;
-}
-
-// A framed picture hung on a wall: a dark frame, a mat and a few blocks of color. `face` is +1 for a wall that looks toward +z, -1 for -z.
-const PALETTES = [['#d9724c', '#f2c14e', '#3f6f9f'], ['#2f6f73', '#e8d9b5', '#c8553d'], ['#6a4c93', '#f4a259', '#e9e4da'], ['#4f7ea3', '#d9b45a', '#78b97a']];
-function art(x: number, y: number, z: number, w: number, h: number, face: 1 | -1, n: number): BufferGeometry[] {
-  const pal = PALETTES[n % PALETTES.length];
-  const fz = z + face * 0.03;
-  return [
-    box(w, h, 0.05, x, y, z, '#2b2e38'),
-    box(w - 0.1, h - 0.1, 0.02, x, y, fz, '#f7f2e8'),
-    box(w * 0.5, h * 0.55, 0.02, x - w * 0.12, y + h * 0.06, fz + face * 0.012, pal[0]),
-    box(w * 0.28, h * 0.42, 0.02, x + w * 0.2, y - h * 0.02, fz + face * 0.024, pal[1]),
-    box(w * 0.7, h * 0.12, 0.02, x, y - h * 0.3, fz + face * 0.012, pal[2]),
-  ];
-}
-
-// A low shelf of books with a plant and a framed picture leaning on it. Long side along z.
-function shelf(x: number, z: number, len: number, n: number): BufferGeometry[] {
-  const books = ['#b85c4a', '#4f7ea3', '#d9b45a', '#6a8f5a', '#e9e4da', '#6a4c93'];
-  const out = [bbox(0.4, 0.9, len, x, 0.45, z, '#8c6a4a', 0.03), bbox(0.44, 0.05, len + 0.04, x, 0.92, z, '#6a4d34', 0.02)];
-  for (let i = 0; i < Math.floor(len / 0.2) - 1; i++) out.push(box(0.26, 0.22 + (i % 3) * 0.05, 0.1, x, 1.05 + (i % 3) * 0.025, z - len / 2 + 0.25 + i * 0.2, books[(i + n) % books.length]));
-  return out;
 }
 
 function kitchen(): BufferGeometry[] {
@@ -175,54 +153,6 @@ export function LobbyDecor({ cx, z1, right, doorX }: DecorSpec) {
     ];
     return mergeRoom(rooms.flat());
   }, [cx, z1, right, doorX]);
-  return (
-    <>
-      <mesh geometry={geo} material={decorMaterial} castShadow receiveShadow />
-      <Plants spots={plants} />
-    </>
-  );
-}
-
-// Behind the whiteboard: a walnut slat wall with two framed pictures, so the board stands against a finished wall and not against glass.
-function boardWall(): BufferGeometry[] {
-  const z = -4.45;
-  const out: BufferGeometry[] = [box(6.4, 2.8, 0.04, 0.25, 1.4, z - 0.02, '#7a5a3e'), box(6.5, 0.08, 0.1, 0.25, 2.84, z - 0.05, '#2b2e38'), box(6.5, 0.1, 0.1, 0.25, 0.05, z - 0.05, '#2b2e38')];
-  const tones = ['#c08a5a', '#b27a4c', '#cb9768', '#a96f42'];
-  for (let i = 0; i < 42; i++) out.push(box(0.09, 2.7, 0.06 + (i % 3) * 0.015, 0.25 - 3.1 + i * 0.15, 1.4, z - 0.07, tones[i % 4]));
-  out.push(...art(-2.65, 1.7, z + 0.02, 0.6, 0.9, 1, 2), ...art(3.15, 1.7, z + 0.02, 0.6, 0.9, 1, 3));
-  return out;
-}
-
-function pod(): BufferGeometry[] {
-  return [
-    ...boardWall(),
-    ...pottedPlant(-4.2, 3.1, 1),
-    ...pottedPlant(4.2, -3.1, 1),
-    bbox(0.9, 0.7, 2.4, 4.3, 0.35, 0.3, '#efe0c6', 0.05),
-    bbox(0.96, 0.06, 2.46, 4.3, 0.73, 0.3, '#c59e73', 0.025),
-    ...[-0.8, 0, 0.8].map((dz) => box(0.02, 0.5, 0.7, 3.84, 0.37, 0.3 + dz, '#d8c4a4')),
-    cyl(0.04, 0.04, 1.4, -4.3, 0.7, -2.6, '#2b2e38', 8),
-    cyl(0.2, 0.1, 0.26, -4.3, 1.45, -2.6, '#f8e7b8'),
-    cyl(0.5, 0.5, 0.3, 2.4, 0.15, 3.3, '#b08a5e', 40),
-    cyl(0.46, 0.5, 0.08, 2.4, 0.34, 3.3, '#d2b58a', 40),
-    ...shelf(-4.7, 0.6, 2.2, 0),
-    ...art(0, 1.35, 0, 0.5, 0.6, 1, 3).map((g) => g.rotateY(Math.PI / 2).translate(-4.55, 0, 1.4)),
-    // A printer on its table, a water cooler and a bin along the back of the pod.
-    box(0.9, 0.04, 0.55, 2.8, 0.7, -3.5, '#efe0c6'),
-    ...[-0.4, 0.4].map((dx) => box(0.05, 0.68, 0.5, 2.8 + dx, 0.34, -3.5, '#3a3f4e')),
-    box(0.5, 0.22, 0.4, 2.8, 0.83, -3.5, '#e8ecee'),
-    box(0.4, 0.03, 0.3, 2.8, 0.96, -3.5, '#f7f4ec'),
-    cyl(0.17, 0.17, 0.95, -2.8, 0.48, -3.6, '#e8ecee', 12),
-    cyl(0.15, 0.15, 0.4, -2.8, 1.15, -3.6, '#9fd0ee', 12),
-    cyl(0.14, 0.12, 0.34, -1.6, 0.17, -3.6, '#3a3f4e', 10),
-    // Boxes of supplies stacked by the shelf.
-    box(0.5, 0.35, 0.4, -4.5, 0.18, -1.3, '#c9a77c'),
-    box(0.42, 0.3, 0.36, -4.5, 0.5, -1.3, '#d8b88a'),
-  ];
-}
-
-export function PodDecor() {
-  const { geo, plants } = useMemo(() => mergeRoom(pod()), []);
   return (
     <>
       <mesh geometry={geo} material={decorMaterial} castShadow receiveShadow />

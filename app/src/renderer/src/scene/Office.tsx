@@ -289,7 +289,7 @@ export function Office({ company }: { company: Company | null }) {
   const b: Bounds = { x0: lot.x0, x1: lot.x0 + lot.w, z0: lot.z0, z1: lot.z0 + lot.h };
   return (
     <Staged>
-      <Lights b={b} slots={(company?.blocks ?? []).map((bl) => bl.slot)} />
+      <Lights b={b} />
       <LobbySun b={b} building={world.building} />
       <Environment b={b} />
       <Exterior b={b} />

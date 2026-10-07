@@ -126,10 +126,10 @@ function TeamPick() {
   if (!teamed) return null;
   return (
     <label className="bh-team">
-      <span>Seat for</span>
+      <span>{ITEM_DEFS[tool.def].seat ? 'Seat for' : 'For team'}</span>
       <i style={{ background: blocks.find((b) => b.id === tool.blockId)?.color ?? '#999' }} />
       <select
-        aria-label="Team the desk belongs to"
+        aria-label="Team the piece belongs to"
         value={tool.blockId ?? ''}
         onChange={(e) => {
           const t = get().build?.tool;
