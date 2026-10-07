@@ -267,8 +267,16 @@ function load(file: string): Loaded | undefined {
     for (const e of company.employees) e.seat = legacy.seats.get(e.id) ?? null;
   }
   const legacy = stored.blocks.flatMap((b) => (b.taskBoard?.sources?.length ? [{ blockId: b.id, sources: b.taskBoard.sources }] : []));
-  // Offices saved before the pod around each team was made of items get those items once, where the pod stood.
-  const shelled = addShells(building, company.blocks.map((b) => ({ id: b.id, slot: b.slot })));
+  // Offices saved before the pod around each team was made of items get those items once, with the team's desks.
+  const shelled = addShells(
+    building,
+    company.blocks.map((b) => ({ id: b.id, slot: b.slot, name: b.name })),
+    (o) => {
+      const name = o.block.name ?? o.block.id;
+      if (o.kind === 'fell_back') console.warn(`company.json: the pod of ${name} stays where the static pod stood, away from its desks: ${o.why}.`);
+      else if (o.left.length) console.warn(`company.json: the pod of ${name} stands with its desks, except ${o.left.map((l) => `${l.id.replace(`${o.block.id}:`, '')} (${l.why})`).join(', ')}, which stay where the static pod stood.`);
+    },
+  );
   return { company, building: seatEveryone(company, shelled), legacy };
 }
 

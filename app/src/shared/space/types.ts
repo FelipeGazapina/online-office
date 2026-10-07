@@ -30,8 +30,11 @@ export type Story = {
   walls: readonly WallSeg[];
   items: readonly Item[];
 };
-/** `shelled` is set once every project block's own pieces (rug, pod boundary, decor, huddle) exist as items. A building without it is migrated on load. */
-export type Building = { v: 1; lot: Lot; stories: readonly Story[]; shelled?: true };
+/**
+ * `shelled` says how far the pod migration got: 1 once every project block's own pieces (rug, pod boundary, decor, huddle) exist
+ * as items, 2 once they also stand with the block's desks. A building below 2 is migrated on load, once.
+ */
+export type Building = { v: 1; lot: Lot; stories: readonly Story[]; shelled?: 1 | 2 };
 
 export type Item = {
   id: ItemId;
