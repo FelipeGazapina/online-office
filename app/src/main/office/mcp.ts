@@ -230,7 +230,7 @@ export async function startOfficeMcp(): Promise<OfficeMcp> {
 
     tool(
       'moveTask',
-      'Move the board card of a task you are on. to "review": your work is ready for the owner to look at. to "done": the task is finished and checked, and every piece you handed out is back. to "doing": you pick it up again. Say why in one sentence, because the owner reads it in the task log. The office refuses when the task is not yours, when the owner put the card where it is, or while another request of the task is still open; the refusal says why. Moving a card to where it already is does nothing.',
+      'Move the board card of a task you are on. to "review": your work is ready for the owner to look at. to "done": the task is finished and checked, and every piece you handed out is back. to "doing": you pick it up again. Say why in one sentence, because the owner reads it in the task log. The office refuses when the task is not yours, when the owner put the card where it is, while another request of the task is still open, or (for done) while its pull request is not merged; the refusal says why. Moving a card to where it already is does nothing.',
       {
         to: z.enum(['doing', 'review', 'done']),
         reason: z.string().trim().min(1).max(500).describe('One sentence for the owner: why the card moves'),
