@@ -112,11 +112,26 @@ export type Whiteboard = {
 };
 
 export type TaskProvider = 'linear' | 'cronospark';
-export type TaskBoardSource = {
-  provider: TaskProvider;
-  projectId: string;
-  label?: string;
-};
+
+// What a Linear source pulls. The first value of each is what the board always did: everyone's issues, from any cycle, as
+// many as Linear's first page holds. A source with no `filters` has exactly those.
+export type LinearAssignee = 'anyone' | 'me' | { id: string; name: string };
+export const LINEAR_LIMITS = [50, 200] as const;
+export type LinearLimit = (typeof LINEAR_LIMITS)[number];
+export type LinearFilters = { assignee: LinearAssignee; cycle: 'any' | 'current'; limit: LinearLimit };
+export const DEFAULT_LINEAR_FILTERS: LinearFilters = { assignee: 'anyone', cycle: 'any', limit: 50 };
+
+// CronoSpark's listing tool takes a project and a status and nothing about people (its limit stops at 100), so a CronoSpark
+// source has no filters.
+export type TaskBoardSource =
+  | { provider: 'cronospark'; projectId: string; label?: string }
+  | { provider: 'linear'; projectId: string; label?: string; filters?: LinearFilters };
+
+export const filtersOf = (source: TaskBoardSource): LinearFilters => (source.provider === 'linear' && source.filters) || DEFAULT_LINEAR_FILTERS;
+
+// Who the picker offers, as Linear's own user list gives them. `unknown` until someone asks (`load_linear_people`).
+export type LinearPerson = { id: string; name: string };
+export type LinearPeople = { kind: 'unknown' } | { kind: 'loading' } | { kind: 'ready'; people: LinearPerson[] } | { kind: 'error'; message: string };
 // A card as a provider lists it. A board turns each card into a task (shared/tasks.ts), keyed by `externalId`.
 export type TaskCard = {
   id: string;
@@ -145,6 +160,7 @@ const TASK_BOARD_STATUS_ALIASES: Record<string, (typeof TASK_BOARD_STATUS_ORDER)
   dev: 'In Dev',
   deferred: 'Deferred',
   done: 'Done',
+  duplicate: 'Done',
   indevelopment: 'In Dev',
   indev: 'In Dev',
   indesign: 'In Design',
@@ -236,6 +252,8 @@ export type ClientMessage =
   | { type: 'configure_linear_board'; blockId: BlockId; url: string }
   | { type: 'connect_task_provider'; provider: TaskProvider }
   | { type: 'configure_task_provider'; provider: 'cronospark'; apiKey: string; userId: string }
+  // Asks Linear who the assignee picker can offer. The answer arrives in the snapshot as `linearPeople`.
+  | { type: 'load_linear_people' }
   // Boards and tasks. A block always keeps at least one board. A quick board takes no sources, so `spec` and `update_board`
   // refuse them on one.
   | { type: 'create_board'; blockId: BlockId; name: string; spec: BoardSpec }
@@ -293,6 +311,7 @@ export type Snapshot = {
   // after `at`, at `share` of wall time.
   taskTime: Record<TaskId, TaskTime>;
   taskConnections: Record<TaskProvider, TaskConnectionState>;
+  linearPeople: LinearPeople;
   mail: MailView;
 };
 

@@ -4,7 +4,7 @@
 // Time is not state. The mailroom's ledger says who was in a turn and when, and every message carries the root request
 // of its chain, so a task's time is a fold over that ledger. The one thing a task stores is the root requests it started.
 import type { LedgerEntry, MessageId, Outcome, TurnId } from './mail.ts';
-import { taskBoardStatusLabel, type BlockId, type EmployeeId, type TaskBoardSource, type TaskCard, type TaskProvider } from './protocol.ts';
+import { DEFAULT_LINEAR_FILTERS, taskBoardStatusLabel, type BlockId, type EmployeeId, type LinearFilters, type TaskBoardSource, type TaskCard, type TaskProvider } from './protocol.ts';
 
 export type BoardId = string & { readonly __brand: 'BoardId' };
 export type TaskId = string & { readonly __brand: 'TaskId' };
@@ -14,8 +14,10 @@ export type LocalDate = `${number}-${number}-${number}`;
 // A quick board is for tasks that came off the top of the owner's head. It cannot be linked to Linear or CronoSpark, so
 // it has no sources to hold.
 export type BoardSpec = { kind: 'quick' } | { kind: 'feature' | 'bug'; sources: TaskBoardSource[] };
-export type Board = { id: BoardId; blockId: BlockId; name: string } & BoardSpec;
-export type BoardPatch = { name?: string; sources?: TaskBoardSource[] };
+// `collapsed` are the columns the owner folded away, in column order, and it is absent when none is. A collapsed column pulls
+// nothing from a provider: the cards whose status lands in it are not fetched, so the limit is spent on the open columns.
+export type Board = { id: BoardId; blockId: BlockId; name: string; collapsed?: TaskStage[] } & BoardSpec;
+export type BoardPatch = { name?: string; sources?: TaskBoardSource[]; collapsed?: TaskStage[] };
 
 export type ProviderOrigin = { kind: TaskProvider; externalId: string; identifier: string; url?: string; priority?: string; providerStatus: string; sourceLabel: string };
 // A task made by hand has its own priority. A provider's task keeps the provider's text in `origin.priority`.
@@ -93,9 +95,24 @@ export function outcomeFromRuns(task: Task, runState: (run: MessageId) => RunSta
 export type Refused = { ok: false; reason: string };
 export type BoardResult = { ok: true; board: Board } | Refused;
 
+// A source's filters as they are kept: the defaults are not kept at all, so a source nobody filtered reads as it always did.
+function cleanFilters(f: LinearFilters): LinearFilters | undefined {
+  const assignee = typeof f.assignee === 'object' ? { id: f.assignee.id.trim(), name: f.assignee.name.trim() } : f.assignee;
+  const clean: LinearFilters = { assignee, cycle: f.cycle, limit: f.limit };
+  return JSON.stringify(clean) === JSON.stringify(DEFAULT_LINEAR_FILTERS) ? undefined : clean;
+}
+
+function cleanSource(s: TaskBoardSource): TaskBoardSource {
+  const projectId = s.projectId.trim();
+  const label = s.label?.trim() ? { label: s.label.trim() } : {};
+  if (s.provider === 'cronospark') return { provider: 'cronospark', projectId, ...label };
+  const filters = s.filters && cleanFilters(s.filters);
+  return { provider: 'linear', projectId, ...label, ...(filters ? { filters } : {}) };
+}
+
 // What a source may hold. The same rules the old board configuration had, now in one place.
 function cleanSources(sources: readonly TaskBoardSource[]): TaskBoardSource[] | Refused {
-  const clean = sources.map((s) => ({ provider: s.provider, projectId: s.projectId.trim(), ...(s.label?.trim() ? { label: s.label.trim() } : {}) }));
+  const clean = sources.map(cleanSource);
   if (clean.some((s) => !s.projectId)) return { ok: false, reason: 'Each source needs a project id.' };
   const seen = new Set<string>();
   for (const s of clean) {
@@ -107,6 +124,19 @@ function cleanSources(sources: readonly TaskBoardSource[]): TaskBoardSource[] | 
 }
 
 const refusedSources = (v: TaskBoardSource[] | Refused): v is Refused => !Array.isArray(v);
+
+// The folded columns in column order, none of them twice. The last open column cannot be folded: a board with every column
+// folded would have nowhere to put a task.
+export function cleanCollapsed(stages: readonly TaskStage[]): TaskStage[] | Refused {
+  const folded = STAGES.filter((s) => stages.includes(s));
+  if (folded.length === STAGES.length) return { ok: false, reason: 'A board keeps at least one column open.' };
+  return folded;
+}
+
+const refusedStages = (v: TaskStage[] | Refused): v is Refused => !Array.isArray(v);
+
+// Whether a provider's card belongs on a board: not when its status lands in a column the owner folded away.
+export const wantsCard = (board: Pick<Board, 'collapsed'>, card: Pick<TaskCard, 'status'>): boolean => !board.collapsed?.includes(stageOfStatus(card.status));
 
 export function makeBoard(id: BoardId, blockId: BlockId, name: string, spec: BoardSpec): BoardResult {
   const trimmed = name.trim();
@@ -120,13 +150,17 @@ export function makeBoard(id: BoardId, blockId: BlockId, name: string, spec: Boa
 export function patchBoard(board: Board, patch: BoardPatch): BoardResult {
   const name = patch.name === undefined ? board.name : patch.name.trim();
   if (!name) return { ok: false, reason: 'A board needs a name.' };
+  const folded = patch.collapsed === undefined ? board.collapsed ?? [] : cleanCollapsed(patch.collapsed);
+  if (refusedStages(folded)) return folded;
+  const { collapsed: _, ...rest } = board;
+  const named = { ...rest, name, ...(folded.length ? { collapsed: folded } : {}) } as Board;
   if (board.kind === 'quick') {
     if (patch.sources !== undefined) return { ok: false, reason: 'A quick board holds tasks from your head. It takes no sources.' };
-    return { ok: true, board: { ...board, name } };
+    return { ok: true, board: named };
   }
   const sources = patch.sources === undefined ? board.sources : cleanSources(patch.sources);
   if (refusedSources(sources)) return sources;
-  return { ok: true, board: { ...board, name, sources } };
+  return { ok: true, board: { ...named, sources } as Board };
 }
 
 // The board a block's task screens show: the first one that pulls from a provider, else the first one it has.

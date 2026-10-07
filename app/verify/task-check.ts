@@ -4,9 +4,10 @@
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { BlockId, EmployeeId, TaskCard } from '../src/shared/protocol.ts';
+import type { BlockId, EmployeeId, LinearFilters, TaskBoardSource, TaskCard } from '../src/shared/protocol.ts';
 import type { LedgerEntry, MessageId, TurnId } from '../src/shared/mail.ts';
 import {
+  cleanCollapsed,
   closedDayWork,
   emptyTurnLog,
   ensureBoards,
@@ -23,6 +24,7 @@ import {
   timesOf as timesOfTasks,
   totalWorkedMs,
   turnLogOf,
+  wantsCard,
   workedMs,
   type Board,
   type BoardId,
@@ -191,6 +193,49 @@ console.log('\n# boards');
   check(!makeBoard(board('f'), B1, '  ', { kind: 'quick' }).ok, 'a board needs a name');
 }
 
+console.log('\n# what a Linear source pulls and which columns a board folds');
+{
+  const linear = (filters?: LinearFilters): TaskBoardSource => ({ provider: 'linear', projectId: 'team:BLOOM', ...(filters ? { filters } : {}) });
+  const f = (over: Partial<LinearFilters> = {}): LinearFilters => ({ assignee: 'anyone', cycle: 'any', limit: 50, ...over });
+  const feature = (sources: TaskBoardSource[]) => {
+    const made = makeBoard(board('f'), B1, 'Sprint', { kind: 'feature', sources });
+    if (!made.ok) throw new Error(made.reason);
+    return made.board;
+  };
+  const sourcesOf = (b: Board) => (b.kind === 'quick' ? [] : b.sources);
+
+  check(JSON.stringify(sourcesOf(feature([linear(f())]))) === JSON.stringify([linear()]), 'filters that are the defaults are not stored: the source reads as it always did');
+  check(JSON.stringify(sourcesOf(feature([linear(f({ assignee: 'me', cycle: 'current', limit: 200 }))]))[0]) === JSON.stringify(linear(f({ assignee: 'me', cycle: 'current', limit: 200 }))), 'a filter that is not the default is stored as given');
+  const picked = sourcesOf(feature([linear(f({ assignee: { id: ' u1 ', name: ' Ana ' } }))]))[0];
+  check(picked?.provider === 'linear' && JSON.stringify(picked.filters?.assignee) === JSON.stringify({ id: 'u1', name: 'Ana' }), 'a picked person is stored trimmed');
+  const once = feature([linear(f({ limit: 200 }))]);
+  const twice = patchBoard(once, { sources: sourcesOf(once) });
+  check(twice.ok && JSON.stringify(twice.board) === JSON.stringify(once), 'cleaning cleaned sources changes nothing');
+  check(JSON.stringify(sourcesOf(feature([{ provider: 'cronospark', projectId: 'p', filters: f({ limit: 200 }) } as never]))[0]) === JSON.stringify({ provider: 'cronospark', projectId: 'p' }), 'a CronoSpark source carries no filters');
+
+  check(JSON.stringify(cleanCollapsed(['done', 'todo', 'done'])) === JSON.stringify(['todo', 'done']), 'folded columns come back once each, in column order');
+  check(JSON.stringify(cleanCollapsed([])) === '[]', 'no column folded is an empty list');
+  check(!Array.isArray(cleanCollapsed(['todo', 'doing', 'review', 'done'])), 'the last open column cannot be folded');
+
+  const open = feature([linear()]);
+  const folded = patchBoard(open, { collapsed: ['done'] });
+  check(folded.ok && JSON.stringify(folded.board.collapsed) === '["done"]' && folded.board.name === 'Sprint' && JSON.stringify(sourcesOf(folded.board)) === JSON.stringify([linear()]), 'a board folds a column and keeps its name and sources');
+  const renamedFolded = folded.ok ? patchBoard(folded.board, { name: 'Next' }) : folded;
+  check(renamedFolded.ok && JSON.stringify(renamedFolded.board.collapsed) === '["done"]', 'a rename leaves the folded columns alone');
+  const unfolded = folded.ok ? patchBoard(folded.board, { collapsed: [] }) : folded;
+  check(unfolded.ok && !('collapsed' in unfolded.board), 'unfolding every column leaves no trace on the board');
+  check(!patchBoard(open, { collapsed: ['todo', 'doing', 'review', 'done'] }).ok, 'a board refuses to fold every column');
+  const quickBoard = makeBoard(board('q'), B1, 'Ideas', { kind: 'quick' });
+  const foldedQuick = quickBoard.ok ? patchBoard(quickBoard.board, { collapsed: ['review'] }) : quickBoard;
+  check(foldedQuick.ok && foldedQuick.board.kind === 'quick' && JSON.stringify(foldedQuick.board.collapsed) === '["review"]', 'a quick board folds a column too');
+
+  const card = (status: string) => ({ status });
+  check(wantsCard(open, card('Done')) && wantsCard(open, card('Canceled')), 'a board with nothing folded wants every card');
+  const noDone = folded.ok ? folded.board : open;
+  check(!wantsCard(noDone, card('Done')) && !wantsCard(noDone, card('Canceled')) && !wantsCard(noDone, card('Completed')) && !wantsCard(noDone, card('Duplicate')), 'a folded Done wants neither done, canceled, completed nor duplicate cards');
+  check(wantsCard(noDone, card('Backlog')) && wantsCard(noDone, card('Todo')) && wantsCard(noDone, card('In Progress')) && wantsCard(noDone, card('In Review')), 'and every other status');
+}
+
 console.log('\n# the mail moves the stage');
 {
   const base = (over: Partial<Task> = {}): Task => ({ ...newTask({ id: task('A'), boardId: board('b'), title: 'x', origin: { kind: 'manual' }, stage: 'doing', now: 0 }), runs: [m('r1'), m('r2')], ...over });
@@ -286,8 +331,15 @@ class FakeProvider {
   errors: string[] = [];
   calls: HoursCall[] = [];
   failing = 0;
-  async fetchSources() {
-    return { cards: this.cards, errors: this.errors };
+  asked: { sources: readonly TaskBoardSource[]; kept: number }[] = [];
+  people: { id: string; name: string }[] = [];
+  async fetchSources(sources: readonly TaskBoardSource[], keep: (card: TaskCard) => boolean = () => true) {
+    const cards = this.cards.filter(keep);
+    this.asked.push({ sources, kept: cards.length });
+    return { cards, errors: this.errors };
+  }
+  async linearPeople() {
+    return this.people;
   }
   async logHours(entry: HoursCall) {
     if (this.failing > 0) {
@@ -665,6 +717,73 @@ console.log('\n# board and task rules');
 }
 
 // ───────────────────────────── the real office ─────────────────────────────
+
+console.log('\n# a folded column pulls nothing, and a source\'s filters reach the provider');
+{
+  const x = taskWorld();
+  const linearCard = (n: number, status: string): TaskCard => ({ id: `linear:i${n}`, provider: 'linear', externalId: `i${n}`, identifier: `BLM-${n}`, title: `Issue ${n}`, status, sourceLabel: 'Linear' });
+  const statuses = ['Todo', 'In Progress', 'In Review', 'Done', 'Canceled', 'Backlog', 'Done'];
+  x.provider.cards = statuses.map((status, i) => linearCard(i + 1, status));
+  const made = x.tasks.createBoard(B1, 'Linear', { kind: 'feature', sources: [{ provider: 'linear', projectId: 'team:BLOOM' }] });
+  await x.tasks.refresh(made.id);
+  const onBoard = () => x.tasks.view(x.now()).tasks.filter((t) => t.boardId === made.id);
+  const stages = () => onBoard().map((t) => t.stage).sort().join();
+  check(onBoard().length === 7 && x.provider.asked.at(-1)!.kept === 7, 'with nothing folded every card becomes a task', stages());
+
+  const worked = onBoard().find((t) => t.origin.kind === 'linear' && t.origin.externalId === 'i4')!;
+  x.tasks.assign(worked.id, ANA);
+  x.tasks.updateTask(worked.id, { stage: 'done' });
+  const before = x.provider.asked.length;
+  x.tasks.updateBoard(made.id, { collapsed: ['done'] });
+  await x.tasks.refresh(made.id);
+  check(x.provider.asked.length > before && x.provider.asked.at(-1)!.kept === 4, 'folding Done asks the provider again, and it keeps only the four cards of the other columns', String(x.provider.asked.at(-1)!.kept));
+  check(onBoard().every((t) => t.stage !== 'done' || t.runs.length > 0) && onBoard().length === 5, 'the done tasks nobody worked on left the board', stages());
+  check(onBoard().some((t) => t.id === worked.id && t.stage === 'done'), 'a done task that has runs stays, in its folded column');
+  check(x.tasks.view(x.now()).boards.find((b) => b.id === made.id)!.collapsed?.join() === 'done', 'the snapshot says Done is folded');
+
+  const again = x.provider.asked.length;
+  x.tasks.updateBoard(made.id, { name: 'Renamed' });
+  check(x.provider.asked.length === again, 'a rename pulls nothing');
+
+  const restarted = new Tasks(x.file, x.host, []);
+  restarted.recover([B1, B2], []);
+  check(restarted.view(x.now()).boards.find((b) => b.id === made.id)!.collapsed?.join() === 'done', 'the folded column survives a restart');
+
+  x.tasks.updateBoard(made.id, { collapsed: [] });
+  await x.tasks.refresh(made.id);
+  check(onBoard().length === 7 && !('collapsed' in x.tasks.view(x.now()).boards.find((b) => b.id === made.id)!), 'unfolding Done brings its cards back on the next pull', stages());
+
+  const filters: LinearFilters = { assignee: { id: 'u-ana', name: 'Ana' }, cycle: 'current', limit: 200 };
+  x.tasks.updateBoard(made.id, { sources: [{ provider: 'linear', projectId: 'team:BLOOM', filters }] });
+  await x.tasks.refresh(made.id);
+  const last = x.provider.asked.at(-1)!.sources[0]!;
+  check(last.provider === 'linear' && JSON.stringify(last.filters) === JSON.stringify(filters), 'changing a filter pulls again with the filter in the source');
+  const kept = restarted.view(x.now()).boards.find((b) => b.id === made.id)!;
+  check(kept.kind !== 'quick' && kept.sources[0]!.provider === 'linear' && kept.sources[0]!.filters === undefined, 'the filter was saved after that restart opened its own copy, so it saw none');
+  const reopened = new Tasks(x.file, x.host, []);
+  reopened.recover([B1, B2], []);
+  const saved = reopened.view(x.now()).boards.find((b) => b.id === made.id)!;
+  check(saved.kind !== 'quick' && JSON.stringify((saved.sources[0] as Extract<TaskBoardSource, { provider: 'linear' }>).filters) === JSON.stringify(filters), 'the filters survive a restart');
+
+  x.tasks.updateBoard(made.id, { sources: [{ provider: 'linear', projectId: 'team:BLOOM', filters: { assignee: 'anyone', cycle: 'any', limit: 50 } }] });
+  const defaults = x.tasks.view(x.now()).boards.find((b) => b.id === made.id)!;
+  check(defaults.kind !== 'quick' && !('filters' in defaults.sources[0]!), 'setting the filters back to the defaults stores none');
+  await x.tasks.refresh(made.id);
+
+  check(x.tasks.view(0).linearPeople.kind === 'unknown', 'nobody is listed until the picker asks');
+  x.provider.people = [{ id: 'u-ana', name: 'Ana' }];
+  const asking = x.tasks.loadLinearPeople();
+  check(x.tasks.view(0).linearPeople.kind === 'loading', 'asking marks the list as loading');
+  await asking;
+  const ready = x.tasks.view(0).linearPeople;
+  check(ready.kind === 'ready' && ready.people.length === 1 && ready.people[0]!.name === 'Ana', 'and then it holds Linear\'s people');
+  x.provider.linearPeople = async () => {
+    throw new Error('Linear is not connected.');
+  };
+  await x.tasks.loadLinearPeople();
+  const failed = x.tasks.view(0).linearPeople;
+  check(failed.kind === 'error' && /not connected/.test(failed.message), 'a failed ask says why');
+}
 
 console.log('\n# the office, with a scripted harness');
 {

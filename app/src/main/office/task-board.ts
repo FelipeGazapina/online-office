@@ -5,7 +5,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { auth, type OAuthClientProvider } from '@modelcontextprotocol/sdk/client/auth.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { OAuthClientInformationFullSchema, OAuthClientInformationSchema, OAuthTokensSchema, type OAuthClientInformationMixed, type OAuthTokens } from '@modelcontextprotocol/sdk/shared/auth.js';
-import type { TaskBoardSource, TaskCard, TaskConnectionState, TaskProvider } from '../../shared/protocol.ts';
+import { filtersOf, type LinearPerson, type TaskBoardSource, type TaskCard, type TaskConnectionState, type TaskProvider } from '../../shared/protocol.ts';
 
 type JsonRecord = Record<string, unknown>;
 // The arguments of CronoSpark's registrar_horas.
@@ -142,16 +142,123 @@ function linearFields(properties: JsonRecord, selector: LinearSelector): JsonRec
   return result;
 }
 
-export function linearToolArguments(tool: Tool, source: TaskBoardSource): LinearToolArguments {
+const properties = (tool: Tool): JsonRecord => asRecord(asRecord(tool.inputSchema)?.properties) ?? {};
+const keyOf = (props: JsonRecord, names: readonly string[]) => Object.keys(props).find((key) => names.includes(fieldName(key)));
+const TEAM_FIELDS = ['team', 'teamid', 'teamkey', 'teamidentifier'];
+
+// What the issue tool says about itself, read from its input schema: where a filter goes and how a page is asked for.
+// Linear's list_issues offers `assignee`, `cycle`, `state`, `limit` (up to 250) and a cursor; a tool without one of them
+// cannot be asked for it, and the fetch says so instead of returning issues the filter was meant to leave out.
+export type LinearPaging = { limitKey?: string; pageMax?: number; cursorKey?: string };
+
+export function linearPaging(tool: Tool): LinearPaging {
+  const props = properties(tool);
+  const limitKey = keyOf(props, ['limit']);
+  const cursorKey = keyOf(props, ['cursor', 'after']);
+  const max = limitKey ? asRecord(props[limitKey])?.maximum : undefined;
+  return { ...(limitKey ? { limitKey } : {}), ...(typeof max === 'number' && max > 0 ? { pageMax: max } : {}), ...(cursorKey ? { cursorKey } : {}) };
+}
+
+// The arguments of one list_issues call: the source's team or project, then who and which cycle. `cycle` is what the tool
+// should be told for the current cycle, which the caller looked up (see currentCycle) or leaves as the word itself.
+export function linearToolArguments(tool: Tool, source: TaskBoardSource, cycle = 'current'): LinearToolArguments {
   const selector = parseLinearSelector(source.projectId);
-  const properties = asRecord(asRecord(tool.inputSchema)?.properties);
-  const args: JsonRecord = properties ? linearFields(properties, selector) : {};
-  if (selector.kind === 'auto' && !Object.keys(args).length && properties) {
-    const projectKey = Object.keys(properties).find((key) => ['project', 'projectid', 'projectidentifier', 'projectkey'].includes(fieldName(key)));
+  const props = properties(tool);
+  const args: JsonRecord = Object.keys(props).length ? linearFields(props, selector) : {};
+  if (selector.kind === 'auto' && !Object.keys(args).length && Object.keys(props).length) {
+    const projectKey = Object.keys(props).find((key) => ['project', 'projectid', 'projectidentifier', 'projectkey'].includes(fieldName(key)));
     if (projectKey) args[projectKey] = selector.value;
   }
   if (selector.kind !== 'workspace' && !Object.keys(args).length) throw new Error('The Linear issue tool cannot filter this source. Use team:BLOOM or project:<project id>.');
-  return { args, selector, ...(selector.kind === 'workspace' && !Object.keys(args).length ? { unfilteredWorkspace: true } : {}) };
+  const unfilteredWorkspace = selector.kind === 'workspace' && !Object.keys(args).length;
+  const f = filtersOf(source);
+  if (f.assignee !== 'anyone') {
+    const key = keyOf(props, ['assignee', 'assigneeid']);
+    if (!key) throw new Error('The Linear issue tool cannot filter by assignee, so this source would show everyone\'s issues. Set the assignee back to Anyone.');
+    args[key] = f.assignee === 'me' ? 'me' : f.assignee.id;
+  }
+  if (f.cycle === 'current') {
+    const key = keyOf(props, ['cycle', 'cycleid']);
+    if (!key) throw new Error('The Linear issue tool cannot filter by cycle, so this source would show every cycle. Set the cycle back to Any.');
+    args[key] = cycle;
+  }
+  return { args, selector, ...(unfilteredWorkspace ? { unfilteredWorkspace } : {}) };
+}
+
+// The cycle a team is in now, in the words list_issues takes (the id), or undefined when the tools cannot say: no
+// list_cycles tool, one that takes no team or no type, or a source that is not a team.
+export function cyclesCall(tool: Tool | undefined, selector: LinearSelector): JsonRecord | undefined {
+  if (!tool || selector.kind !== 'team') return undefined;
+  const props = properties(tool);
+  const team = keyOf(props, TEAM_FIELDS);
+  const type = keyOf(props, ['type']);
+  return team && type ? { [team]: selector.team, [type]: 'current' } : undefined;
+}
+
+export function currentCycleId(body: unknown): string {
+  const list = Array.isArray(body) ? body : asRecord(body)?.cycles;
+  const first = asRecord(Array.isArray(list) ? list[0] : undefined);
+  const id = text(first?.id) || (typeof first?.number === 'number' ? String(first.number) : text(first?.number));
+  if (!id) throw new Error('This Linear team has no current cycle.');
+  return id;
+}
+
+// Where the next page starts, or undefined at the end. The cursor comes back in the page; a tool that pages with `after`
+// and returns no cursor is continued from its last issue.
+function nextCursor(body: unknown, lastId: string | undefined, cursorKey: string): string | undefined {
+  const page = asRecord(body);
+  const info = asRecord(page?.pageInfo);
+  const more = page?.hasNextPage ?? info?.hasNextPage ?? page?.hasMore;
+  if (more === false) return undefined;
+  const given = [page?.nextCursor, page?.cursor, page?.endCursor, info?.endCursor].map(text).find(Boolean);
+  return given || (more === true && fieldName(cursorKey) === 'after' ? lastId : undefined);
+}
+
+const MAX_PAGES = 20;
+// The assignee picker lists this many of Linear's users at most.
+const PEOPLE_CAP = 500;
+
+// Reads pages until `want` items passed `keep` or the tool has no more. What `keep` drops costs nothing against `want`, so
+// a column the owner folded away does not eat the limit. Stops after MAX_PAGES pages, which bounds a workspace whose
+// open issues are few among very many closed ones.
+export async function collectPages<T extends { id: string }>(a: {
+  tool: Tool;
+  base: JsonRecord;
+  want: number;
+  call: (args: JsonRecord) => Promise<unknown>;
+  read: (result: unknown) => T[];
+  lastId: (item: T) => string;
+  keep?: (item: T) => boolean;
+}): Promise<T[]> {
+  const { limitKey, pageMax, cursorKey } = linearPaging(a.tool);
+  const size = Math.min(a.want, pageMax ?? a.want);
+  const out: T[] = [];
+  const seen = new Set<string>();
+  let cursor: string | undefined;
+  for (let page = 0; page < MAX_PAGES && out.length < a.want; page++) {
+    const result = await a.call({ ...a.base, ...(limitKey ? { [limitKey]: size } : {}), ...(cursor && cursorKey ? { [cursorKey]: cursor } : {}) });
+    const batch = a.read(result);
+    for (const item of batch) {
+      if (seen.has(item.id)) continue;
+      seen.add(item.id);
+      if (out.length < a.want && (a.keep?.(item) ?? true)) out.push(item);
+    }
+    const next = cursorKey && batch.length ? nextCursor(fromMcpResult(result), batch.at(-1) && a.lastId(batch.at(-1)!), cursorKey) : undefined;
+    if (!next || next === cursor) break;
+    cursor = next;
+  }
+  return out;
+}
+
+export function normalizePeople(payload: unknown): LinearPerson[] {
+  const seen = new Set<string>();
+  return records(fromMcpResult(payload)).flatMap((item) => {
+    const id = text(item.id);
+    const name = text(item.name) || text(item.displayName);
+    if (!id || !name || item.active === false || item.disabled === true || seen.has(id)) return [];
+    seen.add(id);
+    return [{ id, name }];
+  });
 }
 
 const toolArguments = (tool: Tool, source: TaskBoardSource): JsonRecord => {
@@ -292,11 +399,30 @@ export class TaskBoardService {
     }
   }
 
-  async fetchSources(sources: readonly TaskBoardSource[]): Promise<{ cards: TaskCard[]; errors: string[] }> {
+  // `keep` drops the cards a board does not want before they count against a source's limit.
+  async fetchSources(sources: readonly TaskBoardSource[], keep: (card: TaskCard) => boolean = () => true): Promise<{ cards: TaskCard[]; errors: string[] }> {
     const results = await Promise.all(sources.map(async (source) => {
-      try { return await this.fetchSource(source); } catch (error) { return { cards: [], error: error instanceof Error ? error.message : String(error) }; }
+      try { return await this.fetchSource(source, keep); } catch (error) { return { cards: [], error: error instanceof Error ? error.message : String(error) }; }
     }));
     return { cards: results.flatMap((result) => result.cards), errors: results.flatMap((result) => result.error ? [result.error] : []) };
+  }
+
+  // Everyone the assignee picker can offer, from Linear's own user list.
+  async linearPeople(): Promise<LinearPerson[]> {
+    return this.withClient('linear', async (client, tools) => {
+      const tool = tools.find((candidate) => candidate.name === 'list_users')
+        ?? tools.find((candidate) => /user/i.test(candidate.name) && /list|search|find/i.test(candidate.name));
+      if (!tool) throw new Error('Linear offers no tool that lists its users.');
+      const people = await collectPages({
+        tool,
+        base: {},
+        want: PEOPLE_CAP,
+        call: (args) => client.callTool({ name: tool.name, arguments: args }),
+        read: normalizePeople,
+        lastId: (person) => person.id,
+      });
+      return people.sort((a, b) => a.name.localeCompare(b.name));
+    });
   }
 
   private cronoConfig() {
@@ -397,30 +523,62 @@ export class TaskBoardService {
     }
   }
 
-  private async fetchSource(source: TaskBoardSource): Promise<{ cards: TaskCard[]; error?: string }> {
-    const fixture = process.env.OFFICE_TASK_BOARD_FIXTURE;
-    if (fixture && source.provider === 'cronospark') {
-      return { cards: normalizeTaskPayload(source.provider, JSON.parse(readFileSync(fixture, 'utf8')), source) };
-    }
-    const linearProvider = source.provider === 'linear' && !process.env.LINEAR_MCP_TOKEN && this.connections.get('linear')?.kind === 'ready' ? await this.linearAuthProvider() : undefined;
-    const config = source.provider === 'cronospark' ? this.cronoConfig() : process.env.LINEAR_MCP_TOKEN ? { url: 'https://mcp.linear.app/mcp', headers: { Authorization: `Bearer ${process.env.LINEAR_MCP_TOKEN}` } } : linearProvider ? { url: 'https://mcp.linear.app/mcp', headers: {} } : undefined;
-    if (!config) return { cards: [], error: this.connections.get(source.provider)?.message || `${source.provider} is not connected.` };
+  // Connects to the provider's MCP server, runs `use` with its tools, and closes the connection.
+  private async withClient<T>(provider: TaskProvider, use: (client: Client, tools: Tool[]) => Promise<T>): Promise<T> {
+    const linearProvider = provider === 'linear' && !process.env.LINEAR_MCP_TOKEN && this.connections.get('linear')?.kind === 'ready' ? await this.linearAuthProvider() : undefined;
+    const linearUrl = process.env.LINEAR_MCP_URL || 'https://mcp.linear.app/mcp';
+    const config = provider === 'cronospark' ? this.cronoConfig() : process.env.LINEAR_MCP_TOKEN ? { url: linearUrl, headers: { Authorization: `Bearer ${process.env.LINEAR_MCP_TOKEN}` } } : linearProvider ? { url: linearUrl, headers: {} } : undefined;
+    if (!config) throw new Error(this.connections.get(provider)?.message || `${provider} is not connected.`);
     const client = new Client({ name: 'online-office-task-board', version: '0.1.0' });
     const transport = new StreamableHTTPClientTransport(new URL(config.url), { requestInit: { headers: config.headers }, ...(linearProvider ? { authProvider: linearProvider } : {}) });
     try {
       await client.connect(transport);
-      const tools = (await client.listTools()).tools as Tool[];
-      const tool = source.provider === 'cronospark'
-        ? tools.find((candidate) => candidate.name === 'listar_tasks_projeto')
-        : tools.find((candidate) => candidate.name === 'list_issues')
-          ?? tools.find((candidate) => /issue|task/i.test(`${candidate.name} ${candidate.description ?? ''}`) && /list|search|find/i.test(`${candidate.name} ${candidate.description ?? ''}`));
-      if (!tool) return { cards: [], error: `No task-listing tool is available from ${source.provider}.` };
-      const argumentsForTool = source.provider === 'linear' ? linearToolArguments(tool, source).args : toolArguments(tool, source);
-      const result = await client.callTool({ name: tool.name, arguments: argumentsForTool });
-      return { cards: normalizeTaskPayload(source.provider, result, source) };
+      return await use(client, (await client.listTools()).tools as Tool[]);
     } finally {
       await client.close().catch(() => undefined);
     }
+  }
+
+  private async fetchSource(source: TaskBoardSource, keep: (card: TaskCard) => boolean): Promise<{ cards: TaskCard[]; error?: string }> {
+    const fixture = process.env.OFFICE_TASK_BOARD_FIXTURE;
+    if (fixture && source.provider === 'cronospark') {
+      return { cards: normalizeTaskPayload(source.provider, JSON.parse(readFileSync(fixture, 'utf8')), source).filter(keep) };
+    }
+    return this.withClient(source.provider, async (client, tools) => {
+      // A tool that says it failed has not answered with zero issues: reading its message as an empty list would end the sync
+      // "ready" and drop every task that was not worked on.
+      const call = async (name: string, args: JsonRecord) => {
+        const result = await client.callTool({ name, arguments: args });
+        if (asRecord(result)?.isError === true) throw new Error(text(asRecord(fromMcpResult(result))?.message) || (typeof fromMcpResult(result) === 'string' ? String(fromMcpResult(result)) : `${name} failed.`));
+        return result;
+      };
+      if (source.provider === 'cronospark') {
+        const tool = tools.find((candidate) => candidate.name === 'listar_tasks_projeto');
+        if (!tool) return { cards: [], error: 'No task-listing tool is available from cronospark.' };
+        return { cards: normalizeTaskPayload('cronospark', await call(tool.name, toolArguments(tool, source)), source).filter(keep) };
+      }
+      const tool = tools.find((candidate) => candidate.name === 'list_issues')
+        ?? tools.find((candidate) => /issue|task/i.test(`${candidate.name} ${candidate.description ?? ''}`) && /list|search|find/i.test(`${candidate.name} ${candidate.description ?? ''}`));
+      if (!tool) return { cards: [], error: 'No task-listing tool is available from linear.' };
+      // The cycle is looked up first because a tool that takes a cycle takes its id, not the word "current".
+      let cycle: string | undefined;
+      if (filtersOf(source).cycle === 'current') {
+        const cycles = tools.find((candidate) => candidate.name === 'list_cycles');
+        const asked = cyclesCall(cycles, parseLinearSelector(source.projectId));
+        if (cycles && asked) cycle = currentCycleId(fromMcpResult(await call(cycles.name, asked)));
+      }
+      const { args } = linearToolArguments(tool, source, cycle);
+      const cards = await collectPages({
+        tool,
+        base: args,
+        want: filtersOf(source).limit,
+        call: (page) => call(tool.name, page),
+        read: (result) => normalizeTaskPayload('linear', result, source),
+        lastId: (card) => card.externalId,
+        keep,
+      });
+      return { cards };
+    });
   }
 }
 
