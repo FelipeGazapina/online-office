@@ -336,31 +336,31 @@ function Panel({ employee }: { employee: Employee }) {
             </div>
           )}
           <div className={permission ? 'term-box term-hidden' : 'term-box'}>
-          <div className="term-rule" />
-          <div className="term-prompt">
-            <span className="term-caret">❯</span>
-            <textarea
-              ref={field}
-              value={draft}
-              rows={1}
-              spellCheck={false}
-              placeholder={question ? (question.kind === 'permission' ? 'or tell them what to do differently' : 'or type an answer') : `Message ${employee.name}…`}
-              onChange={(e) => setDraft(e.target.value)}
-              onKeyDown={onKey}
-              autoFocus
-              aria-label={`Message to ${employee.name}`}
-            />
-          </div>
-          <div className="term-rule" />
-          <div className="term-status">
-            <span style={{ color: TONES[MODE_LINE[employee.permissions.mode].tone] }}>
-              {MODE_LINE[employee.permissions.mode].glyph} {MODE_LINE[employee.permissions.mode].text}{' '}
-              <span className="term-dim">{employee.permissions.mode === 'ask' ? '· ? for shortcuts' : '(shift+tab to cycle)'}</span>
-            </span>
-            <span className="term-who">
-              {hint} · {who}
-            </span>
-          </div>
+            <div className="term-rule" />
+            <div className="term-prompt">
+              <span className="term-caret">❯</span>
+              <textarea
+                ref={field}
+                value={draft}
+                rows={1}
+                spellCheck={false}
+                placeholder={question ? 'or type an answer' : `Message ${employee.name}…`}
+                onChange={(e) => setDraft(e.target.value)}
+                onKeyDown={onKey}
+                autoFocus
+                aria-label={`Message to ${employee.name}`}
+              />
+            </div>
+            <div className="term-rule" />
+            <div className="term-status">
+              <span style={{ color: TONES[MODE_LINE[employee.permissions.mode].tone] }}>
+                {MODE_LINE[employee.permissions.mode].glyph} {MODE_LINE[employee.permissions.mode].text}{' '}
+                <span className="term-dim">{employee.permissions.mode === 'ask' ? '· ? for shortcuts' : '(shift+tab to cycle)'}</span>
+              </span>
+              <span className="term-who">
+                {hint} · {who}
+              </span>
+            </div>
           </div>
         </div>
       </div>

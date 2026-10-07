@@ -120,7 +120,7 @@ const lines = (text: string) => (text ? text.replace(/\r/g, '').replace(/\n+$/, 
 // What a result keeps for the owner who opens it. A longer one says how many lines it left out.
 const FULL_LINES = 80;
 // The words of a result that has more to open, at the end of its last shown line.
-export const EXPAND_HINT = ' (click to expand)';
+const EXPAND_HINT = ' (click to expand)';
 
 const dimLine = (text: string): TerminalLine => line([sp(cut(text, 240), 'dim')]);
 const shown = (rows: TerminalLine[], full?: TerminalLine[]): Shown => {
@@ -335,7 +335,7 @@ const under = (rows: TerminalLine[]): TerminalLine[] =>
 // A call: its first line, what it printed collapsed, and `full` for the owner who opens it. A click on a line with `toggle` does that.
 export type Tool = { lines: TerminalLine[]; full?: TerminalLine[] };
 
-export const isChore = (name: string): boolean => !!styleOf(name).quiet;
+const isChore = (name: string): boolean => !!styleOf(name).quiet;
 
 // The call, and the result under it when there is one.
 export function toolLines(name: string, input: Record<string, unknown>, cwd: string, result?: Result): Tool {
@@ -793,7 +793,6 @@ const VERBS = [
 
 const PAST = ['Baked', 'Brewed', 'Churned', 'Cogitated', 'Cooked', 'Crunched', 'Pondered', 'Simmered', 'Worked'];
 export const verbOf = (startedAt: number): string => VERBS[Math.abs(Math.floor(startedAt / 1000)) % VERBS.length]!;
-export const glyphOf = (now: number): string => GLYPHS[Math.floor(now / 160) % GLYPHS.length]!;
 
 const tokensText = (n: number) => (n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n));
 export const secsText = (ms: number) => {
@@ -820,7 +819,7 @@ export type Option = { key: string; label: string; kind: 'allow' | 'always' | 'd
 
 // What the "don't ask again" choice stores, word for word: `npm test *` is every command that starts with those words, `exactly`
 // is that command and no other, and a tool is every use of it. The office stores `ruleFor(question)`, and this prints the same rule.
-export function alwaysLabel(rule: AllowRule): string {
+function alwaysLabel(rule: AllowRule): string {
   switch (rule.kind) {
     case 'command':
       return `Yes, and don't ask again for: ${rule.prefix} *`;
@@ -848,9 +847,9 @@ const TITLES: Record<string, string> = { [SHELL_TOOL]: 'Bash command', Write: 'C
 export const questionTitle = (q: Question): string => (q.kind === 'permission' ? (TITLES[q.tool] ?? `Use ${q.tool}`) : 'The employee is asking you');
 
 // What the owner's typing under the No choice reads, so the choice and the words stay on one row.
-export const AMEND_LEAD = 'No, and tell them what to do differently: ';
+const AMEND_LEAD = 'No, and tell them what to do differently: ';
 
-export type QuestionView = {
+type QuestionView = {
   picked?: number;
   // What the call waiting says about itself, from `TermLive.asks`.
   ask?: Ask;

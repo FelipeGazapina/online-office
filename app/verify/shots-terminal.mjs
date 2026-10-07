@@ -125,20 +125,11 @@ export default async function (s) {
   const row = [normal[2], 0, -normal[0]];
   const along = (p) => p.center[0] * row[0] + p.center[2] * row[2];
   const sorted = [...poses].sort((a, b) => along(a) - along(b));
+  // The middle of the screens on the floor plan: x, then z.
   const mid = [0, 2].map((i) => poses.reduce((n, p) => n + p.center[i], 0) / poses.length);
   const alongMid = (sorted.reduce((n, p) => n + along(p), 0) / sorted.length);
-  const facing = async () => {
-    const cam = await s.eval('({ ...__officeCamera })');
-    return poses.filter((p) => (cam.x - p.center[0]) * p.normal[0] + (cam.z - p.center[2]) * p.normal[2] > 0).length;
-  };
   const camera = () => s.eval(`${state}.camera`);
-  const asFirst = async () => {
-    if ((await camera()) !== 'first') await s.press('Tab', 'Tab');
-  };
-  const asIso = async () => {
-    if ((await camera()) !== 'iso') await s.press('Tab', 'Tab');
-  };
-  // `where` is how far behind the screens, and how far along the row from its middle, the owner stands.
+  // `back` is how far behind the screens the owner stands, `side` how far along the row from its middle, and `turn` how far from straight at them they look.
   const stand = async ({ back, side = 0, turn = 0 }) => {
     const at = [mid[0] + normal[0] * back + row[0] * side, mid[1] + normal[2] * back + row[2] * side];
     await s.eval(`__office.teleport(${at[0]}, ${at[1]}, ${Math.atan2(-normal[0], -normal[2]) + turn})`);
@@ -150,40 +141,21 @@ export default async function (s) {
     await s.eval(`__office.store.setState({ selectedId: null })`);
     await s.sleep(600);
   };
+  const gap = (along(sorted[1]) + along(sorted[2] ?? sorted[1])) / 2 - alongMid;
+  // The first is the shot. The others are other places to stand, for a retake: SHOT_PROBE=1 takes them all, SHOT_CONFIG=<name> one.
   const configs = [
-    { name: 'first-between', cam: 'first', back: 2.3, side: (along(sorted[0]) + along(sorted[1])) / 2 - alongMid },
-    { name: 'first-close', cam: 'first', back: 1.8, side: (along(sorted[1]) + along(sorted[2] ?? sorted[1])) / 2 - alongMid },
-    { name: 'iso-near', cam: 'iso', back: 2.6, side: Math.min(...sorted.map(along)) - alongMid + 0.4, zoom: 560 },
-    { name: 'iso-closer', cam: 'iso', back: 2.6, side: Math.min(...sorted.map(along)) - alongMid + 0.4, zoom: 1100 },
-    { name: 'iso-centre', cam: 'iso', back: 3.2, side: 0, zoom: 1000 },
+    { name: 'close-right', back: 1.8, side: gap, turn: -0.28 },
+    { name: 'back-right', back: 2.1, side: gap, turn: -0.28 },
+    { name: 'middle', back: 2.0, side: 0, turn: -0.1 },
   ];
   const wanted = process.env.SHOT_CONFIG;
-  const todo = process.env.SHOT_PROBE ? configs : [configs.find((c) => c.name === (wanted ?? 'first-between'))];
+  const todo = process.env.SHOT_PROBE ? configs : [configs.find((c) => c.name === (wanted ?? configs[0].name))];
   for (const cfg of todo) {
     const at = await stand(cfg);
-    if (cfg.cam === 'first') await asFirst();
-    else {
-      await asIso();
-      await s.eval(`document.querySelector('canvas').dispatchEvent(new WheelEvent('wheel', { deltaY: -${cfg.zoom} }))`);
-    }
+    if ((await camera()) !== 'first') await s.press('Tab', 'Tab');
     await settle();
-    if (cfg.cam === 'iso') {
-      // Turn the overview in quarter turns to the one that shows the screens' faces.
-      let bestTurn = { turns: 0, facing: await facing() };
-      for (let turns = 1; turns <= 3; turns++) {
-        await s.press('KeyQ', 'q');
-        await s.sleep(1300);
-        const n = await facing();
-        if (n > bestTurn.facing) bestTurn = { turns, facing: n };
-      }
-      await s.press('KeyQ', 'q');
-      for (let i = 0; i < bestTurn.turns; i++) await s.press('KeyQ', 'q');
-      await s.sleep(1800);
-    }
-    console.log(`${cfg.name}: ${poses.length} screens in the row, the owner at ${at.map((v) => v.toFixed(1))}, ${await facing()} face the camera`);
+    console.log(`${cfg.name}: ${poses.length} screens in the row, the owner at ${at.map((v) => v.toFixed(1))}`);
     if (process.env.SHOT_PROBE) {
-      const showing = await s.eval(`Object.values(window.__officeTerminals()).filter((t) => t.rows.some((r) => /Write\\(/.test(r))).length`);
-      console.log(`${showing} monitors show a call`);
       await s.eval('document.activeElement?.blur()');
       await keep(s, `monitors-${cfg.name}`);
     }
