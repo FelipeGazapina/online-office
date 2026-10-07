@@ -53,9 +53,26 @@ const taskBy = (title) => `${state}.tasks.find((t) => t.title === ${JSON.stringi
 
 export const diagnose = async (s) => {
   console.log('tasks at failure:', JSON.stringify(await s.eval(`${state}.tasks.map((t) => ({ title: t.title, stage: t.stage, assignees: t.assignees, runs: t.runs.length }))`).catch(() => '?')));
+  const names = await s.eval(`Object.fromEntries(${state}.company.employees.map((e) => [e.id, e.name]))`).catch(() => ({}));
+  const who = (id) => names[id] ?? id;
+  const tasks = await s.eval(`${state}.tasks.filter((t) => t.history?.length || t.lastOutcome)`).catch(() => []);
+  const entries = ledger();
+  const t0 = Math.min(...tasks.flatMap((t) => (t.history ?? []).map((h) => h.at)), ...entries.flatMap((e) => (e.t === 'post' ? [e.msg.at] : e.at ? [e.at] : [])));
+  const sec = (at) => `+${((at - t0) / 1000).toFixed(1)} s`;
+  for (const t of tasks) {
+    console.log(`history of "${t.title}" (stage ${t.stage}, last outcome ${t.lastOutcome?.outcome} at ${t.lastOutcome ? sec(t.lastOutcome.at) : '-'}):`);
+    for (const h of t.history ?? []) console.log(`  ${sec(h.at)} ${h.kind} ${h.from ?? ''}->${h.to ?? ''} by ${who(h.by)}${h.reason ? ` "${h.reason}"` : ''}`);
+  }
+  const line = (e) => {
+    if (e.t === 'post') {
+      const m = e.msg;
+      return `${sec(m.at)} post ${m.kind} ${who(m.from)}->${who(m.to)} ${m.id.slice(0, 6)}${m.requestId ? ` settles ${m.requestId.slice(0, 6)} ${m.outcome}` : ''} root ${m.rootId.slice(0, 6)} "${(m.title ?? m.text ?? '').slice(0, 50).replace(/\n/g, ' ')}"`;
+    }
+    return e.t === 'deliver' || e.t === 'turn_end' ? `${sec(e.at)} ${e.t} ${e.to ? who(e.to) : ''} turn ${e.turn.slice(0, 6)}` : null;
+  };
+  console.log('mail timeline:\n' + entries.map(line).filter(Boolean).join('\n'));
   console.log('modal:', JSON.stringify(await s.eval(`${state}.modal`).catch(() => '?')), 'aim:', JSON.stringify(await s.eval(`${state}.aim`).catch(() => '?')));
   console.log('sent at failure:', JSON.stringify(await s.eval('window.__sent?.slice(-10)').catch(() => '?')));
-  console.log('ledger posts:\n' + ledger().filter((e) => e.t === 'post').slice(-10).map((e) => `${e.msg.kind} ${e.msg.from}->${e.msg.to} ${(e.msg.title ?? e.msg.text ?? '').slice(0, 80)}`).join('\n'));
   await s.shot('t3-failure').catch(() => {});
 };
 
