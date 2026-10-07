@@ -264,11 +264,15 @@ export function newTask(a: { id: TaskId; boardId: BoardId; title: string; notes?
   return { id: a.id, boardId: a.boardId, title: a.title, ...(a.notes ? { notes: a.notes } : {}), origin: a.origin, stage: a.stage, assignees: [], runs: [], createdAt: a.now, updatedAt: a.now };
 }
 
+// What a person is told at the end of a task's request about its card. A model reads this where it is working far more
+// reliably than in the persona.
+const MOVE_CARD_NOTE = 'Before you settle this, move its card with moveTask and say why in a sentence: to review when the work is ready for the owner, or to done only when nothing is left for them to check.';
+
 // The one request a person is given when a task is assigned to them.
 export function runRequest(task: Task, board: Board): { title: string; text: string } {
   const o = task.origin;
   const source = o.kind === 'manual' ? '' : `\n\nFrom ${o.sourceLabel}: ${o.identifier}${o.url ? ` ${o.url}` : ''}`;
-  return { title: task.title, text: `${task.title}${task.notes ? `\n\n${task.notes}` : ''}${source}\n\nTask board: ${board.name}.` };
+  return { title: task.title, text: `${task.title}${task.notes ? `\n\n${task.notes}` : ''}${source}\n\nTask board: ${board.name}. ${MOVE_CARD_NOTE}` };
 }
 
 const sourceKey = (o: ProviderOrigin) => `${o.kind}:${o.externalId}`;
