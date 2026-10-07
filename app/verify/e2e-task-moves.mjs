@@ -32,6 +32,8 @@ export const env = {
 };
 
 const state = '__office.store.getState()';
+// Work lands on the task's own branch, whose worktree sits beside the data. A block with no branch for it gets the project folder.
+const landed = (taskId, file) => existsSync(join(dataDir, 'worktrees', `task-${taskId}`, file)) || existsSync(join(repo, file));
 const ledgerFile = join(dataDir, 'company.mail.jsonl');
 const posts = () =>
   existsSync(ledgerFile)
@@ -97,14 +99,14 @@ export default async (s) => {
   const moves = (t) => (t.history ?? []).filter((h) => h.kind === 'stage').map((h) => `${h.by === pia ? 'Pia' : h.by === ana ? 'Ana' : h.by === bruno ? 'Bruno' : h.by}:${h.to}`);
 
   // 1. An employee finishes and says so on the board.
-  const hello = await makeTask('Write hello.txt', 'Create hello.txt in the project folder with the single line hello. That is the whole task.', ana);
+  const hello = await makeTask('Write hello.txt', 'Create hello.txt in the project folder with the single line hello.', ana);
   await until(s, `${state}.tasks.find((t) => t.id === ${JSON.stringify(hello)}).lastOutcome?.outcome === 'done'`, 'Ana finishes hello.txt');
   const first = await task(hello);
   console.log('hello stage moves:', moves(first).join(' > '));
   const toReview = (first.history ?? []).find((h) => h.kind === 'stage' && h.to === 'review');
   assert(first.stage === 'review' && toReview?.by === ana, 'the card is in review and Ana moved it herself, not the office');
   assert(typeof toReview.reason === 'string' && toReview.reason.length >= 10, `she gave a reason: ${JSON.stringify(toReview.reason)}`);
-  assert(existsSync(join(repo, 'hello.txt')), 'and her work is in the project folder');
+  assert(landed(hello, 'hello.txt'), 'and her work landed');
   await s.eval(`__office.store.setState({ modal: { kind: 'task_board', blockId: ${JSON.stringify(blockId)}, taskId: ${JSON.stringify(hello)} } })`);
   await s.waitFor(`!!document.querySelector('[data-testid="task-activity"] [data-testid="entry-reason"]')`, 15000);
   const shown = await s.eval(`[...document.querySelectorAll('[data-testid="activity-entry"][data-kind="stage"]')].map((e) => ({ head: e.querySelector('.tb-log-head').innerText, reason: e.querySelector('[data-testid="entry-reason"]')?.innerText ?? null }))`);
@@ -118,12 +120,12 @@ export default async (s) => {
 
   // 2. Someone the task never reached tries to move it.
   const asked = posts().length;
-  await s.eval(`window.office.send({ type: 'post', to: ${JSON.stringify(bruno)}, clientId: 'refuse-1', as: 'say', text: 'Call the moveTask tool once with to "done", reason "checking the board" and task "Write hello.txt". Then message me the exact JSON the tool answered with, word for word, and nothing else.' })`);
+  await s.eval(`window.office.send({ type: 'post', to: ${JSON.stringify(bruno)}, clientId: 'refuse-1', as: 'say', text: 'Call the moveTask tool once with to "done", reason "checking the board" and task "Write hello.txt". Then use the message tool with to "owner" to send me the exact JSON the tool answered with, word for word, and nothing else.' })`);
   const t0 = Date.now();
   let said;
   while (Date.now() - t0 < WAIT_MS && !said) {
     await unattended(s);
-    said = posts().slice(asked).find((m) => m.from === bruno && m.to === 'owner' && m.kind !== 'request' && /not_on_task|not yours|never given/i.test(m.text ?? ''));
+    said = posts().slice(asked).find((m) => m.from === bruno && m.kind === 'say' && /not_on_task|not yours|never given/i.test(m.text ?? ''));
     if (!said) await s.sleep(1500);
   }
   assert(!!said, `Bruno was refused and told the owner so: ${JSON.stringify((said?.text ?? '').slice(0, 160))}`);
@@ -163,5 +165,5 @@ export default async (s) => {
   assert(settledAt.every((at) => at <= done.at), 'every piece had settled before she moved it');
   assert(typeof done.reason === 'string' && done.reason.length >= 10, `with a reason: ${JSON.stringify(done.reason)}`);
   assert(!moves(fin).some((m) => m.startsWith('Ana') || m.startsWith('Bruno')), 'the people who did the pieces did not move the card');
-  assert(existsSync(join(repo, 'one.txt')) && existsSync(join(repo, 'two.txt')), 'both files are in the project folder');
+  assert(landed(report, 'one.txt') && landed(report, 'two.txt'), 'both files landed');
 };
