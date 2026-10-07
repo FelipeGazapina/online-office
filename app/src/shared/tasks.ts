@@ -44,7 +44,8 @@ export type StageBy = ActorId | 'provider';
 
 // What happened to a task that the mailroom's ledger does not say. Append-only: the activity log folds it in with the mail.
 export type TaskEvent =
-  | { kind: 'stage'; at: number; from: TaskStage; to: TaskStage; by: StageBy; cause?: MessageId }
+  // `reason` is what a teammate said when they moved the card themselves.
+  | { kind: 'stage'; at: number; from: TaskStage; to: TaskStage; by: StageBy; cause?: MessageId; reason?: string }
   // An hours entry sent to CronoSpark, or one that failed (`error`).
   | { kind: 'hours'; at: number; employeeId: EmployeeId; date: LocalDate; hours: number; error?: string };
 
@@ -70,9 +71,9 @@ export type Task = {
 export const withEvent = (task: Task, event: TaskEvent): Task => ({ ...task, history: [...(task.history ?? []), event] });
 
 // The task in `to`, with the move on its history. Moving a task to where it already is changes nothing.
-export function restage(task: Task, to: TaskStage, by: StageBy, at: number, cause?: MessageId): Task {
+export function restage(task: Task, to: TaskStage, by: StageBy, at: number, cause?: MessageId, reason?: string): Task {
   if (task.stage === to) return task;
-  return withEvent({ ...task, stage: to }, { kind: 'stage', at, from: task.stage, to, by, ...(cause ? { cause } : {}) });
+  return withEvent({ ...task, stage: to }, { kind: 'stage', at, from: task.stage, to, by, ...(cause ? { cause } : {}), ...(reason ? { reason } : {}) });
 }
 
 export type BoardSync =
@@ -106,6 +107,54 @@ export function outcomeFromRuns(task: Task, runState: (run: MessageId) => RunSta
   if (!latest || latest.reply === task.lastOutcome?.reply) return undefined;
   const lastOutcome: LastOutcome = { outcome: latest.outcome, text: latest.text.slice(0, OUTCOME_TEXT_CAP), at: latest.at, reply: latest.reply };
   return task.stage === 'doing' ? { lastOutcome, stage: latest.outcome === 'done' ? 'review' : 'todo' } : { lastOutcome };
+}
+
+// ───────────────────────────── Teammates moving the card ─────────────────────────────
+
+// Where a teammate may take a card, by where it stands now. Back to doing is picking the work up again, review and done are
+// claims about the work, and todo belongs to the owner and the office: a run that stops sends its task there.
+export type AgentStage = Exclude<TaskStage, 'todo'>;
+const AGENT_MOVES: Record<TaskStage, readonly AgentStage[]> = {
+  todo: ['doing'],
+  doing: ['review', 'done'],
+  review: ['doing', 'done'],
+  done: ['doing'],
+};
+
+// What the mail says about the teammate who asks, as far as one card is concerned.
+export type MoveFacts = {
+  // The card is theirs: it was given to them, or a request of it passed through them.
+  onTask: boolean;
+  // They hold an open request of this task right now, so they are working on it.
+  holding: boolean;
+  // The other open requests of the task that are not theirs, one line each.
+  open: readonly string[];
+};
+
+export type MoveRefusalReason = 'no_task' | 'unknown_task' | 'ambiguous' | 'not_on_task' | 'pinned' | 'not_allowed' | 'not_resumed' | 'open_pieces';
+export type MoveRefusal = { reason: MoveRefusalReason; detail: string };
+
+const refuse = (reason: MoveRefusalReason, detail: string): MoveRefusal => ({ reason, detail });
+
+const stillOpen = (open: readonly string[]) => `${open.length} request(s) of this task are still open (${open.join('; ')})`;
+
+// Why a task is not ready for the owner to look at: a piece of it is still being worked on.
+const reviewRefusal = (open: readonly string[]): MoveRefusal | undefined => (open.length ? refuse('open_pieces', `Not ready for the owner: ${stillOpen(open)}. Wait for them to settle, or cancel them.`) : undefined);
+
+// Why a task cannot be called done. The one place that decides it.
+export function doneRefusal(_task: Task, open: readonly string[]): MoveRefusal | undefined {
+  return open.length ? refuse('open_pieces', `Not done yet: ${stillOpen(open)}. Wait for them to settle, or cancel them.`) : undefined;
+}
+
+// What a teammate's move of a card is refused for, or undefined when it may go ahead. The owner's own hand is not asked:
+// a card the owner placed stays where it is until they move it or give the task to someone again.
+export function agentMoveRefusal(task: Task, to: AgentStage, facts: MoveFacts): MoveRefusal | undefined {
+  if (!facts.onTask) return refuse('not_on_task', 'This task is not yours: it was never given to you and none of its requests passed through you.');
+  if (task.stage === to) return undefined;
+  if (task.stagePinned) return refuse('pinned', `The owner put this task in ${task.stage} themselves, so it stays there until they move it or give the task to someone again.`);
+  if (!AGENT_MOVES[task.stage].includes(to)) return refuse('not_allowed', `A task in ${task.stage} does not go to ${to}. From ${task.stage} it can go to ${AGENT_MOVES[task.stage].join(' or ')}.`);
+  if (to === 'doing') return facts.holding ? undefined : refuse('not_resumed', 'Only someone working on one of its requests takes a task back to doing, and you hold none of them now.');
+  return to === 'done' ? doneRefusal(task, facts.open) : reviewRefusal(facts.open);
 }
 
 // ───────────────────────────── Boards ─────────────────────────────
