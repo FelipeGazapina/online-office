@@ -2,7 +2,7 @@
 // its origin at the middle of its footprint (`ItemDef.top`, in 12.5 cm units) and faces +z at rot 0 like every other model:
 // a laptop's keys are toward +z, its screen toward -z. They are a few boxes and cylinders each, so one def stays one draw call.
 import { BoxGeometry, IcosahedronGeometry, Quaternion, TorusGeometry, Vector3, type BufferGeometry } from 'three';
-import { blob, box, cyl, lathe, lean, merge, paint, rbox } from './parts.ts';
+import { bbox, blob, box, cyl, lathe, lean, merge, paint, rbox } from './parts.ts';
 
 // Every model takes the look it is drawn in: the same footprint and height, another colour or style. `of` wraps round a palette.
 const of = <T,>(palette: readonly T[], look: number): T => palette[((look % palette.length) + palette.length) % palette.length];
@@ -96,10 +96,10 @@ const vase = () =>
       12,
     ),
     ...[
-      { rx: 0.1, rz: -0.25, len: 0.15, color: '#f1ebe0' },
-      { rx: -0.15, rz: 0.1, len: 0.2, color: '#e0a458' },
-      { rx: 0.2, rz: 0.32, len: 0.12, color: '#e8828f' },
-      { rx: -0.1, rz: -0.08, len: 0.1, color: '#f1ebe0' },
+      { rx: 0.1, rz: -0.25, len: 0.07, color: '#f1ebe0' },
+      { rx: -0.15, rz: 0.1, len: 0.09, color: '#e0a458' },
+      { rx: 0.2, rz: 0.32, len: 0.06, color: '#e8828f' },
+      { rx: -0.1, rz: -0.08, len: 0.05, color: '#f1ebe0' },
     ].flatMap(({ rx, rz, len, color }) => {
       // The stem leans about its foot at the vase's neck; the bloom sits where its tip goes.
       const tip = [-len * Math.cos(rx) * Math.sin(rz), 0.23 + len * Math.cos(rx) * Math.cos(rz), len * Math.sin(rx)] as const;
@@ -198,7 +198,7 @@ const coaster = (look: number) => {
 const LUNCHBOXES = [['#4f7ea3', '#f4f0e6'], ['#d95d63', '#f2b84b'], ['#6aa36f', '#f4f0e6']] as const;
 const lunchbox = (look: number) => {
   const [c, latch] = of(LUNCHBOXES, look);
-  return merge([rbox(0.3, 0.05, 0.2, 0, 0.025, 0, 0.03, c), rbox(0.31, 0.026, 0.21, 0, 0.063, 0, 0.03, c), box(0.06, 0.03, 0.018, 0, 0.055, 0.106, latch), box(0.12, 0.006, 0.02, 0.05, 0.078, -0.03, latch)]);
+  return merge([rbox(0.21, 0.046, 0.14, 0, 0.023, 0, 0.03, c), rbox(0.218, 0.026, 0.148, 0, 0.059, 0, 0.03, c), box(0.04, 0.028, 0.014, 0, 0.052, 0.074, latch), box(0.085, 0.005, 0.014, 0.035, 0.074, -0.02, latch)]);
 };
 
 // ---- the upright and the small
@@ -462,10 +462,25 @@ const calculator = (look: number) => {
   ]);
 };
 
+// A phone is 7.1 by 14.7 cm and 8 mm thick. `PHONES` are its looks: body, screen, and what the screen shows.
+const PHONES = [['#2b2e38', '#7fb6ff', true], ['#f4f0e6', '#1c1f27', false], ['#e8828f', '#ffd8a8', true]] as const;
+const phoneSlab = (look: number) => {
+  const [body, screen, lit] = of(PHONES, look);
+  return [
+    bbox(0.071, 0.008, 0.147, 0, 0.004, 0, body, 0.002),
+    box(0.065, 0.0012, 0.14, 0, 0.0086, 0, screen),
+    box(0.016, 0.0014, 0.004, 0, 0.0088, -0.066, '#1c1f27'),
+    ...(lit ? [box(0.034, 0.0014, 0.012, 0, 0.0088, -0.04, CREAM), box(0.054, 0.0014, 0.008, 0, 0.0088, -0.008, '#ffffff'), box(0.054, 0.0014, 0.008, 0, 0.0088, 0.008, '#dfeaff')] : []),
+  ];
+};
+const phone = (look: number) => merge(phoneSlab(look));
+
 const phoneStand = (look: number) => {
   const c = look % 2 ? '#d8b47d' : '#c9cdd8';
-  const phone = merge([paint(new BoxGeometry(0.066, 0.13, 0.008).translate(0, 0.065, 0), look % 2 ? '#f4f0e6' : '#1c1f27'), paint(new BoxGeometry(0.058, 0.12, 0.002).translate(0, 0.065, 0.0045), '#7fb6ff')]);
-  return merge([cyl(0.05, 0.05, 0.01, 0, 0.005, 0.01, c, 12), lean(phone, -0.28, 0, 0, 0.012, 0), box(0.07, 0.014, 0.012, 0, 0.017, 0.045, c)]);
+  // The phone leans back against a slanted rest, its foot on a lip of the plate.
+  const rest = lean(paint(new BoxGeometry(0.05, 0.085, 0.01).translate(0, 0.0425, 0), c), -0.28, 0, 0, 0.012, 0.02);
+  const held = lean(merge(phoneSlab(look).map((g) => g.rotateX(Math.PI / 2).translate(0, 0.0735, 0))), -0.28, 0, 0, 0.018, 0.028);
+  return merge([bbox(0.09, 0.012, 0.1, 0, 0.006, 0, c, 0.004), box(0.074, 0.016, 0.01, 0, 0.02, 0.04, c), rest, held]);
 };
 
 const tablet = (look: number) => {
@@ -668,6 +683,7 @@ export const TABLETOP_MODELS: Readonly<Record<string, (look: number) => BufferGe
   snack_bowl: around(snackBowl),
   calculator: around(calculator),
   phone_stand: around(phoneStand),
+  phone: around(phone),
   tablet: around(tablet),
   candle: around(candle),
   cat_statue: around(catStatue),
