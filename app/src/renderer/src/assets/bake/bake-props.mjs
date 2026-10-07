@@ -31,7 +31,7 @@ const SPECS = [
   { name: 'bookshelf', from: 'wooden_bookshelf_worn/wooden_bookshelf_worn.gltf', size: [1.96, 2, 0.46], slot: 1024, maxTris: 3000 },
   { name: 'desk', from: 'wooden_table_02/wooden_table_02.gltf', size: [1.46, 0.72, 0.94], slot: 1024, rotY: 0 },
   { name: 'lamp', from: 'modern_ceiling_lamp_01/modern_ceiling_lamp_01.gltf', size: [0.42, 1, 0.42], uniform: 'w', slot: 512, anchor: 'top', cutTop: 0.38, maxTris: 1500 },
-  { name: 'chair', from: 'kenney/chairDesk.glb', size: [0.56, 1, 0.56], uniform: 'h', height: 1.0, tint: ['carpet'], rotY: Math.PI },
+  { name: 'chair', from: 'kenney/chairDesk.glb', size: [0.56, 1, 0.56], uniform: 'h', height: 1.0, tint: ['carpet'], rotY: 0 },
 ];
 
 await MeshoptSimplifier.ready;

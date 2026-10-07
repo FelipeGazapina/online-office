@@ -267,13 +267,11 @@ export default async (s) => {
 
   // A seated employee faces the desk: the direction they turn to is the direction of the desk's nearest edge.
   let people = 0;
-  const peopleRows = [];
   for (const p of data.people) {
     assert(p.fwd, `found the scene object of seated employee ${p.id}`);
     const desk = tableFor(p.at, (r) => DESKS.has(r.def.kind));
     const to = nearest(p.at, desk.r.box).map((v, k) => v - p.at[k]);
     const off = angle(p.fwd, to);
-    peopleRows.push(`${p.id} ${off.toFixed(1)}`);
     assert(off <= TOWARD, `employee ${p.id} at ${desk.r.def.id} faces the desk (${off.toFixed(1)} degrees off, limit ${TOWARD})`);
     people++;
   }
@@ -289,6 +287,9 @@ export default async (s) => {
   await s.eval(`__office.teleport(${huddle.x + 3.3}, ${huddle.z + 4.2}, Math.PI)`);
   await s.sleep(2500);
   await save(s, 'huddle');
+  await s.eval('__office.teleport(0, 3.2, Math.PI)');
+  await s.sleep(2500);
+  await save(s, 'meeting');
 
   assert(wrong.length === 0, `every chair kind faces its table (wrong: ${wrong.join(', ') || 'none'})`);
 };
