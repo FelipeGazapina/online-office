@@ -51,7 +51,7 @@ function moveEach(b) {
       if (!applied?.ok) continue;
       const trial = [];
       addShells(applied.building, [...blocks.slice(0, n), block], (o) => trial.push(o));
-      if (trial.length !== n + 1 || trial.some((o) => o.kind !== 'placed')) continue;
+      if (trial.length !== n + 1 || trial.some((o) => o.kind !== 'placed' || o.left.length)) continue;
       console.log(`moved ${block.name} to ${c.x}, ${c.z} m, turned ${quarter * 90} degrees`);
       cur = applied.building;
       return;
@@ -76,7 +76,8 @@ const seen = [];
 const expected = addShells(input, blocks, (o) => seen.push(o));
 company.building = encodeBuilding(input);
 writeFileSync(join(dataDir, 'company.json'), JSON.stringify(company));
-console.log(`state ${STATE}: ${seen.map((o) => `${o.block.name} ${o.kind === 'placed' ? `placed (${o.agree} of ${o.of} agree, turn ${o.pose.quarter}, shift ${o.pose.dx},${o.pose.dz})` : `fell back (${o.why})`}`).join('; ')}`);
+const sayLeft = (o) => (o.left.length ? `, ${o.left.length} left at the slot spot: ${o.left.map((l) => `${l.id.slice(o.block.id.length + 1)} (${l.why})`).join('; ')}` : '');
+console.log(`state ${STATE}: ${seen.map((o) => `${o.block.name} ${o.kind === 'placed' ? `placed (${o.agree} of ${o.of} agree, turn ${o.pose.quarter}, shift ${o.pose.dx},${o.pose.dz}${sayLeft(o)})` : `fell back (${o.why})`}`).join('; ')}`);
 
 export const env = { OFFICE_DATA_DIR: dataDir, OFFICE_START_LEVEL: '5' };
 
@@ -105,26 +106,26 @@ export default async function (s, { launch }) {
   assert(held.shelled === 2, 'the app holds the office with every pod migrated');
   assert(sameItems(held, expected), 'and it is the one the migration gives for this file, piece for piece');
   const mainOut = s.mainLogs.join('\n');
+  const refused = (o) => (o.kind === 'fell_back' || o.left.length > 0);
   for (const o of seen) {
-    const warned = mainOut.includes(`the pod of ${o.block.name} stays where the static pod stood`);
-    assert(warned === (o.kind === 'fell_back'), o.kind === 'fell_back' ? `${o.block.name}'s pod was turned away and the log says why: ${o.why}` : `${o.block.name}'s pod was placed with no warning in the log`);
+    const warned = mainOut.includes(`company.json: the pod of ${o.block.name} `);
+    assert(warned === refused(o), refused(o) ? `${o.block.name}'s pod was turned away in whole or in part and the log says why` : `${o.block.name}'s pod was placed with no warning in the log`);
   }
 
+  const atSlotSpot = (o, i) => shellItems(o.block.id, o.block.slot).some((p) => p.id === i.id && p.x === i.x && p.z === i.z && p.rot === i.rot);
   for (const o of seen) {
     const mine = held.stories.flatMap((st) => st.items).filter((i) => i.blockId === o.block.id);
     const pod = mine.filter((i) => shellItems(o.block.id, o.block.slot).some((p) => p.id === i.id));
     const cores = mine.filter((i) => coreItems(o.block.id, o.block.slot).some((p) => p.id === i.id));
-    if (o.kind === 'fell_back') {
-      const atSlot = pod.filter((i) => shellItems(o.block.id, o.block.slot).some((p) => p.id === i.id && p.x === i.x && p.z === i.z && p.rot === i.rot));
-      assert(atSlot.length === pod.length, `${o.block.name}: the refused pod stands whole at the slot spot (${pod.length} pieces)`);
-      continue;
-    }
-    const box = podBox(pod);
+    const left = new Set(o.kind === 'placed' ? o.left.map((l) => l.id) : pod.map((i) => i.id));
+    assert(pod.filter((i) => left.has(i.id)).every((i) => atSlotSpot(o, i)), `${o.block.name}: the ${left.size} pieces the rules refused stand at the slot spot`);
+    if (o.kind === 'fell_back') continue;
+    const carried = pod.filter((i) => !left.has(i.id));
+    const box = podBox(carried);
     const around = cores.filter((c) => inside(box, c)).length;
-    assert(around >= o.agree, `${o.block.name}: at least the ${o.agree} desks, board or signs that agree on the pose stand inside its pod (${around} of ${cores.length} do)`);
+    assert(around >= o.agree, `${o.block.name}: at least the ${o.agree} desks, board or signs that agree on the pose stand inside its ${carried.length} pieces of pod (${around} of ${cores.length} do)`);
     const moved = o.pose.quarter !== 0 || o.pose.dx !== 0 || o.pose.dz !== 0;
-    const left = pod.filter((i) => shellItems(o.block.id, o.block.slot).some((p) => p.id === i.id && p.x === i.x && p.z === i.z && p.rot === i.rot));
-    assert(!moved || left.length === 0, `${o.block.name}: ${moved ? 'no piece of its pod is left at the old slot spot' : 'it stands at its slot, so its pod does too'}`);
+    assert(!moved || carried.every((i) => !atSlotSpot(o, i)), `${o.block.name}: ${moved ? 'none of the pieces that followed is left at the old slot spot' : 'it stands at its slot, so its pod does too'}`);
   }
 
   if (SHOTS) {
@@ -146,6 +147,7 @@ export default async function (s, { launch }) {
       const box = cellBounds(items);
       await s.eval(`__office.teleport(${(box.x0 + box.x1) / 4}, ${(box.z0 + box.z1) / 4})`);
       await s.eval('__office.step(0.5)');
+      await s.press('Escape');
       await still();
       copyFileSync(await s.shot(`${TAG}-${name}`), join(SHOTS, `${TAG}-${name}.png`));
       await zoom(-300);
@@ -158,11 +160,10 @@ export default async function (s, { launch }) {
     for (const o of seen) {
       const mine = items.filter((i) => i.blockId === o.block.id);
       const podIds = new Set(shellItems(o.block.id, o.block.slot).map((p) => p.id));
-      // A pod turned away stands far from its desks, so each gets its own picture.
-      if (o.kind === 'fell_back') {
-        await frame(`${o.block.name}-desks`, mine.filter((i) => !podIds.has(i.id)));
-        await frame(`${o.block.name}-pod`, mine.filter((i) => podIds.has(i.id)));
-      } else await frame(o.block.name, mine);
+      const stayed = new Set(o.kind === 'placed' ? o.left.map((l) => l.id) : [...podIds]);
+      // Pieces left at the slot spot stand far from the desks, so they get their own picture.
+      await frame(o.kind === 'fell_back' ? `${o.block.name}-desks` : o.block.name, mine.filter((i) => !stayed.has(i.id)));
+      if (stayed.size) await frame(`${o.block.name}-left`, mine.filter((i) => stayed.has(i.id)));
     }
   }
 
@@ -190,6 +191,6 @@ export default async function (s, { launch }) {
   await app.eval('__office.step(2)');
   const after = await app.eval(`${store}.building`);
   assert(after.shelled === 2 && sameItems(after, before), 'after a restart the building is the same, piece for piece');
-  assert(!app.mainLogs.join('\n').includes('stays where the static pod stood'), 'and no block is turned away a second time: the migration did not run again');
+  assert(!app.mainLogs.join('\n').includes('company.json: the pod of'), 'and no pod is turned away a second time: the migration did not run again');
   await app.close();
 }

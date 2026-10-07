@@ -6,7 +6,7 @@ export { applyOps, checkOps, validate, entryOf, BuildHistory } from './validate.
 export { seatPose, deskOf, freeDesk, placeDesk } from './seats.ts';
 export { teamKit, blockCenter, shellItems, DOOR_X, BLOCK_W, BLOCK_D } from './kit.ts';
 export { addShells, inferSlotPose } from './migrate.ts';
-export type { ShellBlock, ShellOutcome, SlotPose, SlotReading } from './migrate.ts';
+export type { LeftPiece, ShellBlock, ShellOutcome, SlotPose, SlotReading } from './migrate.ts';
 export { navOf, stairLinks, route, findPath, closeDoor, openDoor, snapToOpen } from './nav.ts';
 export { wallName, stairsInfo } from './geom.ts';
 export { parseBuilding, encodeBuilding } from './codec.ts';

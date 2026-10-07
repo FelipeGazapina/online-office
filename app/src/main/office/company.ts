@@ -272,7 +272,9 @@ function load(file: string): Loaded | undefined {
     building,
     company.blocks.map((b) => ({ id: b.id, slot: b.slot, name: b.name })),
     (o) => {
-      if (o.kind === 'fell_back') console.warn(`company.json: the pod of ${o.block.name ?? o.block.id} stays where the static pod stood, away from its desks: ${o.why}.`);
+      const name = o.block.name ?? o.block.id;
+      if (o.kind === 'fell_back') console.warn(`company.json: the pod of ${name} stays where the static pod stood, away from its desks: ${o.why}.`);
+      else if (o.left.length) console.warn(`company.json: the pod of ${name} stands with its desks, except ${o.left.map((l) => `${l.id.replace(`${o.block.id}:`, '')} (${l.why})`).join(', ')}, which stay where the static pod stood.`);
     },
   );
   return { company, building: seatEveryone(company, shelled), legacy };

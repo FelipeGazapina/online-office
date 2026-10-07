@@ -7,14 +7,16 @@ import { inLotTile, itemRect, tileIndex } from './geom.ts';
 import { blockCenter, coreItems, shellItems } from './kit.ts';
 import { applyAll, itemInLot } from './story.ts';
 import { applyOps, findItem, locateItem } from './validate.ts';
-import type { Building, BlockId, BuildOp, FloorCell, Item, Rot, SpaceContext, Vec2, Violation } from './types.ts';
+import type { Building, BlockId, BuildOp, FloorCell, Item, ItemId, Rot, SpaceContext, Vec2, Violation } from './types.ts';
 
 /** How a team's slot layout was carried to where its pieces stand: turned `quarter` quarter turns clockwise about the cell origin (x, z) -> (-z, x), then shifted by (dx, dz) cells. */
 export type SlotPose = { quarter: Rot; dx: number; dz: number };
 export type ShellBlock = { id: BlockId; slot: number; name?: string };
+/** A piece of a pod the rules refuse at the team's pose. It stays at the slot spot, where the static pod stood. */
+export type LeftPiece = { id: ItemId; why: string };
 export type ShellOutcome =
-  | { kind: 'placed'; block: ShellBlock; pose: SlotPose; agree: number; of: number }
-  | { kind: 'fell_back'; block: ShellBlock; pose: SlotPose | null; why: string };
+  | { kind: 'placed'; block: ShellBlock; pose: SlotPose; agree: number; of: number; left: readonly LeftPiece[] }
+  | { kind: 'fell_back'; block: ShellBlock; why: string };
 /** What the desks, board and sign say about where their team stands, or why they do not say. */
 export type SlotReading = { story: number; pose: SlotPose; agree: number; of: number } | { why: string };
 
@@ -88,10 +90,13 @@ function carpetUnder(b: Building, slot: number): FloorCell[] {
 // The rules look at the pieces only, not at who sits where: moving a pod changes no desk.
 const NO_SEATS: SpaceContext = { blocks: new Set(), employees: new Map(), seats: new Map() };
 
-function describe(block: ShellBlock, violations: readonly Violation[]): string {
-  const name = (id: string) => (id.startsWith(`${block.id}:`) ? id.slice(block.id.length + 1) : id);
-  const shown = violations.slice(0, 3).map((v) => `${v.kind}${v.ids ? ` ${v.ids.map(name).join(' and ')}` : ''}`);
-  return `the rules refuse the pod there: ${shown.join(', ')}${violations.length > 3 ? `, and ${violations.length - 3} more` : ''}`;
+function describe(piece: Item, violations: readonly Violation[]): string {
+  return violations
+    .map((v) => {
+      const others = (v.ids ?? []).filter((id) => id !== piece.id);
+      return others.length ? `${v.kind} with ${others.join(', ')}` : v.kind;
+    })
+    .join(', ');
 }
 
 type Job = {
@@ -120,35 +125,46 @@ function jobFor(b: Building, block: ShellBlock, fresh: boolean): Job {
 
 function settle(b: Building, job: Job, report: (outcome: ShellOutcome) => void): Building {
   const { block, story, reading, lift, add } = job;
-  const cur = add.length ? applyAll(b, [{ t: 'floor', story: 0, cells: carpetUnder(b, block.slot) }], []).b : b;
-  const atSlot = () => applyAll(cur, [{ t: 'items', story, put: [...lift, ...add.filter((i) => itemInLot(cur.lot, i))], del: [] }], []).b;
+  let cur = add.length ? applyAll(b, [{ t: 'floor', story: 0, cells: carpetUnder(b, block.slot) }], []).b : b;
+  const atSlot = (pieces: readonly Item[]) => {
+    cur = applyAll(cur, [{ t: 'items', story, put: pieces.filter((i) => itemInLot(cur.lot, i)), del: [] }], []).b;
+  };
   if (!('pose' in reading)) {
-    report({ kind: 'fell_back', block, pose: null, why: reading.why });
-    return atSlot();
+    report({ kind: 'fell_back', block, why: reading.why });
+    atSlot([...lift, ...add]);
+    return cur;
   }
   const { pose, agree, of } = reading;
-  if (!isSlot(pose)) {
-    const moved = applyOps(cur, [{ t: 'items', story, put: [...lift, ...add].map((i) => carry(i, pose)), del: [] }], NO_SEATS);
-    if (!moved.ok) {
-      report({ kind: 'fell_back', block, pose, why: describe(block, moved.violations) });
-      return atSlot();
+  const stay: Item[] = [];
+  const left: LeftPiece[] = [];
+  for (const piece of [...lift, ...add]) {
+    if (isSlot(pose)) {
+      stay.push(piece);
+      continue;
     }
-    report({ kind: 'placed', block, pose, agree, of });
-    return moved.building;
+    const placed = applyOps(cur, [{ t: 'items', story, put: [carry(piece, pose)], del: [] }], NO_SEATS);
+    if (placed.ok) cur = placed.building;
+    else {
+      stay.push(piece);
+      left.push({ id: piece.id, why: describe(piece, placed.violations) });
+    }
   }
-  report({ kind: 'placed', block, pose, agree, of });
-  return atSlot();
+  atSlot(stay);
+  report({ kind: 'placed', block, pose, agree, of, left });
+  return cur;
 }
 
 /**
- * Gives every block of `blocks` its pod as items, placed with the block's desks, board and sign.
- * - A building never migrated gets every piece it lacks.
- * - A building at `shelled` 1, migrated when the pod went to the slot spot whatever the desks did, only has the pieces that still
- *   sit exactly at their slot spot carried to the team. A piece the owner moved stands elsewhere and keeps its place, one the
- *   owner deleted stays deleted, and a piece the owner put back on the slot spot by hand is carried once like the rest.
- * A pod goes to the team's pose only when all of it passes the rules of a block move; otherwise it stays at the slot spot and
- * `report` says why. Every piece about to move is lifted first, so a pod cannot be turned away by another pod it is about to
- * leave. The building comes back at `shelled` 2, and a building already there comes back as it is.
+ * Gives every block of `blocks` its pod as items, placed with the block's desks, board and sign, and returns the building at
+ * `shelled` 2. A building already there comes back as it is.
+ * - Never migrated: every piece the team lacks is added.
+ * - At `shelled` 1, where the earlier migration put each pod at its slot spot whatever the desks did: the pieces still exactly
+ *   at their slot spot are carried to the team. A piece anywhere else is one the owner moved and keeps its place, and a piece
+ *   that is gone stays gone. A piece the owner put back on its slot spot by hand cannot be told from an untouched one.
+ * Each piece goes to the team's pose when it passes the rules of a block move, as a piece placed alone does. One the rules
+ * refuse (an owner's cabinet in the way, the edge of the lot) stays at its slot spot and `report` names it and says why. A team
+ * whose pieces give no pose keeps its whole pod at the slot spot. Pieces about to move are lifted first, so a piece is not
+ * refused for the sake of the pod it is about to replace.
  */
 export function addShells(b: Building, blocks: readonly ShellBlock[], report: (outcome: ShellOutcome) => void = () => {}): Building {
   if (b.shelled === 2) return b;

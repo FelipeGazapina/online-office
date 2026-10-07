@@ -539,13 +539,25 @@ const flat = (stories = 1, size = 20): Building => {
   const noCores = run(stage(podOf(A.id, A.slot)));
   check(/none of its desks/.test(whyOf(noCores.seen[0])) && eq(shellNow(noCores.out, A.id, A.slot), byId(podOf(A.id, A.slot))), 'a team with no desks, board or sign left gets its pod at the slot spot and a reason');
 
-  // The rules turn a pod away: a plant where the huddle table would stand, and desks so near the lot edge that the pod would stick out.
+  // The rules turn a piece away: a plant where the huddle table would stand, and desks so near the lot edge that part of the pod would stick out.
+  // That piece stays at its slot spot and the rest of the pod stands with the desks.
+  const split2 = (b: Building, want: readonly Item[], left: readonly { id: string }[]) => {
+    const gone = new Set(left.map((l) => l.id));
+    const now = shellNow(b, A.id, A.slot);
+    return eq(now.filter((i) => !gone.has(i.id)), want.filter((i) => !gone.has(i.id))) && eq(now.filter((i) => gone.has(i.id)), byId(podOf(A.id, A.slot).filter((i) => gone.has(i.id))));
+  };
   const huddle = reference(turned, A.id, A.slot, 1).find((i) => i.def === 'pod_huddle_table')!;
   const blocked = run(stage([...itemsOf(turned), item('plant:in-the-way', 'plant', huddle.x, huddle.z)]));
-  check(/overlap/.test(whyOf(blocked.seen[0])), 'a plant where the huddle table would stand turns the whole pod away: overlap', JSON.stringify(blocked.seen));
-  check(eq(shellNow(blocked.out, A.id, A.slot), byId(podOf(A.id, A.slot))) && itemsOf(blocked.out).some((i) => i.id === 'plant:in-the-way'), 'and the pod stands whole at the slot spot while the plant stays where it was');
-  const edge = run(move(bare, A.id, 0, { x: lot.x0 * 2, z: -50 }));
-  check(/out_of_lot/.test(whyOf(edge.seen[0])), 'desks against the lot edge leave no room for the pod: out_of_lot, and it falls back', JSON.stringify(edge.seen));
+  const blockedOutcome = blocked.seen[0];
+  const blockedLeft = blockedOutcome.kind === 'placed' ? blockedOutcome.left : [];
+  check(blockedLeft.length === 1 && blockedLeft[0].id === huddle.id && /overlap with plant:in-the-way/.test(blockedLeft[0].why), 'a plant where the huddle table would stand turns away that table alone: overlap', JSON.stringify(blocked.seen));
+  check(split2(blocked.out, reference(turned, A.id, A.slot, 1), blockedLeft) && itemsOf(blocked.out).some((i) => i.id === 'plant:in-the-way'), 'the table stays at the slot spot, the other 19 pieces stand with the desks, and the plant stays where it was');
+  const atEdge = move(bare, A.id, 0, { x: lot.x0 * 2, z: -50 });
+  const edge = run(atEdge);
+  const edgeLeft = edge.seen[0].kind === 'placed' ? edge.seen[0].left : [];
+  check(edgeLeft.length > 0 && edgeLeft.every((l) => /out_of_lot/.test(l.why)), 'desks against the lot edge leave no room for part of the pod: those pieces are out_of_lot', JSON.stringify(edge.seen));
+  check(split2(edge.out, reference(atEdge, A.id, A.slot, 0), edgeLeft) && edge.out.shelled === 2, 'only those pieces stay at the slot spot, the rest stand with the desks');
+  check(addShells(edge.out, [A]) === edge.out && eq(addShells({ ...edge.out, shelled: 1 }, [A]), edge.out), 'a second run, flag or no flag, changes nothing: a piece refused once is refused again');
 
   // Carpet painted under the old rug is cleared at the slot spot, and none is painted where the pod goes.
   const carpeted = must(applyOps(bare, [paintRect(0, { x: -5, z: -8, w: 9, h: 7 }, PAINT.carpetBlue)], noCtx));
