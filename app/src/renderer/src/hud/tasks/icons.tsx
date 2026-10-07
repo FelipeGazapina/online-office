@@ -30,6 +30,10 @@ export function StageIcon({ stage, size = 16 }: P & { stage: TaskStage }) {
   );
 }
 
+export const Branch = ({ size }: P) => (
+  <Svg size={size}><circle cx="4.5" cy="3.5" r="1.6" /><circle cx="4.5" cy="12.5" r="1.6" /><circle cx="11.5" cy="5.5" r="1.6" /><path d="M4.5 5.1v5.8M11.5 7.1c0 2.6-3.2 2.2-6 4" /></Svg>
+);
+
 export const KindIcon = ({ kind, size }: P & { kind: Board['kind'] }) =>
   kind === 'feature' ? (
     <Svg size={size}><path d="M8 2l1.5 3.8L13.3 7.3 9.5 8.8 8 12.6 6.5 8.8 2.7 7.3 6.5 5.8z" /></Svg>

@@ -7,7 +7,7 @@ import { join } from 'node:path';
 import type { BlockId, EmployeeId } from '../src/shared/protocol.ts';
 import { Mailroom, type Member } from '../src/main/office/mail.ts';
 import { folderArtifacts } from '../src/main/office/mail-artifacts.ts';
-import { changedInWorkspace, commitsAhead, createWorkspace, integrate, isGitRepo, removeWorkspace, syncWorkspace, workspaceArtifacts, type Workspace } from '../src/main/office/workspace.ts';
+import { changedInWorkspace, commitsAhead, createTaskWorkspace, createWorkspace, defaultBase, integrate, isGitRepo, pushBranch, removeTaskWorkspace, removeWorkspace, syncWorkspace, workspaceArtifacts, type Base, type Workspace } from '../src/main/office/workspace.ts';
 import { check, finish } from './check.ts';
 
 const root = realpathSync(mkdtempSync(join(tmpdir(), 'ws-check-')));
@@ -121,6 +121,167 @@ const text = (dir: string, file: string) => readFileSync(join(dir, file), 'utf8'
   check(integrate(block, ana, 'Ana', 'Ana adds new').kind === 'merged' && existsSync(join(block, 'new.txt')), 'once the owner is clean, the same integration goes through');
 }
 
+// the default branch a task starts from
+const bare = (): { origin: string; block: string } => {
+  const origin = join(root, `origin${++seq}.git`);
+  git(root, 'init', '-q', '--bare', '-b', 'main', origin);
+  const block = repo();
+  git(block, 'remote', 'add', 'origin', origin);
+  git(block, 'push', '-q', '-u', 'origin', 'main');
+  return { origin, block };
+};
+{
+  const plain = repo();
+  git(plain, 'checkout', '-q', '-b', 'wip');
+  const local = defaultBase(plain);
+  check(local.name === 'wip' && !local.origin && git(plain, 'rev-parse', local.ref) === git(plain, 'rev-parse', 'HEAD'), 'with no remote a task starts from the branch the owner has checked out', JSON.stringify(local));
+  const { block } = bare();
+  const fetched = defaultBase(block);
+  check(fetched.name === 'main' && fetched.origin && fetched.ref === 'refs/remotes/origin/main', 'with a remote it starts from origin\'s main even before origin/HEAD is set', JSON.stringify(fetched));
+  git(block, 'checkout', '-q', '-b', 'owner-wip');
+  git(block, 'remote', 'set-head', 'origin', 'main');
+  check(defaultBase(block).name === 'main' && defaultBase(block).ref === 'refs/remotes/origin/main', 'origin/HEAD decides, whatever branch the owner has checked out');
+  const lonely = repo();
+  git(lonely, 'remote', 'add', 'origin', join(root, 'nowhere.git'));
+  check(defaultBase(lonely).name === 'main' && defaultBase(lonely).origin && defaultBase(lonely).ref === 'refs/heads/main', 'a remote that has no default branch yet falls back to the checked-out branch');
+}
+
+// a task branch: naming, reuse, and what it keeps out of the owner's folder
+{
+  const { block, origin } = bare();
+  const base = defaultBase(block);
+  const path = join(root, 'data', `task-${seq}`);
+  const want = { branch: 'task/fix-login-1a2b3c4d', title: 'Fix login', key: '1a2b3c4d' };
+  const ownerHead = git(block, 'rev-parse', 'HEAD');
+  const ws = createTaskWorkspace(block, path, want, base);
+  check(ws.branch === want.branch && git(ws.path, 'rev-parse', '--abbrev-ref', 'HEAD') === want.branch, 'the task gets its branch in its own worktree');
+  check(git(ws.path, 'rev-list', '--count', `${base.ref}..HEAD`) === '1' && git(ws.path, 'log', '-1', '--format=%s') === 'Start: Fix login' && git(ws.path, 'diff', '--name-only', base.ref, 'HEAD') === '', 'the branch starts one empty commit ahead of the base, so a pull request can open');
+  check(git(block, 'rev-parse', '--abbrev-ref', 'HEAD') === 'main' && git(block, 'rev-parse', 'HEAD') === ownerHead && git(block, 'status', '--porcelain') === '', 'the owner\'s checked-out branch and folder are untouched');
+  const tip = git(ws.path, 'rev-parse', 'HEAD');
+  const again = createTaskWorkspace(block, path, want, base);
+  check(again.branch === ws.branch && git(ws.path, 'rev-parse', 'HEAD') === tip && git(block, 'branch', '--list', 'task/*').split('\n').length === 1, 'making it again reuses the branch and adds no commit');
+  removeTaskWorkspace(block, path);
+  check(!existsSync(path) && git(block, 'branch', '--list', want.branch) !== '' && !git(block, 'worktree', 'list').includes(want.branch), 'removing the worktree keeps the branch');
+  const back = createTaskWorkspace(block, path, { ...want, branch: 'task/another-title-1a2b3c4d', title: 'Another title' }, base);
+  check(back.branch === want.branch && git(back.path, 'rev-parse', 'HEAD') === tip && git(block, 'branch', '--list', 'task/*').split('\n').length === 1, 'a worktree the owner deleted comes back on the same commits, found by the task\'s id even after its title changed');
+  const other = createTaskWorkspace(block, join(root, 'data', `task-b-${seq}`), { branch: 'task/other-99999999', title: 'Other', key: '99999999' }, base);
+  check(other.branch === 'task/other-99999999' && git(other.path, 'rev-parse', 'HEAD') !== tip, 'a second task gets a second branch');
+
+  const pushed = await pushBranch(ws.path, ws.branch);
+  check(pushed.kind === 'pushed' && git(origin, 'rev-parse', `refs/heads/${want.branch}`) === tip, 'the branch is pushed to origin', JSON.stringify(pushed));
+  check((await pushBranch(ws.path, ws.branch)).kind === 'pushed' && git(origin, 'rev-parse', `refs/heads/${want.branch}`) === tip, 'pushing again changes nothing');
+  const clone = join(root, `clone${seq}`);
+  git(root, 'clone', '-q', origin, clone);
+  git(clone, 'checkout', '-q', want.branch);
+  write(clone, 'from-github.txt', 'edited on GitHub\n');
+  git(clone, 'add', '-A');
+  git(clone, 'commit', '-q', '-m', 'Update branch');
+  git(clone, 'push', '-q', 'origin', want.branch);
+  write(ws.path, 'ours.txt', 'ours\n');
+  git(ws.path, 'add', '-A');
+  git(ws.path, 'commit', '-q', '-m', 'our work');
+  const behind = await pushBranch(ws.path, ws.branch);
+  check(behind.kind === 'pushed' && existsSync(join(ws.path, 'from-github.txt')) && git(origin, 'rev-parse', `refs/heads/${want.branch}`) === git(ws.path, 'rev-parse', 'HEAD'), 'when origin moved on, its commits are merged in and the push goes through, never forced', JSON.stringify(behind));
+  const second = join(root, `clone-two-${seq}`);
+  git(root, 'clone', '-q', origin, second);
+  const found = createTaskWorkspace(second, join(root, 'data', `task-e-${seq}`), want, defaultBase(second));
+  check(found.branch === want.branch && git(found.path, 'rev-parse', 'HEAD') === git(origin, 'rev-parse', `refs/heads/${want.branch}`) && existsSync(join(found.path, 'ours.txt')), 'in another clone of the same origin the task continues from the branch origin has, not from the base');
+  const offline = repo();
+  const lone = createTaskWorkspace(offline, join(root, 'data', `task-c-${seq}`), { branch: 'task/solo-aaaaaaaa', title: 'Solo', key: 'aaaaaaaa' }, defaultBase(offline));
+  check((await pushBranch(lone.path, lone.branch)).kind === 'no-remote' && git(offline, 'rev-parse', '--verify', `refs/heads/${lone.branch}`) !== '', 'with no remote there is nothing to push and the branch stays local');
+  const gone = repo();
+  git(gone, 'remote', 'add', 'origin', join(root, 'nowhere.git'));
+  const lost = createTaskWorkspace(gone, join(root, 'data', `task-d-${seq}`), { branch: 'task/lost-bbbbbbbb', title: 'Lost', key: 'bbbbbbbb' }, defaultBase(gone));
+  const refused = await pushBranch(lost.path, lost.branch);
+  check(refused.kind === 'failed' && refused.reason.length > 0, 'a remote that cannot be reached is reported, not thrown', JSON.stringify(refused));
+}
+
+// pieces of a task land on its branch, not on the owner's
+{
+  const { block, origin } = bare();
+  const base = defaultBase(block);
+  const task = createTaskWorkspace(block, join(root, 'data', `task-p-${seq}`), { branch: 'task/two-pieces-cccccccc', title: 'Two pieces', key: 'cccccccc' }, base);
+  const ana = hire(block, 'Ana');
+  const bruno = hire(block, 'Bruno');
+  const ownerHead = git(block, 'rev-parse', 'HEAD');
+  check(syncWorkspace(task.path, ana, 'Ana').kind === 'merged' && syncWorkspace(task.path, bruno, 'Bruno').kind === 'merged', 'each person starts from the task branch');
+  check(git(ana.path, 'log', '-1', '--format=%s') === 'Start: Two pieces', 'and so has the task\'s first commit');
+  write(ana.path, 'ana.txt', 'ana piece\n');
+  write(bruno.path, 'bruno.txt', 'bruno piece\n');
+  check(changedInWorkspace(task.path, ana).join() === 'ana.txt' && changedInWorkspace(task.path, bruno).join() === 'bruno.txt', 'artifacts are measured against the task branch, so a teammate\'s file is not mine');
+  const first = integrate(task.path, ana, 'Ana', 'Ana\'s piece');
+  const second = integrate(task.path, bruno, 'Bruno', 'Bruno\'s piece');
+  check(first.kind === 'merged' && second.kind === 'merged' && existsSync(join(task.path, 'ana.txt')) && existsSync(join(task.path, 'bruno.txt')), 'both pieces land on the same task branch');
+  check(git(block, 'rev-parse', 'HEAD') === ownerHead && git(block, 'rev-parse', '--abbrev-ref', 'HEAD') === 'main' && !existsSync(join(block, 'ana.txt')) && git(block, 'status', '--porcelain') === '', 'the owner\'s checked-out branch is untouched');
+  check(git(task.path, 'log', '--format=%an', '-n', '6', '--no-merges').includes('Ana') && /Merge office\/ana/.test(log(task.path)), 'the task log shows the employees\' commits and merges');
+  check((await pushBranch(task.path, task.branch)).kind === 'pushed' && git(origin, 'show', `${task.branch}:ana.txt`) === 'ana piece' && git(origin, 'show', `${task.branch}:bruno.txt`) === 'bruno piece', 'origin has both pieces on the task branch and nothing on main');
+  check(git(origin, 'rev-parse', 'refs/heads/main') === ownerHead, 'origin\'s main did not move');
+  check(integrate(task.path, ana, 'Ana', 'again').kind === 'already', 'rerunning an integration into the task changes nothing');
+  check(commitsAhead(task.path, ana) === 0, 'after the merge her branch is not ahead of the task');
+}
+
+// a conflict between two pieces of one task is handled as it is for the block
+{
+  const { block } = bare();
+  const task = createTaskWorkspace(block, join(root, 'data', `task-q-${seq}`), { branch: 'task/clash-dddddddd', title: 'Clash', key: 'dddddddd' }, defaultBase(block));
+  const ana = hire(block, 'Ana');
+  const bruno = hire(block, 'Bruno');
+  syncWorkspace(task.path, ana, 'Ana');
+  syncWorkspace(task.path, bruno, 'Bruno');
+  write(ana.path, 'shared.txt', 'line 1\nANA\nline 3\n');
+  write(bruno.path, 'shared.txt', 'line 1\nBRUNO\nline 3\n');
+  integrate(task.path, ana, 'Ana', 'Ana edits');
+  const clash = integrate(task.path, bruno, 'Bruno', 'Bruno edits');
+  check(clash.kind === 'conflict' && clash.paths.join() === 'shared.txt' && git(task.path, 'status', '--porcelain') === '' && !existsSync(join(task.path, '.git', 'MERGE_HEAD')) && text(task.path, 'shared.txt').includes('ANA'), 'the second piece reports the conflict and the task branch stays clean with the first piece in it');
+  const sync = syncWorkspace(task.path, bruno, 'Bruno');
+  check(sync.kind === 'conflict' && sync.paths.join() === 'shared.txt', 'syncing the task branch into Bruno leaves the conflict in his worktree');
+  write(bruno.path, 'shared.txt', 'line 1\nANA\nBRUNO\nline 3\n');
+  check(integrate(task.path, bruno, 'Bruno', 'Bruno resolves').kind === 'merged' && text(task.path, 'shared.txt').includes('BRUNO'), 'once he resolves, his piece lands on the task branch');
+}
+
+// one task's commits do not ride into another task, or into the block
+{
+  const { block } = bare();
+  const base = defaultBase(block);
+  const a = createTaskWorkspace(block, join(root, 'data', `task-a-${seq}`), { branch: 'task/first-eeeeeeee', title: 'First', key: 'eeeeeeee' }, base);
+  const b = createTaskWorkspace(block, join(root, 'data', `task-b2-${seq}`), { branch: 'task/second-ffffffff', title: 'Second', key: 'ffffffff' }, base);
+  const ana = hire(block, 'Ana');
+  syncWorkspace(a.path, ana, 'Ana');
+  write(ana.path, 'for-first.txt', 'first\n');
+  check(integrate(a.path, ana, 'Ana', 'First piece').kind === 'merged', 'Ana finishes a piece of the first task');
+  const moved = syncWorkspace(b.path, ana, 'Ana');
+  check(moved.kind === 'merged' && !existsSync(join(ana.path, 'for-first.txt')) && git(ana.path, 'rev-parse', 'HEAD') === git(b.path, 'rev-parse', 'HEAD'), 'starting the second task, her branch starts over from it instead of carrying the first task along', JSON.stringify(moved));
+  write(ana.path, 'for-second.txt', 'second\n');
+  integrate(b.path, ana, 'Ana', 'Second piece');
+  check(!existsSync(join(b.path, 'for-first.txt')) && existsSync(join(b.path, 'for-second.txt')) && existsSync(join(a.path, 'for-first.txt')) && !existsSync(join(a.path, 'for-second.txt')), 'each task branch holds only its own work');
+  check(git(ana.path, 'branch', '--contains', git(a.path, 'rev-parse', 'HEAD')).includes(a.branch), 'the first task\'s work is still safe on its own branch');
+  const back = syncWorkspace(block, ana, 'Ana');
+  write(ana.path, 'plain.txt', 'no task\n');
+  check(back.kind === 'merged' && !existsSync(join(ana.path, 'for-second.txt')) && integrate(block, ana, 'Ana', 'No task').kind === 'merged' && !existsSync(join(block, 'for-second.txt')) && !existsSync(join(block, 'for-first.txt')) && existsSync(join(block, 'plain.txt')), 'work outside any task still goes to the block, without the tasks\' commits');
+  // work that exists nowhere else is never dropped to make room
+  const bruno = hire(block, 'Bruno');
+  write(bruno.path, 'only-here.txt', 'sole copy\n');
+  integrate(a.path, bruno, 'Bruno', 'held').kind;
+  const dirtyTask = createTaskWorkspace(block, join(root, 'data', `task-g-${seq}`), { branch: 'task/third-12121212', title: 'Third', key: '12121212' }, base);
+  write(dirtyTask.path, 'task-only.txt', 'x\n');
+  git(dirtyTask.path, 'add', '-A');
+  git(dirtyTask.path, 'commit', '-q', '-m', 'task side');
+  const keep = hire(block, 'Cleo');
+  write(keep.path, 'cleo.txt', 'cleo only\n');
+  git(keep.path, 'add', '-A');
+  git(keep.path, 'commit', '-q', '-m', 'cleo unintegrated');
+  const merged = syncWorkspace(dirtyTask.path, keep, 'Cleo');
+  check(merged.kind === 'merged' && existsSync(join(keep.path, 'cleo.txt')) && existsSync(join(keep.path, 'task-only.txt')), 'a branch holding work no one else has is merged, never reset');
+  const dirt = hire(block, 'Dina');
+  write(dirt.path, 'dina.txt', 'dina\n');
+  git(dirt.path, 'add', '-A');
+  git(dirt.path, 'commit', '-q', '-m', 'dina delivered');
+  git(block, 'merge', '-q', '--no-edit', dirt.branch);
+  write(dirt.path, 'draft.txt', 'uncommitted\n');
+  const kept = syncWorkspace(dirtyTask.path, dirt, 'Dina');
+  check(kept.kind === 'merged' && existsSync(join(dirt.path, 'draft.txt')), 'uncommitted files are never wiped by the start-over either');
+}
+
 // fire
 {
   const block = repo();
@@ -154,7 +315,7 @@ const text = (dir: string, file: string) => readFileSync(join(dir, file), 'utf8'
     deliver: (to, prompt) => void prompts.set(to, [...(prompts.get(to) ?? []), prompt]),
     steer: () => {},
     hire: () => ({ ok: false, reason: 'no' }),
-    artifacts: workspaceArtifacts((who) => (spaces.has(who) ? { blockCwd: block, ws: spaces.get(who)! } : undefined), folderArtifacts(() => block)),
+    artifacts: workspaceArtifacts((who) => (spaces.has(who) ? { home: block, ws: spaces.get(who)! } : undefined), folderArtifacts(() => block)),
     integrate: (who, title) => integrate(block, spaces.get(who)!, names.get(who)!, title),
     branchOf: (who) => (spaces.has(who) ? { branch: spaces.get(who)!.branch, ahead: commitsAhead(block, spaces.get(who)!) } : undefined),
     persist: () => {},

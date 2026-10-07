@@ -1,12 +1,12 @@
 import { memo, useState, type KeyboardEvent, type PointerEvent } from 'react';
 import { createPortal } from 'react-dom';
 import type { Employee, EmployeeId } from '../../../../shared/protocol.ts';
-import type { Task, TaskStage, TaskTime } from '../../../../shared/tasks.ts';
+import type { PrState, Task, TaskStage, TaskTime } from '../../../../shared/tasks.ts';
 import { fmtClock, fmtHours, isRunning, originOf, providerNote, sharesOf, taskMs } from '../../boardView.ts';
 import { avatarColor, isPo } from '../chat/model.ts';
 import { cardLine, namerOf, questionCount } from './activityView.ts';
 import { useTaskLive } from './live.ts';
-import { Alert, Check, Clock, External, OriginTile } from './icons.tsx';
+import { Alert, Branch, Check, Clock, External, OriginTile } from './icons.tsx';
 
 export function Avatar({ person, size = 22, layer }: { person: Employee | undefined; size?: number; layer?: number }) {
   return (
@@ -68,6 +68,21 @@ export function TimeChip({ time, now, people }: { time: TaskTime | undefined; no
   );
 }
 
+export const PR_STATE_LABEL: Record<PrState, string> = { draft: 'Draft', open: 'Open', merged: 'Merged', closed: 'Closed' };
+
+// Where the task stands on GitHub: its pull request and the state it is in, or why there is none. Nothing for a task with no branch.
+export function PrChip({ task }: { task: Task }) {
+  const git = task.git;
+  if (!git) return null;
+  if (!git.pr) return git.note ? <span className="tb-chip ghost" data-testid="card-pr-note" title={git.note}><Branch size={11} />No PR</span> : null;
+  const { number, url, state } = git.pr;
+  return (
+    <a className={`tb-chip tb-pr ${state}`} href={url} target="_blank" rel="noreferrer" data-testid="card-pr" data-pr-state={state} title={`Pull request #${number} is ${PR_STATE_LABEL[state].toLowerCase()}. Open it on GitHub.`} onClick={(e) => e.stopPropagation()}>
+      <Branch size={11} />#{number} {PR_STATE_LABEL[state]}
+    </a>
+  );
+}
+
 type CardProps = {
   task: Task;
   stage: TaskStage;
@@ -124,6 +139,7 @@ export const Card = memo(function Card({ task, stage, time, now, people, selecte
       <p className="tb-card-title">{task.title}</p>
       <div className="tb-chips">
         <TimeChip time={time} now={now} people={people} />
+        <PrChip task={task} />
         {asks > 0 && (
           <span className="tb-chip ask" data-testid="question-badge" data-count={asks} title={live?.questions.map((q) => `${people.get(q.asker)?.name ?? 'Someone'}: ${q.text.slice(0, 160)}`).join('\n')}>
             <b aria-hidden="true">?</b>
