@@ -5,7 +5,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import { ALLOW_ANSWER } from '../../../../shared/permissions.ts';
 import type { Employee, Question } from '../../../../shared/protocol.ts';
-import { layoutBlocks, MODE_LINE, optionsOf, questionRows, quartersOf, spinnerRow, wrap, type Act, type Row, type Span } from '../../../../shared/terminal.ts';
+import { layoutLog, MODE_LINE, optionsOf, questionRows, quartersOf, spinnerRows, wrap, type Act, type Plan, type Row, type Span } from '../../../../shared/terminal.ts';
 import { escapeMonitor, leaveMonitor, useMonitor } from '../../computer.ts';
 import { monitorPoses, zoomFrame } from '../../scene/monitorPose.ts';
 import { get, send, useStore } from '../../store.ts';
@@ -28,14 +28,19 @@ const quarters = (ch: string) => {
   return q.flatMap((on, i) => (on ? [`linear-gradient(currentColor, currentColor) ${at[i]} / 50% 50% no-repeat`] : [])).join(', ');
 };
 
+// A symbol the monospace font does not have is drawn by another font, wider or narrower than a cell, and every row after it drifts. So each
+// one sits in a cell of its own, and a block glyph is drawn by filling its quarters.
+const SYMBOL = /[\u2190-\u24ff\u2580-\u2bff]/;
+const BLOCKS = /[▘▝▖▗▌▐▀▄▛▜▙▟█▚▞]/;
+
 function SpanView({ s }: { s: Span }) {
   const style = spanStyle(s);
-  if (!/[▘▝▖▗▌▐▀▄▛▜▙▟█▚▞]/.test(s.t)) return <span style={style}>{s.t}</span>;
+  if (!SYMBOL.test(s.t)) return <span style={style}>{s.t}</span>;
   return (
     <span style={style}>
       {[...s.t].map((ch, i) => {
-        const bg = quarters(ch);
-        return bg ? <span key={i} className="qd" style={{ background: bg }}>{' '}</span> : ch;
+        if (BLOCKS.test(ch)) return <span key={i} className="qd" style={{ background: quarters(ch) }}>{' '}</span>;
+        return SYMBOL.test(ch) && !/[\u2500-\u257f]/.test(ch) ? <span key={i} className="cell">{ch}</span> : ch;
       })}
     </span>
   );
@@ -46,7 +51,7 @@ function RowView({ row, onAct }: { row: Row; onAct?: (act: Act) => void }) {
   return (
     <div
       className={`term-row${act && onAct ? ' term-act' : ''}`}
-      style={row.fill ? { background: BGS[row.fill] } : undefined}
+      style={{ ...(row.fill ? { background: BGS[row.fill] } : {}), ...(row.old ? { opacity: 0.62 } : {}) }}
       onClick={act && onAct ? () => onAct(act) : undefined}
     >
       {row.spans.length ? row.spans.map((s, i) => <SpanView key={i} s={s} />) : ' '}
@@ -61,13 +66,19 @@ function charWidth(px: number): number {
   return ctx.measureText('0').width;
 }
 
-function Spinner({ startedAt, tokens }: { startedAt: number; tokens: number }) {
+function Spinner({ startedAt, tokens, cols, plan }: { startedAt: number; tokens: number; cols: number; plan: Plan | undefined }) {
   const [now, setNow] = useState(Date.now());
   useEffect(() => {
     const t = setInterval(() => setNow(Date.now()), 140);
     return () => clearInterval(t);
   }, []);
-  return <RowView row={spinnerRow(startedAt, now, tokens)} />;
+  return (
+    <>
+      {spinnerRows(startedAt, now, tokens, cols, 160, plan).map((row, i) => (
+        <RowView key={i} row={row} />
+      ))}
+    </>
+  );
 }
 
 export function TerminalPanel() {
@@ -93,12 +104,16 @@ function Panel({ employee }: { employee: Employee }) {
   const [picked, setPicked] = useState(0);
   // Tab on a permission dialog opens the words under No, where the owner says what to do instead.
   const [amend, setAmend] = useState(false);
+  // What the owner opened in the log: older turns, and calls with all of their result.
+  const [open, setOpen] = useState<{ turns: ReadonlySet<number>; calls: ReadonlySet<number> }>({ turns: new Set(), calls: new Set() });
   const [sent, setSent] = useState<{ text: string; at: number }[]>([]);
   const [ready, setReady] = useState(false);
   const scroller = useRef<HTMLDivElement>(null);
   const field = useRef<HTMLTextAreaElement>(null);
   const pinned = useRef(true);
   const [behind, setBehind] = useState(false);
+  // The log is scrolled, so a row is cut by the top edge.
+  const [cut, setCut] = useState(false);
   const status = employee.status;
   const question = status.kind === 'blocked_on_owner' ? status.question : null;
   const permission = question?.kind === 'permission' ? question : null;
@@ -129,14 +144,18 @@ function Panel({ employee }: { employee: Employee }) {
     return { w: f.width * size.w, h: f.height * size.h };
   }, [employee.id, size]);
 
-  const px = Math.max(11, Math.min(15, Math.round(frame.h / 40)));
-  const lineH = Math.round(px * 1.32);
+  // The panel is the whole screen the camera looks at, so the text is as large as it can be and still hold a line of a terminal: about
+  // 24 rows of generous spacing, not 40 of fine print.
+  const px = Math.max(13, Math.min(24, Math.round(frame.h / 35)));
+  const lineH = Math.round(px * 1.45);
   const cw = useMemo(() => charWidth(px), [px]);
   const cols = Math.max(30, Math.floor((frame.w - 36) / cw));
 
   const blocks = terminalBlocks(employee.id);
   const live = terminalLive(employee.id);
-  const rows = useMemo(() => layoutBlocks(blocks, cols), [blocks, cols, version]);
+  const log = useMemo(() => layoutLog(blocks, cols, open), [blocks, cols, version, open]);
+  const rowCount = log.head.length + log.past.length + log.now.length;
+  const past = useRef<HTMLDivElement>(null);
 
   // What the owner sent that the employee has not echoed yet stays on the screen, so a message never vanishes between Enter and delivery.
   const echoed = useMemo(() => new Set(blocks.flatMap((b) => b.lines.map((l) => l.spans.map((s) => s.t).join('').replace(/^❯ /, '')))), [blocks]);
@@ -147,13 +166,19 @@ function Panel({ employee }: { employee: Employee }) {
     const el = scroller.current;
     if (el && pinned.current) el.scrollTop = el.scrollHeight;
     else if (el) setBehind(true);
-  }, [rows, pendingRows.length, question?.id, status.kind, size]);
+    if (el) setCut(el.scrollTop > 2);
+  }, [log, pendingRows.length, question?.id, status.kind, size]);
+  // The turns before this one stay at the top, with the latest of them showing.
+  useLayoutEffect(() => {
+    if (past.current) past.current.scrollTop = past.current.scrollHeight;
+  }, [log.past]);
 
   const onScroll = () => {
     const el = scroller.current;
     if (!el) return;
     pinned.current = el.scrollHeight - el.scrollTop - el.clientHeight < 24;
     if (pinned.current) setBehind(false);
+    setCut(el.scrollTop > 2);
   };
 
   const answer = (text: string, always = false) => {
@@ -242,8 +267,15 @@ function Panel({ employee }: { employee: Employee }) {
   const hint = status.kind === 'working' ? 'esc to interrupt' : question ? 'esc to stop · 1-3 to choose' : 'esc to leave';
   const who = `${employee.name} · ${modelLabel(employee.model)}`;
   const dialog = question ? questionRows(question, cols, { picked: permission && amend ? optionsOf(question).length - 1 : picked, ...(permission ? { ask: live.asks?.find((a) => a.detail === permission.detail) } : {}), who, ...(permission && amend ? { amend: draft } : {}) }) : [];
+  const flip = (set: ReadonlySet<number>, n: number) => {
+    const next = new Set(set);
+    if (!next.delete(n)) next.add(n);
+    return next;
+  };
   const act = (a: Act) => {
     if ('option' in a) choose(a.option);
+    else if ('turn' in a) setOpen((o) => ({ ...o, turns: flip(o.turns, a.turn) }));
+    else setOpen((o) => ({ ...o, calls: flip(o.calls, a.block) }));
   };
 
   return (
@@ -253,9 +285,19 @@ function Panel({ employee }: { employee: Employee }) {
       style={{ width: frame.w, height: frame.h, left: (size.w - frame.w) / 2, top: (size.h - frame.h) / 2 }}
     >
       <div className="term-screen" style={{ fontSize: px, lineHeight: `${lineH}px`, background: SCREEN_BG, fontFamily: FONT }} onMouseDown={(e) => e.target === e.currentTarget && field.current?.focus()}>
-        <div className="term-scroll" ref={scroller} onScroll={onScroll} data-rows={rows.length}>
-          {rows.map((r, i) => (
-            <RowView key={i} row={r} />
+        <div className={cut && !log.past.length ? 'term-scroll cut' : 'term-scroll'} ref={scroller} onScroll={onScroll} data-rows={rowCount}>
+          {log.head.map((r, i) => (
+            <RowView key={i} row={r} onAct={act} />
+          ))}
+          {log.past.length > 0 && (
+            <div ref={past} className={open.turns.size ? 'term-past loose' : 'term-past'} style={{ background: SCREEN_BG, ...(open.turns.size ? {} : { maxHeight: lineH * 4 + 8 }) }}>
+              {log.past.map((r, i) => (
+                <RowView key={i} row={r} onAct={act} />
+              ))}
+            </div>
+          )}
+          {log.now.map((r, i) => (
+            <RowView key={`n${i}`} row={r} onAct={act} />
           ))}
           {pendingRows.map((r, i) => (
             <RowView key={`p${i}`} row={r} />
@@ -268,7 +310,7 @@ function Panel({ employee }: { employee: Employee }) {
           </button>
         )}
         <div className="term-foot">
-          {status.kind === 'working' && !question && <Spinner startedAt={status.startedAt} tokens={live.tokens} />}
+          {status.kind === 'working' && !question && <Spinner startedAt={status.startedAt} tokens={live.tokens} cols={cols} plan={live.plan} />}
           {status.kind === 'error' && (
             <div className="term-row">
               <span style={{ color: TONES.dim }}>{'  ⎿  '}</span>

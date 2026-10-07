@@ -3,7 +3,7 @@
 // Run from app/: node verify/terminal-check.ts   Exits 1 on any failed check.
 import type { AllowRule, EmployeeStatus, Question, QuestionId } from '../src/shared/protocol.ts';
 import { covers, ruleFor, sameRule, type PermissionBody } from '../src/shared/permissions.ts';
-import { applyPush, footerOf, optionsOf, questionRows, rowText, screenOf, TERMINAL_LINES, TerminalBuffer, toolLines, wrap, type TermBlock, type TermEvent, type TerminalLine } from '../src/shared/terminal.ts';
+import { applyPush, footerOf, layoutBlocks, layoutLog, optionsOf, questionRows, rowText, screenOf, spinnerRows, TERMINAL_LINES, TerminalBuffer, toolLines, wrap, type TermBlock, type TermEvent, type TerminalLine } from '../src/shared/terminal.ts';
 import { check, finish } from './check.ts';
 
 const text = (rows: { spans: { t: string }[] }[]) => rows.map((r) => r.spans.map((s) => s.t).join(''));
@@ -34,11 +34,11 @@ check(blocks[2]!.lines[0]!.spans.some((s) => s.b && s.t === 'package.json') && b
 check(blocks[3]!.lines.length === 1 && blocks[3]!.lines[0]!.spans[0]!.c === 'dim', 'a call still waiting for its result has a dim dot');
 t.apply({ k: 'result', id: 't1', ok: true, text: '1\t{}', data: { file: { numLines: 46 } } });
 blocks = t.all();
-check(blocks.length === 4 && text(blocks[3]!.lines).join('|') === '● Read(package.json)|  ⎿  Read 46 lines' && blocks[3]!.lines[0]!.spans[0]!.c === 'ok', 'its result lands in the same block, and the dot turns green');
+check(blocks.length === 4 && text(blocks[3]!.lines).join('|') === '● Read(package.json)|  ⎿  Read 46 lines (click to expand)' && blocks[3]!.lines[0]!.spans[0]!.c === 'ok', 'its result lands in the same block, and the dot turns green');
 t.apply({ k: 'tool', id: 't2', name: 'Bash', input: { command: 'npm   test\n --silent' } });
 t.apply({ k: 'result', id: 't2', ok: false, text: 'FAIL src/a.test.ts\nexpected 1\nreceived 2\nat line 4' });
 blocks = t.all();
-check(text(blocks[4]!.lines).join('|') === '● Bash(npm test --silent)|  ⎿  Error: FAIL src/a.test.ts|     expected 1|     received 2|     … +1 line' && blocks[4]!.lines[0]!.spans[0]!.c === 'err', 'a failed command shows its first lines in red and how many it left out');
+check(text(blocks[4]!.lines).join('|') === '● Bash(npm test --silent)|  ⎿  Error: FAIL src/a.test.ts|     expected 1|     received 2|     … +1 line (click to expand)' && blocks[4]!.lines[0]!.spans[0]!.c === 'err', 'a failed command shows its first lines in red and how many it left out');
 t.apply({ k: 'tool', id: 't3', name: 'mcp__office__message', input: { to: 'owner', text: 'Starting now' } });
 check(text(t.all()[5]!.lines)[0] === '● office - message (MCP)(to: "owner", text: "Starting now")', 'the office tools read like any MCP server');
 t.apply({ k: 'tool', id: 't4', name: 'Bash', input: { command: 'sleep 99' } });
@@ -54,7 +54,7 @@ stopped.apply({ k: 'tool', id: 's', name: 'Bash', input: { command: 'make' } });
 stopped.apply({ k: 'result', id: 's', ok: false, text: "The user doesn't want to proceed with this tool use. The tool use was rejected (eg. if it was a file edit, the new_string was NOT written to the file)." });
 stopped.apply({ k: 'end', how: 'interrupted' });
 check(stopped.all().length === 2 && text(stopped.all()[1]!.lines).join('|') === '● Bash(make)|  ⎿  Interrupted · What should Claude do instead?', 'the SDK\'s rejection of a stopped call reads as the interruption, and the end of the turn does not say it twice');
-check(text(toolLines('Edit', { file_path: '/work/repo/a.ts' }, '/work/repo', { ok: true, text: 'x', data: { structuredPatch: [{ oldStart: 9, newStart: 9, lines: [' a', '-b', '+c', '+d'] }] } })).join('|') === '● Update(a.ts)|  ⎿  Updated a.ts with 2 additions and 1 removal|      9   a|     10 - b|     10 + c|     11 + d', 'an edit counts what it added and removed and numbers its diff rows from the patch');
+check(text(toolLines('Edit', { file_path: '/work/repo/a.ts' }, '/work/repo', { ok: true, text: 'x', data: { structuredPatch: [{ oldStart: 9, newStart: 9, lines: [' a', '-b', '+c', '+d'] }] } }).lines).join('|') === '● Update(a.ts)|  ⎿  Updated a.ts with 2 additions and 1 removal|      9   a|     10 - b|     10 + c|     11 + d', 'an edit counts what it added and removed and numbers its diff rows from the patch');
 
 const thoughts = new TerminalBuffer('/work/repo');
 thoughts.apply({ k: 'thinking', id: 'a:0' });
@@ -125,8 +125,115 @@ const spin = screen.find((r) => /esc to interrupt/.test(r));
 check(!!spin && /\(6s · ↑ 1\.2k tokens · esc to interrupt\)/.test(spin), `a working employee shows the spinner with the seconds and the tokens (${spin})`);
 const cut = screenOf({ blocks: t.all(), live: t.live, status: idle, now: 0, cols: 40, rows: 6 });
 check(cut.length === 6 && text(cut).some((r) => r.startsWith('❯ ')) && text(cut).at(-1)!.startsWith('  ? for shortcuts') && text(cut).join('|').includes('Interrupted'), 'a screen too short for the log keeps the prompt and the newest row, and drops the oldest');
-const compact = footerOf({ blocks: [], live: t.live, status: working, now: 0, cols: 30, rows: 8, compact: true });
-check(compact.length === 4 && rowText(compact[2]!).startsWith('❯ ') && /esc to interrupt/.test(rowText(compact[0]!)), 'the compact footer on a desk monitor is the spinner and the prompt box');
+const compact = footerOf({ blocks: [], live: t.live, status: working, now: 0, cols: 60, rows: 8, compact: true });
+check(compact.length === 4 && rowText(compact[2]!).startsWith('❯ ') && /… \(0s\)$/.test(rowText(compact[0]!)), 'the compact footer on a desk monitor is the spinner, without the hint a monitor cannot act on, and the prompt box');
+
+console.log('\n# turns');
+const convo = new TerminalBuffer('/work/repo');
+convo.apply({ k: 'prompt', text: 'What word is in hello.txt? Answer with that word only.' });
+convo.apply({ k: 'tool', id: 'r1', name: 'Read', input: { file_path: '/work/repo/hello.txt' } });
+convo.apply({ k: 'result', id: 'r1', ok: true, text: '1\thi', data: { file: { numLines: 1 } } });
+convo.apply({ k: 'text', id: 'a1', text: 'hi' });
+convo.apply({ k: 'prompt', text: 'Run the tests' });
+convo.apply({ k: 'tool', id: 'b1', name: 'Bash', input: { command: 'make' } });
+convo.apply({ k: 'end', how: 'interrupted' });
+convo.apply({ k: 'prompt', text: 'Create three files a.txt, b.txt and c.txt' });
+convo.apply({ k: 'tool', id: 'w1', name: 'Write', input: { file_path: '/work/repo/a.txt', content: 'a' } });
+const turnsOf = (v = {}) => layoutBlocks(convo.all(), 80, v);
+let laid = turnsOf();
+check(convo.all().map((b) => b.turn).join() === '0,1,1,1,2,2,3,3', 'a prompt opens a turn and the blocks after it belong to it');
+check(text(laid).filter((r) => r.startsWith('▸ ')).length === 2, 'the turns before the current one are a row each');
+check(text(laid).some((r) => r === '▸ ❯ What word is in hello.txt? Answer with that word only.  · 1 call  → hi'), `a row says what was asked, how many calls it took and what was answered (${text(laid).find((r) => r.startsWith('▸ '))})`);
+check(text(laid).some((r) => /^▸ ❯ Run the tests {2}· 1 call · interrupted$/.test(r)), 'and an interrupted turn says so');
+check(!text(laid).some((r) => r.includes('Read(hello.txt)')) && text(laid).some((r) => r.includes('Write(a.txt)')) && text(laid).some((r) => r === '❯ Create three files a.txt, b.txt and c.txt'), 'the current turn is printed in full, the old ones are not');
+const summaries = laid.filter((r) => r.act && 'turn' in r.act);
+check(summaries.map((r) => ('turn' in r.act! ? r.act.turn : -1)).join() === '1,2' && laid.findIndex((r) => r === summaries[1]) === laid.findIndex((r) => r === summaries[0]) + 1, 'a click on the row opens that turn, and the rows of old turns sit together');
+laid = turnsOf({ turns: new Set([1]) });
+check(text(laid).some((r) => r.startsWith('▾ ❯ What word')) && text(laid).some((r) => r.includes('Read(hello.txt)')) && laid.filter((r) => r.old).length === 4, 'an old turn the owner opened shows its blocks, drawn dimmer');
+check(laid.filter((r) => r.old).every((r) => !text([r]).some((x) => x.includes('Write(a.txt)'))), 'and the current turn stays as it was');
+const flatLog = layoutBlocks(convo.all(), 80, { compact: true });
+check(!text(flatLog).some((r) => r === '') && text(flatLog).filter((r) => r.startsWith('▸ ')).length === 2, 'on a monitor there are no blank rows, and old turns are still a row each');
+check(layoutBlocks(convo.all(), 80).length > flatLog.length, 'and a monitor takes fewer rows than the panel for the same log');
+
+const parts = layoutLog(convo.all(), 80);
+check(parts.head.length === 3 && parts.past.length === 2 && text(parts.now)[0] === '❯ Create three files a.txt, b.txt and c.txt', 'the log comes in three parts: the header, the turns before this one, and this one');
+check(layoutBlocks(convo.all(), 80).length === parts.head.length + parts.past.length + parts.now.length + 2, 'and as one list they are the same rows with a blank row between the parts');
+const busy = new TerminalBuffer('/work/repo');
+busy.apply({ k: 'prompt', text: 'go' });
+busy.apply({ k: 'thinking', id: 't', secs: 2 });
+busy.apply({ k: 'tool', id: 'c1', name: 'TaskCreate', input: { subject: 'One' } });
+busy.apply({ k: 'tool', id: 'c2', name: 'TaskCreate', input: { subject: 'Two' } });
+busy.apply({ k: 'tool', id: 'w', name: 'Write', input: { file_path: '/work/repo/a', content: 'a' } });
+check(text(layoutBlocks(busy.all().slice(1), 60)).join('|') === '❯ go||∴ Thought for 2s|● Add task(One)|● Add task(Two)||● Write(a)', 'a thought sits right above what it led to, and the owner\'s own bookkeeping calls sit together');
+check(busy.all().filter((b) => b.kind === 'chore').length === 2 && text(layoutBlocks(busy.all().slice(1), 60, { compact: true })).join('|') === '❯ go|∴ Thought for 2s|● Write(a)', 'on a monitor the bookkeeping is left out, the list being in the spinner');
+check(busy.all().find((b) => b.kind === 'chore')!.lines[0]!.spans.every((x) => x.c === 'dim' && !x.b), 'and it is dim, so the calls that did the work are the ones that stand out');
+
+console.log('\n# results the owner can open');
+const wrote = new TerminalBuffer('/work/repo');
+wrote.apply({ k: 'prompt', text: 'go' });
+wrote.apply({ k: 'tool', id: 'w', name: 'Write', input: { file_path: '/work/repo/n.txt', content: 'one\ntwo\nthree\nfour\nfive\nsix' } });
+wrote.apply({ k: 'result', id: 'w', ok: true, text: 'ok' });
+const wb = wrote.all().at(-1)!;
+check(text(wb.lines).join('|') === '● Write(n.txt)|  ⎿  Wrote 6 lines to n.txt|       1  one|       2  two|       3  three|       4  four|     … +2 lines (click to expand)', `a long result is a count, a few lines and how many are left (${text(wb.lines).join('|')})`);
+check(wb.lines.filter((l) => l.toggle).length === 2 && wb.full!.filter((l) => l.toggle).length === 2, 'the call and the line that says click to expand toggle it');
+check(text(wb.full!).join('|').includes('6  six') && text(wb.full!).at(-1)!.includes('click to collapse'), 'opened, it holds every line and says how to close it');
+const opened = layoutBlocks(wrote.all(), 60, { calls: new Set([wb.n]) });
+check(text(opened).some((r) => r.includes('6  six')) && opened.find((r) => text([r])[0]!.includes('Write(n.txt)'))!.act !== undefined && ('block' in opened.find((r) => text([r])[0]!.includes('Write(n.txt)'))!.act!), 'the rows of a call the owner opened carry the click that closes it');
+const body = wb.lines[2]!.spans.slice(-2);
+check(body[0]!.c === 'dim' && body[1]!.c === 'fg', 'the text of a result is as bright as the words above it, and the line numbers are dim');
+const mini = text(layoutBlocks(wrote.all(), 48, { compact: true })).slice(-3);
+check(mini.join('|') === '❯ go|● Write(n.txt)|  ⎿  Wrote 6 lines to n.txt', `a monitor shows the call and its count (${mini.join('|')})`);
+wrote.apply({ k: 'tool', id: 'r', name: 'Read', input: { file_path: '/work/repo/n.txt' } });
+wrote.apply({ k: 'result', id: 'r', ok: true, text: '1\tone\n2\ttwo\n3\tthree', data: { file: { numLines: 3 } } });
+check(text(wrote.all().at(-1)!.lines).join('|') === '● Read(n.txt)|  ⎿  Read 3 lines (click to expand)' && text(wrote.all().at(-1)!.full!).join('|').includes('2\ttwo'), 'a read says how many lines and holds them to open');
+check(text(layoutBlocks(wrote.all().slice(-1), 60, { compact: true })).join('|') === '● Read(n.txt)|  ⎿  Read 3 lines', 'and a monitor leaves the hint out');
+const fits = new TerminalBuffer('/work/repo');
+fits.apply({ k: 'tool', id: 'b', name: 'Bash', input: { command: 'ls' } });
+fits.apply({ k: 'result', id: 'b', ok: true, text: 'a.txt\nb.txt\nc.txt', data: { stdout: 'a.txt\nb.txt\nc.txt' } });
+check(fits.all().at(-1)!.full === undefined && text(fits.all().at(-1)!.lines).join('|') === '● Bash(ls)|  ⎿  a.txt|     b.txt|     c.txt', 'a result that fits has nothing to open');
+
+console.log('\n# what the employee is doing');
+const planned = new TerminalBuffer('/work/repo');
+planned.apply({ k: 'prompt', text: 'go' });
+planned.apply({
+  k: 'tool',
+  id: 'p',
+  name: 'TodoWrite',
+  input: { todos: [{ content: 'Read the config', status: 'completed', activeForm: 'Reading the config' }, { content: 'Write the tests', status: 'in_progress', activeForm: 'Writing the tests' }, { content: 'Run the suite', status: 'pending', activeForm: 'Running the suite' }] },
+});
+check(planned.live.plan?.active === 'Writing the tests' && planned.live.plan.next === 'Run the suite', 'the todo list says what is being done and what comes next');
+let spun = spinnerRows(10_000, 16_000, 1234, 80, 160, planned.live.plan);
+check(text(spun).join('|').endsWith('Writing the tests… (6s · ↑ 1.2k tokens · esc to interrupt)|  ⎿  Next: Run the suite') && spun[0]!.spans[0]!.c === 'accent', 'the spinner line is the todo being done, in the accent colour, with the next one under it');
+spun = spinnerRows(10_000, 16_000, 0, 80, 160);
+check(spun.length === 1 && !text(spun)[0]!.includes('Next:'), 'an employee with no list has the verb and no hint');
+planned.apply({ k: 'tool', id: 'p2', name: 'TodoWrite', input: { todos: [{ content: 'Run the suite', status: 'in_progress', activeForm: 'Running the suite' }] } });
+check(planned.live.plan?.active === 'Running the suite' && planned.live.plan.next === undefined && spinnerRows(0, 1000, 0, 80, 160, planned.live.plan).length === 1, 'the last todo has nothing after it');
+planned.apply({ k: 'tool', id: 'p3', name: 'TodoWrite', input: { todos: [{ content: 'Run the suite', status: 'completed', activeForm: 'Running the suite' }] } });
+check(planned.live.plan === undefined, 'a list with nothing left to do says nothing');
+planned.apply({ k: 'tool', id: 'p4', name: 'TodoWrite', input: { todos: [{ content: 'A very long thing to do next so that the active line has to wrap', status: 'in_progress', activeForm: 'Doing a very long thing so that the active line has to wrap inside forty columns' }] } });
+check(spinnerRows(0, 5000, 0, 40, 160, planned.live.plan).every((r) => rowText(r).length <= 40), 'a long active line wraps inside the width');
+planned.apply({ k: 'end', how: 'done' });
+check(planned.live.plan === undefined, 'the list is gone when the turn ends');
+
+const tasks = new TerminalBuffer('/work/repo');
+tasks.apply({ k: 'prompt', text: 'go' });
+const create = (id: string, subject: string, activeForm: string, result: { data?: unknown; text: string }) => {
+  tasks.apply({ k: 'tool', id: `c${id}`, name: 'TaskCreate', input: { subject, description: 'x', activeForm } });
+  tasks.apply({ k: 'result', id: `c${id}`, ok: true, ...result });
+};
+create('1', 'Write a.txt', 'Writing a.txt', { data: { task: { id: '1', subject: 'Write a.txt' } }, text: 'Task #1 created successfully: Write a.txt' });
+create('2', 'Write b.txt', 'Writing b.txt', { text: 'Task #2 created successfully: Write b.txt' });
+create('3', 'Run ls', 'Running ls', { text: 'created' });
+check(planned.live.plan === undefined && tasks.live.plan?.active === 'Writing a.txt' && tasks.live.plan.next === 'Write b.txt', 'tasks made one at a time make the list too, whether their id comes as data, in the words or by count');
+check(text(tasks.all().at(-1)!.lines).join('|') === '● Add task(Run ls)', `a created task is one line (${text(tasks.all().at(-1)!.lines).join('|')})`);
+tasks.apply({ k: 'tool', id: 'u1', name: 'TaskUpdate', input: { taskId: '1', status: 'in_progress' } });
+tasks.apply({ k: 'tool', id: 'u2', name: 'TaskUpdate', input: { taskId: '1', status: 'completed' } });
+tasks.apply({ k: 'tool', id: 'u3', name: 'TaskUpdate', input: { taskId: '2', status: 'in_progress' } });
+check(tasks.live.plan?.active === 'Writing b.txt' && tasks.live.plan.next === 'Run ls' && text(tasks.all().at(-2)!.lines).join('|') === '● Update task(#1 · completed)', 'an update moves the list: the one being done, and the one after it');
+tasks.apply({ k: 'tool', id: 'u4', name: 'TaskUpdate', input: { taskId: '3', status: 'deleted' } });
+check(tasks.live.plan?.next === undefined, 'a deleted task is not next');
+tasks.apply({ k: 'end', how: 'done' });
+check(tasks.live.plan === undefined, 'and the list goes with the turn');
 
 console.log('\n# the permission dialog');
 const q = (body: object): Question => ({ id: 'q' as QuestionId, askedAt: 0, ...body }) as Question;
