@@ -2,7 +2,7 @@ import { dismissed, get, set, setSetting, toggleCamera } from './store.ts';
 import { KEYS_INTENT, runtime, STEER_KEYS } from './runtime.ts';
 import { setPtt } from './talk.ts';
 import { toggleMeetingDoor } from './meeting.ts';
-import { enterComputer, enterProjectComputer, leaveComputer } from './computer.ts';
+import { enterComputer, enterMonitor, enterProjectComputer, escapeMonitor, leaveComputer, leaveMonitor, useMonitor } from './computer.ts';
 import { holdModifier } from './hud/build/actions.ts';
 import { buildKey } from './hud/build/keys.ts';
 import { buildView } from './hud/build/state.ts';
@@ -23,6 +23,13 @@ export function installInput() {
     if (e.metaKey || e.ctrlKey || e.altKey) return;
     const s = get();
 
+    // Zoomed into a monitor: Esc stops the employee, or leaves when there is nothing to stop. F leaves. Nothing else moves the owner.
+    if (useMonitor.getState().open) {
+      if (e.code === 'Escape') escapeMonitor();
+      else if (e.code === 'KeyF' && !e.repeat) leaveMonitor();
+      return;
+    }
+
     if (s.portalMode && (e.code === 'Escape' || e.code === 'KeyF') && !s.modal && !s.selectedId) {
       leaveComputer();
       return;
@@ -34,6 +41,7 @@ export function installInput() {
       if (s.computerState === 'seated') leaveComputer();
       else if (s.nearProjectComputer) enterProjectComputer(s.nearProjectComputer);
       else if (s.nearComputer) enterComputer();
+      else if (useMonitor.getState().near) enterMonitor(useMonitor.getState().near!);
       else if (!s.modal && s.nearTaskBoard) set({ modal: { kind: 'task_board', blockId: s.nearTaskBoard } });
       return;
     }

@@ -293,10 +293,10 @@ const folded = new TerminalBuffer('/work/repo', 'Claude Code', 'haiku');
 for (const e of rec.terminal) folded.apply(e);
 const screen = screenOf({ blocks: folded.all(), live: folded.live, status: { kind: 'idle' }, now: 0, cols: 80, rows: 60 }).map(rowText);
 const has = (text: string) => screen.some((r) => r.includes(text));
-check(has('> Read notes.txt and fix it') && has('● Read(notes.txt)') && has('⎿  Read 5 lines'), 'the screen shows the prompt, the read and how many lines it read');
+check(has('❯ Read notes.txt and fix it') && has('● Read(notes.txt)') && has('⎿  Read 5 lines'), 'the screen shows the prompt, the read and how many lines it read');
 check(has('● Update(notes.txt)') && has('Updated notes.txt with 1 addition and 1 removal') && screen.some((r) => /2 - line two/.test(r)) && screen.some((r) => /2 \+ line 2/.test(r)), 'an edit shows its summary and the diff with line numbers');
 check(has('● Write(hello.txt)') && has('Wrote 1 line to hello.txt') && has('● Bash(ls)') && has('hello.txt') && has('● Bash(grep -rn line notes.txt)'), 'a write and two shell commands show their calls and what came back');
-const box = screen.findLastIndex((r) => r.startsWith('> '));
+const box = screen.findLastIndex((r) => r.startsWith('❯ '));
 check(has('All tasks completed') && box > 0 && screen[box - 1]!.startsWith('─') && screen[box + 1]!.startsWith('─'), 'the assistant text is there, and the prompt box sits under it');
 if (process.env.SHOW) console.log(screen.join('\n'));
 

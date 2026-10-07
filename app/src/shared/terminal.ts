@@ -2,13 +2,13 @@
 // event shape (`TermEvent`), `TerminalBuffer` folds them into blocks of styled lines the way Claude Code's own terminal
 // lays them out, and `screenOf` lays the blocks out for a width: the monitor on a desk and the zoomed terminal both draw
 // that. Pure and free of Node and Electron, so the office, the renderer and the check scripts import the same code.
-import type { EmployeeStatus, Question } from './protocol.ts';
+import type { EmployeeStatus, PermissionMode, Question } from './protocol.ts';
 import { ruleFor, SHELL_TOOL } from './permissions.ts';
 
 // ---------------------------------------------------------------- the shape
 
 // Colours are names, the renderer owns the palette.
-export type Tone = 'fg' | 'dim' | 'bright' | 'accent' | 'ok' | 'err' | 'warn' | 'info' | 'rule';
+export type Tone = 'fg' | 'dim' | 'bright' | 'accent' | 'ok' | 'err' | 'warn' | 'info' | 'rule' | 'violet';
 // A highlight behind a span ('user' echoes what the owner typed) or behind a whole row (a diff row).
 export type Bg = 'user' | 'add' | 'del';
 export type Span = { t: string; c?: Tone; b?: boolean; i?: boolean; bg?: Bg };
@@ -293,9 +293,18 @@ const PROMPT_TEXT = 1200;
 
 const CLAWD = [' ▐▛███▜▌', '▝▜█████▛▘', '  ▘▘ ▝▝'];
 
+// "claude-haiku-4-5-20251001" reads "Haiku 4.5", as the header of Claude Code writes a model. Another harness's model id stays as it is.
+export function modelName(id: string): string {
+  const m = /^claude-([a-z]+)-(\d+)(?:-(\d+))?(?:-\d{8})?$/.exec(id);
+  return m ? `${m[1]![0]!.toUpperCase()}${m[1]!.slice(1)} ${m[2]}${m[3] ? `.${m[3]}` : ''}` : id;
+}
+
+// A long folder keeps its tail: the name of the project is what the owner knows it by.
+const tail = (path: string, n: number) => (path.length > n ? `…${path.slice(-(n - 1))}` : path);
+
 function bannerLines(title: string, model: string, cwd: string): TerminalLine[] {
-  const info = [[sp(title, 'bright', { b: true })], [sp(model, 'dim')], [sp(cwd, 'dim')]];
-  return CLAWD.map((art, i) => line([sp(art.padEnd(11), 'accent'), ...(info[i] ?? [])]));
+  const info = [[sp(title, 'bright', { b: true })], [sp(modelName(model), 'dim')], [sp(tail(cwd, 44), 'dim')]];
+  return CLAWD.map((art, i) => line([sp(art.padEnd(11), 'accent'), ...(info[i] ?? [])], { hang: 11 }));
 }
 
 export class TerminalBuffer {
@@ -349,7 +358,7 @@ export class TerminalBuffer {
       case 'prompt': {
         const all = e.text.replace(/\r/g, '').trim().split('\n');
         const shown = all.slice(0, PROMPT_LINES);
-        const ls = shown.map((l, i) => line([sp(i === 0 ? '> ' : '  ', 'dim', { bg: 'user' }), sp(cut(l, PROMPT_TEXT), 'bright', { bg: 'user' })], { hang: 2 }));
+        const ls = shown.map((l, i) => line([sp(i === 0 ? '❯ ' : '  ', 'dim', { bg: 'user' }), sp(cut(l, PROMPT_TEXT), 'bright', { bg: 'user' })], { hang: 2 }));
         if (all.length > PROMPT_LINES) ls.push(line([sp(`  … +${plural(all.length - PROMPT_LINES, 'line')}`, 'dim')]));
         this.add(ls);
         return;
@@ -546,7 +555,7 @@ export const secsText = (ms: number) => {
 
 export function spinnerRow(startedAt: number, now: number, tokens: number, quantum = 160): Row {
   const glyph = GLYPHS[Math.floor(now / quantum) % GLYPHS.length]!;
-  const bits = ['esc to interrupt', secsText(now - startedAt), ...(tokens > 0 ? [`↓ ${tokensText(tokens)} tokens`] : [])];
+  const bits = [secsText(now - startedAt), ...(tokens > 0 ? [`↑ ${tokensText(tokens)} tokens`] : []), 'esc to interrupt'];
   return { spans: [sp(`${glyph} `, 'accent'), sp(`${verbOf(startedAt)}… `, 'accent'), sp(`(${bits.join(' · ')})`, 'dim')] };
 }
 
@@ -580,14 +589,14 @@ export const questionTitle = (q: Question): string => (q.kind === 'permission' ?
 
 // The dialog a question puts on the screen.
 export function questionRows(q: Question, cols: number, picked = 0): Row[] {
-  const out: Row[] = [ruleRow(cols), { spans: [sp(` ${questionTitle(q)}`, 'accent', { b: true })] }, blankRow()];
+  const out: Row[] = [ruleRow(cols), { spans: [sp(` ${questionTitle(q)}`, 'violet', { b: true })] }, blankRow()];
   if (q.kind === 'permission') {
     for (const l of wrap(line([sp('   '), sp(cut(q.detail, 400), 'bright')], { hang: 3 }), cols)) out.push(l);
     out.push(blankRow(), { spans: [sp(' Do you want to proceed?', 'fg')] });
   } else {
     for (const l of wrap(line([sp(' '), sp(q.text, 'bright')], { hang: 1 }), cols)) out.push(l);
   }
-  optionsOf(q).forEach((o, i) => out.push({ spans: [sp(i === picked ? ' ❯ ' : '   ', 'accent'), sp(`${o.key}. ${o.label}`, i === picked ? 'accent' : 'fg')] }));
+  optionsOf(q).forEach((o, i) => out.push({ spans: [sp(i === picked ? ' ❯ ' : '   ', 'violet'), sp(`${o.key}. ${o.label}`, i === picked ? 'violet' : 'fg')] }));
   return out;
 }
 
@@ -601,10 +610,14 @@ export type ScreenArgs = {
   // Fewer rows of furniture: no blank rows, no hint line. The monitor on a desk uses it.
   compact?: boolean;
   draft?: string;
-  // Who and what the status line names.
+  // Who and what the status line names, and how much the employee may do without asking.
   who?: string;
   model?: string;
+  mode?: PermissionMode;
 };
+
+// What Claude Code's status line says of a permission mode. `ask` is its default mode, which says nothing.
+const MODE_LINE: Record<PermissionMode, string | undefined> = { inherit: 'accept edits on', ask: undefined, auto: 'auto mode on', yolo: 'bypass permissions on' };
 
 // The bottom of the screen: what the harness is doing, a question waiting on the owner, the prompt.
 export function footerOf(a: ScreenArgs): Row[] {
@@ -625,12 +638,13 @@ export function footerOf(a: ScreenArgs): Row[] {
     out.push({ spans: [sp('  ⎿  ', 'dim'), sp(cut(`Error: ${flat(status.message)}`, Math.max(20, cols - 6)), 'err')] });
     gap();
   }
-  out.push(ruleRow(cols), { spans: [sp('> ', 'dim'), sp(a.draft ?? '', 'bright'), sp('█', 'dim')] }, ruleRow(cols));
+  out.push(ruleRow(cols), { spans: [sp('❯ ', 'dim'), sp(a.draft ?? '', 'bright'), sp('█', 'dim')] }, ruleRow(cols));
   if (!a.compact) {
-    const left = [a.who, a.model].filter(Boolean).join(' · ');
-    const right = status.kind === 'working' ? 'esc to interrupt' : '? for shortcuts';
-    const pad = Math.max(1, cols - 2 - left.length - right.length);
-    out.push({ spans: [sp(`  ${left}${' '.repeat(pad)}${right}`, 'dim')] });
+    const mode = a.mode ? MODE_LINE[a.mode] : undefined;
+    const left: Span[] = mode ? [sp('  ▸▸ ', 'violet'), sp(`${mode} `, 'violet'), sp('(shift+tab to cycle)', 'dim')] : [sp('  ? for shortcuts', 'dim')];
+    const right = [a.who, a.model].filter(Boolean).join(' · ');
+    const used = left.reduce((n, x) => n + x.t.length, 0);
+    out.push({ spans: [...left, sp(' '.repeat(Math.max(1, cols - used - right.length - 1)) + right, 'dim')] });
   }
   return out;
 }
