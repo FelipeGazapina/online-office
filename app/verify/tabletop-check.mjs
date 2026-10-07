@@ -56,13 +56,22 @@ const bakedBox = (prop) => {
 };
 
 const small = Object.values(ITEM_DEFS).filter((d) => placementOf(d) !== 'floor');
-check(small.length >= 12, `${small.length} defs may stand on a surface`);
+check(small.length >= 35, `${small.length} defs may stand on a surface`);
+// A look is a colour or a style, never another size: every look of every def fits the same footprint and stands as tall as the def says.
 for (const def of small) {
   const baked = PROP_DEFS[def.id];
-  const box = baked ? bakedBox(baked.prop) : new Box3().setFromBufferAttribute(modelOf(def.id).getAttribute('position'));
+  const looks = baked ? 1 : (def.looks ?? 1);
   const [w, d] = [def.top.w * TOP_UNIT, def.top.d * TOP_UNIT];
-  const fits = box.max.x - box.min.x <= w + 0.01 && box.max.z - box.min.z <= d + 0.01 && Math.abs(box.max.x + box.min.x) <= 0.03 && Math.abs(box.max.z + box.min.z) <= 0.03;
-  check(fits, `${def.id}${baked ? ` (${baked.prop})` : ''}: the model fits its ${def.top.w} by ${def.top.d} units on a top (${(box.max.x - box.min.x).toFixed(2)} by ${(box.max.z - box.min.z).toFixed(2)} m of ${w} by ${d} m)`);
-  check(box.min.y >= -0.001 && Math.abs(box.max.y - def.height) <= 0.02, `${def.id}: it stands on y = 0 and is ${box.max.y.toFixed(2)} m tall, the def says ${def.height} m`);
+  for (let look = 0; look < looks; look++) {
+    const box = baked ? bakedBox(baked.prop) : new Box3().setFromBufferAttribute(modelOf(def.id, look).getAttribute('position'));
+    const at = `${def.id}${baked ? ` (${baked.prop})` : looks > 1 ? ` look ${look}` : ''}`;
+    const fits = box.max.x - box.min.x <= w + 0.01 && box.max.z - box.min.z <= d + 0.01 && Math.abs(box.max.x + box.min.x) <= 0.03 && Math.abs(box.max.z + box.min.z) <= 0.03;
+    check(fits, `${at}: the model fits its ${def.top.w} by ${def.top.d} units on a top (${(box.max.x - box.min.x).toFixed(2)} by ${(box.max.z - box.min.z).toFixed(2)} m of ${w} by ${d} m)`);
+    check(box.min.y >= -0.001 && Math.abs(box.max.y - def.height) <= 0.02, `${at}: it stands on y = 0 and is ${box.max.y.toFixed(2)} m tall, the def says ${def.height} m`);
+  }
+  if (looks > 1) {
+    const [a, b] = [modelOf(def.id, 0).getAttribute('color'), modelOf(def.id, 1).getAttribute('color')];
+    check(a && b && a.array.some((v, i) => v !== b.array[i]), `${def.id}: look 1 is not look 0 over again`);
+  }
 }
 finish();

@@ -1,6 +1,6 @@
 import { ITEM_DEFS, YAW, footprint, layerOf } from './catalog.ts';
 import { defOf, floorItems, hasFloorAt, inLotTile, isTop, itemRect, sameLot, stairsInfo, tileIndex, wkey } from './geom.ts';
-import { poseIn, topRect, unitsOverlap } from './surface.ts';
+import { drawKey, poseIn, topsClash } from './surface.ts';
 import type { Building, FloorGeometry, FloorRender, Item, ItemId, Lot, Room, Story, TopItem, WallDir, WallRef, WallSeg } from './types.ts';
 
 
@@ -96,16 +96,16 @@ function buildFloor(b: Building, index: number, hole: Uint8Array): FloorGeometry
     if (isTop(item)) (tops.get(item.on) ?? tops.set(item.on, []).get(item.on)!).push(n);
   });
   for (const list of tops.values()) {
-    const rects = list.map((n) => {
+    const placed = list.map((n) => {
       const item = story.items[n] as TopItem;
       const def = defOf(item);
-      return def && topRect(item, def);
+      return def && { item, def };
     });
     for (let i = 0; i < list.length; i++) {
       for (let j = i + 1; j < list.length; j++) {
-        const a = rects[i];
-        const c = rects[j];
-        if (a && c && unitsOverlap(a, c)) overlaps.push([story.items[list[i]].id, story.items[list[j]].id]);
+        const a = placed[i];
+        const c = placed[j];
+        if (a && c && topsClash(a.item, a.def, c.item, c.def)) overlaps.push([a.item.id, c.item.id]);
       }
     }
   }
@@ -300,7 +300,8 @@ function buildRender(b: Building, index: number, hole: Uint8Array, wallAt: Reado
   for (const item of story.items) {
     const def = ITEM_DEFS[item.def];
     if (!def) continue;
-    const g = groups.get(item.def) ?? groups.set(item.def, { m: [], ids: [] }).get(item.def)!;
+    const key = isTop(item) ? drawKey(item, def) : item.def;
+    const g = groups.get(key) ?? groups.set(key, { m: [], ids: [] }).get(key)!;
     if (isTop(item)) {
       const pose = poseIn(byId, item);
       if (!pose) continue;

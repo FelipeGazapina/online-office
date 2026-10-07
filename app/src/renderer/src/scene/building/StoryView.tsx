@@ -85,6 +85,7 @@ function Instances({
   onClick,
   castShadow = true,
   receiveShadow = true,
+  probe,
 }: {
   geometry: BufferGeometry;
   material: MeshStandardMaterial | MeshBasicMaterial;
@@ -93,6 +94,7 @@ function Instances({
   onClick?: (e: ThreeEvent<MouseEvent>) => void;
   castShadow?: boolean;
   receiveShadow?: boolean;
+  probe?: Record<string, unknown> & { at?: number[][] };
 }) {
   const ref = useRef<InstancedMesh>(null);
   useLayoutEffect(() => {
@@ -101,11 +103,21 @@ function Instances({
     fill(m);
     m.instanceMatrix.needsUpdate = true;
     if (m.instanceColor) m.instanceColor.needsUpdate = true;
-  }, [fill]);
+    // For the tests: where this mesh really draws each of its instances, read back from the matrices it was given.
+    if (probe) probe.at = Array.from({ length: count }, (_, i) => placeOf(m, i));
+  }, [fill, probe, count]);
   if (count === 0) return null;
-  return <instancedMesh ref={ref} args={[geometry, material, count]} frustumCulled={false} castShadow={castShadow} receiveShadow={receiveShadow} onClick={onClick} />;
+  return <instancedMesh ref={ref} args={[geometry, material, count]} frustumCulled={false} castShadow={castShadow} receiveShadow={receiveShadow} onClick={onClick} userData={probe} />;
 }
 
+const readBack = new Matrix4();
+const placeOf = (mesh: InstancedMesh, i: number): number[] => {
+  mesh.updateWorldMatrix(true, false);
+  mesh.getMatrixAt(i, readBack);
+  readBack.premultiply(mesh.matrixWorld);
+  const e = readBack.elements;
+  return [e[12], e[13], e[14], Math.atan2(e[8], e[0])].map((n) => Math.round(n * 1000) / 1000);
+};
 const place = (m: Matrix4, x: number, y: number, z: number, yaw: number) => m.compose(p3.set(x, y, z), q.setFromAxisAngle(up, yaw), one);
 
 // ---------------------------------------------------------------- floor
@@ -284,7 +296,10 @@ function Furniture({ geom }: { geom: FloorGeometry }) {
   );
 }
 
-function ModelInstances({ def, matrices, ids, onClick, tintOf }: { def: string; matrices: Float32Array; ids: readonly ItemId[]; onClick: (e: ThreeEvent<MouseEvent>) => void; tintOf?: (id: ItemId) => Color | null }) {
+// A def drawn in a look other than its first is keyed `def#look` in the render list: one draw call per look, however many there are.
+function ModelInstances({ def: key, matrices, ids, onClick, tintOf }: { def: string; matrices: Float32Array; ids: readonly ItemId[]; onClick: (e: ThreeEvent<MouseEvent>) => void; tintOf?: (id: ItemId) => Color | null }) {
+  const [def, lookText] = key.split('#');
+  const look = Number(lookText ?? 0);
   const fill = useMemo(
     () => (mesh: InstancedMesh) => {
       const m = new Matrix4();
@@ -296,11 +311,12 @@ function ModelInstances({ def, matrices, ids, onClick, tintOf }: { def: string; 
     },
     [def, matrices, ids, tintOf],
   );
+  const probe = useMemo(() => ({ probe: 'model', def, look, count: ids.length, at: [] as number[][] }), [def, look, ids, matrices]);
   const baked = PROP_DEFS[def];
   // Small things that can stand on a top are too small to throw a shadow worth its passes; their contact patch grounds them.
   const cast = placementOf(ITEM_DEFS[def]) === 'floor';
   if (BOUNDARY.has(def)) return <Instances geometry={modelOf(def)} material={boundaryMaterial} count={ids.length} fill={fill} onClick={onClick} castShadow={false} />;
-  if (!baked) return <Instances geometry={modelOf(def)} material={furnitureMaterial} count={ids.length} fill={fill} onClick={onClick} castShadow={cast} />;
+  if (!baked) return <Instances geometry={modelOf(def, look)} material={furnitureMaterial} count={ids.length} fill={fill} onClick={onClick} castShadow={cast} probe={probe} />;
   const { geometry, material } = propOf(baked.prop);
   const onTop = onTopOf(def);
   return (
@@ -315,7 +331,8 @@ function ModelInstances({ def, matrices, ids, onClick, tintOf }: { def: string; 
 function ContactShadows({ geom }: { geom: FloorGeometry }) {
   const spots = useMemo(() => {
     const out: { x: number; y: number; z: number; yaw: number; w: number; d: number }[] = [];
-    for (const [def, data] of geom.render.items) {
+    for (const [key, data] of geom.render.items) {
+      const def = key.split('#')[0];
       const dims = ITEM_DEFS[def];
       if (!dims || NO_BLOB.has(def) || layerOf(dims) === 'floor') continue;
       for (let i = 0; i < data.ids.length; i++) {

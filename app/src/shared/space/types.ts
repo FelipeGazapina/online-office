@@ -40,13 +40,15 @@ export type Building = { v: 1; lot: Lot; stories: readonly Story[]; shelled?: 1 
 
 type ItemBase = { id: ItemId; def: string; rot: Rot; blockId?: BlockId; tint?: number };
 /** Stands on the floor at absolute cell (x, z). */
-export type FloorItem = ItemBase & { x: number; z: number; on?: undefined; u?: undefined; v?: undefined };
+export type FloorItem = ItemBase & { x: number; z: number; on?: undefined; u?: undefined; v?: undefined; look?: undefined; ang?: undefined; lvl?: undefined };
 /**
  * Stands on top of the floor item `on`. (u, v) is the corner of its footprint nearest the host's own origin, in TOP_UNITs
  * from the host's footprint in the host's unturned frame, and `rot` is relative to the host. The host's position and turn
  * are the only place where it is in the world, so moving, turning or deleting the host carries or drops it with no edit of its own.
+ * `look` picks one of the def's `looks` (a colour or a style: same footprint and height), `ang` is a few degrees of extra turn that only
+ * the drawing sees, and `lvl` is how many things it is stacked above the surface: a mug on a notebook is level 1.
  */
-export type TopItem = ItemBase & { on: ItemId; u: number; v: number; x?: undefined; z?: undefined };
+export type TopItem = ItemBase & { on: ItemId; u: number; v: number; x?: undefined; z?: undefined; look?: number; ang?: number; lvl?: number };
 export type Item = FloorItem | TopItem;
 
 /** A floor item lies on the ground: people walk over it, objects stand on it, and two floor items never overlap. Everything else is an object. */
@@ -54,7 +56,7 @@ export type ItemLayer = 'floor' | 'object';
 /** A rectangle of a surface in TOP_UNITs, in the host's unturned frame: [u0, u1) by [v0, v1). */
 export type UnitRect = { u0: number; v0: number; u1: number; v1: number };
 /** The top of a desk, table, counter or shelf: how high it is, where things may stand and where something fixed (a monitor) already does. */
-export type Surface = { height: number; rect: UnitRect; blocked?: readonly UnitRect[] };
+export type Surface = { height: number; rect: UnitRect; blocked?: readonly UnitRect[]; /** The top is a disc and `rect` is the square inside it: the ghost outlines the disc. */ round?: true };
 /** Where an item may stand: on the floor only, on a surface only, or either (a lamp, a plant). */
 export type Placement = 'floor' | 'surface' | 'both';
 export type ItemKind = 'bench_desk' | 'po_desk' | 'owner_desk' | 'decor' | 'table' | 'seat' | 'board' | 'terminal' | 'stairs';
@@ -70,6 +72,10 @@ export type ItemDef = {
   placement?: Placement;
   /** Footprint on a surface, in TOP_UNITs. */
   top?: { w: number; d: number };
+  /** How many looks (colours or styles) the model has. A look never changes the footprint or the height. */
+  looks?: number;
+  /** Other small things may rest on this one, as a notebook or a book carries a mug. */
+  stackable?: boolean;
   surface?: Surface;
   seat?: { chair: Vec2; exit: Vec2; yaw: number };
   stairs?: { rise: 1; holeLen: number };
@@ -105,6 +111,7 @@ export type ViolationKind =
   | 'off_surface'
   | 'floor_only'
   | 'needs_surface'
+  | 'unsupported'
   | 'desk_wrong_block'
   | 'desk_wrong_kind'
   | 'desk_double_occupied'

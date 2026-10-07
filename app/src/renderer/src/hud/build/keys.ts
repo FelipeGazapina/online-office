@@ -4,7 +4,7 @@ import { runtime } from '../../runtime.ts';
 import { get } from '../../store.ts';
 import { enterBuild, exitBuild, redo, rotate, sendOps, setLevel, setTool, stepBack, undo } from './actions.ts';
 import { removal, askToRemove, keepBlock, removeBlock } from './removal.ts';
-import { buildView, modifiers } from './state.ts';
+import { buildView, hand, modifiers } from './state.ts';
 
 export const PAN_KEYS: readonly string[] = ['KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'];
 
@@ -84,7 +84,14 @@ export function buildKey(e: KeyboardEvent): boolean {
     case 'KeyE': {
       const story = s.building?.stories[level];
       const item = s.buildCursor.hover && story?.items.find((i) => i.id === s.buildCursor.hover);
-      if (item && story) setTool({ kind: 'item', def: item.def, rot: worldRotOf(story, item), carry: null, blockId: item.blockId ?? null });
+      if (item && story) {
+        setTool({ kind: 'item', def: item.def, rot: worldRotOf(story, item), carry: null, blockId: item.blockId ?? null });
+        // A copy of a small thing looks like it and stands as it stands.
+        if (item.on !== undefined) {
+          hand.look = item.look ?? 0;
+          hand.ang = item.ang ?? 0;
+        }
+      }
       return taken();
     }
     case 'Tab':

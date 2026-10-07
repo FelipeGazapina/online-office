@@ -38,7 +38,13 @@ import {
   shellItems,
   surfaceAt,
   teamKit,
+  drawKey,
+  liftOf,
+  pointAtHeight,
+  restingOn,
+  stackSpot,
   topItemAt,
+  topOfStack,
   topPose,
   turnBlock,
   validate,
@@ -798,6 +804,113 @@ const flat = (stories = 1, size = 20): Building => {
   const mean = (performance.now() - t0) / 500;
   console.log(`checkOps one top item: mean ${mean.toFixed(3)} ms`);
   check(mean < 1, 'checkOps for one top item under 1 ms');
+}
+
+
+// ---------------------------------------------------------------- dressing: looks, a few degrees of turn, and things stacked on things
+{
+  const topOf = (name: string, def: string, on: string, u: number, v: number, extra: { rot?: 0 | 1 | 2 | 3; look?: number; ang?: number; lvl?: number } = {}): Item => ({ id: id(name), def, on: id(on), u, v, rot: extra.rot ?? 0, ...(extra.look && { look: extra.look }), ...(extra.ang && { ang: extra.ang }), ...(extra.lvl && { lvl: extra.lvl }) });
+  const small = Object.values(ITEM_DEFS).filter((d) => d.placement === 'surface' || d.placement === 'both');
+  check(small.length >= 35, `${small.length} small defs can stand on a surface`);
+  check(small.filter((d) => (d.looks ?? 1) >= 2).length >= 25, `${small.filter((d) => (d.looks ?? 1) >= 2).length} of them come in two or more looks`);
+  check(small.filter((d) => d.stackable).length >= 6 && small.every((d) => !d.stackable || d.top!.w * d.top!.d >= 1), 'several are flat enough to carry others');
+  check(small.every((d) => (d.looks ?? 1) >= 1 && Number.isInteger(d.looks ?? 1)), 'a def has a whole number of looks');
+
+  const base = must(applyOps(flat(1), [put(0, item('desk', 'bench_desk', 10, 10), item('table', 'meeting_table', 20, 20, 1))], noCtx));
+  const ok = (b: Building, ...ops: Item[]) => applyOps(b, [put(0, ...ops)], noCtx);
+  const bad = (name: string, r: Applied, kind: ViolationKind) => check(kinds(r).includes(kind), name, JSON.stringify(kinds(r)));
+  const hostOf = (b: Building, hostId: string) => floorItems(b.stories[0]).find((i) => i.id === hostId)!;
+  const poseOf = (b: Building, it: Item) => {
+    const t = b.stories[0].items.find((i) => i.id === it.id) as never as Item & { on: ItemId };
+    const host = hostOf(b, t.on);
+    return topPose(host, ITEM_DEFS[host.def], t as never, ITEM_DEFS[t.def], liftOf(t as never, ITEM_DEFS[t.def], b.stories[0].items));
+  };
+
+  // a look and a turn are kept, drawn under their own key, and a change of look is a change
+  const seen = must(ok(base, topOf('m1', 'mug', 'desk', 0, 6, { look: 3, ang: -7 })));
+  const m1 = seen.stories[0].items.find((i) => i.id === 'm1')!;
+  check(m1.look === 3 && m1.ang === -7 && m1.lvl === undefined, 'a mug keeps its look and its turn, and has no stack level when it is on the surface');
+  check(eq(parseBuilding(JSON.parse(JSON.stringify(encodeBuilding(seen)))), seen), 'save and load keeps the look, the turn and the level');
+  const geo = deriveFloors(seen)[0];
+  check(geo.render.items.has('mug#3') && !geo.render.items.has('mug') && geo.render.items.get('mug#3')!.ids[0] === 'm1', 'the render list draws a mug of look 3 under its own key');
+  check(drawKey({ ...m1, look: 8 } as Item, ITEM_DEFS.mug) === 'mug#3' && drawKey({ ...m1, look: 5 } as Item, ITEM_DEFS.mug) === 'mug', 'a look the def does not have wraps round');
+  check(Math.abs(poseOf(seen, m1).yaw - (0 + (-7 * Math.PI) / 180)) < 1e-9, 'the few degrees turn the drawing and nothing else');
+  const relooked = must(ok(seen, topOf('m1', 'mug', 'desk', 0, 6, { look: 1, ang: -7 })));
+  check(relooked.stories[0].rev !== seen.stories[0].rev, 'a new look is a new story revision, so the scene draws it');
+  check(ok(seen, topOf('m2', 'mug', 'desk', 0, 6, { ang: 12 })).ok === false, 'a turn does not make room: the footprint is the same');
+  let refused = '';
+  try {
+    parseBuilding({ ...encodeBuilding(seen) as object, stories: [{ ...(encodeBuilding(seen) as { stories: object[] }).stories[0], items: [{ id: 'x', def: 'mug', on: 'desk', u: 0, v: 0, rot: 0, lvl: 9 }] }] });
+  } catch (e) {
+    refused = String(e);
+  }
+  check(refused.includes('lvl'), 'a file with a stack nine high is refused at the door');
+
+  // stacks: a mug on a notebook, books on books
+  const notebook = topOf('nb', 'notebook', 'desk', 0, 0, { look: 1 });
+  const withNote = must(ok(base, notebook));
+  const heightOf = (d: string) => ITEM_DEFS[d].height;
+  const mugOn = topOf('mug', 'mug', 'desk', 1, 0, { lvl: 1 });
+  const stackedMug = must(ok(withNote, mugOn));
+  check(Math.abs(poseOf(stackedMug, mugOn).y - (ITEM_DEFS.bench_desk.surface!.height + heightOf('notebook'))) < 1e-9, 'a mug on a notebook stands as high as the notebook is thick');
+  bad('a mug at level 1 with nothing under it is unsupported', ok(base, mugOn), 'unsupported');
+  bad('a mug on the surface where the notebook lies is refused', ok(withNote, topOf('mug', 'mug', 'desk', 1, 0)), 'overlap');
+  bad('a mug at level 1 beside the notebook, off its edge, is unsupported', ok(withNote, topOf('mug', 'mug', 'desk', 3, 0, { lvl: 1 })), 'unsupported');
+  check(ok(withNote, topOf('mug', 'mug', 'desk', 3, 0)).ok, 'a mug beside the notebook, on the surface, is fine');
+  bad('a mug does not carry a mug', ok(stackedMug, topOf('mug2', 'mug', 'desk', 1, 0, { lvl: 2 })), 'unsupported');
+  bad('two mugs at level 1 on one spot are refused', ok(stackedMug, topOf('mug2', 'mug', 'desk', 1, 0, { lvl: 1 })), 'overlap');
+  check(ok(stackedMug, topOf('mug2', 'mug', 'desk', 2, 1, { lvl: 1 })).ok, 'two mugs side by side on one notebook are fine');
+  bad('a laptop does not carry anything: it is not flat', ok(must(ok(base, topOf('lap', 'laptop', 'desk', 0, 0))), topOf('mug', 'mug', 'desk', 1, 0, { lvl: 1 })), 'unsupported');
+  const books = must(ok(withNote, topOf('bk1', 'books', 'desk', 0, 0, { lvl: 1 })));
+  const books2 = must(ok(books, topOf('bk2', 'books', 'desk', 0, 0, { lvl: 2, ang: 6 })));
+  check(Math.abs(poseOf(books2, books2.stories[0].items.find((i) => i.id === 'bk2')!).y - (ITEM_DEFS.bench_desk.surface!.height + heightOf('notebook') + heightOf('books'))) < 1e-9, 'books on books on a notebook add up their heights');
+  const four = must(ok(books2, topOf('f3', 'folder', 'desk', 0, 0, { lvl: 3 })));
+  bad('a stack five high is refused', ok(four, topOf('c4', 'coaster', 'desk', 0, 0, { lvl: 4 })), 'unsupported');
+
+  // what rests on a thing leaves with it, and comes back with undo
+  const takeNote = applyOps(stackedMug, [{ t: 'items', story: 0, put: [], del: [id('nb')] }], noCtx);
+  check(takeNote.ok && !takeNote.building.stories[0].items.some((i) => i.id === 'nb' || i.id === 'mug'), 'taking the notebook away takes the mug with it: a stack never keeps a mug in the air');
+  check(takeNote.ok && eq(must(applyOps(takeNote.building, takeNote.inverse, noCtx)), stackedMug), 'and undo brings both back, the mug still on the notebook');
+  const slid = applyOps(stackedMug, [put(0, topOf('nb', 'notebook', 'desk', 0, 4, { look: 1 }))], noCtx);
+  check(!slid.ok && kinds(slid).includes('unsupported'), 'sliding the notebook out from under the mug is refused');
+  const moved = applyOps(stackedMug, [put(0, topOf('mug', 'mug', 'desk', 0, 0, { lvl: 1 }), topOf('nb', 'notebook', 'desk', 0, 4, { look: 1 }))], noCtx);
+  check(!moved.ok || kinds(moved).length === 0, 'unless the mug moves in the same edit');
+  const hostGone = applyOps(books2, [{ t: 'items', story: 0, put: [], del: [id('desk')] }], noCtx);
+  check(hostGone.ok && hostGone.building.stories[0].items.length === 1 && eq(must(applyOps(hostGone.building, hostGone.inverse, noCtx)), books2), 'deleting the desk deletes the whole stack, and undo brings it all back');
+
+  // picking and aiming
+  const down = (x: number, z: number): PickRay => ({ o: { x, y: 4, z }, d: { x: 0, y: -1, z: 0 } });
+  const mugPose = poseOf(stackedMug, mugOn);
+  check(topItemAt(stackedMug.stories[0], down(mugPose.x, mugPose.z))?.id === 'mug', 'a ray down onto the mug on the notebook picks the mug');
+  check(topItemAt(stackedMug.stories[0], down(mugPose.x, mugPose.z), id('mug'))?.id === 'nb', 'without the mug in the way it picks the notebook under it');
+  const [nbPose] = [poseOf(stackedMug, notebook)];
+  check(topItemAt(stackedMug.stories[0], down(nbPose.box.x1 - 0.03, nbPose.box.z1 - 0.03))?.id === 'nb', 'and a ray onto the bare end of the notebook picks the notebook');
+  const nbItem = stackedMug.stories[0].items.find((i) => i.id === 'nb') as never as Item & { on: ItemId };
+  check(restingOn(stackedMug.stories[0], nbItem as never).map((i) => i.id).join() === 'mug' && topOfStack(stackedMug.stories[0], nbItem as never).id === 'mug', 'what rests on the notebook is the mug, and the mug is what a hand takes first');
+  check(Math.abs((pointAtHeight({ o: { x: 1, y: 3, z: 1 }, d: { x: 0, y: -1, z: 0 } }, 1)?.x ?? 0) - 1) < 1e-9 && pointAtHeight({ o: { x: 1, y: 3, z: 1 }, d: { x: 0, y: 1, z: 0 } }, 1) === null, 'a point of a ray at a height, and none for a ray that goes up');
+  const desk = hostOf(withNote, 'desk');
+  const spot = stackSpot(desk, ITEM_DEFS.bench_desk, nbItem as never, ITEM_DEFS.notebook, ITEM_DEFS.mug, 0, { x: nbPose.x + 0.4, z: nbPose.z });
+  check(!!spot && spot.lvl === 1 && ok(withNote, topOf('m', 'mug', 'desk', spot.u, spot.v, { lvl: spot.lvl, rot: spot.rot })).ok, 'the spot for a mug aimed at the end of a notebook is pulled in so the mug stays on it');
+  check(stackSpot(desk, ITEM_DEFS.bench_desk, nbItem as never, ITEM_DEFS.notebook, ITEM_DEFS.vase, 0, { x: nbPose.x, z: nbPose.z })?.lvl === 1, 'a vase fits a notebook');
+  const coaster = must(ok(base, topOf('co', 'coaster', 'desk', 0, 0)));
+  check(stackSpot(desk, ITEM_DEFS.bench_desk, coaster.stories[0].items.find((i) => i.id === 'co') as never, ITEM_DEFS.coaster, ITEM_DEFS.vase, 0, { x: 5.2, z: 5.1 }) === null && stackSpot(desk, ITEM_DEFS.bench_desk, nbItem as never, ITEM_DEFS.laptop, ITEM_DEFS.mug, 0, { x: 1, z: 1 }) === null, 'a vase is too big for a coaster, and a laptop carries nothing');
+
+  // a block move keeps the stack together, on its floor and on another
+  const two = must(applyOps(flat(2), [put(0, item('desk', 'bench_desk', 10, 10), item('table', 'meeting_table', 20, 20, 1))], noCtx));
+  const dressed = must(applyOps(two, [put(0, item('b:desk', 'bench_desk', 4, 30, 0, 'blk')), put(0, topOf('b:nb', 'notebook', 'b:desk', 0, 0), topOf('b:mug', 'mug', 'b:desk', 1, 0, { lvl: 1, look: 2, ang: 5 }))], noCtx));
+  const blockStory = dressed.stories[0];
+  const shifted = must(applyOps(dressed, moveBlockOps(blockStory, 0, 'blk', blockPose(blockItems(blockStory, 'blk'), 1, { x: 30, z: 30 })), noCtx));
+  const mugNow = shifted.stories[0].items.find((i) => i.id === 'b:mug')!;
+  check(mugNow.on === 'b:desk' && mugNow.lvl === 1 && mugNow.look === 2 && mugNow.ang === 5 && validate(shifted, noCtx).every((v) => v.kind === 'story_unreachable'), 'a block moved and turned keeps a mug on its notebook, with its look and turn');
+  const upstairs = must(applyOps(dressed, moveBlockOps(blockStory, 0, 'blk', blockPose(blockItems(blockStory, 'blk'), 0, { x: 20, z: 12 }), 1), noCtx));
+  check(upstairs.stories[1].items.filter((i) => i.on !== undefined).map((i) => `${i.id}:${i.lvl ?? 0}`).sort().join() === 'b:mug:1,b:nb:0', 'and carried to another floor');
+
+  // the verdict that drives the ghost stays fast with stacks about
+  const t0 = performance.now();
+  for (let n = 0; n < 500; n++) checkOps(stackedMug, [put(0, topOf('probe', 'mug', 'desk', 1 + (n % 2), n % 2, { lvl: 1 }))], noCtx);
+  const mean = (performance.now() - t0) / 500;
+  console.log(`checkOps one stacked item: mean ${mean.toFixed(3)} ms`);
+  check(mean < 1, 'checkOps for one stacked item under 1 ms');
 }
 
 // ---------------------------------------------------------------- performance

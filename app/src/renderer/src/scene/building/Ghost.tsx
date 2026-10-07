@@ -6,7 +6,7 @@ import { Edges, Html } from '@react-three/drei';
 import { useEffect, useMemo, useState } from 'react';
 import { BackSide, BufferGeometry, CircleGeometry, Color, DoubleSide, Float32BufferAttribute, MeshBasicMaterial, MeshStandardMaterial, RingGeometry, ShaderMaterial, Shape, Vector2 } from 'three';
 import { mergeVertices } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
-import { cellBounds, ITEM_DEFS, STORY_H, WALL_HALF, YAW, footprint, rotateLocal, stairsInfo, type FloorItem, type TopItem, type TopPose, type Vec2 } from '../../../../shared/space/index.ts';
+import { cellBounds, ITEM_DEFS, lookOf, STORY_H, WALL_HALF, YAW, footprint, rotateLocal, stairsInfo, type FloorItem, type TopItem, type TopPose, type Vec2 } from '../../../../shared/space/index.ts';
 import { draft, type Ghost } from '../../hud/build/state.ts';
 import { useStore } from '../../store.ts';
 import { propOf } from '../props.ts';
@@ -32,6 +32,10 @@ const MATERIALS = {
   wallRed: basic(RED, 0.5),
   fillWhite: basic(WHITE, 0.28),
   fillGreen: basic(GREEN, 0.34, false),
+  topGreen: basic(GREEN, 0.2, false),
+  topRim: basic('#c9ffdc', 0.95, false),
+  topRimRed: basic('#ffd0d0', 0.95, false),
+  topRed: basic(RED, 0.22, false),
   fillRed: basic(RED, 0.38, false),
   padGreen: basic(GREEN, 0.7, false),
   padRed: basic(RED, 0.72, false),
@@ -85,17 +89,18 @@ const RIM = { ink: rim('#232640', RIM_INK), ok: rim('#a6ffc4', RIM_TONE), bad: r
 const hulls = new Map<string, BufferGeometry>();
 // The small things that are drawn from a baked prop show that prop as their ghost, so the piece in hand is the piece that lands.
 const GHOST_BAKED: ReadonlySet<string> = new Set(['lamp_desk', 'laptop', 'picture_frame', 'vase', 'desk_clock']);
-const shapeOf = (def: string): BufferGeometry => (GHOST_BAKED.has(def) && PROP_DEFS[def] ? propOf(PROP_DEFS[def].prop).geometry : modelOf(def));
+const shapeOf = (def: string, look = 0): BufferGeometry => (GHOST_BAKED.has(def) && PROP_DEFS[def] ? propOf(PROP_DEFS[def].prop).geometry : modelOf(def, look));
 /** The model's shape with its vertices welded and smoothly shaded, so pushing it outward does not tear it at the corners. */
-function hullOf(def: string): BufferGeometry {
-  let g = hulls.get(def);
+function hullOf(def: string, look = 0): BufferGeometry {
+  const key = `${def}#${look}`;
+  let g = hulls.get(key);
   if (!g) {
-    const src = shapeOf(def);
+    const src = shapeOf(def, look);
     const bare = new BufferGeometry().setAttribute('position', src.getAttribute('position').clone());
     if (src.index) bare.setIndex(src.index.clone());
     g = mergeVertices(bare, 1e-4);
     g.computeVertexNormals();
-    hulls.set(def, g);
+    hulls.set(key, g);
   }
   return g;
 }
@@ -243,7 +248,7 @@ function Rect({ x0, z0, x1, z1, color, fill, border = BORDER, ink = false, probe
           <planeGeometry args={[w, d]} />
         </mesh>
       )}
-      {ink && outline(0.07, MATERIALS.keyline, 0.065, 9)}
+      {ink && outline(border * 0.45, MATERIALS.keyline, 0.065, 9)}
       {outline(0, edge, 0.07, 10)}
     </group>
   );
@@ -306,15 +311,15 @@ function TurnMark({ box, ok, min = 0.26 }: { box: { x0: number; z0: number; x1: 
 }
 
 // The piece itself, tinted by the verdict, outlined, and again through whatever stands in front of it.
-function Model({ def, at, yaw, ok }: { def: string; at: [number, number, number]; yaw: number; ok: boolean }) {
-  const hull = hullOf(def);
+function Model({ def, look = 0, at, yaw, ok }: { def: string; look?: number; at: [number, number, number]; yaw: number; ok: boolean }) {
+  const hull = hullOf(def, look);
   const flat = GHOST_BAKED.has(def);
   return (
     <>
       <mesh geometry={hull} material={RIM.ink} position={at} rotation-y={yaw} renderOrder={6} />
       <mesh geometry={hull} material={ok ? RIM.ok : RIM.bad} position={at} rotation-y={yaw} renderOrder={7} userData={{ probe: 'ghost-rim', ok }} />
-      <mesh geometry={shapeOf(def)} material={flat ? (ok ? FLAT_XRAY_OK : FLAT_XRAY_BAD) : ok ? XRAY_OK : XRAY_BAD} position={at} rotation-y={yaw} renderOrder={8} />
-      <mesh geometry={shapeOf(def)} material={flat ? (ok ? FLAT_OK : FLAT_BAD) : ok ? MODEL_OK : MODEL_BAD} position={at} rotation-y={yaw} renderOrder={9} />
+      <mesh geometry={shapeOf(def, look)} material={flat ? (ok ? FLAT_XRAY_OK : FLAT_XRAY_BAD) : ok ? XRAY_OK : XRAY_BAD} position={at} rotation-y={yaw} renderOrder={8} />
+      <mesh geometry={shapeOf(def, look)} material={flat ? (ok ? FLAT_OK : FLAT_BAD) : ok ? MODEL_OK : MODEL_BAD} position={at} rotation-y={yaw} renderOrder={9} userData={{ probe: 'ghost-model', def, look, x: at[0], y: at[1], z: at[2], yaw, ok }} />
     </>
   );
 }
@@ -405,27 +410,43 @@ function ItemGhost({ item, ok, outline }: { item: FloorItem; ok: boolean; outlin
   );
 }
 
+// The top of a round table, outlined as the disc it is: a glowing ring and a faint fill, so the edge of the table reads as the place to aim at.
+function TopDisc({ surface, ok }: { surface: { x0: number; z0: number; x1: number; z1: number; y: number }; ok: boolean }) {
+  const r = (Math.hypot(surface.x1 - surface.x0, surface.z1 - surface.z0) / 2) * 0.96;
+  return (
+    <group position={[(surface.x0 + surface.x1) / 2, surface.y + 0.006, (surface.z0 + surface.z1) / 2]} rotation-x={-Math.PI / 2}>
+      <mesh material={ok ? MATERIALS.topGreen : MATERIALS.topRed} renderOrder={6} userData={{ probe: 'surface', ok, y: surface.y, round: true, x0: surface.x0, z0: surface.z0, x1: surface.x1, z1: surface.z1 }}>
+        <circleGeometry args={[r, 48]} />
+      </mesh>
+      <mesh material={ok ? MATERIALS.topRim : MATERIALS.topRimRed} renderOrder={10}>
+        <ringGeometry args={[r - 0.012, r + 0.012, 64]} />
+      </mesh>
+    </group>
+  );
+}
+
 // A small item on a desk, table or shelf: the usable part of the top faintly outlined, the item's footprint on it in the verdict's
 // colour, and the item itself standing there. A hovered one in the select tool only gets the footprint, in white.
-function TopGhost({ item, pose, ok, outline, surface }: { item: TopItem; pose: TopPose; ok: boolean; outline: boolean; surface?: { x0: number; z0: number; x1: number; z1: number; y: number } }) {
+function TopGhost({ item, pose, ok, outline, surface }: { item: TopItem; pose: TopPose; ok: boolean; outline: boolean; surface?: { x0: number; z0: number; x1: number; z1: number; y: number; round?: true } }) {
   const color = outline ? WHITE : tone(ok);
   const { x0, z0, x1, z1 } = pose.box;
   return (
     <>
-      {surface && !outline && (
+      {surface && !outline && surface.round && <TopDisc surface={surface} ok={ok} />}
+      {surface && !outline && !surface.round && (
         <group position-y={surface.y - 0.052}>
-          <Rect x0={surface.x0} z0={surface.z0} x1={surface.x1} z1={surface.z1} color={WHITE} fill={MATERIALS.fillWhite} border={0.012} probe={{ probe: 'surface', y: surface.y, x0: surface.x0, z0: surface.z0, x1: surface.x1, z1: surface.z1 }} />
+          <Rect x0={surface.x0} z0={surface.z0} x1={surface.x1} z1={surface.z1} color={ok ? '#c9ffdc' : '#ffd0d0'} fill={ok ? MATERIALS.topGreen : MATERIALS.topRed} border={0.024} probe={{ probe: 'surface', ok, y: surface.y, x0: surface.x0, z0: surface.z0, x1: surface.x1, z1: surface.z1 }} />
         </group>
       )}
       <group position-y={pose.y - 0.05}>
-        <Rect x0={x0} z0={z0} x1={x1} z1={z1} color={color} fill={outline ? null : ok ? MATERIALS.padGreen : MATERIALS.padRed} border={0.014} ink={!outline} probe={{ probe: 'top-footprint', ok, host: item.on, x0, z0, w: x1 - x0, d: z1 - z0, y: pose.y }} />
+        <Rect x0={x0 - 0.012} z0={z0 - 0.012} x1={x1 + 0.012} z1={z1 + 0.012} color={color} fill={outline ? null : ok ? MATERIALS.padGreen : MATERIALS.padRed} border={0.02} ink={!outline} probe={{ probe: 'top-footprint', ok, host: item.on, x0, z0, w: x1 - x0, d: z1 - z0, y: pose.y }} />
       </group>
       {!outline && (
         <>
           <group position-y={pose.y - 0.045}>
             <TurnMark box={pose.box} ok={ok} min={0.1} />
           </group>
-          <Model def={item.def} at={[pose.x, pose.y, pose.z]} yaw={pose.yaw} ok={ok} />
+          <Model def={item.def} look={lookOf(item, ITEM_DEFS[item.def])} at={[pose.x, pose.y, pose.z]} yaw={pose.yaw} ok={ok} />
         </>
       )}
     </>

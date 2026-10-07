@@ -2,7 +2,7 @@ import { ITEM_DEFS, PAINT_COUNT, layerOf, placementOf, rotateLocal } from './cat
 import { deriveFloors } from './derive.ts';
 import { defOf, floorItems, hasFloorAt, inLotTile, isFloor, isTop, itemRect, sameItem, stairsInfo, tileIndex, wkey, type CellRect } from './geom.ts';
 import { route } from './nav.ts';
-import { topRect, topViolation, unitsOverlap } from './surface.ts';
+import { levelOf, MAX_LVL, supportViolation, topsClash, topViolation } from './surface.ts';
 import { itemInLot, wallInLot, applyAll } from './story.ts';
 import type {
   Applied,
@@ -187,7 +187,7 @@ export function validate(b: Building, ctx: SpaceContext): readonly Violation[] {
         continue;
       }
       if (isTop(item)) {
-        const kind = topViolation(item, def, findItem(story, item.on));
+        const kind = topViolation(item, def, findItem(story, item.on)) ?? supportViolation(item, def, (g.tops.get(item.on) ?? []).map((n) => story.items[n]));
         if (kind) out.push({ kind, story: s, ids: [item.id] });
         continue;
       }
@@ -294,12 +294,10 @@ export function fastViolations(b: Building, ops: readonly BuildOp[]): Violation[
         const host = m.has(item.on) ? (m.get(item.on) ?? undefined) : findItem(b.stories[s], item.on);
         const kind = topViolation(item, def, host);
         if (kind) out.push({ kind, story: s, ids: [id] });
-        const mine = topRect(item, def);
         for (const n of g.tops.get(item.on) ?? []) {
           const other = g.story.items[n] as TopItem;
           if (m.has(other.id)) continue;
-          const theirs = ITEM_DEFS[other.def] && topRect(other, ITEM_DEFS[other.def]);
-          if (theirs && unitsOverlap(mine, theirs)) out.push({ kind: 'overlap', story: s, ids: [other.id, id] });
+          if (ITEM_DEFS[other.def] && topsClash(item, def, other, ITEM_DEFS[other.def])) out.push({ kind: 'overlap', story: s, ids: [other.id, id] });
         }
         addedTops.push({ item, def });
         continue;
@@ -333,9 +331,31 @@ export function fastViolations(b: Building, ops: readonly BuildOp[]): Violation[
     for (let i = 0; i < addedTops.length; i++) {
       for (let j = i + 1; j < addedTops.length; j++) {
         if (addedTops[i].item.on !== addedTops[j].item.on) continue;
-        if (unitsOverlap(topRect(addedTops[i].item, addedTops[i].def), topRect(addedTops[j].item, addedTops[j].def))) {
+        if (topsClash(addedTops[i].item, addedTops[i].def, addedTops[j].item, addedTops[j].def)) {
           out.push({ kind: 'overlap', story: s, ids: [addedTops[i].item.id, addedTops[j].item.id] });
         }
+      }
+    }
+    // A stack stays whole: what is put or left on a host rests on something that is still there. What a deleted thing carried falls with
+    // it (the story does the same), so only what stood before and has lost its support through a move counts.
+    const hosts = new Set<ItemId>(addedTops.map((t) => t.item.on));
+    for (const [id] of m) {
+      const old = findItem(b.stories[s], id);
+      if (old && isTop(old)) hosts.add(old.on);
+    }
+    for (const host of hosts) {
+      const before = (g.tops.get(host) ?? []).map((n) => g.story.items[n]);
+      let kept: Item[] = before.filter((i) => m.get(i.id) !== null);
+      for (let pass = 0; pass <= MAX_LVL; pass++) {
+        const falling = kept.filter((i) => isTop(i) && levelOf(i) > 0 && ITEM_DEFS[i.def] && supportViolation(i, ITEM_DEFS[i.def], kept) !== null && supportViolation(i, ITEM_DEFS[i.def], before) === null);
+        if (!falling.length) break;
+        kept = kept.filter((i) => !falling.includes(i));
+      }
+      const now: Item[] = [...kept.filter((i) => !m.has(i.id)), ...[...m.values()].filter((i): i is Item => !!i && isTop(i) && i.on === host)];
+      for (const item of now) {
+        const def = ITEM_DEFS[item.def];
+        if (!def || !isTop(item) || levelOf(item) === 0 || supportViolation(item, def, now) === null) continue;
+        if (m.has(item.id) || supportViolation(item, def, before) === null) out.push({ kind: 'unsupported', story: s, ids: [item.id] });
       }
     }
   }

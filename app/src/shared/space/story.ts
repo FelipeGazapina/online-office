@@ -1,5 +1,6 @@
 import { ITEM_DEFS, PAINT_COUNT } from './catalog.ts';
 import { hashStory, isTop, itemRect, sameItem, sameLot, tileIndex, wrefKey } from './geom.ts';
+import { levelOf, MAX_LVL, supportViolation } from './surface.ts';
 import {
   MAX_LOT,
   MAX_STORIES,
@@ -53,6 +54,11 @@ const normWall = (w: WallSeg): WallSeg => (w.open ? { x: w.x, z: w.z, d: w.d, st
 const normItem = (i: Item): Item => {
   // A top item belongs to its host's block: it carries no block of its own.
   const o: Item = isTop(i) ? { id: i.id, def: i.def, on: i.on, u: i.u, v: i.v, rot: i.rot } : { id: i.id, def: i.def, x: i.x, z: i.z, rot: i.rot };
+  if (isTop(i) && isTop(o)) {
+    if (i.look) o.look = i.look;
+    if (i.ang) o.ang = i.ang;
+    if (i.lvl) o.lvl = i.lvl;
+  }
   if (i.blockId !== undefined && !isTop(i)) o.blockId = i.blockId;
   if (i.tint !== undefined) o.tint = i.tint;
   return o;
@@ -210,6 +216,16 @@ export function applyOp(b: Building, op: BuildOp, report: Violation[]): { b: Bui
         const gone = new Set<ItemId>(op.del);
         for (const it of story.items) {
           if (it.on !== undefined && gone.has(it.on)) {
+            touch(it.id);
+            map.delete(it.id);
+          }
+        }
+        // And what rested on a deleted thing falls with it: a stack never keeps a mug in the air.
+        for (let pass = 0; pass <= MAX_LVL; pass++) {
+          const left = [...map.values()];
+          const falling = left.filter((it) => isTop(it) && levelOf(it) > 0 && !!ITEM_DEFS[it.def] && supportViolation(it, ITEM_DEFS[it.def], left) !== null && supportViolation(it, ITEM_DEFS[it.def], story.items) === null);
+          if (!falling.length) break;
+          for (const it of falling) {
             touch(it.id);
             map.delete(it.id);
           }

@@ -4,7 +4,7 @@
 import { useThree } from '@react-three/fiber';
 import { useEffect } from 'react';
 import { Vector3 } from 'three';
-import { blockAt, blockItems, floorItems, blockPose, CELL, checkOps, FLOOR_PAINTS, ITEM_DEFS, moveBlockOps, placeBlock, placementOf, rectWalls, STORY_H, surfaceAt, surfaceBox, topItemAt, topPose, topSpot, WALL_STYLES, worldRotOf, type Building, type BuildOp, type Item, type ItemId, type PickRay, type TopItem, type TopPose, type Vec2 } from '../../../../shared/space/index.ts';
+import { blockAt, blockItems, floorItems, blockPose, CELL, checkOps, FLOOR_PAINTS, ITEM_DEFS, liftOf, moveBlockOps, placeBlock, placementOf, pointAtHeight, rectWalls, stackSpot, STORY_H, surfaceAt, surfaceBox, topItemAt, topOfStack, topPose, topSpot, WALL_STYLES, worldRotOf, type Building, type BuildOp, type Item, type ItemId, type PickRay, type TopItem, type TopPose, type Vec2 } from '../../../../shared/space/index.ts';
 import {
   floodRoom,
   itemAt,
@@ -24,7 +24,7 @@ import {
   wallsToPut,
 } from '../../../../shared/space/buildersGesture.ts';
 import { pickUpBlock, rotate, sendOps, setTool, stepBack, toolItem, toolTopItem } from '../../hud/build/actions.ts';
-import { buildView, draft, modifiers, setGhost, spaceContext, VIOLATION_TEXT, type Ghost } from '../../hud/build/state.ts';
+import { buildView, draft, modifiers, rollHand, setGhost, spaceContext, VIOLATION_TEXT, type Ghost } from '../../hud/build/state.ts';
 import { get, set, useStore, type BuildCursor, type BuildState, type BuildTool } from '../../store.ts';
 import { groundPoint, pickRay, tileOf, vertexOf } from './Picking.ts';
 
@@ -52,7 +52,7 @@ function poseOfTop(story: Building['stories'][number], item: Item): { item: TopI
   const host = item.on === undefined ? undefined : floorItems(story).find((h) => h.id === item.on);
   const def = ITEM_DEFS[item.def];
   const hostDef = host && ITEM_DEFS[host.def];
-  return item.on !== undefined && host && def && hostDef ? { item, pose: topPose(host, hostDef, item, def) } : null;
+  return item.on !== undefined && host && def && hostDef ? { item, pose: topPose(host, hostDef, item, def, liftOf(item, def, story.items)) } : null;
 }
 
 function storyItem(b: Building, level: number, id: ItemId | null): Item | null {
@@ -126,12 +126,22 @@ function plan(b: Building, build: BuildState, p: Vec2, ray: PickRay, drag: Drag 
       // A small item under a pointer that is over a desk, table or shelf stands on its top, snapped to a unit of it. Anywhere else it is on the floor,
       // where the rules say whether it may be.
       const def = ITEM_DEFS[tool.def];
-      const over = placementOf(def) === 'floor' ? null : surfaceAt(story, ray);
-      if (over) {
-        const hostDef = ITEM_DEFS[over.host.def];
-        const top = toolTopItem(tool, over.host.id, topSpot(over.host, hostDef, def, tool.rot, over.point), existing);
-        const pose = topPose(over.host, hostDef, top, def);
-        const surface = surfaceBox(over.host, hostDef) ?? undefined;
+      const small = placementOf(def) !== 'floor';
+      // A flat thing under the pointer (a notebook, a folder, a book) carries what is put on it: the item stands on that, one level up. Anything
+      // else under the pointer is passed over, and the item stands on the top beneath it, snapped to a unit of it.
+      const hit = small ? topItemAt(story, ray, tool.carry ?? undefined) : null;
+      const hitHost = hit && floorItems(story).find((h) => h.id === hit.on);
+      const hitDef = hit && hitHost ? ITEM_DEFS[hit.def] : undefined;
+      const hitPose = hit && hitHost && hitDef ? topPose(hitHost, ITEM_DEFS[hitHost.def], hit, hitDef, liftOf(hit, hitDef, story.items)) : null;
+      const onFlat = hitPose && hitDef ? pointAtHeight(ray, hitPose.y + hitDef.height) : null;
+      const stacked = hit && hitHost && hitDef && onFlat ? stackSpot(hitHost, ITEM_DEFS[hitHost.def], hit, hitDef, def, tool.rot, onFlat) : null;
+      const plane = small && !stacked ? surfaceAt(story, ray) : null;
+      const onTop = stacked && hitHost ? { host: hitHost, spot: stacked } : plane && { host: plane.host, spot: topSpot(plane.host, ITEM_DEFS[plane.host.def], def, tool.rot, plane.point) };
+      if (onTop) {
+        const hostDef = ITEM_DEFS[onTop.host.def];
+        const top = toolTopItem(tool, onTop.host.id, onTop.spot, existing);
+        const pose = topPose(onTop.host, hostDef, top, def, liftOf(top, def, story.items));
+        const surface = surfaceBox(onTop.host, hostDef) ?? undefined;
         return { ops: [putItemOp(level, top)], ghost: (ok) => ({ kind: 'top', item: top, pose, ok, surface }), readout: null };
       }
       const at = itemOrigin(tool.def, tool.rot, p);
@@ -166,8 +176,10 @@ function pickAt(b: Building, build: BuildState, p: Vec2, ray: PickRay, whole: bo
     const id = blockAt(story, p);
     return !!id && pickUpBlock(id, p);
   }
-  const top = topItemAt(story, ray);
-  if (top) {
+  const hit = topItemAt(story, ray);
+  if (hit) {
+    // What is stacked on a thing comes off first.
+    const top = topOfStack(story, hit);
     setTool({ kind: 'item', def: top.def, rot: worldRotOf(story, top), carry: top.id, blockId: null });
     return true;
   }
@@ -243,7 +255,8 @@ export function BuildInput() {
       const { build, b, p, ray } = c;
       draft.cursor = { x: p.x, z: p.z, valid: true };
       const story = b.stories[build.level];
-      const hover = story ? (topItemAt(story, ray)?.id ?? itemAt(story, p)?.id ?? null) : null;
+      const aimed = story ? topItemAt(story, ray) : null;
+      const hover = story ? ((aimed && topOfStack(story, aimed).id) ?? itemAt(story, p)?.id ?? null) : null;
       const pl = plan(b, build, p, ray, drag, modifiers.shift, modifiers.ctrl);
       let ghost: Ghost | null = null;
       let verdict: BuildCursor['verdict'] = null;
@@ -343,7 +356,10 @@ export function BuildInput() {
       }
       const pl = plan(b, build, p, ray, finished, modifiers.shift, modifiers.ctrl);
       const fits = !!pl && verdictOf(b, pl.ops).ok;
-      if (pl && fits && pl.ops.length) sendOps(pl.ops);
+      if (pl && fits && pl.ops.length) {
+        sendOps(pl.ops);
+        if (tool.kind === 'item' && !tool.carry) rollHand(tool.def);
+      }
       // A piece or block that is dropped lets go, whether or not it moved. A drag that ends somewhere it does not fit puts it back.
       if ((tool.kind === 'item' || tool.kind === 'block') && tool.carry && (fits || wasGrab)) {
         if (tool.kind === 'block') setTool({ kind: 'block', carry: null });

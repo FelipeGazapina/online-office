@@ -2,7 +2,6 @@
 // and facing +z at rot 0. Every one is a handful of boxes, cylinders and blobs so a def still costs one draw call.
 import type { BufferGeometry } from 'three';
 import { POD_MODELS } from './pod.ts';
-import { TABLETOP_MODELS } from './tabletop.ts';
 import { bbox, blob, box, cyl, merge, rbox } from './parts.ts';
 
 const WOOD = '#efe0c6';
@@ -152,9 +151,6 @@ export const FURNITURE: Readonly<Record<string, () => BufferGeometry>> = {
   wardrobe: () => merge([box(1.4, 2.0, 0.5, 0, 1.0, 0, '#e2d1b3'), box(0.66, 1.9, 0.02, -0.34, 1.0, 0.26, '#d4c2a2'), box(0.66, 1.9, 0.02, 0.34, 1.0, 0.26, '#d4c2a2'), box(0.04, 0.3, 0.03, -0.05, 1.0, 0.285, INK), box(0.04, 0.3, 0.03, 0.05, 1.0, 0.285, INK)]),
   sideboard: () => merge([box(1.9, 0.8, 0.45, 0, 0.45, 0, WALNUT), ...legs(1.9, 0.4, 0.06, 0.08, INK), ...[-0.62, 0, 0.62].map((x) => box(0.58, 0.68, 0.02, x, 0.45, 0.235, '#7a5a3c')), box(1.94, 0.04, 0.5, 0, 0.87, 0, OAK)]),
   cubby: () => merge([box(1.4, 1.1, 0.4, 0, 0.55, 0, OAK), ...[-0.23, 0.23].map((x) => box(0.02, 1.0, 0.36, x, 0.55, 0.03, WALNUT)), ...[0.37, 0.73].map((y) => box(1.3, 0.03, 0.36, 0, y, 0.03, WALNUT)), ...[-0.46, 0, 0.46].map((x, i) => box(0.28, 0.25, 0.25, x, 0.5, 0.04, [SAGE, '#e0a458', SKY][i]))]),
-
-  // ---- small things for the top of a desk, a table or a shelf
-  ...TABLETOP_MODELS,
 
   // ---- the pieces of a team's pod
   ...POD_MODELS,

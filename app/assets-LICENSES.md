@@ -39,5 +39,9 @@ Kenney's chair has flat material colours, so it ships as vertex colours with no 
 | desk_clock | Alarm Clock 01, Poly Haven (simplified to 1,000 triangles) | https://polyhaven.com/a/alarm_clock_01 | CC0 |
 
 The five small props above stand on desks, tables and shelves (`ItemDef.top`). The small plants on tops are the `plant_succulent` prop of
-Potted Plant 04. The books, papers, mug, pen cup and trophy have no source file: they are boxes and cylinders written in
-`src/renderer/src/scene/building/tabletop.ts`, original to this repository, and so carry no third-party license.
+Potted Plant 04. Every other small prop has no source file: the books, papers, mug, pen cup and trophy, and the 26 added for dressing
+(notebook, folder, magazine, coaster, lunchbox, upright books, sticky notes, headphones, water bottle, tumbler, coffee to go, desk
+organizer, small frame, succulent and succulent trio, cable tray, snack bowl, calculator, phone on a stand, tablet, candle, cat statue,
+letter tray, glasses, stapler and speaker), each in two to five colours or styles, are boxes, cylinders and lathes written in
+`src/renderer/src/scene/building/tabletop.ts`, original to this repository, and so carry no third-party license. No asset was added
+to the bake script or to `src/renderer/src/assets/models` for them.
