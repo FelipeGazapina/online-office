@@ -5,11 +5,10 @@
 // releases the tool. Esc on an idle employee leaves, and the camera comes back.
 // Run: pnpm build:verify && OFFICE_OUT_DIR=out/verify OFFICE_CDP_PORT=9342 node verify/cdp.mjs verify/e2e-terminal.mjs
 import { execFileSync } from 'node:child_process';
-import { copyFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { HAIKU, assert, scratch, stepUntil } from './lib.mjs';
 
-const SHOTS = process.env.OFFICE_SHOTS ?? '/Users/feliperico/.claude/orchestrate/online-office-game/shots/m1';
 const { dataDir, repo } = scratch();
 export const env = { OFFICE_DATA_DIR: dataDir, OFFICE_START_LEVEL: '5', OFFICE_TEST_RUN: '', OFFICE_CLAUDE_MODEL: HAIKU };
 
@@ -25,11 +24,6 @@ const ledger = () =>
         }
       })
     : [];
-const keep = async (s, name) => {
-  const from = await s.shot(name);
-  mkdirSync(SHOTS, { recursive: true });
-  copyFileSync(from, `${SHOTS}/${name}.png`);
-};
 const screenOf = (s, id) => s.eval(`(window.__officeTerminals?.() ?? {})[${JSON.stringify(id)}]?.rows ?? []`);
 const text = (rows) => rows.join('\n');
 const waitScreen = async (s, id, pattern, ms, label) => {
@@ -112,6 +106,8 @@ export default async function (s) {
   const body = await s.eval(`document.querySelector('.term-scroll').innerText`);
   assert(/Claude Code/.test(body) && /Create a file named hello\.txt/.test(body) && /Write\(hello\.txt\)/.test(body), 'the terminal holds the whole session: header, prompt and the calls');
   assert(await s.eval(`document.activeElement?.tagName === 'TEXTAREA'`), 'the prompt has the cursor');
+  const type = await s.eval(`(() => { const el = document.querySelector('.term-screen'); const r = document.querySelector('.term-frame').getBoundingClientRect(); return { px: parseFloat(getComputedStyle(el).fontSize), line: parseFloat(getComputedStyle(el).lineHeight), h: r.height }; })()`);
+  assert(type.px >= Math.min(24, Math.round(type.h / 35)) - 1 && type.px >= 15 && type.line / type.px >= 1.4, `the panel uses the room it has: ${type.px}px type on ${type.line}px lines in a panel ${Math.round(type.h)}px high`);
   await s.shot('terminal-zoom');
 
   // A message typed in the terminal reaches the employee: the ledger holds the owner post and she answers in the terminal.
@@ -138,8 +134,28 @@ export default async function (s) {
   await s.press('Enter');
   await s.waitFor(`(document.querySelector('.term-scroll')?.innerText.match(/Write\\(/g) ?? []).length >= 3`, 60000);
   assert((await status()) === 'working', 'three calls are on the zoomed terminal while she is still at work');
-  await keep(s, 'zoom');
+  await s.shot('terminal-zoom-mid');
   await s.waitFor(`${state}.company.employees[0].status.kind === 'idle'`, 90000);
+
+  // The turns before this one are a row each, pinned above it. A click opens one, and another closes it.
+  const rowsOf = (sel) => s.eval(`[...document.querySelectorAll(${JSON.stringify(sel)})].map((r) => r.innerText)`);
+  const past = await rowsOf('.term-past .term-row');
+  assert(past.length === 2 && past.every((r) => r.startsWith('▸')) && /hello\.txt/.test(past[0]) && /What word is written/.test(past[1]) && /→ hi/.test(past[1]), `two earlier turns are a row each: ${past.join(' | ')}`);
+  assert(!(await s.eval(`document.querySelector('.term-scroll').innerText.includes('Write(hello.txt)')`)), 'and their calls are not in the log');
+  await s.clickOn('.term-past .term-row', 'hello.txt');
+  await s.waitFor(`!!document.querySelector('.term-past.loose')`, 3000);
+  await s.sleep(300);
+  assert(await s.eval(`document.querySelector('.term-past.loose').innerText.includes('Write(hello.txt)')`), 'a click on a turn opens it, with its calls');
+  assert(await s.eval(`(() => { const a = document.querySelector('.term-past.loose').getBoundingClientRect(); const b = document.querySelector('.term-scroll').getBoundingClientRect(); return a.top >= b.top - 2 && a.top < b.top + 40; })()`), 'and the log shows it from its first row');
+  assert((await s.eval(`parseFloat(getComputedStyle([...document.querySelectorAll('.term-past.loose .term-row')].find((r) => r.innerText.includes('Write(hello.txt)'))).opacity)`)) < 0.9, 'and what it shows is dimmer than the turn in progress');
+  await s.clickOn('.term-past .term-row', 'hello.txt');
+  await s.waitFor(`!document.querySelector('.term-past.loose')`, 3000);
+  // A result that printed more than it shows says so, and a click opens it.
+  assert(await s.eval(`document.querySelector('.term-scroll').innerText.includes('click to expand')`), 'a result with more to show says click to expand');
+  await s.clickOn('.term-act', 'click to expand');
+  await s.waitFor(`document.querySelector('.term-scroll').innerText.includes('click to collapse')`, 3000);
+  await s.clickOn('.term-act', 'click to collapse');
+  await s.waitFor(`!document.querySelector('.term-scroll').innerText.includes('click to collapse')`, 3000);
 
   // Esc during a step stops it. The shell is told to sleep, and Esc ends the turn: the office hears it, the terminal says so, nothing keeps running.
   // Claude Code refuses a bare sleep, so the slow command is a node process that waits for ever. Its name is made up here, so nothing else matches it.
@@ -171,24 +187,66 @@ export default async function (s) {
   assert(left.length === 0, `the command she was running is gone ${Date.now() - gone0} ms after she was idle${left.length ? `: ${execFileSync('ps', ['-o', 'pid,ppid,etime,command', '-p', left.join(',')], { encoding: 'utf8' }).slice(0, 600)}` : ''}`);
   await s.shot('terminal-interrupted');
 
-  // A permission card shows in the terminal, and answering it there lets the tool run.
+  // A permission dialog is in the terminal, and answering it there decides the call.
   await s.eval(`window.office.send({ type: 'set_permissions', employeeId: ${JSON.stringify(id)}, mode: 'ask' })`);
   await s.waitFor(`${state}.company.employees[0].permissions.mode === 'ask'`, 5000);
-  await s.type('Use your Bash tool to run exactly this command: touch permission-ok.txt');
-  await s.press('Enter');
-  await s.waitFor(`${state}.company.employees[0].status.kind === 'blocked_on_owner'`, 60000);
-  await s.waitFor(`!!document.querySelector('.term-dialog')`, 3000);
-  const dialog = await s.eval(`document.querySelector('.term-dialog').innerText`);
-  assert(/Bash command/.test(dialog) && /touch permission-ok\.txt/.test(dialog) && /1\. Yes/.test(dialog) && /3\. No/.test(dialog), `the card is in the terminal: ${dialog.replace(/\n+/g, ' | ')}`);
-  const onMonitor = await waitScreen(s, id, /Do you want to proceed\?/, 3000, 'the card on the monitor');
-  assert(/touch permission-ok\.txt/.test(text(onMonitor.rows)), 'and on the monitor');
-  await keep(s, 'permission');
+  const dialogOf = () => s.eval(`document.querySelector('.term-dialog')?.innerText ?? ''`);
+  const ask = async (command, description) => {
+    await s.type(`Use your Bash tool to run exactly this command: ${command}${description ? `. Give the call the description "${description}".` : ''}`);
+    await s.press('Enter');
+    await s.waitFor(`${state}.company.employees[0].status.kind === 'blocked_on_owner'`, 60000);
+    await s.waitFor(`!!document.querySelector('.term-dialog')`, 3000);
+    return dialogOf();
+  };
+  const rule = () => s.eval(`${state}.company.employees[0].permissions.alwaysAllow`);
+
+  // A: yes, this once. The dialog is Claude Code's.
+  let dialog = await ask('touch permission-ok.txt', 'Create the marker file');
+  assert(/Bash command/.test(dialog) && /touch permission-ok\.txt/.test(dialog) && /Do you want to proceed\?/.test(dialog), `the dialog is in the terminal: ${dialog.replace(/\n+/g, ' | ').slice(0, 260)}`);
+  assert(/Create the marker file/.test(dialog), 'it says what the model wrote the command is for');
+  assert(/This command requires approval/.test(dialog), 'it says the command requires approval');
+  assert(/1\. Yes/.test(dialog) && /2\. Yes, and don't ask again for: touch \*/.test(dialog) && /3\. No\s*(\n|$)/.test(dialog), 'the choices say the exact scope, and No is plain');
+  assert(/Esc to cancel · Tab to amend/.test(dialog) && !/what to do differently/.test(dialog), 'the footer says Esc to cancel and Tab to amend, and no line repeats the No choice');
+  assert(await s.eval(`document.querySelector('.term-box').getBoundingClientRect().width <= 1`), 'there is no second input line while a choice is pending');
+  assert(await s.eval(`document.activeElement?.tagName === 'TEXTAREA'`), 'and the keys still reach the dialog');
+  const dashed = await s.eval(`[...document.querySelectorAll('.term-dialog .term-row')].map((r) => r.innerText)`);
+  assert(dashed.filter((r) => /^╌+$/.test(r.trim())).length === 2 && dashed.findIndex((r) => /touch permission-ok/.test(r)) === dashed.findIndex((r) => /^╌+$/.test(r.trim())) + 1, 'the command sits between two dashed rules');
+  const onMonitor = await waitScreen(s, id, /Do you want to proceed\?/, 3000, 'the dialog on the monitor');
+  assert(/touch permission-ok\.txt/.test(text(onMonitor.rows)) && /2\. Yes, and don't ask again for: touch \*/.test(text(onMonitor.rows)) && !/❯ █/.test(text(onMonitor.rows)), 'and on the monitor, with the same scope and no prompt box');
+  await s.shot('terminal-permission');
   await s.press('1', '1');
   await s.waitFor(`!document.querySelector('.term-dialog')`, 5000);
+  const workspace = await s.eval(`${state}.company.employees[0].workspace?.path ?? ''`);
+  const present = (name) => existsSync(join(repo, name)) || (!!workspace && existsSync(join(workspace, name)));
   const touched = Date.now();
-  while (!existsSync(join(repo, 'permission-ok.txt')) && Date.now() - touched < 30000) await s.sleep(200);
-  assert(existsSync(join(repo, 'permission-ok.txt')) || existsSync(join(await s.eval(`${state}.company.employees[0].workspace?.path ?? ''`), 'permission-ok.txt')), 'answering there releases the tool: the command ran and the card went away');
+  while (!present('permission-ok.txt') && Date.now() - touched < 30000) await s.sleep(200);
+  assert(present('permission-ok.txt'), 'answering 1 releases the tool: the command ran and the dialog went away');
+  assert((await rule()).length === 0, 'and stored no rule');
   await s.waitFor(`${state}.company.employees[0].status.kind === 'idle'`, 60000);
+
+  // B: yes, and do not ask again. The rule stored is the one the choice named.
+  dialog = await ask('touch always-ok.txt');
+  const scope = /don't ask again for: (.+)$/m.exec(dialog)?.[1];
+  assert(scope === 'touch *', `the choice names its scope: ${scope}`);
+  await s.press('2', '2');
+  await s.waitFor(`!document.querySelector('.term-dialog')`, 5000);
+  const stored = await rule();
+  assert(stored.length === 1 && stored[0].kind === 'command' && `${stored[0].prefix} *` === scope, `the rule stored is the scope shown: ${JSON.stringify(stored)}`);
+  await s.waitFor(`${state}.company.employees[0].status.kind === 'idle'`, 60000);
+
+  // C: no, with words. Tab opens them under No.
+  dialog = await ask('mkdir denied-dir');
+  assert(!/what to do differently/.test(dialog), 'the dialog opens with no words typed under No');
+  await s.chord('Tab');
+  await s.waitFor(`document.querySelector('.term-dialog')?.innerText.includes('3. No, and tell them what to do differently:')`, 3000);
+  await s.type('use ls instead');
+  await s.waitFor(`document.querySelector('.term-dialog')?.innerText.includes('what to do differently: use ls instead')`, 3000);
+  assert(/Enter to send · Esc to cancel/.test(await dialogOf()), 'Tab turns the footer into Enter to send');
+  await s.press('Enter');
+  await s.waitFor(`!document.querySelector('.term-dialog')`, 5000);
+  await s.waitFor(`${state}.company.employees[0].status.kind === 'idle'`, 60000);
+  assert(!present('denied-dir'), 'No keeps the command from running');
+  assert(await s.eval(`document.querySelector('.term-scroll')?.innerText.includes('They said: No, use ls instead')`), 'and the words go back to the employee');
 
   // Esc on someone with nothing to stop leaves, and the camera comes back.
   await s.press('Escape', 'Escape');

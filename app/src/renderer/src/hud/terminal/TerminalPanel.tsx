@@ -5,7 +5,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import { ALLOW_ANSWER } from '../../../../shared/permissions.ts';
 import type { Employee, Question } from '../../../../shared/protocol.ts';
-import { layoutBlocks, MODE_LINE, optionsOf, questionTitle, quartersOf, spinnerRow, wrap, type Row, type Span } from '../../../../shared/terminal.ts';
+import { layoutLog, MODE_LINE, optionsOf, questionRows, quartersOf, spinnerRows, wrap, type Act, type Plan, type Row, type Span } from '../../../../shared/terminal.ts';
 import { escapeMonitor, leaveMonitor, useMonitor } from '../../computer.ts';
 import { monitorPoses, zoomFrame } from '../../scene/monitorPose.ts';
 import { get, send, useStore } from '../../store.ts';
@@ -28,22 +28,32 @@ const quarters = (ch: string) => {
   return q.flatMap((on, i) => (on ? [`linear-gradient(currentColor, currentColor) ${at[i]} / 50% 50% no-repeat`] : [])).join(', ');
 };
 
+// A symbol the monospace font does not have is drawn by another font, wider or narrower than a cell, and every row after it drifts. So each
+// one sits in a cell of its own, and a block glyph is drawn by filling its quarters.
+const SYMBOL = /[\u2190-\u24ff\u2580-\u2bff]/;
+const BLOCKS = /[▘▝▖▗▌▐▀▄▛▜▙▟█▚▞]/;
+
 function SpanView({ s }: { s: Span }) {
   const style = spanStyle(s);
-  if (!/[▘▝▖▗▌▐▀▄▛▜▙▟█▚▞]/.test(s.t)) return <span style={style}>{s.t}</span>;
+  if (!SYMBOL.test(s.t)) return <span style={style}>{s.t}</span>;
   return (
     <span style={style}>
       {[...s.t].map((ch, i) => {
-        const bg = quarters(ch);
-        return bg ? <span key={i} className="qd" style={{ background: bg }}>{' '}</span> : ch;
+        if (BLOCKS.test(ch)) return <span key={i} className="qd" style={{ background: quarters(ch) }}>{' '}</span>;
+        return SYMBOL.test(ch) && !/[\u2500-\u257f]/.test(ch) ? <span key={i} className="cell">{ch}</span> : ch;
       })}
     </span>
   );
 }
 
-function RowView({ row }: { row: Row }) {
+function RowView({ row, onAct }: { row: Row; onAct?: (act: Act) => void }) {
+  const act = row.act;
   return (
-    <div className="term-row" style={row.fill ? { background: BGS[row.fill] } : undefined}>
+    <div
+      className={`term-row${act && onAct ? ' term-act' : ''}`}
+      style={{ ...(row.fill ? { background: BGS[row.fill] } : {}), ...(row.old ? { opacity: 0.62 } : {}) }}
+      onClick={act && onAct ? () => onAct(act) : undefined}
+    >
       {row.spans.length ? row.spans.map((s, i) => <SpanView key={i} s={s} />) : ' '}
     </div>
   );
@@ -56,34 +66,18 @@ function charWidth(px: number): number {
   return ctx.measureText('0').width;
 }
 
-function Spinner({ startedAt, tokens }: { startedAt: number; tokens: number }) {
+function Spinner({ startedAt, tokens, cols, plan }: { startedAt: number; tokens: number; cols: number; plan: Plan | undefined }) {
   const [now, setNow] = useState(Date.now());
   useEffect(() => {
     const t = setInterval(() => setNow(Date.now()), 140);
     return () => clearInterval(t);
   }, []);
-  return <RowView row={spinnerRow(startedAt, now, tokens)} />;
-}
-
-function Dialog({ q, picked, choose }: { q: Question; picked: number; choose: (i: number) => void }) {
-  const options = optionsOf(q);
   return (
-    <div className="term-dialog">
-      <div className="term-title">{questionTitle(q)}</div>
-      {q.kind === 'permission' ? (
-        <>
-          <div className="term-detail">{q.detail}</div>
-          <div className="term-ask">Do you want to proceed?</div>
-        </>
-      ) : (
-        <div className="term-detail">{q.text}</div>
-      )}
-      {options.map((o, i) => (
-        <button key={o.key} type="button" className={`term-option${i === picked ? ' on' : ''}`} onClick={() => choose(i)}>
-          <span>{i === picked ? '❯' : ' '}</span> {o.key}. {o.label}
-        </button>
+    <>
+      {spinnerRows(startedAt, now, tokens, cols, 160, plan).map((row, i) => (
+        <RowView key={i} row={row} />
       ))}
-    </div>
+    </>
   );
 }
 
@@ -108,14 +102,21 @@ function Panel({ employee }: { employee: Employee }) {
   const [size, setSize] = useState({ w: window.innerWidth, h: window.innerHeight });
   const [draft, setDraft] = useState('');
   const [picked, setPicked] = useState(0);
+  // Tab on a permission dialog opens the words under No, where the owner says what to do instead.
+  const [amend, setAmend] = useState(false);
+  // What the owner opened in the log: older turns, and calls with all of their result.
+  const [open, setOpen] = useState<{ turns: ReadonlySet<number>; calls: ReadonlySet<number> }>({ turns: new Set(), calls: new Set() });
   const [sent, setSent] = useState<{ text: string; at: number }[]>([]);
   const [ready, setReady] = useState(false);
   const scroller = useRef<HTMLDivElement>(null);
   const field = useRef<HTMLTextAreaElement>(null);
   const pinned = useRef(true);
   const [behind, setBehind] = useState(false);
+  // The log is scrolled, so a row is cut by the top edge.
+  const [cut, setCut] = useState(false);
   const status = employee.status;
   const question = status.kind === 'blocked_on_owner' ? status.question : null;
+  const permission = question?.kind === 'permission' ? question : null;
 
   useEffect(() => {
     const onResize = () => setSize({ w: window.innerWidth, h: window.innerHeight });
@@ -130,6 +131,10 @@ function Panel({ employee }: { employee: Employee }) {
   useEffect(() => {
     if (ready) field.current?.focus();
   }, [ready]);
+  useEffect(() => {
+    setAmend(false);
+    setPicked(0);
+  }, [question?.id]);
 
   // The panel lies on the monitor's screen as the camera frames it. Without a pose (the desk is gone) it is a window in the middle.
   const frame = useMemo(() => {
@@ -139,14 +144,18 @@ function Panel({ employee }: { employee: Employee }) {
     return { w: f.width * size.w, h: f.height * size.h };
   }, [employee.id, size]);
 
-  const px = Math.max(11, Math.min(15, Math.round(frame.h / 40)));
-  const lineH = Math.round(px * 1.32);
+  // The panel is the whole screen the camera looks at, so the text is as large as it can be and still hold a line of a terminal: about
+  // 24 rows of generous spacing, not 40 of fine print.
+  const px = Math.max(13, Math.min(24, Math.round(frame.h / 35)));
+  const lineH = Math.round(px * 1.45);
   const cw = useMemo(() => charWidth(px), [px]);
   const cols = Math.max(30, Math.floor((frame.w - 36) / cw));
 
   const blocks = terminalBlocks(employee.id);
   const live = terminalLive(employee.id);
-  const rows = useMemo(() => layoutBlocks(blocks, cols), [blocks, cols, version]);
+  const log = useMemo(() => layoutLog(blocks, cols, open), [blocks, cols, version, open]);
+  const rowCount = log.head.length + log.past.length + log.now.length;
+  const past = useRef<HTMLDivElement>(null);
 
   // What the owner sent that the employee has not echoed yet stays on the screen, so a message never vanishes between Enter and delivery.
   const echoed = useMemo(() => new Set(blocks.flatMap((b) => b.lines.map((l) => l.spans.map((s) => s.t).join('').replace(/^❯ /, '')))), [blocks]);
@@ -157,31 +166,46 @@ function Panel({ employee }: { employee: Employee }) {
     const el = scroller.current;
     if (el && pinned.current) el.scrollTop = el.scrollHeight;
     else if (el) setBehind(true);
-  }, [rows, pendingRows.length, question?.id, status.kind, size]);
+    if (el) setCut(el.scrollTop > 2);
+  }, [log, pendingRows.length, question?.id, status.kind, size]);
+  // The turns before this one stay at the top, with the latest of them showing.
+  useLayoutEffect(() => {
+    if (past.current) past.current.scrollTop = past.current.scrollHeight;
+  }, [log.past]);
 
   const onScroll = () => {
     const el = scroller.current;
     if (!el) return;
     pinned.current = el.scrollHeight - el.scrollTop - el.clientHeight < 24;
     if (pinned.current) setBehind(false);
+    setCut(el.scrollTop > 2);
   };
 
   const answer = (text: string, always = false) => {
     if (!question) return;
     send({ type: 'answer', employeeId: employee.id, questionId: question.id, text, ...(always ? { always } : {}) });
     setPicked(0);
+    setAmend(false);
   };
 
-  // A pick from the card: yes, yes for good, or no. With words typed, the third choice sends them as the reason.
+  // A pick from the dialog: yes, yes for good, or no. No takes the words typed under it when the owner pressed Tab.
   const choose = (i: number) => {
     if (!question) return;
     const option = optionsOf(question)[i];
     if (!option) return;
-    if (question.kind === 'ask') return answer(option.label);
-    if (option.label === 'Yes') return answer(ALLOW_ANSWER);
-    if (option.always) return answer(ALLOW_ANSWER, true);
-    answer(draft.trim() ? `No, ${draft.trim()}` : 'No');
-    setDraft('');
+    switch (option.kind) {
+      case 'pick':
+        return answer(option.label);
+      case 'allow':
+        return answer(ALLOW_ANSWER);
+      case 'always':
+        return answer(ALLOW_ANSWER, true);
+      case 'deny': {
+        const why = amend ? draft.trim() : '';
+        answer(why ? `No, ${why}` : 'No');
+        setDraft('');
+      }
+    }
   };
 
   const submit = () => {
@@ -206,19 +230,32 @@ function Panel({ employee }: { employee: Employee }) {
       e.preventDefault();
       return escapeMonitor();
     }
-    if (question && !draft) {
+    if (question && (permission || !draft)) {
       const n = optionsOf(question).length;
-      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      if (permission && e.key === 'Tab') {
         e.preventDefault();
-        return setPicked((p) => (p + (e.key === 'ArrowDown' ? 1 : n - 1)) % n);
+        return setAmend((on) => !on);
       }
-      if (/^[1-9]$/.test(e.key) && Number(e.key) <= n) {
-        e.preventDefault();
-        return choose(Number(e.key) - 1);
-      }
-      if (e.key === 'Enter') {
-        e.preventDefault();
-        return choose(picked);
+      if (permission && amend) {
+        if (e.key === 'Enter' && !e.nativeEvent.isComposing) {
+          e.preventDefault();
+          return choose(n - 1);
+        }
+      } else {
+        if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+          e.preventDefault();
+          return setPicked((p) => (p + (e.key === 'ArrowDown' ? 1 : n - 1)) % n);
+        }
+        if (/^[1-9]$/.test(e.key) && Number(e.key) <= n) {
+          e.preventDefault();
+          return choose(Number(e.key) - 1);
+        }
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          return choose(picked);
+        }
+        // Anything else typed on a permission dialog is the owner saying what to do instead.
+        if (permission && e.key.length === 1 && !e.ctrlKey && !e.metaKey) setAmend(true);
       }
     }
     if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
@@ -227,7 +264,31 @@ function Panel({ employee }: { employee: Employee }) {
     }
   };
 
-  const hint = status.kind === 'working' ? 'esc to interrupt' : question ? 'esc to stop · 1-3 to choose' : 'esc to leave';
+  // The spinner already says esc interrupts, so the foot says it only when there is no spinner.
+  const hint = status.kind === 'working' ? '' : question ? 'esc to stop · 1-3 to choose' : 'esc to leave';
+  const who = `${employee.name} · ${modelLabel(employee.model)}`;
+  const dialog = question ? questionRows(question, cols, { picked: permission && amend ? optionsOf(question).length - 1 : picked, ...(permission ? { ask: live.asks?.find((a) => a.detail === permission.detail) } : {}), who, ...(permission && amend ? { amend: draft } : {}) }) : [];
+  const flip = (set: ReadonlySet<number>, n: number) => {
+    const next = new Set(set);
+    if (!next.delete(n)) next.add(n);
+    return next;
+  };
+  const act = (a: Act) => {
+    // The click took the cursor out of the prompt, and what the owner types next still goes there.
+    field.current?.focus();
+    if ('option' in a) return choose(a.option);
+    if ('turn' in a) {
+      const next = flip(open.turns, a.turn);
+      setOpen({ ...open, turns: next });
+      // An opened turn is read from its first row. When the last one closes, the log follows the newest row again.
+      pinned.current = next.size === 0;
+      if (next.size > open.turns.size) requestAnimationFrame(() => past.current?.scrollIntoView({ block: 'start' }));
+      return;
+    }
+    // A result opens where the owner clicked, and the log stays where it is.
+    pinned.current = false;
+    setOpen({ ...open, calls: flip(open.calls, a.block) });
+  };
 
   return (
     <div
@@ -236,9 +297,19 @@ function Panel({ employee }: { employee: Employee }) {
       style={{ width: frame.w, height: frame.h, left: (size.w - frame.w) / 2, top: (size.h - frame.h) / 2 }}
     >
       <div className="term-screen" style={{ fontSize: px, lineHeight: `${lineH}px`, background: SCREEN_BG, fontFamily: FONT }} onMouseDown={(e) => e.target === e.currentTarget && field.current?.focus()}>
-        <div className="term-scroll" ref={scroller} onScroll={onScroll} data-rows={rows.length}>
-          {rows.map((r, i) => (
-            <RowView key={i} row={r} />
+        <div className={cut && !log.past.length ? 'term-scroll cut' : 'term-scroll'} ref={scroller} onScroll={onScroll} data-rows={rowCount}>
+          {log.head.map((r, i) => (
+            <RowView key={i} row={r} onAct={act} />
+          ))}
+          {log.past.length > 0 && (
+            <div ref={past} className={open.turns.size ? 'term-past loose' : 'term-past'} style={{ background: SCREEN_BG, ...(open.turns.size ? {} : { maxHeight: lineH * 4 + 8 }) }}>
+              {log.past.map((r, i) => (
+                <RowView key={i} row={r} onAct={act} />
+              ))}
+            </div>
+          )}
+          {log.now.map((r, i) => (
+            <RowView key={`n${i}`} row={r} onAct={act} />
           ))}
           {pendingRows.map((r, i) => (
             <RowView key={`p${i}`} row={r} />
@@ -251,38 +322,44 @@ function Panel({ employee }: { employee: Employee }) {
           </button>
         )}
         <div className="term-foot">
-          {status.kind === 'working' && !question && <Spinner startedAt={status.startedAt} tokens={live.tokens} />}
+          {status.kind === 'working' && !question && <Spinner startedAt={status.startedAt} tokens={live.tokens} cols={cols} plan={live.plan} />}
           {status.kind === 'error' && (
             <div className="term-row">
               <span style={{ color: TONES.dim }}>{'  ⎿  '}</span>
               <span style={{ color: TONES.err }}>Error: {status.message}</span>
             </div>
           )}
-          {question && <Dialog q={question} picked={picked} choose={choose} />}
-          <div className="term-rule" />
-          <div className="term-prompt">
-            <span className="term-caret">❯</span>
-            <textarea
-              ref={field}
-              value={draft}
-              rows={1}
-              spellCheck={false}
-              placeholder={question ? (question.kind === 'permission' ? 'or tell them what to do differently' : 'or type an answer') : `Message ${employee.name}…`}
-              onChange={(e) => setDraft(e.target.value)}
-              onKeyDown={onKey}
-              autoFocus
-              aria-label={`Message to ${employee.name}`}
-            />
-          </div>
-          <div className="term-rule" />
-          <div className="term-status">
-            <span style={{ color: TONES[MODE_LINE[employee.permissions.mode].tone] }}>
-              {MODE_LINE[employee.permissions.mode].glyph} {MODE_LINE[employee.permissions.mode].text}{' '}
-              <span className="term-dim">{employee.permissions.mode === 'ask' ? '· ? for shortcuts' : '(shift+tab to cycle)'}</span>
-            </span>
-            <span className="term-who">
-              {hint} · {employee.name} · {modelLabel(employee.model)}
-            </span>
+          {question && (
+            <div className="term-dialog" data-picked={picked}>
+              {dialog.map((r, i) => (
+                <RowView key={i} row={r} onAct={act} />
+              ))}
+            </div>
+          )}
+          <div className={permission ? 'term-box term-hidden' : 'term-box'}>
+            <div className="term-rule" />
+            <div className="term-prompt">
+              <span className="term-caret">❯</span>
+              <textarea
+                ref={field}
+                value={draft}
+                rows={1}
+                spellCheck={false}
+                placeholder={question ? 'or type an answer' : `Message ${employee.name}…`}
+                onChange={(e) => setDraft(e.target.value)}
+                onKeyDown={onKey}
+                autoFocus
+                aria-label={`Message to ${employee.name}`}
+              />
+            </div>
+            <div className="term-rule" />
+            <div className="term-status">
+              <span style={{ color: TONES[MODE_LINE[employee.permissions.mode].tone] }}>
+                {MODE_LINE[employee.permissions.mode].glyph} {MODE_LINE[employee.permissions.mode].text}{' '}
+                <span className="term-dim">{employee.permissions.mode === 'ask' ? '· ? for shortcuts' : '(shift+tab to cycle)'}</span>
+              </span>
+              <span className="term-who">{[hint, who].filter(Boolean).join(' · ')}</span>
+            </div>
           </div>
         </div>
       </div>

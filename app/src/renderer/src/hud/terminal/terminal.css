@@ -35,7 +35,12 @@
   scrollbar-width: thin;
   scrollbar-color: #3a3a40 transparent;
 }
+/* A row cut by the top edge fades out instead of showing half its letters. */
+.term-scroll.cut { -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 1.5em); mask-image: linear-gradient(to bottom, transparent 0, #000 1.5em); }
 .term-row { white-space: pre; min-height: 1em; }
+/* The turns before this one are pinned above it, a row each, so what is happening now is all that moves. */
+.term-past { position: sticky; top: 0; z-index: 2; overflow-y: auto; scrollbar-width: none; padding: 2px 0 6px; margin-bottom: 0.45em; border-bottom: 1px solid #34343a; }
+.term-past.loose { position: static; max-height: none; overflow: visible; }
 .term-gap { height: 0.6em; }
 .term-foot { flex: 0 0 auto; padding-top: 4px; }
 .term-rule { height: 0; border-top: 1px solid #4a4a52; margin: 2px 0; }
@@ -62,26 +67,11 @@
 .term-status { display: flex; justify-content: space-between; gap: 1em; color: #8e8e93; white-space: pre; padding-left: 2ch; }
 .term-dim { color: #8e8e93; }
 .term-who { color: #6b6b72; }
-.term-dialog { border-top: 1px solid #b4a7f5; margin-top: 6px; padding: 6px 0 4px 1ch; }
-.term-title { color: #b4a7f5; font-weight: 700; }
-.term-detail { color: #f5f5f7; white-space: pre-wrap; word-break: break-word; padding: 0.4em 0 0.4em 2ch; max-height: 7em; overflow: hidden; }
-.term-ask { color: #d6d6d8; }
-.term-option {
-  display: block;
-  width: 100%;
-  text-align: left;
-  border: 0;
-  background: transparent;
-  color: #d6d6d8;
-  font: inherit;
-  line-height: inherit;
-  padding: 0;
-  cursor: pointer;
-  white-space: pre-wrap;
-}
-.term-option.on { color: #b4a7f5; }
-.term-option span { color: #b4a7f5; display: inline-block; width: 1.5ch; }
-.term-option:hover { color: #b4a7f5; }
+.term-dialog { padding: 4px 0; }
+.term-act { cursor: pointer; }
+.term-act:hover { background: rgba(255, 255, 255, 0.05); }
+/* The prompt box still takes the keys while a permission dialog is open, but it is not drawn: the dialog is the bottom of the screen. */
+.term-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; opacity: 0; pointer-events: none; }
 .term-latest {
   position: absolute;
   right: 22px;
@@ -109,4 +99,5 @@
 }
 .term-leave::after { content: ' · F'; opacity: 0.6; font-weight: 400; }
 .qd { display: inline-block; width: 1ch; height: 1lh; vertical-align: top; }
+.cell { display: inline-block; width: 1ch; overflow: visible; text-align: center; vertical-align: top; }
 body[data-monitor] .hud { visibility: hidden; }
