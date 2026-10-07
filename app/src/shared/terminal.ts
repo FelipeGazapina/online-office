@@ -2,7 +2,7 @@
 // event shape (`TermEvent`), `TerminalBuffer` folds them into blocks of styled lines the way Claude Code's own terminal
 // lays them out, and `screenOf` lays the blocks out for a width: the monitor on a desk and the zoomed terminal both draw
 // that. Pure and free of Node and Electron, so the office, the renderer and the check scripts import the same code.
-import type { EmployeeStatus, PermissionMode, Question } from './protocol.ts';
+import type { AllowRule, EmployeeStatus, PermissionMode, Question } from './protocol.ts';
 import { ruleFor, SHELL_TOOL } from './permissions.ts';
 
 // ---------------------------------------------------------------- the shape
@@ -17,8 +17,13 @@ export type TerminalLine = { spans: Span[]; hang?: number; fill?: Bg };
 // A block is what one thing printed: a message, a tool call with its result, a notice. Blocks never reorder. `n` counts
 // up from 0 over the life of the buffer, and block 0 is the banner, which stays when old blocks are dropped.
 export type TermBlock = { n: number; lines: TerminalLine[] };
-// What the screen shows besides the blocks: how many tokens the turn wrote so far.
-export type TermLive = { tokens: number };
+// What the screen shows besides the blocks: how many tokens the turn wrote so far, what the employee's todo list says they are doing
+// and will do next, and what the calls waiting on the owner say they are for.
+export type Plan = { active: string; next?: string };
+// What a call waiting for approval says about itself. `detail` is the command or path the question carries, and `description`
+// is the line the model wrote for the owner under a Bash command ("Run the test suite").
+export type Ask = { detail: string; description?: string; reason?: string };
+export type TermLive = { tokens: number; plan?: Plan; asks?: Ask[] };
 // What changed since the last push. Blocks below `from` (other than the banner) are gone. `reset` says the sender holds
 // nothing the receiver can keep, so it starts from these blocks alone.
 export type TerminalPush = { from: number; blocks: TermBlock[]; live: TermLive; reset?: boolean };
@@ -40,6 +45,8 @@ export type TermEvent =
   | { k: 'end'; how: 'done' | 'interrupted' | 'error'; message?: string; ms?: number }
   | { k: 'note'; text: string; tone?: Tone }
   | { k: 'tokens'; out: number }
+  // A call is about to ask the owner for approval, with what the harness says about it.
+  | { k: 'approval'; detail: string; description?: string; reason?: string }
   // The header: which harness, which model, where.
   | { k: 'banner'; title: string; model: string; cwd: string };
 
@@ -349,7 +356,9 @@ export class TerminalBuffer {
   private liveDirty = false;
   private from = 1;
   private everSent = false;
-  live: TermLive = { tokens: 0 };
+  private tokens = 0;
+  private plan: Plan | undefined;
+  private asks: Ask[] = [];
   private readonly cwd: string;
 
   constructor(cwd: string, title = 'Claude Code', model = '') {
@@ -384,6 +393,10 @@ export class TerminalBuffer {
       this.dirty.delete(n);
       this.from = n + 1;
     }
+  }
+
+  get live(): TermLive {
+    return { tokens: this.tokens, ...(this.plan ? { plan: this.plan } : {}), ...(this.asks.length ? { asks: this.asks } : {}) };
   }
 
   apply(e: TermEvent): void {
@@ -446,7 +459,10 @@ export class TerminalBuffer {
         }
         this.tools.clear();
         this.stoppedCall = false;
-        this.live = { tokens: 0 };
+        this.tokens = 0;
+        this.plan = undefined;
+        this.asks = [];
+        this.liveDirty = true;
         if (e.how === 'interrupted') {
           if (!said) this.add([line([sp('  ⎿  ', 'dim'), ...interruptedRow()])]);
         } else if (e.how === 'done' && e.ms !== undefined && e.ms >= 5000) {
@@ -459,7 +475,12 @@ export class TerminalBuffer {
         this.add([line([sp(e.text, e.tone ?? 'dim')], { hang: 2 })]);
         return;
       case 'tokens':
-        this.live = { tokens: e.out };
+        this.tokens = e.out;
+        this.liveDirty = true;
+        return;
+      case 'approval':
+        // The last few are kept: a turn can have several calls waiting, and the owner sees them one at a time.
+        this.asks = [...this.asks.filter((a) => a.detail !== e.detail), { detail: e.detail, ...(e.description ? { description: e.description } : {}), ...(e.reason ? { reason: e.reason } : {}) }].slice(-4);
         this.liveDirty = true;
         return;
       case 'banner':
@@ -505,7 +526,10 @@ export function applyPush(held: Map<number, TermBlock>, push: TerminalPush): voi
 
 // ---------------------------------------------------------------- laying out for a width
 
-export type Row = { spans: Span[]; fill?: Bg };
+// What a click on a row does: open or close an old turn, open or close a call's whole result, or pick a choice of the dialog.
+export type Act = { turn: number } | { block: number } | { option: number };
+// `old` marks a row of an old turn the owner opened, which is drawn dimmer than the turn in progress.
+export type Row = { spans: Span[]; fill?: Bg; act?: Act; old?: true };
 
 const sameStyle = (a: Span, b: Span) => a.c === b.c && a.b === b.b && a.i === b.i && a.bg === b.bg;
 function push(row: Span[], s: Span) {
@@ -607,44 +631,94 @@ export function spinnerRow(startedAt: number, now: number, tokens: number, quant
   return { spans: [sp(`${glyph} `, 'accent'), sp(`${verbOf(startedAt)}… `, 'accent'), sp(`(${bits.join(' · ')})`, 'dim')] };
 }
 
-// The rule above and below the prompt.
-export const ruleRow = (cols: number): Row => ({ spans: [sp('─'.repeat(cols), 'rule')] });
+// The rule above and below the prompt, and the dashed one around a command.
+export const ruleRow = (cols: number, tone: Tone = 'rule'): Row => ({ spans: [sp('─'.repeat(cols), tone)] });
+const dashedRow = (cols: number): Row => ({ spans: [sp('╌'.repeat(cols), 'rule')] });
 
-export type Option = { key: string; label: string; always?: boolean };
+// What a choice does. `pick` is one of the options an employee offered.
+export type Option = { key: string; label: string; kind: 'allow' | 'always' | 'deny' | 'pick' };
+
+// What the "don't ask again" choice stores, word for word: `npm test *` is every command that starts with those words, `exactly`
+// is that command and no other, and a tool is every use of it. The office stores `ruleFor(question)`, and this prints the same rule.
+export function alwaysLabel(rule: AllowRule): string {
+  switch (rule.kind) {
+    case 'command':
+      return `Yes, and don't ask again for: ${rule.prefix} *`;
+    case 'exact':
+      return `Yes, and don't ask again for exactly: ${rule.command}`;
+    case 'tool':
+      return `Yes, and don't ask again for: all ${rule.name} calls`;
+  }
+}
 
 // What the owner can pick on a card: the same choices Claude Code's permission dialog offers.
 export function optionsOf(q: Question): Option[] {
   if (q.kind === 'permission') {
     const rule = ruleFor(q);
-    const always = rule
-      ? rule.kind === 'command'
-        ? `${rule.prefix} commands`
-        : rule.kind === 'exact'
-          ? 'this exact command'
-          : `${rule.name} calls`
-      : undefined;
     return [
-      { key: '1', label: 'Yes' },
-      ...(always ? [{ key: '2', label: `Yes, and don't ask again for ${always}`, always: true }] : []),
-      { key: always ? '3' : '2', label: 'No, and tell the employee what to do differently (esc)' },
+      { key: '1', label: 'Yes', kind: 'allow' },
+      ...(rule ? [{ key: '2', label: alwaysLabel(rule), kind: 'always' as const }] : []),
+      { key: rule ? '3' : '2', label: 'No', kind: 'deny' },
     ];
   }
-  return (q.options ?? []).map((label, i) => ({ key: String(i + 1), label }));
+  return (q.options ?? []).map((label, i) => ({ key: String(i + 1), label, kind: 'pick' as const }));
 }
 
 const TITLES: Record<string, string> = { [SHELL_TOOL]: 'Bash command', Write: 'Create file', Edit: 'Edit file', MultiEdit: 'Edit file', NotebookEdit: 'Edit notebook', Read: 'Read file' };
 export const questionTitle = (q: Question): string => (q.kind === 'permission' ? (TITLES[q.tool] ?? `Use ${q.tool}`) : 'The employee is asking you');
 
-// The dialog a question puts on the screen.
-export function questionRows(q: Question, cols: number, picked = 0): Row[] {
-  const out: Row[] = [ruleRow(cols), { spans: [sp(` ${questionTitle(q)}`, 'violet', { b: true })] }, blankRow()];
+// What the owner's typing under the No choice reads, so the choice and the words stay on one row.
+export const AMEND_LEAD = 'No, and tell them what to do differently: ';
+
+export type QuestionView = {
+  picked?: number;
+  // What the call waiting says about itself, from `TermLive.asks`.
+  ask?: Ask;
+  // Who is asking and on what, for the foot of the dialog.
+  who?: string;
+  // The words typed under No, once the owner pressed Tab. Undefined while the owner is not amending.
+  amend?: string;
+  // A monitor on a desk: the command and the choices, nothing else.
+  compact?: boolean;
+};
+
+// A command between its rules. A long one keeps its first rows and says how many it left out.
+function commandRows(detail: string, cols: number, max: number): Row[] {
+  const rows = detail.replace(/\r/g, '').split('\n').flatMap((l) => wrap(line([sp(' '), sp(cut(l, 400), 'bright')], { hang: 1 }), cols));
+  return rows.length <= max ? rows : [...rows.slice(0, max), { spans: [sp(` … +${plural(rows.length - max, 'line')}`, 'dim')] }];
+}
+
+// The dialog a question puts on the screen: Claude Code's own permission prompt for a call, a plain list for a question.
+export function questionRows(q: Question, cols: number, v: QuestionView = {}): Row[] {
+  const { picked = 0, compact = false } = v;
+  const out: Row[] = [ruleRow(cols, 'violet'), { spans: [sp(` ${questionTitle(q)}`, 'violet', { b: true })] }];
+  const options = optionsOf(q);
+  const optionRows = () =>
+    options.flatMap((o, i) => {
+      const on = i === picked;
+      const amending = v.amend !== undefined && o.kind === 'deny';
+      const text = amending ? `${o.key}. ${AMEND_LEAD}${v.amend}` : `${o.key}. ${o.label}`;
+      return wrap(line([sp(on ? ' ❯ ' : '   ', 'violet'), sp(text, on ? 'violet' : 'fg'), ...(amending ? [sp('█', 'dim')] : [])], { hang: 6 }), cols).map((r) => ({ ...r, act: { option: i } }));
+    });
   if (q.kind === 'permission') {
-    for (const l of wrap(line([sp('   '), sp(cut(q.detail, 400), 'bright')], { hang: 3 }), cols)) out.push(l);
-    out.push(blankRow(), { spans: [sp(' Do you want to proceed?', 'fg')] });
-  } else {
-    for (const l of wrap(line([sp(' '), sp(q.text, 'bright')], { hang: 1 }), cols)) out.push(l);
+    if (!compact) {
+      if (v.ask?.description) out.push({ spans: [sp(` ${cut(flat(v.ask.description), Math.max(8, cols - 2))}`, 'dim')] });
+      out.push(dashedRow(cols));
+    }
+    out.push(...commandRows(q.detail, cols, compact ? 2 : 8));
+    if (!compact) {
+      const what = q.tool === SHELL_TOOL ? 'command' : 'action';
+      out.push(dashedRow(cols), { spans: [sp(` This ${what} requires approval`, 'fg'), ...(v.ask?.reason ? [sp(` · ${cut(flat(v.ask.reason), 160)}`, 'dim')] : [])] }, blankRow());
+    }
+    out.push({ spans: [sp(' Do you want to proceed?', 'fg')] }, ...optionRows());
+    if (!compact) {
+      const hint = v.amend === undefined ? ' Esc to cancel · Tab to amend' : ' Enter to send · Esc to cancel';
+      const right = v.who ?? '';
+      out.push(blankRow(), { spans: [sp(hint, 'dim'), ...(right ? [sp(' '.repeat(Math.max(1, cols - hint.length - right.length - 1)) + right, 'dim')] : [])] });
+    }
+    return out;
   }
-  optionsOf(q).forEach((o, i) => out.push({ spans: [sp(i === picked ? ' ❯ ' : '   ', 'violet'), sp(`${o.key}. ${o.label}`, i === picked ? 'violet' : 'fg')] }));
+  out.push(blankRow(), ...wrap(line([sp(' '), sp(q.text, 'bright')], { hang: 1 }), cols), ...optionRows());
   return out;
 }
 
@@ -681,7 +755,12 @@ export function footerOf(a: ScreenArgs): Row[] {
   };
   if (status.kind === 'blocked_on_owner') {
     gap();
-    out.push(...questionRows(status.question, cols));
+    const q = status.question;
+    const who = [a.who, a.model].filter(Boolean).join(' · ');
+    const ask = q.kind === 'permission' ? a.live.asks?.find((x) => x.detail === q.detail) : undefined;
+    out.push(...questionRows(q, cols, { ...(ask ? { ask } : {}), who, compact: a.compact }));
+    // A permission dialog is the whole bottom of the screen: no prompt box under it, as in Claude Code.
+    if (q.kind === 'permission') return out;
   } else if (status.kind === 'working') {
     gap();
     out.push(spinnerRow(status.startedAt, now, a.live.tokens, a.compact ? 500 : 160));

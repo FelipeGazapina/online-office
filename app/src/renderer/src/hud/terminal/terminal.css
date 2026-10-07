@@ -62,26 +62,11 @@
 .term-status { display: flex; justify-content: space-between; gap: 1em; color: #8e8e93; white-space: pre; padding-left: 2ch; }
 .term-dim { color: #8e8e93; }
 .term-who { color: #6b6b72; }
-.term-dialog { border-top: 1px solid #b4a7f5; margin-top: 6px; padding: 6px 0 4px 1ch; }
-.term-title { color: #b4a7f5; font-weight: 700; }
-.term-detail { color: #f5f5f7; white-space: pre-wrap; word-break: break-word; padding: 0.4em 0 0.4em 2ch; max-height: 7em; overflow: hidden; }
-.term-ask { color: #d6d6d8; }
-.term-option {
-  display: block;
-  width: 100%;
-  text-align: left;
-  border: 0;
-  background: transparent;
-  color: #d6d6d8;
-  font: inherit;
-  line-height: inherit;
-  padding: 0;
-  cursor: pointer;
-  white-space: pre-wrap;
-}
-.term-option.on { color: #b4a7f5; }
-.term-option span { color: #b4a7f5; display: inline-block; width: 1.5ch; }
-.term-option:hover { color: #b4a7f5; }
+.term-dialog { padding: 4px 0; }
+.term-act { cursor: pointer; }
+.term-act:hover { background: rgba(255, 255, 255, 0.05); }
+/* The prompt box still takes the keys while a permission dialog is open, but it is not drawn: the dialog is the bottom of the screen. */
+.term-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; opacity: 0; pointer-events: none; }
 .term-latest {
   position: absolute;
   right: 22px;

@@ -1,8 +1,9 @@
 // No app, no model. The terminal's shape (src/shared/terminal.ts): how events fold into blocks, how a block wraps to a width, what
 // the screen shows under it, and how a window keeps up with the pushes. The session itself is checked in claude-check.ts.
 // Run from app/: node verify/terminal-check.ts   Exits 1 on any failed check.
-import type { EmployeeStatus, Question, QuestionId } from '../src/shared/protocol.ts';
-import { applyPush, footerOf, optionsOf, rowText, screenOf, TERMINAL_LINES, TerminalBuffer, toolLines, wrap, type TermBlock, type TermEvent, type TerminalLine } from '../src/shared/terminal.ts';
+import type { AllowRule, EmployeeStatus, Question, QuestionId } from '../src/shared/protocol.ts';
+import { covers, ruleFor, sameRule, type PermissionBody } from '../src/shared/permissions.ts';
+import { applyPush, footerOf, optionsOf, questionRows, rowText, screenOf, TERMINAL_LINES, TerminalBuffer, toolLines, wrap, type TermBlock, type TermEvent, type TerminalLine } from '../src/shared/terminal.ts';
 import { check, finish } from './check.ts';
 
 const text = (rows: { spans: { t: string }[] }[]) => rows.map((r) => r.spans.map((s) => s.t).join(''));
@@ -127,19 +128,78 @@ check(cut.length === 6 && text(cut).some((r) => r.startsWith('❯ ')) && text(cu
 const compact = footerOf({ blocks: [], live: t.live, status: working, now: 0, cols: 30, rows: 8, compact: true });
 check(compact.length === 4 && rowText(compact[2]!).startsWith('❯ ') && /esc to interrupt/.test(rowText(compact[0]!)), 'the compact footer on a desk monitor is the spinner and the prompt box');
 
-console.log('\n# questions on the screen');
+console.log('\n# the permission dialog');
 const q = (body: object): Question => ({ id: 'q' as QuestionId, askedAt: 0, ...body }) as Question;
-const run = q({ kind: 'permission', text: 'Can I run a shell command?', tool: 'Bash', detail: 'npm test -- --watch' });
-check(optionsOf(run).map((o) => `${o.key}:${o.label}`).join('|') === "1:Yes|2:Yes, and don't ask again for npm test commands|3:No, and tell the employee what to do differently (esc)", 'a command asks Yes, Yes and do not ask again for that command, and No');
-check(optionsOf(q({ kind: 'permission', text: '', tool: 'Bash', detail: 'a && b' })).map((o) => o.key).join() === '1,3' || optionsOf(q({ kind: 'permission', text: '', tool: 'Bash', detail: 'a && b' })).map((o) => o.key).join() === '1,2', 'a command no rule can stand for has no do-not-ask-again');
-check(optionsOf(q({ kind: 'permission', text: '', tool: 'Bash', detail: 'a && b' })).every((o) => !o.always), 'and offers no always option');
+const perm = (tool: string, detail: string): Question => q({ kind: 'permission', text: 'Can I?', tool, detail });
+const run = perm('Bash', 'npm test -- --watch');
+check(optionsOf(run).map((o) => `${o.key}:${o.label}`).join('|') === "1:Yes|2:Yes, and don't ask again for: npm test *|3:No", 'a command asks Yes, Yes and do not ask again for the exact words it will store, and a plain No');
+check(optionsOf(run).map((o) => o.kind).join() === 'allow,always,deny', 'each choice says what it does');
+const noRule = perm('Bash', 'sudo make install');
+check(optionsOf(noRule).map((o) => `${o.key}:${o.kind}`).join() === '1:allow,2:deny' && optionsOf(perm('Bash', 'a && b')).every((o) => o.kind !== 'always'), 'a command no rule can stand for has no do-not-ask-again, and No moves up to 2');
+
+// The scope on the choice is the rule the office stores: what the label says is read back into a rule, and the two must be the same.
+const readBack = (label: string): AllowRule | undefined => {
+  const m = /^Yes, and don't ask again for( exactly)?: (.*)$/s.exec(label);
+  if (!m) return undefined;
+  if (m[1]) return { kind: 'exact', command: m[2]! };
+  const tool = /^all (.+) calls$/.exec(m[2]!);
+  if (tool) return { kind: 'tool', name: tool[1]! };
+  return m[2]!.endsWith(' *') ? { kind: 'command', prefix: m[2]!.slice(0, -2) } : undefined;
+};
+const cases: [string, string][] = [
+  ['Bash', 'npm test -- --watch'], ['Bash', 'git status --short'], ['Bash', 'touch permission-ok.txt'], ['Bash', 'ls -la'], ['Bash', 'pnpm build:verify'],
+  ['Bash', 'node -e "setInterval(() => {}, 1000)" m1-slow'], ['Bash', 'rm -rf *'], ['Bash', 'python3 script.py --fast'], ['Write', '/work/repo/a.txt'], ['Edit', 'src/a.ts'],
+];
+for (const [tool, detail] of cases) {
+  const question = perm(tool, detail);
+  const always = optionsOf(question).find((o) => o.kind === 'always');
+  const stored = ruleFor(question as PermissionBody);
+  check(!!always && !!stored && sameRule(readBack(always.label)!, stored), `${tool} ${detail}: the choice says "${always?.label}" and the stored rule is ${JSON.stringify(stored)}`);
+  const body = question as PermissionBody;
+  check(!!stored && covers(stored, body), `${tool} ${detail}: the rule it stores covers the call on the card`);
+}
+const npm = ruleFor(perm('Bash', 'npm test -- --watch') as PermissionBody)!;
+check(covers(npm, perm('Bash', 'npm test') as PermissionBody) && !covers(npm, perm('Bash', 'npm testing') as PermissionBody) && !covers(npm, perm('Bash', 'npm run build') as PermissionBody) && !covers(npm, perm('Bash', 'npm test && rm -rf /') as PermissionBody), '`npm test *` covers npm test with more words and nothing that merely starts with those letters or chains a second command');
+const exact = ruleFor(perm('Bash', 'rm -rf *') as PermissionBody)!;
+check(exact.kind === 'exact' && !covers(exact, perm('Bash', 'rm -rf node_modules') as PermissionBody) && /for exactly: rm -rf \*$/.test(optionsOf(perm('Bash', 'rm -rf *')).find((o) => o.kind === 'always')!.label), 'a command that can run anything is allowed exactly, and the choice says exactly, so a trailing * is not read as a wildcard');
+
 const blocked: EmployeeStatus = { kind: 'blocked_on_owner', task: 't', question: run };
-screen = text(screenOf({ blocks: t.all(), live: t.live, status: blocked, now: 0, cols: 70, rows: 40 }));
+const dialogLive = { tokens: 0, asks: [{ detail: 'npm test -- --watch', description: 'Run the test suite' }] };
+screen = text(screenOf({ blocks: t.all(), live: dialogLive, status: blocked, now: 0, cols: 70, rows: 40, who: 'Ana', model: 'Haiku 4.5', mode: 'ask' }));
 const at = screen.findIndex((r) => r.includes('Bash command'));
-check(at > 0 && screen[at + 2]!.includes('npm test -- --watch') && screen.some((r) => r.includes('Do you want to proceed?')) && screen.some((r) => r.includes('❯ 1. Yes')) && screen.some((r) => r.includes('3. No, and tell')), 'a permission card is a dialog on the screen with its command and numbered choices');
-check(!screen.some((r) => /\(esc to interrupt/.test(r)), 'the dialog replaces the spinner');
+check(at > 0 && screen[at - 1]!.startsWith('────'), 'a permission dialog opens with a rule over its title');
+const want = ['Bash command', 'Run the test suite', '╌', 'npm test -- --watch', '╌', 'This command requires approval', '', 'Do you want to proceed?', '❯ 1. Yes', '2. Yes, and don\'t ask again for: npm test *', '3. No', '', 'Esc to cancel · Tab to amend'];
+const got = screen.slice(at, at + want.length).map((r) => r.trim());
+check(want.every((w, i) => (w === '' ? got[i] === '' : got[i]!.startsWith(w))), `the dialog reads title, description, the command between dashed rules, requires approval, the question, the choices and the footer (${got.join(' | ')})`);
+check(/Ana · Haiku 4\.5$/.test(screen[at + want.length - 1]!), 'the footer names who is asking');
+check(!screen.slice(at).some((r) => r.startsWith('❯ ') || r.startsWith('────')), 'no prompt box under the dialog: one input line at a time');
+check(!screen.some((r) => /\(.*esc to interrupt/.test(r)), 'the dialog replaces the spinner');
+check(!screen.some((r) => /tell them what to do differently/.test(r)), 'the No choice is plain, with no second line repeating it');
+screen = text(screenOf({ blocks: [], live: dialogLive, status: blocked, now: 0, cols: 70, rows: 40 }));
+check(screen.some((r) => r.includes('╌╌╌╌')) && screen.some((r) => r.includes('This command requires approval')), 'the rest of the dialog does not depend on who asks');
+const noWords = text(screenOf({ blocks: [], live: { tokens: 0 }, status: blocked, now: 0, cols: 70, rows: 40 }));
+check(!noWords.some((r) => r.trim() === 'Run the test suite') && noWords.some((r) => r.includes('npm test -- --watch')), 'a call that gave no description has none, and still shows its command');
+const amended = text(questionRows(run, 70, { amend: 'use npm ci' }));
+check(amended.some((r) => r.includes('3. No, and tell them what to do differently: use npm ci█')) && amended.some((r) => r.includes('Enter to send')), 'after Tab the words typed sit under No, on its own row');
+const long = text(questionRows(perm('Bash', Array.from({ length: 14 }, (_, i) => `echo line ${i}`).join('\n')), 60));
+check(long.some((r) => /… \+\d+ lines?$/.test(r.trim())) && long.length < 36, 'a long command keeps its first rows and says how many it left out');
+const tall = text(questionRows(perm('Bash', 'node -e "' + 'x'.repeat(200) + '"'), 40));
+check(tall.filter((r) => r.trim().startsWith('x') || r.includes('node -e')).length >= 3 && tall.every((r) => r.length <= 40), 'a long command wraps inside the width');
+const small = questionRows(run, 48, { compact: true });
+check(small.length <= 7 && text(small).some((r) => r.includes('2. Yes, and don\'t ask again for: npm test *')) && !text(small).some((r) => r.includes('requires approval')), `on a desk monitor the dialog is the command and the choices (${small.length} rows)`);
+const edit = text(questionRows(perm('Write', '/work/repo/a.txt'), 60));
+check(edit[1]!.trim() === 'Create file' && edit.some((r) => r.includes('This action requires approval')) && edit.some((r) => r.includes('for: all Write calls')), 'a file tool reads Create file, and its always-allow is every Write');
 const ask = q({ kind: 'ask', text: 'Which colour?', options: ['red', 'blue'] });
 screen = text(screenOf({ blocks: [], live: t.live, status: { kind: 'blocked_on_owner', task: 't', question: ask }, now: 0, cols: 50, rows: 20 }));
-check(screen.some((r) => r.includes('Which colour?')) && screen.some((r) => r.includes('1. red')) && screen.some((r) => r.includes('2. blue')), 'a question to the owner lists its options');
+check(screen.some((r) => r.includes('Which colour?')) && screen.some((r) => r.includes('1. red')) && screen.some((r) => r.includes('2. blue')) && screen.some((r) => r.startsWith('❯ ')), 'a question to the owner lists its options, and keeps the prompt to answer in words');
+
+console.log('\n# what a call says about itself');
+const asked = new TerminalBuffer('/work/repo');
+asked.apply({ k: 'approval', detail: 'npm test', description: 'Run the test suite', reason: 'Not in the allow list' });
+check(asked.live.asks?.[0]?.description === 'Run the test suite' && asked.take()!.live.asks?.length === 1, 'an approval event rides along on the live part of the next push');
+for (let i = 0; i < 6; i++) asked.apply({ k: 'approval', detail: `cmd ${i}` });
+check(asked.live.asks?.length === 4 && asked.live.asks.at(-1)!.detail === 'cmd 5', 'it keeps the last few');
+asked.apply({ k: 'end', how: 'done' });
+check(asked.live.asks === undefined, 'and drops them when the turn ends');
 
 finish();

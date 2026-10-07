@@ -11,7 +11,7 @@ import {
   type SDKResultMessage,
   type SDKUserMessage,
 } from '@anthropic-ai/claude-agent-sdk';
-import { SHELL_TOOL, isAllow } from '../../../shared/permissions.ts';
+import { SHELL_TOOL, isAllow, type PermissionBody } from '../../../shared/permissions.ts';
 import type { InterruptStyle, ModelCatalog, ModelId, ModelOption, PermissionMode, PermissionPolicy, QuestionBody } from '../../../shared/protocol.ts';
 import type { TermEvent } from '../../../shared/terminal.ts';
 import { logger } from '../debug.ts';
@@ -227,7 +227,7 @@ function describeTool(name: string, input: Record<string, unknown>, cwd: string)
 
 // What the card shows next to Allow / Deny: the shell command, or the file the tool wants to touch. The office matches
 // Always allow rules against `tool` and `detail`, so a shell command must go out as SHELL_TOOL with the bare command.
-function permissionBody(name: string, input: Record<string, unknown>, cwd: string): QuestionBody {
+function permissionBody(name: string, input: Record<string, unknown>, cwd: string): PermissionBody {
   const target = targetOf(input, cwd);
   const shell = name === 'Bash';
   return {
@@ -704,11 +704,15 @@ export class ClaudeSession implements EmployeeSession {
     host.log(`Finished: ${short(text, 200) || this.task}`);
   }
 
-  private canUseTool: CanUseTool = async (toolName, input, { signal }) => {
+  private canUseTool: CanUseTool = async (toolName, input, { signal, decisionReason }) => {
     // bypassPermissions still asks about a few protected paths, and YOLO bypasses every check.
     if (this.policy.mode === 'yolo' || runsUnasked(toolName)) return { behavior: 'allow', updatedInput: input };
     const { cwd } = this.host.block;
-    const answer = await this.host.ask(permissionBody(toolName, input, cwd), AbortSignal.any([signal, this.life.signal]));
+    const body = permissionBody(toolName, input, cwd);
+    // The terminal's dialog shows what the model wrote for a command, and why the harness asked.
+    const description = toolName === 'Bash' ? short(str(input.description), 200) : '';
+    this.host.terminal({ k: 'approval', detail: body.detail, ...(description ? { description } : {}), ...(decisionReason ? { reason: short(decisionReason, 200) } : {}) });
+    const answer = await this.host.ask(body, AbortSignal.any([signal, this.life.signal]));
     if (isAllow(answer)) return { behavior: 'allow', updatedInput: input };
     return { behavior: 'deny', message: `The boss did not allow this. They said: ${answer || 'no'}` };
   };

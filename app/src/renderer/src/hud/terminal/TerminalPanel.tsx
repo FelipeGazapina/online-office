@@ -5,7 +5,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import { ALLOW_ANSWER } from '../../../../shared/permissions.ts';
 import type { Employee, Question } from '../../../../shared/protocol.ts';
-import { layoutBlocks, MODE_LINE, optionsOf, questionTitle, quartersOf, spinnerRow, wrap, type Row, type Span } from '../../../../shared/terminal.ts';
+import { layoutBlocks, MODE_LINE, optionsOf, questionRows, quartersOf, spinnerRow, wrap, type Act, type Row, type Span } from '../../../../shared/terminal.ts';
 import { escapeMonitor, leaveMonitor, useMonitor } from '../../computer.ts';
 import { monitorPoses, zoomFrame } from '../../scene/monitorPose.ts';
 import { get, send, useStore } from '../../store.ts';
@@ -41,9 +41,14 @@ function SpanView({ s }: { s: Span }) {
   );
 }
 
-function RowView({ row }: { row: Row }) {
+function RowView({ row, onAct }: { row: Row; onAct?: (act: Act) => void }) {
+  const act = row.act;
   return (
-    <div className="term-row" style={row.fill ? { background: BGS[row.fill] } : undefined}>
+    <div
+      className={`term-row${act && onAct ? ' term-act' : ''}`}
+      style={row.fill ? { background: BGS[row.fill] } : undefined}
+      onClick={act && onAct ? () => onAct(act) : undefined}
+    >
       {row.spans.length ? row.spans.map((s, i) => <SpanView key={i} s={s} />) : ' '}
     </div>
   );
@@ -63,28 +68,6 @@ function Spinner({ startedAt, tokens }: { startedAt: number; tokens: number }) {
     return () => clearInterval(t);
   }, []);
   return <RowView row={spinnerRow(startedAt, now, tokens)} />;
-}
-
-function Dialog({ q, picked, choose }: { q: Question; picked: number; choose: (i: number) => void }) {
-  const options = optionsOf(q);
-  return (
-    <div className="term-dialog">
-      <div className="term-title">{questionTitle(q)}</div>
-      {q.kind === 'permission' ? (
-        <>
-          <div className="term-detail">{q.detail}</div>
-          <div className="term-ask">Do you want to proceed?</div>
-        </>
-      ) : (
-        <div className="term-detail">{q.text}</div>
-      )}
-      {options.map((o, i) => (
-        <button key={o.key} type="button" className={`term-option${i === picked ? ' on' : ''}`} onClick={() => choose(i)}>
-          <span>{i === picked ? '❯' : ' '}</span> {o.key}. {o.label}
-        </button>
-      ))}
-    </div>
-  );
 }
 
 export function TerminalPanel() {
@@ -108,6 +91,8 @@ function Panel({ employee }: { employee: Employee }) {
   const [size, setSize] = useState({ w: window.innerWidth, h: window.innerHeight });
   const [draft, setDraft] = useState('');
   const [picked, setPicked] = useState(0);
+  // Tab on a permission dialog opens the words under No, where the owner says what to do instead.
+  const [amend, setAmend] = useState(false);
   const [sent, setSent] = useState<{ text: string; at: number }[]>([]);
   const [ready, setReady] = useState(false);
   const scroller = useRef<HTMLDivElement>(null);
@@ -116,6 +101,7 @@ function Panel({ employee }: { employee: Employee }) {
   const [behind, setBehind] = useState(false);
   const status = employee.status;
   const question = status.kind === 'blocked_on_owner' ? status.question : null;
+  const permission = question?.kind === 'permission' ? question : null;
 
   useEffect(() => {
     const onResize = () => setSize({ w: window.innerWidth, h: window.innerHeight });
@@ -130,6 +116,10 @@ function Panel({ employee }: { employee: Employee }) {
   useEffect(() => {
     if (ready) field.current?.focus();
   }, [ready]);
+  useEffect(() => {
+    setAmend(false);
+    setPicked(0);
+  }, [question?.id]);
 
   // The panel lies on the monitor's screen as the camera frames it. Without a pose (the desk is gone) it is a window in the middle.
   const frame = useMemo(() => {
@@ -170,18 +160,27 @@ function Panel({ employee }: { employee: Employee }) {
     if (!question) return;
     send({ type: 'answer', employeeId: employee.id, questionId: question.id, text, ...(always ? { always } : {}) });
     setPicked(0);
+    setAmend(false);
   };
 
-  // A pick from the card: yes, yes for good, or no. With words typed, the third choice sends them as the reason.
+  // A pick from the dialog: yes, yes for good, or no. No takes the words typed under it when the owner pressed Tab.
   const choose = (i: number) => {
     if (!question) return;
     const option = optionsOf(question)[i];
     if (!option) return;
-    if (question.kind === 'ask') return answer(option.label);
-    if (option.label === 'Yes') return answer(ALLOW_ANSWER);
-    if (option.always) return answer(ALLOW_ANSWER, true);
-    answer(draft.trim() ? `No, ${draft.trim()}` : 'No');
-    setDraft('');
+    switch (option.kind) {
+      case 'pick':
+        return answer(option.label);
+      case 'allow':
+        return answer(ALLOW_ANSWER);
+      case 'always':
+        return answer(ALLOW_ANSWER, true);
+      case 'deny': {
+        const why = amend ? draft.trim() : '';
+        answer(why ? `No, ${why}` : 'No');
+        setDraft('');
+      }
+    }
   };
 
   const submit = () => {
@@ -206,19 +205,32 @@ function Panel({ employee }: { employee: Employee }) {
       e.preventDefault();
       return escapeMonitor();
     }
-    if (question && !draft) {
+    if (question && (permission || !draft)) {
       const n = optionsOf(question).length;
-      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      if (permission && e.key === 'Tab') {
         e.preventDefault();
-        return setPicked((p) => (p + (e.key === 'ArrowDown' ? 1 : n - 1)) % n);
+        return setAmend((on) => !on);
       }
-      if (/^[1-9]$/.test(e.key) && Number(e.key) <= n) {
-        e.preventDefault();
-        return choose(Number(e.key) - 1);
-      }
-      if (e.key === 'Enter') {
-        e.preventDefault();
-        return choose(picked);
+      if (permission && amend) {
+        if (e.key === 'Enter' && !e.nativeEvent.isComposing) {
+          e.preventDefault();
+          return choose(n - 1);
+        }
+      } else {
+        if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+          e.preventDefault();
+          return setPicked((p) => (p + (e.key === 'ArrowDown' ? 1 : n - 1)) % n);
+        }
+        if (/^[1-9]$/.test(e.key) && Number(e.key) <= n) {
+          e.preventDefault();
+          return choose(Number(e.key) - 1);
+        }
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          return choose(picked);
+        }
+        // Anything else typed on a permission dialog is the owner saying what to do instead.
+        if (permission && e.key.length === 1 && !e.ctrlKey && !e.metaKey) setAmend(true);
       }
     }
     if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
@@ -228,6 +240,11 @@ function Panel({ employee }: { employee: Employee }) {
   };
 
   const hint = status.kind === 'working' ? 'esc to interrupt' : question ? 'esc to stop · 1-3 to choose' : 'esc to leave';
+  const who = `${employee.name} · ${modelLabel(employee.model)}`;
+  const dialog = question ? questionRows(question, cols, { picked: permission && amend ? optionsOf(question).length - 1 : picked, ...(permission ? { ask: live.asks?.find((a) => a.detail === permission.detail) } : {}), who, ...(permission && amend ? { amend: draft } : {}) }) : [];
+  const act = (a: Act) => {
+    if ('option' in a) choose(a.option);
+  };
 
   return (
     <div
@@ -258,7 +275,14 @@ function Panel({ employee }: { employee: Employee }) {
               <span style={{ color: TONES.err }}>Error: {status.message}</span>
             </div>
           )}
-          {question && <Dialog q={question} picked={picked} choose={choose} />}
+          {question && (
+            <div className="term-dialog" data-picked={picked}>
+              {dialog.map((r, i) => (
+                <RowView key={i} row={r} onAct={act} />
+              ))}
+            </div>
+          )}
+          <div className={permission ? 'term-box term-hidden' : 'term-box'}>
           <div className="term-rule" />
           <div className="term-prompt">
             <span className="term-caret">❯</span>
@@ -281,8 +305,9 @@ function Panel({ employee }: { employee: Employee }) {
               <span className="term-dim">{employee.permissions.mode === 'ask' ? '· ? for shortcuts' : '(shift+tab to cycle)'}</span>
             </span>
             <span className="term-who">
-              {hint} · {employee.name} · {modelLabel(employee.model)}
+              {hint} · {who}
             </span>
+          </div>
           </div>
         </div>
       </div>
