@@ -264,7 +264,8 @@ function Panel({ employee }: { employee: Employee }) {
     }
   };
 
-  const hint = status.kind === 'working' ? 'esc to interrupt' : question ? 'esc to stop · 1-3 to choose' : 'esc to leave';
+  // The spinner already says esc interrupts, so the foot says it only when there is no spinner.
+  const hint = status.kind === 'working' ? '' : question ? 'esc to stop · 1-3 to choose' : 'esc to leave';
   const who = `${employee.name} · ${modelLabel(employee.model)}`;
   const dialog = question ? questionRows(question, cols, { picked: permission && amend ? optionsOf(question).length - 1 : picked, ...(permission ? { ask: live.asks?.find((a) => a.detail === permission.detail) } : {}), who, ...(permission && amend ? { amend: draft } : {}) }) : [];
   const flip = (set: ReadonlySet<number>, n: number) => {
@@ -357,9 +358,7 @@ function Panel({ employee }: { employee: Employee }) {
                 {MODE_LINE[employee.permissions.mode].glyph} {MODE_LINE[employee.permissions.mode].text}{' '}
                 <span className="term-dim">{employee.permissions.mode === 'ask' ? '· ? for shortcuts' : '(shift+tab to cycle)'}</span>
               </span>
-              <span className="term-who">
-                {hint} · {who}
-              </span>
+              <span className="term-who">{[hint, who].filter(Boolean).join(' · ')}</span>
             </div>
           </div>
         </div>

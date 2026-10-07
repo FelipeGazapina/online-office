@@ -110,60 +110,74 @@ export default async function (s) {
     await s.waitFor(`__officeMonitor.getState().open === null`, 3000);
   }
   await s.sleep(1500);
-  for (const p of people) {
-    const text = `Create ten small files ${p.name.toLowerCase()}1.txt to ${p.name.toLowerCase()}10.txt, each containing its own number, one Write call per file, one file at a time. Then use your Bash tool to run ls. Then say done.`;
-    await post(s, p.id, text, `m-${p.name}`);
-  }
-  await s.eval(`__office.store.setState({ selectedId: null })`);
-
-  // Frame the row: the owner stands behind the chairs of the biggest group of desks that face one way, and looks at their screens.
+  // Frame the row. The screens of a desk face its sitter and the sitters block each other's view, and which desk gets which computer changes
+  // from one run to the next, so the owner tries places to stand behind the chairs and keeps the one from which most terminals can be read.
   const all = await s.eval(`Object.values(__officeMonitors())`);
   const unit = (v) => [v[0] / Math.hypot(v[0], v[2]), 0, v[2] / Math.hypot(v[0], v[2])];
   const groups = all.map((a) => all.filter((b) => unit(a.normal)[0] * unit(b.normal)[0] + unit(a.normal)[2] * unit(b.normal)[2] > 0.7));
   const poses = groups.sort((a, b) => b.length - a.length)[0];
   const normal = unit([0, 1, 2].map((i) => poses.reduce((n, p) => n + p.normal[i], 0) / poses.length));
   const row = [normal[2], 0, -normal[0]];
-  const along = (p) => p.center[0] * row[0] + p.center[2] * row[2];
-  const sorted = [...poses].sort((a, b) => along(a) - along(b));
-  // The middle of the screens on the floor plan: x, then z.
-  const mid = [0, 2].map((i) => poses.reduce((n, p) => n + p.center[i], 0) / poses.length);
-  const alongMid = (sorted.reduce((n, p) => n + along(p), 0) / sorted.length);
-  const camera = () => s.eval(`${state}.camera`);
-  // `back` is how far behind the screens the owner stands, `side` how far along the row from its middle, and `turn` how far from straight at them they look.
-  const stand = async ({ back, side = 0, turn = 0 }) => {
-    const at = [mid[0] + normal[0] * back + row[0] * side, mid[1] + normal[2] * back + row[2] * side];
-    await s.eval(`__office.teleport(${at[0]}, ${at[1]}, ${Math.atan2(-normal[0], -normal[2]) + turn})`);
-    return at;
-  };
-  const settle = async () => {
-    await s.sleep(2200);
-    // The chat that opened for the nearest sitter closes, and stays closed while the owner stands still.
-    await s.eval(`__office.store.setState({ selectedId: null })`);
-    await s.sleep(600);
-  };
-  const gap = (along(sorted[1]) + along(sorted[2] ?? sorted[1])) / 2 - alongMid;
-  // The first is the shot. The others are other places to stand, for a retake: SHOT_PROBE=1 takes them all, SHOT_CONFIG=<name> one.
-  const configs = [
-    { name: 'close-right', back: 1.8, side: gap, turn: -0.28 },
-    { name: 'back-right', back: 2.1, side: gap, turn: -0.28 },
-    { name: 'middle', back: 2.0, side: 0, turn: -0.1 },
-  ];
-  const wanted = process.env.SHOT_CONFIG;
-  const todo = process.env.SHOT_PROBE ? configs : [configs.find((c) => c.name === (wanted ?? configs[0].name))];
-  for (const cfg of todo) {
-    const at = await stand(cfg);
-    if ((await camera()) !== 'first') await s.press('Tab', 'Tab');
-    await settle();
-    console.log(`${cfg.name}: ${poses.length} screens in the row, the owner at ${at.map((v) => v.toFixed(1))}`);
-    if (process.env.SHOT_PROBE) {
-      await s.eval('document.activeElement?.blur()');
-      await keep(s, `monitors-${cfg.name}`);
+  const centre = [0, 2].map((i) => poses.reduce((n, p) => n + p.center[i], 0) / poses.length);
+  if ((await s.eval(`${state}.camera`)) !== 'first') await s.press('Tab', 'Tab');
+  await s.sleep(1500);
+
+  const candidates = [];
+  for (const back of [1.3, 1.6, 1.9, 2.2, 2.6]) {
+    for (const side of [-2, -1.5, -1, -0.5, 0, 0.5, 1, 1.5, 2]) {
+      const at = [centre[0] + normal[0] * back + row[0] * side, centre[1] + normal[2] * back + row[2] * side];
+      for (const turn of [-0.4, -0.2, 0, 0.2, 0.4]) candidates.push({ at, yaw: Math.atan2(centre[0] - at[0], centre[1] - at[1]) + turn });
     }
   }
-  if (process.env.SHOT_PROBE) return;
+  // What a place to stand shows: for each screen, whether it is in the frame, faces the owner, is big enough to read, and has nothing in front of it.
+  // A sitter's head filling the lower half of the frame costs as much as a screen is worth.
+  const seen = (poses) => `(() => {
+    const cam = __officeCamera;
+    const W = innerWidth;
+    const H = innerHeight;
+    const tan = Math.tan((cam.fov * Math.PI) / 360);
+    const sizes = ${JSON.stringify(poses)}.map((p) => {
+      const at = __office.project(p.center[0], p.center[1], p.center[2]);
+      const d = Math.hypot(cam.x - p.center[0], cam.y - p.center[1], cam.z - p.center[2]);
+      const face = ((cam.x - p.center[0]) * p.normal[0] + (cam.y - p.center[1]) * p.normal[1] + (cam.z - p.center[2]) * p.normal[2]) / d;
+      const width = (p.w / (2 * d * tan)) * H;
+      if (!at || at.x < 80 || at.x > W - 80 || at.y < 80 || at.y > H - 160 || face < 0.5 || width < 90) return 0;
+      const hit = __office.pick(at.x, at.y);
+      return hit?.point && Math.hypot(hit.point.x - p.center[0], hit.point.z - p.center[2]) < 0.35 ? Math.min(width, 380) : 0;
+    });
+    let near = 0;
+    for (let i = 1; i <= 5; i++) {
+      for (let j = 1; j <= 3; j++) {
+        const hit = __office.pick((W * i) / 6, H * (0.45 + 0.15 * j));
+        if (hit?.point && Math.hypot(hit.point.x - cam.x, hit.point.z - cam.z) < 1.1 && hit.point.y > 0.5) near++;
+      }
+    }
+    return { sizes, near };
+  })()`;
+  let best = { score: -1, shown: 0 };
+  for (const c of candidates) {
+    await s.eval(`__office.teleport(${c.at[0]}, ${c.at[1]}, ${c.yaw})`);
+    await s.sleep(200);
+    const { sizes, near } = await s.eval(seen(poses));
+    const shown = sizes.filter(Boolean).length;
+    const score = sizes.reduce((n, w) => n + w, 0) + (shown >= 3 ? 400 : 0) - near * 60;
+    if (score > best.score) best = { score, shown, c };
+  }
+  await s.eval(`__office.teleport(${best.c.at[0]}, ${best.c.at[1]}, ${best.c.yaw})`);
+  await s.sleep(2200);
+  // The chat that opened for the nearest sitter closes, and stays closed while the owner stands still.
+  await s.eval(`__office.store.setState({ selectedId: null })`);
+  await s.sleep(600);
+  console.log(`the owner stands at ${best.c.at.map((v) => v.toFixed(1))}: ${best.shown} of ${poses.length} terminals in view, readable and unobstructed (score ${Math.round(best.score)})`);
+
+  // Everyone gets a task once the owner is in place, so the screens show a session at work and not one that is over.
+  for (const p of people) {
+    const text = `Create ten small files ${p.name.toLowerCase()}1.txt to ${p.name.toLowerCase()}10.txt, each containing its own number, one Write call per file, one file at a time. Then use your Bash tool to run ls. Then say done.`;
+    await post(s, p.id, text, `m-${p.name}`);
+  }
 
   // Wait until most of them show a call being made.
-  const showing = () => s.eval(`Object.values(window.__officeTerminals()).filter((t) => t.rows.some((r) => /Write\\(/.test(r))).length`);
+  const showing = () => s.eval(`Object.values(window.__officeTerminals()).filter((t) => t.rows.filter((r) => /Write\\(/.test(r)).length >= 2).length`);
   const t1 = Date.now();
   while ((await showing()) < 3 && Date.now() - t1 < 120000) await s.sleep(300);
   await s.sleep(1200);
