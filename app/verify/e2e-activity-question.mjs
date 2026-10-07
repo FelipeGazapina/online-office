@@ -139,13 +139,16 @@ export default async (s) => {
   while (Date.now() - t1 < WAIT_MS) {
     await unattended(s);
     const t = await s.eval(`${task()}`);
-    if (t.stage === 'review') break;
+    // The employee may move the card to review herself before her reply lands, so wait for the reply too.
+    if (t.stage === 'review' && t.lastOutcome && t.lastOutcome.reply !== asked.id) break;
     if (t.stage === 'todo' && t.lastOutcome && t.runs.length === 2 && t.lastOutcome.reply !== asked.id) throw new Error(`the second run ended ${t.lastOutcome.outcome}: ${t.lastOutcome.text.slice(0, 300)}`);
     await s.sleep(2000);
   }
   const done = await s.eval(`${task()}`);
   assert(done.stage === 'review' && done.lastOutcome.outcome === 'done', 'the employee resumed, settled, and the task moved to review');
-  assert(existsSync(join(repo, 'colour.txt')) && readFileSync(join(repo, 'colour.txt'), 'utf8').trim() === 'blue', 'colour.txt holds the colour the owner answered');
+  // The task has its own branch, and the work is merged into it, not into the folder the owner has open.
+  const colour = [join(dataDir, 'worktrees', `task-${taskId}`, 'colour.txt'), join(repo, 'colour.txt')].find((f) => existsSync(f));
+  assert(!!colour && readFileSync(colour, 'utf8').trim() === 'blue', 'colour.txt holds the colour the owner answered');
   await s.sleep(1500);
 
   const entries = await s.eval(`[...document.querySelectorAll('[data-testid="activity-entry"]')].map((e) => ({ kind: e.dataset.kind, text: e.innerText.replace(/\\s+/g, ' ') }))`);
@@ -158,7 +161,7 @@ export default async (s) => {
   assert(blockedAt > 0 && answerAt > blockedAt && doneAt > answerAt, `blocked (${blockedAt}), then the owner's answer (${answerAt}), then done with its file (${doneAt})`);
   assert(entries.filter((e) => e.kind === 'stage').length >= 3, 'the stage moves are in the log');
   const stages = (await s.eval(`${task()}.history`)).filter((h) => h.kind === 'stage').map((h) => `${h.by}:${h.to}`);
-  assert(stages.join() === 'owner:doing,mailroom:todo,owner:doing,mailroom:review', `each stage move says who made it (${stages.join(' ')})`);
+  assert(/^owner:doing,mailroom:todo,owner:doing,(mailroom|[0-9a-f-]{36}):review$/.test(stages.join()) && stages.at(-1) !== 'owner:review', `each stage move says who made it, and the last one to review is the office or the employee (${stages.join(' ')})`);
   await s.eval(`(() => { const b = document.querySelector('[data-testid="task-detail"] .tb-dock-body'); b.scrollTop = b.scrollHeight; })()`);
   await s.sleep(400);
   await s.shot('a1-question-after');

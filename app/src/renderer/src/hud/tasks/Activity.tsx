@@ -194,6 +194,12 @@ function Detail({ e }: { e: ActivityEntry }) {
           {e.artifact && e.artifact.length > 0 && <Files files={e.artifact} />}
         </>
       );
+    case 'stage':
+      return e.reason ? (
+        <p className="tb-log-text" data-testid="entry-reason">
+          <Words text={e.reason} limit={200} />
+        </p>
+      ) : null;
     default:
       return null;
   }

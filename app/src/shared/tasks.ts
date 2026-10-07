@@ -39,12 +39,22 @@ export type HoursLog = {
   error?: { message: string; at: number };
 };
 
+// A pull request as the owner sees it on GitHub: a draft until someone marks it ready, then open, then merged or closed.
+export type PrState = 'draft' | 'open' | 'merged' | 'closed';
+export type TaskPr = { number: number; url: string; state: PrState };
+
+// Where a task's work lives in git: its branch, the branch its pull request targets, the pull request once there is one, and
+// `note` for the one thing the owner should know, such as why there is no pull request. A task in a block that is not a git
+// repository has none of this.
+export type TaskGit = { branch: string; base: string; pr?: TaskPr; note?: string };
+
 // Who moved a stage: the owner, the office when a run settled (`mailroom`), a teammate, or Linear or CronoSpark changing the card.
 export type StageBy = ActorId | 'provider';
 
 // What happened to a task that the mailroom's ledger does not say. Append-only: the activity log folds it in with the mail.
 export type TaskEvent =
-  | { kind: 'stage'; at: number; from: TaskStage; to: TaskStage; by: StageBy; cause?: MessageId }
+  // `reason` is what a teammate said when they moved the card themselves.
+  | { kind: 'stage'; at: number; from: TaskStage; to: TaskStage; by: StageBy; cause?: MessageId; reason?: string }
   // An hours entry sent to CronoSpark, or one that failed (`error`).
   | { kind: 'hours'; at: number; employeeId: EmployeeId; date: LocalDate; hours: number; error?: string };
 
@@ -65,14 +75,15 @@ export type Task = {
   lastOutcome?: LastOutcome;
   hours?: HoursLog;
   history?: TaskEvent[];
+  git?: TaskGit;
 };
 
 export const withEvent = (task: Task, event: TaskEvent): Task => ({ ...task, history: [...(task.history ?? []), event] });
 
 // The task in `to`, with the move on its history. Moving a task to where it already is changes nothing.
-export function restage(task: Task, to: TaskStage, by: StageBy, at: number, cause?: MessageId): Task {
+export function restage(task: Task, to: TaskStage, by: StageBy, at: number, cause?: MessageId, reason?: string): Task {
   if (task.stage === to) return task;
-  return withEvent({ ...task, stage: to }, { kind: 'stage', at, from: task.stage, to, by, ...(cause ? { cause } : {}) });
+  return withEvent({ ...task, stage: to }, { kind: 'stage', at, from: task.stage, to, by, ...(cause ? { cause } : {}), ...(reason ? { reason } : {}) });
 }
 
 export type BoardSync =
@@ -106,6 +117,57 @@ export function outcomeFromRuns(task: Task, runState: (run: MessageId) => RunSta
   if (!latest || latest.reply === task.lastOutcome?.reply) return undefined;
   const lastOutcome: LastOutcome = { outcome: latest.outcome, text: latest.text.slice(0, OUTCOME_TEXT_CAP), at: latest.at, reply: latest.reply };
   return task.stage === 'doing' ? { lastOutcome, stage: latest.outcome === 'done' ? 'review' : 'todo' } : { lastOutcome };
+}
+
+// ───────────────────────────── Teammates moving the card ─────────────────────────────
+
+// Where a teammate may take a card, by where it stands now. Back to doing is picking the work up again, review and done are
+// claims about the work, and todo belongs to the owner and the office: a run that stops sends its task there.
+export type AgentStage = Exclude<TaskStage, 'todo'>;
+const AGENT_MOVES: Record<TaskStage, readonly AgentStage[]> = {
+  todo: ['doing'],
+  doing: ['review', 'done'],
+  review: ['doing', 'done'],
+  done: ['doing'],
+};
+
+// What the mail says about the teammate who asks, as far as one card is concerned.
+export type MoveFacts = {
+  // The card is theirs: it was given to them, or a request of it passed through them.
+  onTask: boolean;
+  // They hold an open request of this task right now, so they are working on it.
+  holding: boolean;
+  // The other open requests of the task that are not theirs, one line each.
+  open: readonly string[];
+};
+
+export type MoveRefusalReason = 'no_task' | 'unknown_task' | 'ambiguous' | 'not_on_task' | 'pinned' | 'not_allowed' | 'not_resumed' | 'open_pieces' | 'pr_open';
+export type MoveRefusal = { reason: MoveRefusalReason; detail: string };
+
+const refuse = (reason: MoveRefusalReason, detail: string): MoveRefusal => ({ reason, detail });
+
+const stillOpen = (open: readonly string[]) => `${open.length} request(s) of this task are still open (${open.join('; ')})`;
+
+// Why a task is not ready for the owner to look at: a piece of it is still being worked on.
+const reviewRefusal = (open: readonly string[]): MoveRefusal | undefined => (open.length ? refuse('open_pieces', `Not ready for the owner: ${stillOpen(open)}. Wait for them to settle, or cancel them.`) : undefined);
+
+// Why a task cannot be called done. The one place that decides it.
+export function doneRefusal(task: Task, open: readonly string[]): MoveRefusal | undefined {
+  if (open.length) return refuse('open_pieces', `Not done yet: ${stillOpen(open)}. Wait for them to settle, or cancel them.`);
+  const pr = task.git?.pr;
+  if (pr && prIsOpen(pr)) return refuse('pr_open', `Pull request #${pr.number} of this task is still ${pr.state} on GitHub. The owner merges it, and that moves the task to done. Move the task to review instead, so the owner knows it is ready to merge.`);
+  return undefined;
+}
+
+// What a teammate's move of a card is refused for, or undefined when it may go ahead. The owner's own hand is not asked:
+// a card the owner placed stays where it is until they move it or give the task to someone again.
+export function agentMoveRefusal(task: Task, to: AgentStage, facts: MoveFacts): MoveRefusal | undefined {
+  if (!facts.onTask) return refuse('not_on_task', 'This task is not yours: it was never given to you and none of its requests passed through you.');
+  if (task.stage === to) return undefined;
+  if (task.stagePinned) return refuse('pinned', `The owner put this task in ${task.stage} themselves, so it stays there until they move it or give the task to someone again.`);
+  if (!AGENT_MOVES[task.stage].includes(to)) return refuse('not_allowed', `A task in ${task.stage} does not go to ${to}. From ${task.stage} it can go to ${AGENT_MOVES[task.stage].join(' or ')}.`);
+  if (to === 'doing') return facts.holding ? undefined : refuse('not_resumed', 'Only someone working on one of its requests takes a task back to doing, and you hold none of them now.');
+  return to === 'done' ? doneRefusal(task, facts.open) : reviewRefusal(facts.open);
 }
 
 // ───────────────────────────── Boards ─────────────────────────────
@@ -215,11 +277,56 @@ export function newTask(a: { id: TaskId; boardId: BoardId; title: string; notes?
   return { id: a.id, boardId: a.boardId, title: a.title, ...(a.notes ? { notes: a.notes } : {}), origin: a.origin, stage: a.stage, assignees: [], runs: [], createdAt: a.now, updatedAt: a.now };
 }
 
+// What a person is told at the end of a task's request about its card. A model reads this where it is working far more
+// reliably than in the persona.
+const MOVE_CARD_NOTE = 'Before you settle this, move its card with moveTask and say why in a sentence: to review when the work is ready for the owner, or to done only when nothing is left for them to check.';
+
 // The one request a person is given when a task is assigned to them.
 export function runRequest(task: Task, board: Board): { title: string; text: string } {
   const o = task.origin;
   const source = o.kind === 'manual' ? '' : `\n\nFrom ${o.sourceLabel}: ${o.identifier}${o.url ? ` ${o.url}` : ''}`;
-  return { title: task.title, text: `${task.title}${task.notes ? `\n\n${task.notes}` : ''}${source}\n\nTask board: ${board.name}.` };
+  const where = task.git ? `\n\nThis task has its own git branch, ${task.git.branch}. Whatever you and your team finish is merged into it for you and sent to GitHub as a pull request for the owner to review, so the block's main folder stays as it is.` : '';
+  return { title: task.title, text: `${task.title}${task.notes ? `\n\n${task.notes}` : ''}${source}${where}\n\nTask board: ${board.name}. ${MOVE_CARD_NOTE}` };
+}
+
+// ───────────────────────────── Git ─────────────────────────────
+
+// What a task branch name ends with, and what finds the branch again when the title has changed since.
+export const taskKey = (id: string): string => id.toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 8) || 'task';
+
+export const taskBranchName = (title: string, id: string): string => {
+  const slug = title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+/, '').slice(0, 32).replace(/-+$/, '');
+  return `task/${slug || 'task'}-${taskKey(id)}`;
+};
+
+// What the pull request says: the task's notes, where it came from, and who is on it.
+export function prBody(task: Task, people: readonly string[]): string {
+  const o = task.origin;
+  const rows = [
+    ...(o.kind === 'manual' ? [] : [`**From ${o.sourceLabel}:** ${o.url ? `[${o.identifier}](${o.url})` : o.identifier}`]),
+    ...(people.length ? [`**People:** ${people.join(', ')}`] : []),
+  ];
+  return [task.notes?.trim(), rows.join('\n'), 'Opened by Online Office. The work of each person on this task is merged into this branch as they finish it.'].filter(Boolean).join('\n\n');
+}
+
+export const prIsOpen = (pr: TaskPr | undefined): boolean => pr?.state === 'draft' || pr?.state === 'open';
+
+// The task once its pull request is known. A merged pull request is the owner's word that the work is done, and the move
+// is on the task's history like any other the owner makes.
+export function withPr(task: Task, pr: TaskPr, now: number): Task {
+  if (!task.git) return task;
+  const { note: _, ...git } = task.git;
+  const next = { ...git, pr };
+  const moved = pr.state === 'merged' ? restage(task, 'done', 'owner', now) : task;
+  if (JSON.stringify(next) === JSON.stringify(task.git) && moved === task) return task;
+  return { ...moved, git: next, updatedAt: now };
+}
+
+// The task with a note about its branch, or with the note cleared.
+export function withGitNote(task: Task, note: string | undefined, now: number): Task {
+  if (!task.git || task.git.note === note) return task;
+  const { note: _, ...git } = task.git;
+  return { ...task, git: note ? { ...git, note } : git, updatedAt: now };
 }
 
 const sourceKey = (o: ProviderOrigin) => `${o.kind}:${o.externalId}`;
