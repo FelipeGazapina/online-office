@@ -146,9 +146,7 @@ const properties = (tool: Tool): JsonRecord => asRecord(asRecord(tool.inputSchem
 const keyOf = (props: JsonRecord, names: readonly string[]) => Object.keys(props).find((key) => names.includes(fieldName(key)));
 const TEAM_FIELDS = ['team', 'teamid', 'teamkey', 'teamidentifier'];
 
-// What the issue tool says about itself, read from its input schema: where a filter goes and how a page is asked for.
-// Linear's list_issues offers `assignee`, `cycle`, `state`, `limit` (up to 250) and a cursor; a tool without one of them
-// cannot be asked for it, and the fetch says so instead of returning issues the filter was meant to leave out.
+// How a tool pages, read from its input schema. Linear's list_issues takes a `limit` (up to 250) and a cursor.
 export type LinearPaging = { limitKey?: string; pageMax?: number; cursorKey?: string };
 
 export function linearPaging(tool: Tool): LinearPaging {
@@ -159,8 +157,9 @@ export function linearPaging(tool: Tool): LinearPaging {
   return { ...(limitKey ? { limitKey } : {}), ...(typeof max === 'number' && max > 0 ? { pageMax: max } : {}), ...(cursorKey ? { cursorKey } : {}) };
 }
 
-// The arguments of one list_issues call: the source's team or project, then who and which cycle. `cycle` is what the tool
-// should be told for the current cycle, which the caller looked up (see currentCycle) or leaves as the word itself.
+// The arguments of one list_issues call: the source's team or project, then who and which cycle. `cycle` is what the tool is
+// told for the current cycle: the id cyclesCall found, or the word itself. A filter the tool has no field for fails the
+// sync, because dropping it would show issues the owner filtered out.
 export function linearToolArguments(tool: Tool, source: TaskBoardSource, cycle = 'current'): LinearToolArguments {
   const selector = parseLinearSelector(source.projectId);
   const props = properties(tool);
@@ -549,8 +548,9 @@ export class TaskBoardService {
       // "ready" and drop every task that was not worked on.
       const call = async (name: string, args: JsonRecord) => {
         const result = await client.callTool({ name, arguments: args });
-        if (asRecord(result)?.isError === true) throw new Error(text(asRecord(fromMcpResult(result))?.message) || (typeof fromMcpResult(result) === 'string' ? String(fromMcpResult(result)) : `${name} failed.`));
-        return result;
+        if (asRecord(result)?.isError !== true) return result;
+        const body = fromMcpResult(result);
+        throw new Error(text(asRecord(body)?.message) || (typeof body === 'string' ? body : '') || `${name} failed.`);
       };
       if (source.provider === 'cronospark') {
         const tool = tools.find((candidate) => candidate.name === 'listar_tasks_projeto');

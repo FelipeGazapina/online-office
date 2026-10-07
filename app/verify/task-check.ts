@@ -733,12 +733,15 @@ console.log('\n# a folded column pulls nothing, and a source\'s filters reach th
   const worked = onBoard().find((t) => t.origin.kind === 'linear' && t.origin.externalId === 'i4')!;
   x.tasks.assign(worked.id, ANA);
   x.tasks.updateTask(worked.id, { stage: 'done' });
+  const moved = onBoard().find((t) => t.origin.kind === 'linear' && t.origin.externalId === 'i1')!;
+  x.tasks.updateTask(moved.id, { stage: 'done' });
   const before = x.provider.asked.length;
   x.tasks.updateBoard(made.id, { collapsed: ['done'] });
   await x.tasks.refresh(made.id);
   check(x.provider.asked.length > before && x.provider.asked.at(-1)!.kept === 4, 'folding Done asks the provider again, and it keeps only the four cards of the other columns', String(x.provider.asked.at(-1)!.kept));
-  check(onBoard().every((t) => t.stage !== 'done' || t.runs.length > 0) && onBoard().length === 5, 'the done tasks nobody worked on left the board', stages());
+  check(onBoard().every((t) => t.stage !== 'done' || t.runs.length > 0 || t.id === moved.id) && onBoard().length === 5, 'the done tasks nobody worked on left the board', stages());
   check(onBoard().some((t) => t.id === worked.id && t.stage === 'done'), 'a done task that has runs stays, in its folded column');
+  check(onBoard().some((t) => t.id === moved.id && t.stage === 'done'), 'so does one the owner moved there whose card is still pulled: the fold is about what a card says, not where it sits');
   check(x.tasks.view(x.now()).boards.find((b) => b.id === made.id)!.collapsed?.join() === 'done', 'the snapshot says Done is folded');
 
   const again = x.provider.asked.length;
