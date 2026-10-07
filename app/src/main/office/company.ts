@@ -367,19 +367,21 @@ export class Office {
     this.mail = this.openMail(ledger);
     // The boards are written before company.json drops the old per-block sources they came from.
     this.tasks.recover(this.company.blocks.map((b) => b.id), loaded.legacy);
+    // A read-only look at a copy of someone's office: nothing warms up and no request is delivered, so no agent runs.
+    const frozen = !!process.env.OFFICE_NO_AGENTS;
     for (const e of this.company.employees) {
       if (e.status.kind === 'working' || e.status.kind === 'blocked_on_owner') {
         e.status = { kind: 'idle' };
         e.activity = 'Back from a break (app restarted)';
       }
       this.startSession(e);
-      if (e.role === 'orchestrator') this.sessionOf(e).warm?.();
-      if (e.provider === 'claude-code') this.acker.warm();
+      if (e.role === 'orchestrator' && !frozen) this.sessionOf(e).warm?.();
+      if (e.provider === 'claude-code' && !frozen) this.acker.warm();
     }
     save(dataFile, this.company, this.building);
     this.tasks.refreshWhere((board) => board.sources.length > 0);
     // Sessions exist now, so whatever a crash left half delivered can go out again.
-    this.mail.recoverOnStart();
+    if (!frozen) this.mail.recoverOnStart();
   }
 
   private openMail(ledger: LedgerEntry[]): Mailroom {

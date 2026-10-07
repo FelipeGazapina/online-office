@@ -4,6 +4,9 @@ import { PRIORITIES, STAGES, type Board, type Priority, type Task, type TaskStag
 import { PRIORITY_LABEL, STAGE_LABEL, fmtAgo, fmtClock, fmtHours, originOf, presenceOf, sharesOf, taskMs } from '../../boardView.ts';
 import { send, useStore } from '../../store.ts';
 import { isPo } from '../chat/model.ts';
+import { ActivityLog, Questions } from './Activity.tsx';
+import { namerOf, sayLive } from './activityView.ts';
+import { useActivity, useTaskLive } from './live.ts';
 import { moveTask } from './actions.ts';
 import { Avatar } from './Card.tsx';
 import { Alert, Check, Close, External, OriginTile, PriorityIcon, StageIcon } from './icons.tsx';
@@ -85,6 +88,10 @@ export function Detail({ task, board, blockPeople, people, time, stage, now, onC
   const total = taskMs(time, now);
   const top = shares[0]?.ms || 1;
   const outcome = task.lastOutcome;
+  const log = useActivity(task);
+  const snapshotLive = useTaskLive(task.id);
+  const live = log?.live ?? snapshotLive;
+  const name = namerOf(people);
 
   return (
     <aside className="tb-dock tb-detail" aria-label="Task details" data-testid="task-detail">
@@ -150,6 +157,8 @@ export function Detail({ task, board, blockPeople, people, time, stage, now, onC
           <dd>{board.name}</dd>
         </dl>
 
+        <Questions task={task} questions={live?.questions ?? []} people={people} />
+
         <section className="tb-section">
           <h3>Assign</h3>
           {blockPeople.length === 0 && <p className="tb-hint">Hire someone in this block to hand them work.</p>}
@@ -158,13 +167,19 @@ export function Detail({ task, board, blockPeople, people, time, stage, now, onC
               const on = task.assignees.includes(p.id);
               const running = !!time?.running.some((r) => r.employeeId === p.id);
               const presence = presenceOf(p);
+              const mine = live?.people.find((l) => l.employeeId === p.id);
+              const words = mine && mine.state !== 'idle' ? sayLive(mine, name) : undefined;
               return (
                 <li key={p.id} data-employee={p.id}>
                   <Avatar person={p} size={26} />
                   <span className="tb-person">
                     <b>{p.name}</b>
                     {isPo(p) && <small className="tb-po">PO</small>}
-                    <em className={presence.kind}>{presence.word}</em>
+                    {words ? (
+                      <em className={`live st-${words.state}`} data-testid="person-live" data-state={words.state}>{words.text}</em>
+                    ) : (
+                      <em className={presence.kind}>{presence.word}</em>
+                    )}
                   </span>
                   {running ? (
                     <span className="tb-chip running"><i className="tb-live" />On it</span>
@@ -215,6 +230,8 @@ export function Detail({ task, board, blockPeople, people, time, stage, now, onC
             <p className="tb-quote">{outcome.text.length > 420 ? `${outcome.text.slice(0, 420)}…` : outcome.text}</p>
           </section>
         )}
+
+        <ActivityLog entries={log?.entries} people={people} />
       </div>
       {manual && (
         <footer className="tb-dock-foot">

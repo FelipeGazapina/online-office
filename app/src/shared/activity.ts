@@ -337,7 +337,8 @@ export function liveOf(task: Task, ix: ActivityIndex, inputs: LiveInputs = noInp
       const turn = turnOn(who)!;
       const fallback = requests.find((r) => r.to === who) ?? requests[0];
       const piece = lastDelivered ?? fallback;
-      if (piece) return { employeeId: who, state: 'working', piece: pieceOf(piece), since: turn.start, on };
+      // A long turn that moved on to this piece is working on it from the pickup, not from when the turn began.
+      if (piece) return { employeeId: who, state: 'working', piece: pieceOf(piece), since: Math.max(turn.start, ix.deliveredAt.get(piece.id) ?? 0), on };
     }
     if (lastDelivered || (parked && serving(who))) {
       const piece = lastDelivered ?? requests.find((r) => r.to === who) ?? requests[0];
