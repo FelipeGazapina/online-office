@@ -18,6 +18,7 @@ import { inVoid, lobbyVoid } from '../lobbyVoid.ts';
 import { propOf } from '../props.ts';
 import { box, computerOf, cyl, merge, DEFAULT_TINT, DYNAMIC, modelOf, onTopOf, PROP_DEFS, screensOf } from './models.ts';
 import { shadowMaterial, shadowMesh, shapeOf, throwOf, type Spot } from './shadows.ts';
+import { Dressing, wornOn } from './Dressing.tsx';
 import { trimOf, TRIMMED } from './pod.ts';
 import { crossesView, curbModel, facesCamera, frameModel, glassModel, occludes, octantOf, VARIANTS, wallMatrix, wallModel, wallRecords, ZERO, type Variant, type WallRecord } from './walls.ts';
 
@@ -295,6 +296,7 @@ function Furniture({ geom }: { geom: FloorGeometry }) {
           [desks, hue],
         )}
       />
+      <Dressing geom={geom} material={furnitureMaterial} />
       <ContactShadows geom={geom} />
       <WarmPools geom={geom} />
       <Screens geom={geom} />
@@ -401,6 +403,13 @@ function ContactShadows({ geom }: { geom: FloorGeometry }) {
       const c = chairOf(d);
       if (c) out.push({ x: c.x, y: 0.02, z: c.z, yaw: 0, w: 0.7, d: 0.7 });
     }
+    // What the desks wear throws the same shaped shadows as what the owner puts there.
+    for (const { item, def, pose } of wornOn(geom)) {
+      const shape = shapeOf(item.def, () => ({ geometry: modelOf(item.def), height: def.height }));
+      if (!shape) continue;
+      const to = throwOf(def.height);
+      cast.push({ x: pose.x + to.x, y: pose.y + 0.006, z: pose.z + to.z, yaw: pose.yaw, shape });
+    }
     return { spots: out, shaped: cast };
   }, [geom]);
   const fill = useMemo(
@@ -449,6 +458,10 @@ function WarmPools({ geom }: { geom: FloorGeometry }) {
         const y = data.matrices[i * 5 + 1];
         if (y > 0) out.push({ x: data.matrices[i * 5], y: y + 0.004, z: data.matrices[i * 5 + 2], size: warm[0], power: warm[1] });
       }
+    }
+    for (const { item, pose } of wornOn(geom)) {
+      const warm = WARM[item.def];
+      if (warm) out.push({ x: pose.x, y: pose.y + 0.004, z: pose.z, size: warm[0], power: warm[1] });
     }
     return out;
   }, [geom]);

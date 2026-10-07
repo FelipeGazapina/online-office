@@ -1,5 +1,6 @@
-// The two pictures the panel compares to Sims 4: an item held over a table with its green footprint, and a dressed office.
-// Writes place.png and decorated.png (1440x900) to OFFICE_SHOTS_DIR (default /tmp/office-shots).
+// The pictures the panel compares to Sims 4: an item held over a table with its green footprint (place), a dressed desk pod and table at the
+// closest the overview gets (decorated, in build mode with the Tabletop tab open, and decorated-play, the same without the build tools), and
+// a person's-eye view of a dressed desk (close). Writes them at 1440x900 to OFFICE_SHOTS_DIR (default /tmp/office-shots).
 // Run: pnpm build:verify && OFFICE_SHOTS_DIR=... OFFICE_OUT_DIR=out/verify OFFICE_CDP_PORT=9341 node verify/cdp.mjs verify/shots-tabletop.mjs
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -17,6 +18,7 @@ const store = '__office.store.getState()';
 const file = join(dataDir, 'company.json');
 const PLACE_HOST = process.env.OFFICE_PLACE_HOST ?? 'blk-a:pod_huddle_table:00';
 const PLACE_ITEM = process.env.OFFICE_PLACE_ITEM ?? 'succulent';
+const DECORATED_DIST = Number(process.env.OFFICE_DECORATED_DIST ?? 6.5);
 const disk = () => JSON.parse(readFileSync(file, 'utf8'));
 const ctxOf = (c) => ({
   blocks: new Set(c.blocks.map((b) => b.id)),
@@ -57,7 +59,7 @@ export default async function (s) {
   }
   assert(!!spot, `the table has a free spot for a ${PLACE_ITEM}`);
 
-  // decorated.png: the row and the huddle table as the panel sees the office
+  // decorated-play.png: the pod and the huddle table as the panel sees the office in play, the owner standing in the aisle
   const middle = (h) => {
     const f = footprint(ITEM_DEFS[h.def], h.rot);
     return { x: (h.x + f.w / 2) / 2, z: (h.z + f.d / 2) / 2 };
@@ -66,12 +68,12 @@ export default async function (s) {
   const taken = new Set(await s.eval(`${store}.company.employees.map((e) => e.seat)`));
   const row = middle(desks.find((i) => !taken.has(i.id)) ?? desks[0]);
   const table = middle(host);
-  await s.eval(`__office.teleport(${(row.x + table.x) / 2 - 0.9}, ${(row.z + table.z) / 2 + 1.0}, Math.PI)`);
+  const between = { x: (row.x + table.x) / 2, z: (row.z + table.z) / 2 };
+  await s.eval(`__office.teleport(${between.x - 0.9}, ${between.z + 1.0}, Math.PI)`);
   await s.sleep(1500);
-  const closer = Number(process.env.OFFICE_DECORATED_ZOOM ?? 500);
-  await d.zoom(-closer);
-  await d.shotTo('decorated');
-  await d.zoom(closer);
+  await d.zoomTo(DECORATED_DIST);
+  await d.shotTo('decorated-play');
+  await d.zoomTo(27);
 
   // close.png: a person's-eye view of a dressed desk
   const freeDesk = desks.find((i) => !taken.has(i.id)) ?? desks[0];
@@ -86,12 +88,19 @@ export default async function (s) {
   await s.press('Tab');
   await s.waitFor('window.__officeCamera && Math.abs(window.__officeCamera.blend) < 0.001', 10000);
 
-
-  // place.png: the item in hand over a table, its footprint green on the top, the catalog folded to its bar. The owner stands well away from it.
+  // decorated.png: build mode, the Tabletop tab open under the pod and the table, the way a Sims buy-mode shot has its catalog
   await s.eval(`__office.teleport(${table.x + 5}, ${table.z + 8}, 0)`);
   await s.sleep(500);
   await d.enterBuild();
-  await d.zoom(-1400);
+  await d.zoomTo(DECORATED_DIST);
+  await s.clickOn('[data-tab="tabletop"]');
+  await d.centerOn(between.x, 0.75, between.z);
+  await s.sleep(400);
+  await d.shotTo('decorated');
+
+  // place.png: the item in hand over a table, its footprint green on the top, the catalog folded to its bar. The owner stands well away from it.
+  // The framing is the one of b4c: 8 meters from the point looked at, which was the nearest the overview used to come.
+  await d.zoomTo(8);
   await d.choose(PLACE_ITEM);
   const top = hostToWorld(host, hostDef, spot.u + want.w / 2, spot.v + want.d / 2);
   const px = await d.centerOn(top.x, hostDef.surface.height, top.z);
@@ -103,5 +112,4 @@ export default async function (s) {
   await s.press('Escape');
   await d.park();
   await d.exitBuild();
-
 }
