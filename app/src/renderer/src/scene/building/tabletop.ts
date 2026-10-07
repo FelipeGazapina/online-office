@@ -556,7 +556,7 @@ const speaker = (look: number) => {
 };
 
 
-// ---- the plants and oddities that make one desk someone's: other species than the leafy pot, a toy, a puzzle. Only desks wear them (`dressing.ts`).
+// ---- the plants and oddities that make one desk someone's: other species than the leafy pot, a toy, a puzzle.
 
 const clump = (r: number, x: number, y: number, z: number, color: string) => paint(new IcosahedronGeometry(r, 1).translate(x, y, z), color);
 const clay = (look: number) => {
