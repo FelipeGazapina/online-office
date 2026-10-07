@@ -524,7 +524,7 @@ function Screens({ geom }: { geom: FloorGeometry }) {
       } else if (kind === 'error') {
         color.set('#ff4d4d');
       } else if (kind === 'idle') {
-        color.set('#6a7898').multiplyScalar(0.3);
+        color.set('#6a7898').multiplyScalar(0.45);
       } else {
         // A desk nobody sits at has its screen on standby: lit dimly, so a row of empty desks is not a row of black slabs.
         color.set('#6a7898').multiplyScalar(0.45);
@@ -539,13 +539,23 @@ function Screens({ geom }: { geom: FloorGeometry }) {
   return (
     <>
       {used.map((setup) => {
-        const count = slots.filter((s) => s.setup === setup).length;
+        const mine = slots.filter((s) => s.setup === setup);
+        // For the tests: which desk each screen of this mesh belongs to and the colour it is lit with right now.
+        const probe = {
+          probe: 'screens',
+          setup,
+          desks: mine.map((s) => s.desk.id),
+          get colors() {
+            return Array.from(meshes.current.get(setup)?.instanceColor?.array ?? []);
+          },
+        };
         return (
           <instancedMesh
-            key={`${setup}:${count}`}
+            key={`${setup}:${mine.length}`}
             ref={(m: InstancedMesh | null) => void (m ? meshes.current.set(setup, m) : meshes.current.delete(setup))}
-            args={[screensOf(setup), screenMaterial, count]}
+            args={[screensOf(setup), screenMaterial, mine.length]}
             frustumCulled={false}
+            userData={probe}
           />
         );
       })}
