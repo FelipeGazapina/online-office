@@ -56,7 +56,7 @@ const bakedBox = (prop) => {
 };
 
 const small = Object.values(ITEM_DEFS).filter((d) => placementOf(d) !== 'floor');
-check(small.length >= 35, `${small.length} defs may stand on a surface`);
+check(small.length >= 44, `${small.length} defs may stand on a surface`);
 // A look is a colour or a style, never another size: every look of every def fits the same footprint and stands as tall as the def says.
 for (const def of small) {
   const baked = PROP_DEFS[def.id];
@@ -65,7 +65,9 @@ for (const def of small) {
   for (let look = 0; look < looks; look++) {
     const box = baked ? bakedBox(baked.prop) : new Box3().setFromBufferAttribute(modelOf(def.id, look).getAttribute('position'));
     const at = `${def.id}${baked ? ` (${baked.prop})` : looks > 1 ? ` look ${look}` : ''}`;
-    const fits = box.max.x - box.min.x <= w + 0.01 && box.max.z - box.min.z <= d + 0.01 && Math.abs(box.max.x + box.min.x) <= 0.03 && Math.abs(box.max.z + box.min.z) <= 0.03;
+    // A set is laid out by its members' own units, so it only has to stay inside its footprint; a single model is also centered on it.
+    const inside = box.max.x - box.min.x <= w + (def.group ? 0.04 : 0.01) && box.max.z - box.min.z <= d + (def.group ? 0.04 : 0.01);
+    const fits = def.group ? inside && box.min.x >= -w / 2 - 0.03 && box.max.x <= w / 2 + 0.03 && box.min.z >= -d / 2 - 0.03 && box.max.z <= d / 2 + 0.03 : inside && Math.abs(box.max.x + box.min.x) <= 0.03 && Math.abs(box.max.z + box.min.z) <= 0.03;
     check(fits, `${at}: the model fits its ${def.top.w} by ${def.top.d} units on a top (${(box.max.x - box.min.x).toFixed(2)} by ${(box.max.z - box.min.z).toFixed(2)} m of ${w} by ${d} m)`);
     check(box.min.y >= -0.001 && Math.abs(box.max.y - def.height) <= 0.02, `${at}: it stands on y = 0 and is ${box.max.y.toFixed(2)} m tall, the def says ${def.height} m`);
   }

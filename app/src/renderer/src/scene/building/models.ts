@@ -2,7 +2,7 @@
 // call per story however many of it there are. A model sits on the floor with its origin at the middle of the item's
 // footprint and faces +z at rot 0, the way the space module's seats do.
 import { BufferGeometry, IcosahedronGeometry, PlaneGeometry } from 'three';
-import { ITEM_DEFS, STORY_H } from '../../../../shared/space/index.ts';
+import { composeVignette, ITEM_DEFS, liftOf, lookOf, STORY_H, TOP_UNIT, topRect, YAW, type ItemId } from '../../../../shared/space/index.ts';
 import type { PropName } from '../props.ts';
 import { FURNITURE } from './furniture.ts';
 import { POD_DYNAMIC } from './pod.ts';
@@ -10,7 +10,7 @@ import { TABLETOP_MODELS } from './tabletop.ts';
 import { computerOf, screensOf } from './computer.ts';
 import { at, bbox, blob, box, cyl, merge, paint } from './parts.ts';
 
-export { blob, box, cyl, merge, paint, screensOf };
+export { blob, box, cyl, merge, paint, screensOf, computerOf };
 
 const WOOD = '#efe0c6';
 const DARK = '#3a3f4e';
@@ -70,7 +70,26 @@ function stairs(): BufferGeometry {
   return g;
 }
 
+// A vignette drawn as one model: each member's own model, turned and set where it would stand, so the ghost and the catalog card show the set as it will land.
+function groupModel(id: string, look: number): BufferGeometry {
+  const def = ITEM_DEFS[id];
+  const members = composeVignette(def, 'group' as ItemId, { rot: 0, u: 0, v: 0 }, look, (member, n) => `${member}~${n}` as ItemId);
+  const { w, d } = def.top!;
+  return merge(
+    members.map((m) => {
+      const mdef = ITEM_DEFS[m.def];
+      const r = topRect(m, mdef);
+      const lift = liftOf(m, mdef, members);
+      return modelOf(m.def, lookOf(m, mdef))
+        .clone()
+        .rotateY(YAW[m.rot] + ((m.ang ?? 0) * Math.PI) / 180)
+        .translate(((r.u0 + r.u1) / 2 - w / 2) * TOP_UNIT, lift, ((r.v0 + r.v1) / 2 - d / 2) * TOP_UNIT);
+    }),
+  );
+}
+
 function build(def: string, look: number): BufferGeometry {
+  if (ITEM_DEFS[def]?.group) return groupModel(def, look);
   const small = TABLETOP_MODELS[def];
   if (small) return small(look);
   switch (def) {

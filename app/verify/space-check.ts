@@ -43,6 +43,10 @@ import {
   pointAtHeight,
   restingOn,
   NEIGHBOUR_GAP,
+  VIGNETTES,
+  composeVignette,
+  topSize,
+  topSpot,
   SETUP_COUNT,
   setupsOf,
   stackSpot,
@@ -959,6 +963,48 @@ const flat = (stories = 1, size = 20): Building => {
   const moved = [...kit.setups].filter(([id, s]) => setupsOf(far.stories[0]).get(id as ItemId) !== s);
   check(moved.length === 0, 'a desk far from the rest changes no other desk\'s computer');
   check(!JSON.stringify(encodeBuilding(kitted)).includes('setup'), 'the setups are not written to the building file');
+}
+
+// ---------------------------------------------------------------- vignettes: a set is one catalog entry and lands as ordinary items
+{
+  const table = must(applyOps(flat(1, 30), [put(0, item('long', 'meeting_long', 4, 4))], noCtx));
+  const host = floorItems(table.stories[0]).find((i) => i.id === 'long')!;
+  const ids = (member: string, n: number) => `set~${member}${n}` as ItemId;
+  check(VIGNETTES.length >= 6 && VIGNETTES.every((v) => ITEM_DEFS[v.id]?.group === v.members), `${VIGNETTES.length} vignettes are defs of the catalog`);
+  for (const v of VIGNETTES) {
+    const def = ITEM_DEFS[v.id];
+    check(def.group!.length >= 3 && def.group!.every((m) => ITEM_DEFS[m.def] && ITEM_DEFS[m.def].placement !== 'floor'), `${v.id}: ${def.group!.length} members, each a small thing`);
+    // A set has a base, a middle and a tallest piece: it is not a row of things the same height.
+    const placed = composeVignette(def, 'host' as ItemId, { rot: 0, u: 0, v: 0 }, 0, ids);
+    const tops = new Set(placed.map((m) => Math.round((liftOf(m, ITEM_DEFS[m.def], placed) + ITEM_DEFS[m.def].height) * 100)));
+    check(tops.size >= 3, `${v.id}: ${tops.size} different heights among its members`);
+    let bad = '';
+    for (let rot = 0; rot < 4 && !bad; rot++) {
+      for (let look = 0; look < v.looks && !bad; look++) {
+        const size = topSize(def, rot as 0 | 1 | 2 | 3);
+        const spot = { rot: rot as 0 | 1 | 2 | 3, u: 3 + look, v: 2 };
+        const members = composeVignette(def, host.id, spot, look, ids);
+        const found = checkOps(table, [{ t: 'items', story: 0, put: members, del: [] }], noCtx);
+        const inside = members.every((m) => {
+          const r = topSize(ITEM_DEFS[m.def], m.rot);
+          return m.u >= spot.u && m.v >= spot.v && m.u + r.w <= spot.u + size.w && m.v + r.d <= spot.v + size.d;
+        });
+        if (found.length || !inside || members.length !== def.group!.length) bad = `rot ${rot} look ${look}: ${found.map((f) => f.kind).join()} inside=${inside}`;
+      }
+    }
+    check(!bad, `${v.id}: every turn and look is accepted by the rules and stays in its footprint`, bad);
+  }
+  const lone = applyOps(table, [put(0, { id: 'bare' as ItemId, def: 'vg_stack', on: host.id, u: 3, v: 3, rot: 0 })], noCtx);
+  check(!lone.ok && kinds(lone).includes('unknown_item'), 'a vignette is never an item: only its members are');
+  const set = must(applyOps(table, [{ t: 'items', story: 0, put: composeVignette(ITEM_DEFS.vg_coffee, host.id, { rot: 0, u: 3, v: 3 }, 1, ids), del: [] }], noCtx));
+  check(set.stories[0].items.filter((i) => i.on === host.id).length === ITEM_DEFS.vg_coffee.group!.length, 'a set lands as its members on the host');
+  const base = set.stories[0].items.find((i) => i.def === 'tray')!;
+  const gone = must(applyOps(set, [{ t: 'items', story: 0, put: [], del: [base.id] }], noCtx));
+  check(gone.stories[0].items.filter((i) => i.on === host.id).length === 0, 'taking the tray takes what stands on it');
+  const solo = must(applyOps(set, [{ t: 'items', story: 0, put: [], del: [set.stories[0].items.find((i) => i.def === 'mug')!.id] }], noCtx));
+  check(solo.stories[0].items.filter((i) => i.on === host.id).length === ITEM_DEFS.vg_coffee.group!.length - 1, 'a member comes off alone');
+  const spot = topSpot(host, ITEM_DEFS.meeting_long, ITEM_DEFS.vg_runner, 0, { x: 4, z: 2.75 });
+  check(checkOps(table, [{ t: 'items', story: 0, put: composeVignette(ITEM_DEFS.vg_runner, host.id, spot, 0, ids), del: [] }], noCtx).length === 0, 'a set aimed at a point of the table stands where the ghost shows it');
 }
 
 // ---------------------------------------------------------------- performance

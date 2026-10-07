@@ -51,6 +51,9 @@ export type FloorItem = ItemBase & { x: number; z: number; on?: undefined; u?: u
 export type TopItem = ItemBase & { on: ItemId; u: number; v: number; x?: undefined; z?: undefined; look?: number; ang?: number; lvl?: number };
 export type Item = FloorItem | TopItem;
 
+/** One piece of a vignette: where its footprint starts on the group's top (TOP_UNITs from the group's corner), its own turn, look, a few degrees and how high it is stacked. */
+export type GroupMember = { def: string; u: number; v: number; rot?: Rot; look?: number; ang?: number; lvl?: number };
+
 /** A floor item lies on the ground: people walk over it, objects stand on it, and two floor items never overlap. Everything else is an object. */
 export type ItemLayer = 'floor' | 'object';
 /** A rectangle of a surface in TOP_UNITs, in the host's unturned frame: [u0, u1) by [v0, v1). */
@@ -76,6 +79,8 @@ export type ItemDef = {
   looks?: number;
   /** A desk draws its computer in one of this many setups, which `setupsOf` hands out so that desks next to each other differ. Not stored. */
   setups?: number;
+  /** A vignette: a def that is never an item itself. Putting it down puts its members down, each an ordinary small item, grouped around a focal point. Its `top` and `height` are those of the members together. */
+  group?: readonly GroupMember[];
   /** Other small things may rest on this one, as a notebook or a book carries a mug. */
   stackable?: boolean;
   surface?: Surface;

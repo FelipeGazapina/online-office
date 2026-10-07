@@ -1,92 +1,87 @@
 // A dressed office, as data: what stands where on a team's desks, its huddle table, a meeting table and a shelf. Shared by the shots
 // script and e2e-tabletop so the picture the panel sees is the one the rules accepted. A spot is [def, u, v, { rot, look, ang, lvl }]
 // in 12.5 cm units of the host's own frame (a team desk is 12 by 8, its monitor and keyboard are already on it).
-import { applyOps, blockItems, floorItems, ITEM_DEFS } from '../src/shared/space/index.ts';
+import { applyOps, blockItems, composeVignette, floorItems, ITEM_DEFS } from '../src/shared/space/index.ts';
 
-// Four ways to clutter a team desk. Each keeps to one corner and lets another stay bare, so a row of them is not a row of copies.
+// How a team desk is dressed. A spot is [def, u, v, { rot, look, ang, lvl }]; a def that starts with `vg_` is a set (a vignette), put down the way the
+// build tool puts it down, as its members. Every desk has one thing it is built around, a set or a stack, on one side of the computer, and
+// a few things of its own beside it; the side, the set and the mix change from desk to desk so a row of them reads as a row of different people.
 const DESKS = [
-  // a student's: notebook with a mug on it, headphones, a succulent, a bottle by the mouse hand
+  // coffee tray on the left, a bottle on the right, a plant and a frame at the back
   [
-    ['notebook', 0, 1, { look: 0, ang: -5 }],
-    ['mug', 1, 1, { lvl: 1, look: 1, ang: 24 }],
-    ['headphones', 0, 4, { look: 0, ang: 8 }],
-    ['succulent', 0, 6, { look: 0, ang: 20 }],
+    ['vg_coffee', 0, 1, { look: 0 }],
     ['water_bottle', 10, 0, { look: 0 }],
-    ['sticky_notes', 11, 2, { look: 0, ang: -14 }],
-    ['books_row', 3, 6, { look: 1 }],
-    ['frame_small', 7, 6, { look: 1, ang: -6 }],
-    ['desk_clock', 9, 6, { ang: 4 }],
+    ['succulent', 10, 6, { look: 1, ang: 20 }],
+    ['frame_small', 6, 7, { look: 2, ang: -6 }],
+    ['sticky_notes', 11, 3, { look: 0, ang: 14 }],
   ],
-  // a tidy one: folder under the lamp, tumbler, organizer at the back
+  // a stack of books with a plant on top on the right, headphones and a mug on the left
   [
-    ['folder', 0, 0, { look: 1, ang: 3 }],
-    ['notebook', 0, 2, { look: 2, ang: -3 }],
-    ['coaster', 0, 5, { look: 1 }],
-    ['mug', 0, 5, { lvl: 1, look: 0 }],
-    ['tumbler', 10, 0, { look: 2 }],
-    ['phone_stand', 11, 2, { look: 0, rot: 3, ang: -10 }],
-    ['desk_organizer', 3, 6, { look: 0, ang: 2 }],
-    ['succulent_trio', 6, 6, { look: 0 }],
-    ['lamp_desk', 9, 5, { ang: 10 }],
+    ['vg_stack', 10, 1, { rot: 1, look: 1 }],
+    ['headphones', 0, 4, { look: 0, ang: 8 }],
+    ['mug', 0, 1, { look: 2, ang: 14 }],
+    ['desk_organizer', 5, 6, { look: 0, ang: 2 }],
+    ['candle', 10, 6, { look: 2 }],
   ],
-  // a busy one: magazines, snack bowl, calculator, papers
+  // a runner across the back with its candles, a notebook and a pen cup in front of it
   [
-    ['magazine', 0, 1, { look: 1, ang: -9 }],
-    ['magazine', 0, 1, { lvl: 1, look: 3, ang: 7 }],
-    ['takeaway_cup', 0, 5, { look: 1 }],
-    ['snack_bowl', 1, 6, { look: 0 }],
-    ['calculator', 10, 1, { look: 0, ang: 12 }],
-    ['papers', 3, 6, { look: 1, ang: -4 }],
-    ['stapler', 7, 6, { look: 1, ang: 6 }],
-    ['pen_cup', 10, 3, { look: 2 }],
-    ['candle', 9, 6, { look: 2 }],
+    ['vg_runner', 2, 6, { look: 1 }],
+    ['notebook', 0, 1, { look: 3, ang: -4 }],
+    ['pen_cup', 0, 4, { look: 2 }],
+    ['tumbler', 10, 1, { look: 2 }],
+    ['phone_stand', 11, 4, { look: 0, rot: 3, ang: -10 }],
   ],
-  // the corner one: laptop and a stack of books, a cat
+  // a gadget tray on the left and a reading nook along the back
   [
-    ['laptop', 0, 0, { rot: 2, ang: 6 }],
-    ['books', 0, 3, { look: 2, ang: -7 }],
-    ['books', 0, 3, { lvl: 1, look: 0, ang: 9 }],
-    ['mug', 0, 3, { lvl: 2, look: 3, ang: 30 }],
+    ['vg_gadgets', 0, 1, { look: 1 }],
+    ['vg_reading', 4, 6, { look: 2 }],
+    ['mug', 10, 2, { look: 4, ang: -16 }],
     ['cat_statue', 11, 0, { look: 0, rot: 3 }],
-    ['lunchbox', 3, 6, { look: 2, ang: -3 }],
-    ['sticky_notes', 7, 6, { look: 1, ang: 18 }],
-    ['glasses', 9, 6, { look: 1, ang: -20 }],
-    ['pen_cup', 10, 2, { look: 0 }],
+  ],
+  // a snack break down the left side, a small stack at the right
+  [
+    ['vg_snack', 0, 0, { rot: 1, look: 2 }],
+    ['vg_stack', 10, 4, { rot: 1, look: 2 }],
+    ['succulent_trio', 5, 7, { look: 1 }],
+    ['water_bottle', 10, 0, { look: 3 }],
+  ],
+  // the laptop one: a laptop beside the computer, books in a row, glasses on a folder
+  [
+    ['laptop', 0, 1, { rot: 2, ang: 6 }],
+    ['folder', 0, 4, { look: 1, ang: -3 }],
+    ['glasses', 0, 4, { lvl: 1, look: 1, ang: -20 }],
+    ['books_row', 4, 6, { look: 1 }],
+    ['lunchbox', 8, 6, { look: 2, ang: -3 }],
+    ['pen_cup', 10, 1, { look: 0 }],
+    ['sticky_notes', 11, 4, { look: 1, ang: 18 }],
   ],
 ];
 
-// The PO's desk has its own pad of papers on the left, so the clutter keeps to the right and the back.
+// The PO's desk has its own planner on the left, so the arrangement keeps to the right and the back.
 const PO = [
-  ['succulent', 0, 4, { look: 1, ang: 10 }],
-  ['notebook', 0, 6, { look: 1, ang: 4 }],
-  ['coaster', 10, 0, { look: 2 }],
-  ['tumbler', 10, 0, { lvl: 1, look: 1 }],
-  ['sticky_notes', 11, 2, { look: 2, ang: 16 }],
-  ['frame_small', 10, 4, { look: 3, ang: -5 }],
-  ['books_row', 4, 6, { look: 0 }],
-  ['cat_statue', 8, 6, { look: 1, rot: 3 }],
+  ['vg_runner', 2, 6, { look: 2 }],
+  ['tumbler', 10, 1, { look: 1 }],
+  ['coaster', 10, 3, { look: 1 }],
+  ['mug', 10, 3, { lvl: 1, look: 0 }],
+  ['frame_small', 11, 4, { look: 3, ang: -5 }],
 ];
 
-// A round top: everything stays within three units of its middle.
+// A round top: everything stays within the circle.
 const HUDDLE = [
-  ['succulent', 5, 3, { look: 3, ang: 15 }],
-  ['notebook', 3, 5, { look: 3, ang: 10 }],
-  ['mug', 4, 5, { lvl: 1, look: 2, ang: -30 }],
-  ['snack_bowl', 7, 5, { look: 2 }],
-  ['books', 6, 1, { look: 1, ang: -18 }],
+  ['vg_coffee', 5, 3, { look: 1 }],
+  ['succulent', 3, 6, { look: 3, ang: 15 }],
+  ['snack_bowl', 6, 6, { look: 2 }],
   ['headphones', 3, 2, { look: 1, ang: 40 }],
-  ['tumbler', 8, 3, { look: 0 }],
 ];
 
 const TABLE = [
-  ['vase', 12, 4, { ang: 0 }],
-  ['laptop', 3, 2, { rot: 0, ang: -4 }],
+  ['vg_runner', 8, 5, { look: 3 }],
+  ['vg_study', 1, 1, { look: 1 }],
+  ['vg_snack', 17, 3, { look: 0 }],
   ['laptop', 3, 8, { rot: 2, ang: 5 }],
-  ['folder', 8, 4, { look: 0, ang: -8 }],
-  ['coaster', 15, 3, { look: 0 }],
-  ['water_bottle', 15, 3, { look: 2, lvl: 1 }],
-  ['books_row', 18, 8, { look: 2 }],
-  ['succulent_trio', 12, 8, { look: 1 }],
+  ['laptop', 18, 1, { rot: 0, ang: -4 }],
+  ['water_bottle', 20, 6, { look: 2 }],
+  ['vase', 12, 2, { ang: 0 }],
 ];
 
 const SHELF = [
@@ -105,9 +100,13 @@ export function dressingOps(building, { block = 'blk-a', story = 0, table = 'mee
   const put = [];
   plans.forEach(([host, spots], n) => {
     spots.forEach(([def, u, v, extra = {}], k) => {
-      // The same cluster on another desk takes the next look of each thing, so a row of desks is not a row of copies.
+      // The same cluster on another host takes the next look of each thing, so a row of desks is not a row of copies.
       const looks = ITEM_DEFS[def].looks ?? 1;
       const look = ((extra.look ?? 0) + n) % looks;
+      if (ITEM_DEFS[def].group) {
+        put.push(...composeVignette(ITEM_DEFS[def], host, { rot: extra.rot ?? 0, u, v }, look, (member, i) => `${host}~${def}${k}.${i}:${member}`));
+        return;
+      }
       const ang = (extra.ang ?? 0) + (extra.ang ? (n % 3) * 3 : 0);
       put.push({ id: `${host}~${def}${k}`, def, on: host, u, v, rot: extra.rot ?? 0, ...(look && { look }), ...(ang && { ang }), ...(extra.lvl && { lvl: extra.lvl }) });
     });

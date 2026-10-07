@@ -19,3 +19,5 @@ export { drawKey, levelOf, liftOf, lookOf, MAX_LVL, pointAtHeight, poseIn, relat
 export type { PickRay, TopPose } from './surface.ts';
 export type { BlockPose } from './blocks.ts';
 export { NEIGHBOUR_GAP, SETUP_COUNT, setupsOf } from './setups.ts';
+export { composeVignette } from './compose.ts';
+export { VIGNETTES } from './vignettes.ts';

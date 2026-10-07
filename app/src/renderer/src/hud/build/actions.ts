@@ -162,7 +162,8 @@ export function toolTopItem(tool: Extract<BuildTool, { kind: 'item' }>, host: It
   const item: TopItem = { id: tool.carry ?? newItemId(tool.def), def: tool.def, on: host, rot: spot.rot, u: spot.u, v: spot.v };
   const from = existing ?? (hand.def === tool.def ? hand : null);
   if (from?.look) item.look = from.look;
-  if (from?.ang) item.ang = from.ang;
+  // A set shows its own angles in its model, so the hand's extra turn would make the ghost differ from what lands.
+  if (from?.ang && !ITEM_DEFS[tool.def].group) item.ang = from.ang;
   if (spot.lvl) item.lvl = spot.lvl;
   if (existing?.tint !== undefined) item.tint = existing.tint;
   return item;

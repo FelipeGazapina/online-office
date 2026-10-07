@@ -501,6 +501,26 @@ const speaker = (look: number) => {
   return merge([cyl(0.045, 0.045, 0.1, 0, 0.05, 0, c, 14), cyl(0.0465, 0.0465, 0.07, 0, 0.05, 0, grille, 14), cyl(0.04, 0.04, 0.008, 0, 0.104, 0, '#1c1f27', 14), box(0.012, 0.004, 0.012, -0.012, 0.109, 0, '#f2b84b'), box(0.012, 0.004, 0.012, 0.012, 0.109, 0, '#9fe0a0')]);
 };
 
+// ---- the bases a set is arranged on
+
+const SERVING_TRAYS = [['#8c6a4a', '#d8b47d'], ['#2b2e38', '#5a6070'], ['#f4f0e6', '#c9cdd8']] as const;
+const tray = (look: number) => {
+  const [c, rim] = of(SERVING_TRAYS, look);
+  return merge([rbox(0.5, 0.012, 0.37, 0, 0.006, 0, 0, c), ...[-1, 1].map((s) => box(0.5, 0.026, 0.012, 0, 0.013, s * 0.179, rim)), ...[-1, 1].map((s) => box(0.012, 0.026, 0.37, s * 0.244, 0.013, 0, rim))]);
+};
+
+const RUNNERS = [['#5f9f6c', '#4d8a5d'], ['#c8745a', '#f1ebe0'], ['#3a4f7a', '#e8c88a'], ['#f1ebe0', '#c8a06a']] as const;
+// A cloth runner down the middle of a table: a strip, a border along each long edge and a fringe at both ends.
+const runner = (look: number) => {
+  const [c, edge] = of(RUNNERS, look);
+  return merge([
+    box(0.99, 0.008, 0.24, 0, 0.004, 0, c),
+    ...[-1, 1].map((s) => box(0.99, 0.0095, 0.018, 0, 0.00475, s * 0.111, edge)),
+    ...[-1, 1].flatMap((s) => Array.from({ length: 6 }, (_, n) => box(0.01, 0.006, 0.03, s * 0.5, 0.003, -0.1 + n * 0.04, edge))),
+    ...Array.from({ length: 5 }, (_, n) => box(0.06, 0.0098, 0.05, -0.38 + n * 0.19, 0.0049, 0, edge)),
+  ]);
+};
+
 // A footprint on a top hugs its model, so each model is centered on it, whatever the parts that stick out to one side do.
 const around = (make: (look: number) => BufferGeometry) => (look: number) => {
   const g = make(look);
@@ -545,4 +565,6 @@ export const TABLETOP_MODELS: Readonly<Record<string, (look: number) => BufferGe
   glasses: around(glasses),
   stapler: around(stapler),
   speaker: around(speaker),
+  tray: around(tray),
+  runner: around(runner),
 };

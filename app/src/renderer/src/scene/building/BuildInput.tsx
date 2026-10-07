@@ -4,7 +4,7 @@
 import { useThree } from '@react-three/fiber';
 import { useEffect } from 'react';
 import { Vector3 } from 'three';
-import { blockAt, blockItems, floorItems, blockPose, CELL, checkOps, FLOOR_PAINTS, ITEM_DEFS, liftOf, moveBlockOps, placeBlock, placementOf, pointAtHeight, rectWalls, stackSpot, STORY_H, surfaceAt, surfaceBox, topItemAt, topOfStack, topPose, topSpot, WALL_STYLES, worldRotOf, type Building, type BuildOp, type Item, type ItemId, type PickRay, type TopItem, type TopPose, type Vec2 } from '../../../../shared/space/index.ts';
+import { blockAt, blockItems, composeVignette, floorItems, blockPose, CELL, checkOps, FLOOR_PAINTS, ITEM_DEFS, liftOf, moveBlockOps, placeBlock, placementOf, pointAtHeight, rectWalls, stackSpot, STORY_H, surfaceAt, surfaceBox, topItemAt, topOfStack, topPose, topSpot, WALL_STYLES, worldRotOf, type Building, type BuildOp, type Item, type ItemId, type PickRay, type TopItem, type TopPose, type Vec2 } from '../../../../shared/space/index.ts';
 import {
   floodRoom,
   itemAt,
@@ -23,7 +23,7 @@ import {
   wallsToDelete,
   wallsToPut,
 } from '../../../../shared/space/buildersGesture.ts';
-import { pickUpBlock, rotate, sendOps, setTool, stepBack, toolItem, toolTopItem } from '../../hud/build/actions.ts';
+import { newItemId, pickUpBlock, rotate, sendOps, setTool, stepBack, toolItem, toolTopItem } from '../../hud/build/actions.ts';
 import { buildView, draft, modifiers, rollHand, setGhost, spaceContext, VIOLATION_TEXT, type Ghost } from '../../hud/build/state.ts';
 import { get, set, useStore, type BuildCursor, type BuildState, type BuildTool } from '../../store.ts';
 import { groundPoint, pickRay, tileOf, vertexOf } from './Picking.ts';
@@ -129,7 +129,7 @@ function plan(b: Building, build: BuildState, p: Vec2, ray: PickRay, drag: Drag 
       const small = placementOf(def) !== 'floor';
       // A flat thing under the pointer (a notebook, a folder, a book) carries what is put on it: the item stands on that, one level up. Anything
       // else under the pointer is passed over, and the item stands on the top beneath it, snapped to a unit of it.
-      const hit = small ? topItemAt(story, ray, tool.carry ?? undefined) : null;
+      const hit = small && !def.group ? topItemAt(story, ray, tool.carry ?? undefined) : null;
       const hitHost = hit && floorItems(story).find((h) => h.id === hit.on);
       const hitDef = hit && hitHost ? ITEM_DEFS[hit.def] : undefined;
       const hitPose = hit && hitHost && hitDef ? topPose(hitHost, ITEM_DEFS[hitHost.def], hit, hitDef, liftOf(hit, hitDef, story.items)) : null;
@@ -142,7 +142,9 @@ function plan(b: Building, build: BuildState, p: Vec2, ray: PickRay, drag: Drag 
         const top = toolTopItem(tool, onTop.host.id, onTop.spot, existing);
         const pose = topPose(onTop.host, hostDef, top, def, liftOf(top, def, story.items));
         const surface = surfaceBox(onTop.host, hostDef) ?? undefined;
-        return { ops: [putItemOp(level, top)], ghost: (ok) => ({ kind: 'top', item: top, pose, ok, surface }), readout: null };
+        // A set is put down as its members, one `items` op, so the verdict is that of the whole arrangement; the ghost shows the set as one model.
+        const put = def.group ? composeVignette(def, onTop.host.id, onTop.spot, top.look ?? 0, newItemId) : [top];
+        return { ops: [{ t: 'items', story: level, put, del: [] }], ghost: (ok) => ({ kind: 'top', item: top, pose, ok, surface }), readout: null };
       }
       const at = itemOrigin(tool.def, tool.rot, p);
       const item = toolItem(tool, at, existing);

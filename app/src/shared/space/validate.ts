@@ -182,7 +182,7 @@ export function validate(b: Building, ctx: SpaceContext): readonly Violation[] {
     }
     for (const item of story.items) {
       const def = defOf(item);
-      if (!def) {
+      if (!def || def.group) {
         out.push({ kind: 'unknown_item', story: s, ids: [item.id] });
         continue;
       }
@@ -284,7 +284,7 @@ export function fastViolations(b: Building, ops: readonly BuildOp[]): Violation[
     for (const [id, item] of m) {
       if (!item) continue;
       const def = ITEM_DEFS[item.def];
-      if (!def) {
+      if (!def || def.group) {
         out.push({ kind: 'unknown_item', story: s, ids: [id] });
         continue;
       }
