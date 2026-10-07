@@ -6,8 +6,8 @@
 // Run from app/: node verify/tabletop-check.mjs   Exits 1 on any failed check. (An .mjs for the same reason as pod-check.mjs.)
 import { readFileSync } from 'node:fs';
 import { Box3, Vector3 } from 'three';
-import { CELL, ITEM_DEFS, TOP_UNIT, placementOf } from '../src/shared/space/index.ts';
-import { PROP_DEFS, modelOf } from '../src/renderer/src/scene/building/models.ts';
+import { CELL, ITEM_DEFS, SETUP_COUNT, TOP_UNIT, placementOf } from '../src/shared/space/index.ts';
+import { PROP_DEFS, computerOf, modelOf } from '../src/renderer/src/scene/building/models.ts';
 import { check, finish } from './check.ts';
 
 const SLACK = 0.02;
@@ -55,8 +55,31 @@ const bakedBox = (prop) => {
   return new Box3(new Vector3(...min), new Vector3(...max));
 };
 
+// A desk's computer stays within what the desk declares `blocked`: what stands lower than a screen's clearance, on the top, lies inside those rects (give or
+// take two centimeters), so a thing the owner puts beside it never stands inside a keyboard or a screen's foot. What is higher than that floats over the top.
+for (const id of ['bench_desk', 'po_desk']) {
+  const def = ITEM_DEFS[id];
+  const { rect, blocked, height } = def.surface;
+  const box = (r) => ({ x0: r.u0 * TOP_UNIT - (def.w * CELL) / 2 - 0.02, x1: r.u1 * TOP_UNIT - (def.w * CELL) / 2 + 0.02, z0: r.v0 * TOP_UNIT - (def.d * CELL) / 2 - 0.02, z1: r.v1 * TOP_UNIT - (def.d * CELL) / 2 + 0.02 });
+  const on = box(rect);
+  const allowed = blocked.map(box);
+  check(def.setups === SETUP_COUNT, `${id}: ${SETUP_COUNT} setups`);
+  for (let setup = 0; setup < SETUP_COUNT; setup++) {
+    const pos = computerOf(id === 'po_desk', setup).getAttribute('position');
+    const stray = [];
+    for (let i = 0; i < pos.count; i++) {
+      const [x, y, z] = [pos.getX(i), pos.getY(i), pos.getZ(i)];
+      // Higher than a screen's clearance floats over the top; a cable lies flat under half a centimeter; the back edge of the desk is where a clamp holds an arm.
+      if (y > height + 0.075 || y < height + 0.0055 || z >= 0.465 || x < on.x0 || x > on.x1 || z < on.z0 || z > on.z1) continue;
+      if (!allowed.some((r) => x >= r.x0 && x <= r.x1 && z >= r.z0 && z <= r.z1)) stray.push(`(${x.toFixed(2)}, ${y.toFixed(2)}, ${z.toFixed(2)})`);
+    }
+    const tall = new Box3().setFromBufferAttribute(pos).max.y;
+    check(stray.length === 0 && tall <= height + 0.48, `${id} setup ${setup}: what stands low on the top is inside the declared rects, and its highest point is ${tall.toFixed(2)} m`, stray.slice(0, 4).join(' '));
+  }
+}
+
 const small = Object.values(ITEM_DEFS).filter((d) => placementOf(d) !== 'floor');
-check(small.length >= 35, `${small.length} defs may stand on a surface`);
+check(small.length >= 44, `${small.length} defs may stand on a surface`);
 // A look is a colour or a style, never another size: every look of every def fits the same footprint and stands as tall as the def says.
 for (const def of small) {
   const baked = PROP_DEFS[def.id];
@@ -65,7 +88,9 @@ for (const def of small) {
   for (let look = 0; look < looks; look++) {
     const box = baked ? bakedBox(baked.prop) : new Box3().setFromBufferAttribute(modelOf(def.id, look).getAttribute('position'));
     const at = `${def.id}${baked ? ` (${baked.prop})` : looks > 1 ? ` look ${look}` : ''}`;
-    const fits = box.max.x - box.min.x <= w + 0.01 && box.max.z - box.min.z <= d + 0.01 && Math.abs(box.max.x + box.min.x) <= 0.03 && Math.abs(box.max.z + box.min.z) <= 0.03;
+    // A set is laid out by its members' own units, so it only has to stay inside its footprint; a single model is also centered on it.
+    const inside = box.max.x - box.min.x <= w + (def.group ? 0.04 : 0.01) && box.max.z - box.min.z <= d + (def.group ? 0.04 : 0.01);
+    const fits = def.group ? inside && box.min.x >= -w / 2 - 0.03 && box.max.x <= w / 2 + 0.03 && box.min.z >= -d / 2 - 0.03 && box.max.z <= d / 2 + 0.03 : inside && Math.abs(box.max.x + box.min.x) <= 0.03 && Math.abs(box.max.z + box.min.z) <= 0.03;
     check(fits, `${at}: the model fits its ${def.top.w} by ${def.top.d} units on a top (${(box.max.x - box.min.x).toFixed(2)} by ${(box.max.z - box.min.z).toFixed(2)} m of ${w} by ${d} m)`);
     check(box.min.y >= -0.001 && Math.abs(box.max.y - def.height) <= 0.02, `${at}: it stands on y = 0 and is ${box.max.y.toFixed(2)} m tall, the def says ${def.height} m`);
   }

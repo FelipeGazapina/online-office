@@ -1,6 +1,6 @@
 // The build catalog as data: which tab holds which entry, and what picking an entry does. Furniture entries come from
 // the space module's ITEM_DEFS, so a new def with a name here shows up in the catalog and nowhere else needs to change.
-import { FLOOR_PAINTS, ITEM_DEFS, WALL_STYLES, placementOf } from '../../../../shared/space/index.ts';
+import { FLOOR_PAINTS, ITEM_DEFS, VIGNETTES, WALL_STYLES, placementOf } from '../../../../shared/space/index.ts';
 import type { BuildTool } from '../../store.ts';
 
 export type TabId = 'desks' | 'seating' | 'tables' | 'decor' | 'plants' | 'storage' | 'tabletop' | 'stairs' | 'walls' | 'floors' | 'openings';
@@ -113,6 +113,7 @@ const furniture: readonly [string, string, TabId, boolean][] = [
   ['frame_small', 'Small frame', 'tabletop', false],
   ['succulent', 'Succulent', 'tabletop', false],
   ['succulent_trio', 'Succulent trio', 'tabletop', false],
+  ['potted_plant', 'Potted plant', 'tabletop', false],
   ['cable_tray', 'Cable tray', 'tabletop', false],
   ['snack_bowl', 'Snack bowl', 'tabletop', false],
   ['calculator', 'Calculator', 'tabletop', false],
@@ -124,6 +125,8 @@ const furniture: readonly [string, string, TabId, boolean][] = [
   ['glasses', 'Glasses', 'tabletop', false],
   ['stapler', 'Stapler', 'tabletop', false],
   ['speaker', 'Speaker', 'tabletop', false],
+  ['tray', 'Tray', 'tabletop', false],
+  ['runner', 'Table runner', 'tabletop', false],
   ['stairs', 'Stairs', 'stairs', false],
 ];
 
@@ -135,6 +138,8 @@ const ALSO_ON_TOPS: readonly string[] = furniture.map(([def]) => def).filter((de
 const tool = (id: string, name: string, tab: TabId, t: BuildTool, icon: 'wall' | 'room' | 'door' | 'window' | 'arch'): Entry => ({ id, name, tab, kind: 'tool', tool: t, icon });
 
 export const ENTRIES: readonly Entry[] = [
+  // The sets come first in the Tabletop tab: one card, several things, put down together.
+  ...VIGNETTES.map((v): Entry => ({ id: v.id, name: v.name, tab: 'tabletop', kind: 'item', def: v.id, teamed: false })),
   ...ALSO_ON_TOPS.map((def): Entry => ({ id: `${TOP_PREFIX}${def}`, name: furniture.find(([d]) => d === def)![1], tab: 'tabletop', kind: 'item', def, teamed: false })),
   ...furniture.map(([def, name, tab, teamed]): Entry => ({ id: def, name, tab, kind: 'item', def, teamed })),
   tool('wall', 'Wall', 'walls', { kind: 'wall' }, 'wall'),
@@ -154,6 +159,7 @@ function label(name: string): string {
 /** Footprint of a furniture entry in meters, for the card caption. */
 export function footprintText(def: string): string {
   const d = ITEM_DEFS[def];
+  if (d.group) return `${d.group.length} pieces`;
   // What only stands on a surface is measured on it, in centimeters: a mug is 13 by 13.
   if (d.top && placementOf(d) === 'surface') return `${Math.round(d.top.w * 12.5)} × ${Math.round(d.top.d * 12.5)} cm`;
   const fmt = (n: number) => String(n / 2);

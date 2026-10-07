@@ -1,4 +1,8 @@
 import type { ItemDef, ItemLayer, Placement, Rot, Surface } from './types.ts';
+import { groupDef, VIGNETTES } from './vignettes.ts';
+
+// How many computers a desk can wear (`setups.ts`). Kept here so the catalog does not import the module that imports it.
+const SETUP_COUNT = 8;
 
 export const FLOOR_PAINTS: readonly { name: string; color: string }[] = [
   { name: 'none', color: '#000000' },
@@ -40,6 +44,7 @@ const desk = (id: string, kind: 'bench_desk' | 'po_desk' | 'owner_desk'): ItemDe
   d: 2,
   height: 0.75,
   walkable: false,
+  setups: kind === 'owner_desk' ? undefined : SETUP_COUNT,
   seat: { chair: { x: 1.5, z: -0.8 }, exit: { x: 1.5, z: -3 }, yaw: 0 },
 });
 
@@ -143,6 +148,7 @@ const tabletop: ItemDef[] = [
   small('frame_small', 1, 1, 0.14, { looks: 4 }),
   small('succulent', 2, 2, 0.16, { looks: 4 }),
   small('succulent_trio', 3, 1, 0.11, { looks: 2 }),
+  small('potted_plant', 2, 2, 0.34, { looks: 4 }),
   small('cable_tray', 3, 1, 0.07, { looks: 2 }),
   small('snack_bowl', 2, 2, 0.09, { looks: 3 }),
   small('calculator', 1, 2, 0.025, { looks: 2 }),
@@ -154,7 +160,12 @@ const tabletop: ItemDef[] = [
   small('glasses', 2, 1, 0.02, { looks: 3 }),
   small('stapler', 2, 1, 0.05, { looks: 3 }),
   small('speaker', 1, 1, 0.12, { looks: 3 }),
+  small('tray', 4, 3, 0.03, { looks: 3, ...flat }),
+  small('runner', 8, 2, 0.012, { looks: 4, ...flat }),
 ];
+
+// Set pieces: a vignette is one def to the catalog and a handful of the small things above once it is down.
+const vignettes: ItemDef[] = VIGNETTES.map((v) => groupDef(v, (id) => tabletop.find((d) => d.id === id)!));
 
 // What a project block brings besides its desks, board, terminal and sign. The kit places these around the block's middle
 // (kit.ts shellItems); each is an ordinary item, so the owner can pick, move and delete it alone. The floor ones lie under
@@ -211,7 +222,7 @@ const ALSO_ON_TOP: Readonly<Record<string, { placement: Placement; top: { w: num
 
 const withTops = (d: ItemDef): ItemDef => ({ ...d, ...(SURFACES[d.id] && { surface: SURFACES[d.id] }), ...ALSO_ON_TOP[d.id] });
 
-export const ITEM_DEFS: Readonly<Record<string, ItemDef>> = Object.freeze(Object.fromEntries([...defs, ...more, ...tabletop, ...pod].map((d) => [d.id, withTops(d)])));
+export const ITEM_DEFS: Readonly<Record<string, ItemDef>> = Object.freeze(Object.fromEntries([...defs, ...more, ...tabletop, ...vignettes, ...pod].map((d) => [d.id, withTops(d)])));
 
 export const layerOf = (def: ItemDef): ItemLayer => def.layer ?? 'object';
 export const placementOf = (def: ItemDef): Placement => def.placement ?? 'floor';

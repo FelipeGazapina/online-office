@@ -1,7 +1,7 @@
 // The models of the small things that stand on desks, tables and shelves. Each sits on y = 0, the surface it stands on, with
 // its origin at the middle of its footprint (`ItemDef.top`, in 12.5 cm units) and faces +z at rot 0 like every other model:
 // a laptop's keys are toward +z, its screen toward -z. They are a few boxes and cylinders each, so one def stays one draw call.
-import { BoxGeometry, TorusGeometry, Vector3, type BufferGeometry } from 'three';
+import { BoxGeometry, Quaternion, TorusGeometry, Vector3, type BufferGeometry } from 'three';
 import { blob, box, cyl, lathe, lean, merge, paint, rbox } from './parts.ts';
 
 // Every model takes the look it is drawn in: the same footprint and height, another colour or style. `of` wraps round a palette.
@@ -367,6 +367,45 @@ const succulent = (look: number) => {
   ]);
 };
 
+const PLANTERS = [['#f1ebe0', '#d6cfbf'], ['#c8745a', '#9a553f'], ['#7c9c92', '#5f7f75'], ['#3a3f4e', '#2b2e38']] as const;
+// A potted plant that stands taller than anything else on a desk: stems fanned out of a pot, each ending in a leaf blade, the blades in layers.
+const pottedPlant = (look: number) => {
+  const [pot, rim] = of(PLANTERS, look);
+  // Per leaf: the angle round the pot, how far the stem leans from upright, its length and the green it wears.
+  const leaves: [number, number, number][] = [
+    [0.0, 0.08, 0.17],
+    [0.8, 0.28, 0.15],
+    [1.6, 0.26, 0.18],
+    [2.4, 0.32, 0.14],
+    [3.2, 0.27, 0.17],
+    [4.0, 0.3, 0.15],
+    [4.8, 0.25, 0.18],
+    [5.6, 0.33, 0.13],
+    [0.4, 0.5, 0.09],
+    [2.0, 0.52, 0.09],
+    [3.6, 0.5, 0.09],
+    [5.2, 0.52, 0.09],
+  ];
+  const up = new Vector3(0, 1, 0);
+  const along = (g: BufferGeometry, dir: Vector3) => g.applyQuaternion(new Quaternion().setFromUnitVectors(up, dir));
+  return merge([
+    cyl(0.075, 0.055, 0.1, 0, 0.05, 0, pot, 14),
+    cyl(0.08, 0.08, 0.014, 0, 0.1, 0, rim, 14),
+    cyl(0.066, 0.066, 0.004, 0, 0.104, 0, '#4a3a2b', 14),
+    ...leaves.flatMap(([a, tilt, len], n) => {
+      const stem = new Vector3(Math.sin(tilt) * Math.cos(a), Math.cos(tilt), Math.sin(tilt) * Math.sin(a));
+      const tip = stem.clone().multiplyScalar(len).add(new Vector3(0, 0.1, 0));
+      // The blade carries on a little further out than the stem, the way a leaf droops away from it.
+      const blade = new Vector3(Math.sin(tilt + 0.4) * Math.cos(a), Math.cos(tilt + 0.4), Math.sin(tilt + 0.4) * Math.sin(a));
+      const mid = tip.clone().addScaledVector(blade, 0.034);
+      return [
+        along(cyl(0.0035, 0.0035, len, 0, 0, 0, '#4d8a5d', 5), stem).translate(tip.x / 2, 0.05 + tip.y / 2, tip.z / 2),
+        along(paint(new BoxGeometry(0.046, 0.075, 0.004), of(LEAF, n + look)), blade).translate(mid.x, mid.y, mid.z),
+      ];
+    }),
+  ]);
+};
+
 const succulentTrio = (look: number) =>
   merge([
     box(0.34, 0.012, 0.1, 0, 0.006, 0, look % 2 ? '#2b2e38' : '#d8b47d'),
@@ -501,6 +540,26 @@ const speaker = (look: number) => {
   return merge([cyl(0.045, 0.045, 0.1, 0, 0.05, 0, c, 14), cyl(0.0465, 0.0465, 0.07, 0, 0.05, 0, grille, 14), cyl(0.04, 0.04, 0.008, 0, 0.104, 0, '#1c1f27', 14), box(0.012, 0.004, 0.012, -0.012, 0.109, 0, '#f2b84b'), box(0.012, 0.004, 0.012, 0.012, 0.109, 0, '#9fe0a0')]);
 };
 
+// ---- the bases a set is arranged on
+
+const SERVING_TRAYS = [['#8c6a4a', '#d8b47d'], ['#2b2e38', '#5a6070'], ['#f4f0e6', '#c9cdd8']] as const;
+const tray = (look: number) => {
+  const [c, rim] = of(SERVING_TRAYS, look);
+  return merge([rbox(0.5, 0.012, 0.37, 0, 0.006, 0, 0, c), ...[-1, 1].map((s) => box(0.5, 0.026, 0.012, 0, 0.013, s * 0.179, rim)), ...[-1, 1].map((s) => box(0.012, 0.026, 0.37, s * 0.244, 0.013, 0, rim))]);
+};
+
+const RUNNERS = [['#5f9f6c', '#4d8a5d'], ['#c8745a', '#f1ebe0'], ['#3a4f7a', '#e8c88a'], ['#f1ebe0', '#c8a06a']] as const;
+// A cloth runner down the middle of a table: a strip, a border along each long edge and a fringe at both ends.
+const runner = (look: number) => {
+  const [c, edge] = of(RUNNERS, look);
+  return merge([
+    box(0.99, 0.008, 0.24, 0, 0.004, 0, c),
+    ...[-1, 1].map((s) => box(0.99, 0.0095, 0.018, 0, 0.00475, s * 0.111, edge)),
+    ...[-1, 1].flatMap((s) => Array.from({ length: 6 }, (_, n) => box(0.01, 0.006, 0.03, s * 0.5, 0.003, -0.1 + n * 0.04, edge))),
+    ...Array.from({ length: 5 }, (_, n) => box(0.06, 0.0098, 0.05, -0.38 + n * 0.19, 0.0049, 0, edge)),
+  ]);
+};
+
 // A footprint on a top hugs its model, so each model is centered on it, whatever the parts that stick out to one side do.
 const around = (make: (look: number) => BufferGeometry) => (look: number) => {
   const g = make(look);
@@ -534,6 +593,7 @@ export const TABLETOP_MODELS: Readonly<Record<string, (look: number) => BufferGe
   frame_small: around(frameSmall),
   succulent: around(succulent),
   succulent_trio: around(succulentTrio),
+  potted_plant: around(pottedPlant),
   cable_tray: around(cableTray),
   snack_bowl: around(snackBowl),
   calculator: around(calculator),
@@ -545,4 +605,6 @@ export const TABLETOP_MODELS: Readonly<Record<string, (look: number) => BufferGe
   glasses: around(glasses),
   stapler: around(stapler),
   speaker: around(speaker),
+  tray: around(tray),
+  runner: around(runner),
 };
