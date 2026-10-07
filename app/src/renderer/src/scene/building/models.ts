@@ -6,6 +6,7 @@ import { ITEM_DEFS, STORY_H } from '../../../../shared/space/index.ts';
 import type { PropName } from '../props.ts';
 import { FURNITURE } from './furniture.ts';
 import { POD_DYNAMIC } from './pod.ts';
+import { TABLETOP_MODELS } from './tabletop.ts';
 import { at, bbox, blob, box, cyl, merge, paint } from './parts.ts';
 
 export { blob, box, cyl, merge, paint };
@@ -86,7 +87,9 @@ function stairs(): BufferGeometry {
   return g;
 }
 
-function build(def: string): BufferGeometry {
+function build(def: string, look: number): BufferGeometry {
+  const small = TABLETOP_MODELS[def];
+  if (small) return small(look);
   switch (def) {
     case 'bench_desk':
       return desk(false);
@@ -160,9 +163,11 @@ export const onTopOf = (def: string): BufferGeometry | undefined => {
 };
 
 const cache = new Map<string, BufferGeometry>();
-export function modelOf(def: string): BufferGeometry {
-  let g = cache.get(def);
-  if (!g) cache.set(def, (g = build(def)));
+/** The model of a def in one of its looks (a colour or a style: same footprint and height). Look 0 is the def's first. */
+export function modelOf(def: string, look = 0): BufferGeometry {
+  const key = look ? `${def}#${look}` : def;
+  let g = cache.get(key);
+  if (!g) cache.set(key, (g = build(def, look)));
   return g;
 }
 

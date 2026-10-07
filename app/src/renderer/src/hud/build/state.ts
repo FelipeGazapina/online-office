@@ -10,7 +10,7 @@ export type Ghost =
   | { kind: 'walls'; walls: readonly WallSeg[]; ok: boolean; color?: string }
   | { kind: 'vertex'; at: Vec2 }
   | { kind: 'item'; item: FloorItem; ok: boolean }
-  | { kind: 'top'; item: TopItem; pose: TopPose; ok: boolean; outline?: boolean; surface?: { x0: number; z0: number; x1: number; z1: number; y: number } }
+  | { kind: 'top'; item: TopItem; pose: TopPose; ok: boolean; outline?: boolean; surface?: { x0: number; z0: number; x1: number; z1: number; y: number; round?: true } }
   | { kind: 'outline'; item: FloorItem }
   | { kind: 'block'; items: readonly FloorItem[]; ok: boolean }
   | { kind: 'blockSelect'; items: readonly FloorItem[] };

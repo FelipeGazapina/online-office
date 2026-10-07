@@ -76,7 +76,9 @@ const itemBase = {
   tint: z.number().int().min(0).max(0xffffff).optional(),
 };
 const unit = z.number().int().min(-1024).max(1024);
-const item: z.ZodType<Item> = z.union([z.object({ ...itemBase, x: tile, z: tile }), z.object({ ...itemBase, on: itemIdSchema, u: unit, v: unit })]);
+// A small thing on a surface also says how it looks, how many degrees it stands off square, and how many things it is stacked above the top.
+const onTop = { look: z.number().int().min(0).max(63).optional(), ang: z.number().int().min(-180).max(180).optional(), lvl: z.number().int().min(0).max(3).optional() };
+const item: z.ZodType<Item> = z.union([z.object({ ...itemBase, x: tile, z: tile }), z.object({ ...itemBase, on: itemIdSchema, u: unit, v: unit, ...onTop })]);
 const lot = z.object({ x0: tile, z0: tile, w: z.number().int().min(1).max(64), h: z.number().int().min(1).max(64) });
 const MANY = 4096;
 const buildOp: z.ZodType<BuildOp> = z.discriminatedUnion('t', [

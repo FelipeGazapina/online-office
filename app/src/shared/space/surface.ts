@@ -159,12 +159,12 @@ export function topViolation(item: TopItem, def: ItemDef, host: Item | undefined
 }
 
 /** The usable part of a host's top in the world, in meters, and how high it is. */
-export function surfaceBox(host: FloorItem, def: ItemDef): { x0: number; z0: number; x1: number; z1: number; y: number } | null {
+export function surfaceBox(host: FloorItem, def: ItemDef): { x0: number; z0: number; x1: number; z1: number; y: number; round?: true } | null {
   const s = def.surface;
   if (!s) return null;
   const a = hostToWorld(host, def, s.rect.u0, s.rect.v0);
   const b = hostToWorld(host, def, s.rect.u1, s.rect.v1);
-  return { x0: Math.min(a.x, b.x), z0: Math.min(a.z, b.z), x1: Math.max(a.x, b.x), z1: Math.max(a.z, b.z), y: s.height };
+  return { x0: Math.min(a.x, b.x), z0: Math.min(a.z, b.z), x1: Math.max(a.x, b.x), z1: Math.max(a.z, b.z), y: s.height, ...(s.round && { round: true as const }) };
 }
 
 /** A turn in the world as the turn relative to a host. */

@@ -2,13 +2,15 @@
 // they stay there when the furniture moves, turns, goes to another floor with its block, is deleted (and undone) or the app
 // restarts. Real mouse and key events through the DevTools protocol; the checks read the building main holds and the
 // instances the scene draws.
-// Set OFFICE_SHOTS_DIR to also write place.png, decorated.png and close.png (1440x900) there.
+// Small things come in looks, sit a few degrees off square, stack on flat ones, and the catalog folds out of the way while one is in hand.
+// Set OFFICE_SHOTS_DIR to also write close.png (1440x900) there; place.png and decorated.png come from shots-tabletop.mjs.
 // Run: pnpm build:verify && OFFICE_OUT_DIR=out/verify OFFICE_CDP_PORT=9341 node verify/cdp.mjs verify/e2e-tabletop.mjs
-import { copyFileSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { applyOps, blockItems, cellBounds, checkOps, floorItems, footprint, hostToWorld, ITEM_DEFS, moveBlockOps, parseBuilding, seatPose, topPose, validate } from '../src/shared/space/index.ts';
+import { applyOps, blockItems, cellBounds, checkOps, floorItems, footprint, hostToWorld, ITEM_DEFS, liftOf, moveBlockOps, parseBuilding, seatPose, surfaceBox, topPose, validate, YAW } from '../src/shared/space/index.ts';
 import { itemOrigin } from '../src/shared/space/buildersGesture.ts';
 import { assert, scratch } from './lib.mjs';
+import { drive } from './tabletop-drive.mjs';
 
 const { dataDir, repo } = scratch();
 const SHOTS = process.env.OFFICE_SHOTS_DIR;
@@ -31,11 +33,12 @@ const allItems = (b) => b.stories.flatMap((s) => s.items);
 const tops = (b) => allItems(b).filter((i) => i.on !== undefined);
 const onHost = (b, id) => tops(b).filter((i) => i.on === id);
 const hostIn = (b, id, story = 0) => floorItems(b.stories[story]).find((i) => i.id === id);
-const spot = (i) => JSON.stringify({ id: i.id, def: i.def, on: i.on, u: i.u, v: i.v, rot: i.rot });
+const spot = (i) => JSON.stringify({ id: i.id, def: i.def, on: i.on, u: i.u, v: i.v, rot: i.rot, look: i.look ?? 0, ang: i.ang ?? 0, lvl: i.lvl ?? 0 });
 const poseOf = (b, it, story = 0) => {
   const host = hostIn(b, it.on, story);
-  return topPose(host, ITEM_DEFS[host.def], it, ITEM_DEFS[it.def]);
+  return topPose(host, ITEM_DEFS[host.def], it, ITEM_DEFS[it.def], liftOf(it, ITEM_DEFS[it.def], b.stories[story].items));
 };
+const degrees = (rad) => ((((rad * 180) / Math.PI + 180) % 360) + 360) % 360 - 180;
 const ctxOf = (c) => ({
   blocks: new Set(c.blocks.map((b) => b.id)),
   employees: new Map(c.employees.map((e) => [e.id, { blockId: e.blockId, orchestrator: e.role === 'orchestrator' }])),
@@ -45,6 +48,7 @@ const ctxOf = (c) => ({
 export async function diagnose(s) {
   console.log('tops at failure:', JSON.stringify(await s.eval(`${store}.building.stories.flatMap((st) => st.items.filter((i) => i.on !== undefined))`)));
   console.log('tool:', JSON.stringify(await s.eval(`${store}.build?.tool`)), JSON.stringify(await s.eval(`${store}.buildCursor`)));
+  console.log('models drawn:', JSON.stringify((await s.eval(`__office.probe('model')`)).filter((m) => ['mug', 'notebook'].includes(m.def))));
   await s.shot('tabletop-failure');
 }
 
@@ -55,100 +59,20 @@ export default async function (s, { launch }) {
   if (SHOTS) await s.eval(`document.documentElement.classList.remove('test-run'); document.querySelector('.test-banner')?.remove();`);
   await s.sleep(800);
 
-  const at = (x, y, z) => s.eval(`__office.project(${x}, ${y}, ${z})`);
-  const hold = (code, key) => s.key('keyDown', code, key);
-  const release = (code, key) => s.key('keyUp', code, key);
-  const building = () => s.eval(`${store}.building`);
-  const tool = () => s.eval(`${store}.build?.tool ?? null`);
-  const level = () => s.eval(`${store}.build?.level ?? 0`);
-  const verdict = () => s.eval(`${store}.buildCursor.verdict`);
-  const waitBuilding = (expr, label, ms = 6000) => s.waitFor(`(() => { const b = ${store}.building; return ${expr}; })()`, ms).catch(() => {
-    throw new Error(label);
-  });
-  const park = () => s.mouse('mouseMoved', 720, 20);
-  const still = async () => {
-    let last = null;
-    for (let i = 0; i < 40; i++) {
-      const c = await s.eval('({ x: __officeCamera.x, z: __officeCamera.z, y: __officeCamera.y })');
-      if (last && Math.hypot(c.x - last.x, c.z - last.z, c.y - last.y) < 0.004) return;
-      last = c;
-      await s.sleep(200);
-    }
-  };
-  const bring = async (x, y, z) => {
-    for (let i = 0; i < 80; i++) {
-      const p = await at(x, y, z);
-      const key = p.x > 1000 ? ['KeyD', 'd'] : p.x < 440 ? ['KeyA', 'a'] : p.y > 560 ? ['KeyS', 's'] : p.y < 260 ? ['KeyW', 'w'] : null;
-      if (!key) {
-        await still();
-        return at(x, y, z);
-      }
-      await hold(...key);
-      await s.sleep(Math.min(400, 120 + Math.abs(p.x > 1000 || p.x < 440 ? p.x - 720 : p.y - 400) / 3));
-      await release(...key);
-      await s.sleep(350);
-    }
-    throw new Error(`could not bring ${x}, ${y}, ${z} into view`);
-  };
-  const hoverPx = async (p) => {
-    await s.mouse('mouseMoved', p.x - 2, p.y);
-    await s.mouse('mouseMoved', p.x, p.y);
-    await s.sleep(160);
-  };
-  const probeOf = async (name) => {
-    for (let i = 0; i < 15; i++) {
-      const [found] = await s.eval(`__office.probe('${name}')`);
-      if (found) return found;
-      await s.sleep(80);
-    }
-    return undefined;
-  };
-  const waitProbe = async (name, at) => {
-    let last;
-    for (let i = 0; i < 25; i++) {
-      last = await probeOf(name);
-      if (last && at(last)) return last;
-      await s.sleep(80);
-    }
-    return last;
-  };
-  const enterBuild = async () => {
-    await s.clickOn('[data-testid="build-enter"]');
-    await s.waitFor(`!!${store}.build`, 4000);
-    await s.sleep(500);
-  };
-  const exitBuild = async () => {
-    await s.clickOn('.bh-done');
-    await s.waitFor(`${store}.build === null`, 4000);
-  };
-  const zoom = async (delta) => {
-    await s.eval(`document.querySelector('canvas').dispatchEvent(new WheelEvent('wheel', { deltaY: ${delta}, bubbles: true }))`);
-    await s.sleep(700);
-    await still();
-  };
-  const shotTo = async (name) => {
-    const path = await s.shot(name);
-    if (SHOTS) {
-      mkdirSync(SHOTS, { recursive: true });
-      copyFileSync(path, join(SHOTS, `${name}.png`));
-    }
-    return path;
+  const { at, hold, release, building, tool, level, verdict, waitBuilding, park, still, bring, centerOn, hoverPx, probeOf, waitProbe, enterBuild, exitBuild, zoom, shotTo, choose, openCatalog, turnTo } = drive(s, { shots: SHOTS });
+  const rev = (b) => JSON.stringify(b.stories.map((st) => st.rev));
+  const unchanged = (before, after) => rev(before) === rev(after);
+  const rectOf = (sel) => s.eval(`(() => { const e = document.querySelector(${JSON.stringify(sel)}); if (!e) return null; const r = e.getBoundingClientRect(); return r.width && r.height ? { x0: r.left, y0: r.top, x1: r.right, y1: r.bottom } : null; })()`);
+  const hudRects = async () => (await Promise.all(['.bh-held', '.bh-hint', '.bh-panel', '.bh-top', '.bh-levels', '.bh-readout'].map(rectOf))).filter(Boolean);
+  const meets = (p, q) => p.x0 < q.x1 && q.x0 < p.x1 && p.y0 < q.y1 && q.y0 < p.y1;
+  // The screen rectangle that holds a host's usable top, through the camera as it is now.
+  const topOnScreen = async (host) => {
+    const box = surfaceBox(host, ITEM_DEFS[host.def]);
+    const corners = await Promise.all([[box.x0, box.z0], [box.x1, box.z0], [box.x1, box.z1], [box.x0, box.z1]].map(([x, z]) => at(x, box.y, z)));
+    return { x0: Math.min(...corners.map((c) => c.x)), y0: Math.min(...corners.map((c) => c.y)), x1: Math.max(...corners.map((c) => c.x)), y1: Math.max(...corners.map((c) => c.y)) };
   };
 
   const centerOf = (b, hostId, def, u, v, rel, story = 0) => poseOf(b, { id: 'probe', def, on: hostId, u, v, rot: rel }, story);
-  const choose = async (entry, tab = 'tabletop') => {
-    await s.clickOn(`[data-tab="${tab}"]`);
-    await s.eval(`document.querySelector('[data-entry="${entry}"]').scrollIntoView({ inline: 'center', block: 'nearest' })`);
-    await s.sleep(120);
-    await s.clickOn(`[data-entry="${entry}"]`);
-    await s.sleep(120);
-  };
-  const turnTo = async (world) => {
-    const now = (await tool()).rot;
-    for (let n = 0; n < (((world - now) % 4) + 4) % 4; n++) await s.press('Period');
-  };
-  const rev = (b) => JSON.stringify(b.stories.map((st) => st.rev));
-  const unchanged = (before, after) => rev(before) === rev(after);
 
   async function pointAt(hostId, def, u, v, rel, story = 0) {
     const b = await building();
@@ -159,14 +83,20 @@ export default async function (s, { launch }) {
     await hoverPx(px);
     return { px, host, pose };
   }
-  async function put(entry, def, hostId, u, v, rel = 0, story = 0) {
-    await choose(entry);
+  // `again` puts the next one of what is already in hand, without picking it from the catalog again.
+  async function put(entry, def, hostId, u, v, rel = 0, story = 0, again = false) {
+    if (!again) await choose(entry);
     const { px, pose } = await pointAt(hostId, def, u, v, rel, story);
     const ghost = await waitProbe('top-footprint', (g) => Math.abs(g.x0 - pose.box.x0) < 0.01 && Math.abs(g.z0 - pose.box.z0) < 0.01);
     assert(ghost?.ok === true && ghost.host === hostId && ghost.color === GREEN, `${def} at ${u},${v} on ${hostId.split(':')[0]}: one green footprint on the top`);
+    const model = await probeOf('ghost-model');
+    assert(model?.def === def && model.ok === true && Math.abs(model.y - pose.y) < 0.002 && Math.hypot(model.x - pose.x, model.z - pose.z) < 0.02, `${def}: and the piece itself stands there at the height of the top (${model?.y?.toFixed(3)} m)`);
     await s.click(px.x, px.y);
     await waitBuilding(`b.stories[${story}].items.some((i) => i.def === ${JSON.stringify(def)} && i.on === ${JSON.stringify(hostId)} && i.u === ${u} && i.v === ${v} && i.rot === ${rel})`, `${def} did not arrive on ${hostId}`);
-    return (await building()).stories[story].items.filter((i) => i.def === def && i.on === hostId && i.u === u && i.v === v).at(-1);
+    const landed = (await building()).stories[story].items.filter((i) => i.def === def && i.on === hostId && i.u === u && i.v === v).at(-1);
+    const turn = degrees(model.yaw - YAW[(hostIn(await building(), hostId, story).rot + rel) % 4]);
+    assert((landed.look ?? 0) === model.look && Math.abs(turn - (landed.ang ?? 0)) < 0.6 && Math.abs(landed.ang ?? 0) <= 12 && (landed.look ?? 0) < (ITEM_DEFS[def].looks ?? 1), `${def}: the piece that landed is the piece that was in hand (look ${landed.look ?? 0}, turned ${landed.ang ?? 0} degrees)`);
+    return landed;
   }
   async function refuse(entry, def, hostId, u, v, text, kind = 'top-footprint') {
     await choose(entry);
@@ -196,31 +126,46 @@ export default async function (s, { launch }) {
   await enterBuild();
   await s.clickOn('[data-tab="tabletop"]');
   const cards = await s.eval(`[...document.querySelectorAll('.bh-card')].map((c) => c.dataset.entry)`);
-  assert(cards.length >= 12 && ['laptop', 'books', 'mug', 'picture_frame', 'vase', 'pen_cup', 'desk_clock', 'trophy', 'papers', 'tabletop:lamp_desk', 'tabletop:plant_small'].every((e) => cards.includes(e)), `the Tabletop tab lists ${cards.length} things to put on a surface`);
+  assert(cards.length >= 38 && ['laptop', 'books', 'mug', 'picture_frame', 'vase', 'pen_cup', 'desk_clock', 'trophy', 'papers', 'tabletop:lamp_desk', 'tabletop:plant_small', 'notebook', 'headphones', 'water_bottle', 'succulent', 'cat_statue', 'sticky_notes'].every((e) => cards.includes(e)), `the Tabletop tab lists ${cards.length} things to put on a surface`);
   assert(await s.eval(`[...document.querySelectorAll('.bh-card img')].every((i) => i.src.startsWith('data:image/png') && i.src.length > 1000)`), 'each with a rendered thumbnail');
+  assert((await rectOf('.bh-hint')) !== null && (await rectOf('.bh-held')) === null, 'with nothing in hand the catalog and its hint bar are whole');
 
   await zoom(-800);
   await choose('tabletop:lamp_desk');
   {
     const host = hostIn(await building(), DA);
     const w = hostToWorld(host, ITEM_DEFS[host.def], 3, 4);
-    for (let i = 0; i < 6; i++) {
-      const p = await at(w.x, ITEM_DEFS[host.def].surface.height, w.z);
-      if (Math.hypot(p.x - 720, p.y - 400) < 90) break;
-      const key = Math.abs(p.x - 720) > 90 ? (p.x > 720 ? ['KeyD', 'd'] : ['KeyA', 'a']) : p.y > 400 ? ['KeyS', 's'] : ['KeyW', 'w'];
-      await hold(...key);
-      await s.sleep(Math.min(350, 80 + Math.max(Math.abs(p.x - 720), Math.abs(p.y - 400)) / 2.5));
-      await release(...key);
-      await s.sleep(450);
-    }
-    await still();
+    await centerOn(w.x, ITEM_DEFS[host.def].surface.height, w.z, 90);
   }
   await pointAt(DA, 'lamp_desk', 0, 0, 0);
   await s.sleep(300);
   const lampGhost = await probeOf('top-footprint');
-  assert(lampGhost?.ok === true && lampGhost.y > 0.7 && lampGhost.y < 0.76 && (await probeOf('surface'))?.y === lampGhost.y, `the lamp's green footprint lies on the desk top, ${lampGhost?.y} m up, inside the outline of the usable top`);
-  await shotTo('place');
-  await s.press('Escape');
+  const topLit = await probeOf('surface');
+  assert(lampGhost?.ok === true && lampGhost.y > 0.7 && lampGhost.y < 0.76 && topLit?.y === lampGhost.y && topLit.ok === true, `the lamp's green footprint lies on the desk top, ${lampGhost?.y} m up, inside the outline of the usable top, which is lit green too`);
+  const lampModel = await probeOf('ghost-model');
+  assert(lampModel?.def === 'lamp_desk' && lampModel.ok === true && Math.abs(lampModel.y - lampGhost.y) < 0.002, 'the lamp itself is drawn on the desk top under the pointer');
+  {
+    // The catalog folds to one bar while a thing for a desk is in hand, so what the pointer is on is never behind a panel.
+    const bar = await rectOf('.bh-held');
+    assert(!!bar && bar.y1 - bar.y0 < 80 && bar.y1 <= 900 && bar.x0 > 200 && bar.x1 < 1240, `the catalog folded into a bar ${Math.round(bar.x1 - bar.x0)} by ${Math.round(bar.y1 - bar.y0)} px at the bottom`);
+    assert((await rectOf('.bh-panel')) === null && (await rectOf('.bh-hint')) === null, 'no panel and no second hint bar are left');
+    const desk = hostIn(await building(), DA);
+    const onScreen = await topOnScreen(desk);
+    const covering = (await hudRects()).filter((r) => meets(r, onScreen));
+    assert(onScreen.x1 - onScreen.x0 > 120 && covering.length === 0, `nothing of the HUD covers the desk top the pointer is on (${Math.round(onScreen.x1 - onScreen.x0)} by ${Math.round(onScreen.y1 - onScreen.y0)} px)`);
+    const cancel = await rectOf('[data-testid="cancel-tool"]');
+    assert(!!cancel && cancel.y0 >= bar.y0 && cancel.y1 <= bar.y1 && cancel.x1 - cancel.x0 > 60, 'Cancel (Esc) is a button on the bar');
+    const said = await s.eval(`document.querySelector('[data-testid="held-bar"]').innerText`);
+    assert(said.includes('Desk lamp') && said.includes('Cancel') && /Click\s*place/.test(said), `the bar names what is in hand and what a click does (${said.replace(/\s+/g, ' ')})`);
+    await openCatalog();
+    const open = await rectOf('.bh-panel');
+    assert(!!open && open.y1 <= bar.y0 + 1 && (await s.eval(`document.querySelectorAll('.bh-card').length`)) >= 38, 'the pointer on the bar opens the whole catalog above it');
+    await pointAt(DA, 'lamp_desk', 0, 0, 0);
+    assert((await rectOf('.bh-panel')) === null && (await probeOf('top-footprint'))?.ok === true, 'and the pointer back on the desk folds it again, the green footprint with it');
+    await s.clickOn('[data-testid="cancel-tool"]');
+    assert((await tool()).kind === 'select', 'the Cancel button puts the lamp down');
+    assert((await rectOf('.bh-hint')) !== null && (await rectOf('.bh-held')) === null, 'and the catalog and its hint bar come back whole');
+  }
   await park();
   await zoom(800);
 
@@ -252,7 +197,12 @@ export default async function (s, { launch }) {
   assert(onHost(afterPlacing, DA).length === 8 && onHost(afterPlacing, DB).length === 3 && onHost(afterPlacing, DC).length === 2 && onHost(afterPlacing, TABLE).length === 3 && onHost(afterPlacing, HUDDLE).length === 3 && onHost(afterPlacing, SHELF).length === 2, 'on three desks, two tables and a shelf');
   assert(tops(afterPlacing).every((i) => i.x === undefined && i.z === undefined && i.blockId === undefined), 'each records its host and its place on it, and no floor cell');
   assert(validate(parseBuilding(disk().building, () => {}), ctxOf(disk())).filter((v) => v.kind !== 'story_unreachable').length === 0 && tops(parseBuilding(disk().building, () => {})).length === 21, 'company.json holds all of them and the building is valid');
-  const drawn = async (def) => s.eval(`__office.instances(${JSON.stringify(def)})`);
+  // Where the scene draws a def: the baked props' meshes, and every look of a model built in code, read back from their instance matrices.
+  const drawn = async (def) => {
+    const baked = await s.eval(`__office.instances(${JSON.stringify(def)})`);
+    const looks = (await s.eval(`__office.probe('model')`)).filter((m) => m.def === def).flatMap((m) => m.at.map(([x, y, z, yaw]) => ({ x, y, z, yaw, look: m.look })));
+    return [...baked, ...looks];
+  };
   const heightsOk = async (b) => {
     for (const it of tops(b)) {
       const pose = poseOf(b, it);
@@ -287,18 +237,97 @@ export default async function (s, { launch }) {
   const stillMug = (await building()).stories[0].items.filter((i) => i.def === 'mug' && i.on === DA);
   assert(stillMug.length === 1, 'none of the refused spots left an item behind');
 
+  // ---- dressing: looks, turns and stacks, by hand on the meeting table
+  const dressing = [];
+  const dress = async (...args) => dressing.push(await put(...args));
+  await dress('mug', 'mug', TABLE, 3, 8, 0);
+  await dress('mug', 'mug', TABLE, 6, 8, 0, 0, true);
+  const [mugA, mugB] = dressing;
+  assert((mugA.look ?? 0) !== (mugB.look ?? 0) && Math.max(Math.abs(mugA.ang ?? 0), Math.abs(mugB.ang ?? 0)) > 0, `two mugs put down one after the other differ: looks ${mugA.look ?? 0} and ${mugB.look ?? 0}, turned ${mugA.ang ?? 0} and ${mugB.ang ?? 0} degrees`);
+  const looksDrawn = (await s.eval(`__office.probe('model')`)).filter((m) => m.def === 'mug' && m.count > 0);
+  assert(looksDrawn.length >= 2 && looksDrawn.some((m) => m.look > 0), `the scene draws the mugs under ${looksDrawn.length} models, one per look`);
+  const nb = await put('notebook', 'notebook', TABLE, 17, 7, 0);
+  dressing.push(nb);
+  // The mug is aimed at the middle of the notebook, which is not the table: it goes up a level, on the notebook.
+  {
+    await choose('mug');
+    const b = await building();
+    const pose = poseOf(b, nb);
+    const px = await bring(pose.x, pose.y + ITEM_DEFS.notebook.height, pose.z);
+    await hoverPx(px);
+    const rest = await waitProbe('ghost-model', (g) => g.def === 'mug' && g.y > pose.y + 0.01);
+    assert(rest?.ok === true && Math.abs(rest.y - (ITEM_DEFS.meeting_table.surface.height + ITEM_DEFS.notebook.height)) < 0.003, `a mug aimed at the notebook stands on it, ${(rest?.y ?? 0).toFixed(3)} m up: the table's ${ITEM_DEFS.meeting_table.surface.height} and the notebook's ${ITEM_DEFS.notebook.height}`);
+    const foot = await probeOf('top-footprint');
+    assert(foot?.ok === true && Math.abs(foot.y - rest.y) < 0.003, 'with its green footprint on the notebook');
+    await s.click(px.x, px.y);
+    await waitBuilding(`b.stories[0].items.some((i) => i.def === 'mug' && i.lvl === 1)`, 'the mug did not land on the notebook');
+    const mugOn = (await building()).stories[0].items.find((i) => i.def === 'mug' && i.lvl === 1);
+    dressing.push(mugOn);
+    assert(mugOn.on === TABLE && mugOn.u >= nb.u - 1 && mugOn.u + 1 <= nb.u + 4 && mugOn.v >= nb.v - 1 && mugOn.v + 1 <= nb.v + 3, `the mug is stacked at level 1 on the table, over the notebook (${mugOn.u}, ${mugOn.v})`);
+    await park();
+    await s.sleep(300);
+    const mugDrawn = (await drawn('mug')).filter((d) => Math.abs(d.y - rest.y) < 0.01);
+    assert(mugDrawn.length === 1, 'the scene draws it on the notebook');
+    const up0 = poseOf(await building(), mugOn);
+    // The hand takes what is on top first: aimed at the bare end of the notebook, the thing to take is the mug that stands on it.
+    await s.clickOn('[data-testid="mode-piece"]');
+    const end = await bring(pose.box.x0 + 0.04, pose.y + ITEM_DEFS.notebook.height, pose.z);
+    await hoverPx(end);
+    assert((await s.eval(`${store}.buildCursor.hover`)) === mugOn.id, 'pointing at the end of the notebook with a mug on it hovers the mug, which has to come off first');
+    await s.mouse('mousePressed', end.x, end.y, 1);
+    await s.mouse('mouseReleased', end.x, end.y);
+    await s.sleep(250);
+    assert((await tool()).carry === mugOn.id, 'one click takes the mug, not the notebook under it');
+    await s.press('Escape');
+    // A second mug aimed at a bare end of the notebook (the end the first mug does not hide from the camera) stands on it too, beside the first.
+    await choose('mug');
+    let beside = null;
+    for (const x of [pose.box.x0 + 0.04, pose.box.x1 - 0.04]) {
+      const px2 = await bring(x, pose.y + ITEM_DEFS.notebook.height, pose.z);
+      await hoverPx(px2);
+      const g = await probeOf('ghost-model');
+      if (g?.ok === true && Math.abs(g.y - rest.y) < 0.003 && Math.hypot(g.x - up0.x, g.z - up0.z) > 0.05) {
+        beside = { g, px: px2 };
+        break;
+      }
+    }
+    assert(!!beside, 'a second mug aimed at a bare end of the notebook stands there at the same height, beside the first');
+    await s.click(beside.px.x, beside.px.y);
+    await waitBuilding(`b.stories[0].items.filter((i) => i.def === 'mug' && i.lvl === 1).length === 2`, 'the second mug did not land on the notebook');
+    dressing.push((await building()).stories[0].items.find((i) => i.def === 'mug' && i.lvl === 1 && i.id !== mugOn.id));
+    await s.press('Escape');
+    await park();
+  }
+  // Books on books: the second set goes on the first, a little askew.
+  const stackBase = await put('books', 'books', TABLE, 8, 8, 0);
+  dressing.push(stackBase);
+  {
+    await choose('books');
+    const b = await building();
+    const pose = poseOf(b, stackBase);
+    const px = await bring(pose.x, pose.y + ITEM_DEFS.books.height, pose.z);
+    await hoverPx(px);
+    const rest = await waitProbe('ghost-model', (g) => g.def === 'books' && g.y > pose.y + 0.01);
+    assert(rest?.ok === true && Math.abs(rest.y - (ITEM_DEFS.meeting_table.surface.height + ITEM_DEFS.books.height)) < 0.003, 'books aimed at books stand on them');
+    await s.click(px.x, px.y);
+    await waitBuilding(`b.stories[0].items.some((i) => i.def === 'books' && i.lvl === 1)`, 'the second books did not land');
+    dressing.push((await building()).stories[0].items.find((i) => i.def === 'books' && i.lvl === 1));
+    await s.press('Escape');
+    await park();
+  }
+  const dressed = await building();
+  assert(validate(parseBuilding(disk().building, () => {}), ctxOf(disk())).filter((v) => v.kind !== 'story_unreachable').length === 0 && dressing.every((i) => onHost(dressed, TABLE).some((t) => t.id === i.id)), `company.json holds the ${dressing.length} things dressed by hand, and the building is valid`);
+  assert((await heightsOk(dressed)) === null, 'and the scene draws every one of them, stacked ones included, where its data puts it');
+  const turned = (await drawn('mug')).filter((d) => Math.abs(degrees(d.yaw) - Math.round(degrees(d.yaw) / 90) * 90) > 0.5);
+  assert(turned.length >= 1, `at least one mug is drawn a few degrees off square (${turned.length})`);
+
   await exitBuild();
   const middleOf = (id) => {
     const h = hostIn(afterPlacing, id);
     const f = footprint(ITEM_DEFS[h.def], h.rot);
     return { x: (h.x + f.w / 2) / 2, z: (h.z + f.d / 2) / 2 };
   };
-  const [rowAt, tableAt] = [middleOf(DA), middleOf(HUDDLE)];
-  await s.eval(`__office.teleport(${(rowAt.x + tableAt.x) / 2 - 0.9}, ${(rowAt.z + tableAt.z) / 2 + 1.0}, Math.PI)`);
-  await s.sleep(1500);
-  await zoom(-500);
-  await shotTo('decorated');
-  await zoom(500);
+  const tableAt = middleOf(HUDDLE);
   const deskPose = seatPose(afterPlacing, DA);
   const eye = { x: deskPose.chair.x, z: deskPose.chair.z };
   await s.press('Tab');
@@ -457,7 +486,8 @@ export default async function (s, { launch }) {
     }
     return null;
   };
-  assert((await drawnUp()) === null, 'floor 2 draws them 3.2 m up, on the desks');
+  const missingUp = await drawnUp();
+  assert(missingUp === null, `floor 2 draws them 3.2 m up, on the desks${missingUp ? ` (not found: ${missingUp})` : ''}`);
   await s.clickOn('[aria-label="Undo"]');
   await waitBuilding(`b.stories[0].items.some((i) => i.blockId === ${JSON.stringify(BLOCK)}) && !b.stories[1].items.some((i) => i.blockId === ${JSON.stringify(BLOCK)})`, 'undo did not bring the block down');
   now = await building();
@@ -526,7 +556,7 @@ export default async function (s, { launch }) {
   assert(seated >= 3, `the people at their desks (${seated}) are still sitting there`);
 
   const expected = tops(parseBuilding(disk().building, () => {})).map(spot).sort();
-  assert(expected.length === 21, 'company.json holds the 21 things');
+  assert(expected.length === 21 + dressing.length, `company.json holds the ${21 + dressing.length} things`);
   await s.close();
   const app = await launch({ env });
   await app.waitFor('!!window.__office && !!window.office');
@@ -542,6 +572,6 @@ export default async function (s, { launch }) {
   await app.waitFor(`!${store}.company.blocks.some((b) => b.id === ${JSON.stringify(BLOCK)})`, 8000);
   await app.waitFor(`${store}.building.stories[0].items.every((i) => i.blockId !== ${JSON.stringify(BLOCK)})`, 8000);
   const after = await app.eval(`${store}.building`);
-  assert(tops(after).length === 5 && tops(after).every((i) => !!hostIn(after, i.on)), 'removing the team takes what stood on its desks and its huddle table; the 5 on the meeting table and the shelf stay, each on a host that is still there');
+  assert(tops(after).length === 5 + dressing.length && tops(after).every((i) => !!hostIn(after, i.on)), `removing the team takes what stood on its desks and its huddle table; the ${5 + dressing.length} on the meeting table and the shelf stay, each on a host that is still there`);
   await app.close();
 }

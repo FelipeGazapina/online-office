@@ -56,7 +56,7 @@ export type ItemLayer = 'floor' | 'object';
 /** A rectangle of a surface in TOP_UNITs, in the host's unturned frame: [u0, u1) by [v0, v1). */
 export type UnitRect = { u0: number; v0: number; u1: number; v1: number };
 /** The top of a desk, table, counter or shelf: how high it is, where things may stand and where something fixed (a monitor) already does. */
-export type Surface = { height: number; rect: UnitRect; blocked?: readonly UnitRect[] };
+export type Surface = { height: number; rect: UnitRect; blocked?: readonly UnitRect[]; /** The top is a disc and `rect` is the square inside it: the ghost outlines the disc. */ round?: true };
 /** Where an item may stand: on the floor only, on a surface only, or either (a lamp, a plant). */
 export type Placement = 'floor' | 'surface' | 'both';
 export type ItemKind = 'bench_desk' | 'po_desk' | 'owner_desk' | 'decor' | 'table' | 'seat' | 'board' | 'terminal' | 'stairs';

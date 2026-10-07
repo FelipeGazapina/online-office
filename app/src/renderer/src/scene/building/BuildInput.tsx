@@ -126,17 +126,22 @@ function plan(b: Building, build: BuildState, p: Vec2, ray: PickRay, drag: Drag 
       // A small item under a pointer that is over a desk, table or shelf stands on its top, snapped to a unit of it. Anywhere else it is on the floor,
       // where the rules say whether it may be.
       const def = ITEM_DEFS[tool.def];
-      const over = placementOf(def) === 'floor' ? null : surfaceAt(story, ray);
-      if (over) {
-        const hostDef = ITEM_DEFS[over.host.def];
-        // A flat thing under the pointer (a notebook, a folder, a book) carries what is put on it: the item stands on that, one level up.
-        const base = topItemAt(story, ray, tool.carry ?? undefined);
-        const baseDef = base && base.on === over.host.id ? ITEM_DEFS[base.def] : undefined;
-        const baseTop = base && baseDef ? pointAtHeight(ray, hostDef.surface!.height + liftOf(base, baseDef, story.items) + baseDef.height) : null;
-        const stacked = base && baseDef && baseTop ? stackSpot(over.host, hostDef, base, baseDef, def, tool.rot, baseTop) : null;
-        const top = toolTopItem(tool, over.host.id, stacked ?? topSpot(over.host, hostDef, def, tool.rot, over.point), existing);
-        const pose = topPose(over.host, hostDef, top, def, liftOf(top, def, story.items));
-        const surface = surfaceBox(over.host, hostDef) ?? undefined;
+      const small = placementOf(def) !== 'floor';
+      // A flat thing under the pointer (a notebook, a folder, a book) carries what is put on it: the item stands on that, one level up. Anything
+      // else under the pointer is passed over, and the item stands on the top beneath it, snapped to a unit of it.
+      const hit = small ? topItemAt(story, ray, tool.carry ?? undefined) : null;
+      const hitHost = hit && floorItems(story).find((h) => h.id === hit.on);
+      const hitDef = hit && hitHost ? ITEM_DEFS[hit.def] : undefined;
+      const hitPose = hit && hitHost && hitDef ? topPose(hitHost, ITEM_DEFS[hitHost.def], hit, hitDef, liftOf(hit, hitDef, story.items)) : null;
+      const onFlat = hitPose && hitDef ? pointAtHeight(ray, hitPose.y + hitDef.height) : null;
+      const stacked = hit && hitHost && hitDef && onFlat ? stackSpot(hitHost, ITEM_DEFS[hitHost.def], hit, hitDef, def, tool.rot, onFlat) : null;
+      const plane = small && !stacked ? surfaceAt(story, ray) : null;
+      const onTop = stacked && hitHost ? { host: hitHost, spot: stacked } : plane && { host: plane.host, spot: topSpot(plane.host, ITEM_DEFS[plane.host.def], def, tool.rot, plane.point) };
+      if (onTop) {
+        const hostDef = ITEM_DEFS[onTop.host.def];
+        const top = toolTopItem(tool, onTop.host.id, onTop.spot, existing);
+        const pose = topPose(onTop.host, hostDef, top, def, liftOf(top, def, story.items));
+        const surface = surfaceBox(onTop.host, hostDef) ?? undefined;
         return { ops: [putItemOp(level, top)], ghost: (ok) => ({ kind: 'top', item: top, pose, ok, surface }), readout: null };
       }
       const at = itemOrigin(tool.def, tool.rot, p);
