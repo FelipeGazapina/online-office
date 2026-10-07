@@ -21,6 +21,7 @@ const run: ClaudeRun = ({ prompt, options }) => {
   return {
     [Symbol.asyncIterator]: () => p.out[Symbol.asyncIterator](),
     interrupt: async () => void p.calls.push('interrupt'),
+    stopTask: async (id) => void p.calls.push(`stopTask ${id}`),
     setModel: async (model) => {
       p.calls.push(`setModel ${model}`);
       if (model === 'refused') throw new Error("Model 'refused' not found");
@@ -305,8 +306,9 @@ const esc = scripted();
 esc.session.assign('a long job', 'Long job', 'a long job');
 const escProc = processes.at(-1)!;
 await feed(escProc, init('sess-esc'), assistant([{ type: 'tool_use', id: 'slow', name: 'Bash', input: { command: 'sleep 99' } }]));
+await feed(escProc, sdk({ type: 'system', subtype: 'task_started', task_id: 'bash-1', tool_use_id: 'slow', is_backgrounded: false, task_type: 'local_bash' }));
 esc.session.interrupt();
-check(escProc.calls.at(-1) === 'interrupt' && esc.interrupted.length === 0 && esc.completed.length === 0, 'Esc interrupts the SDK turn and the turn is not over until the SDK says so');
+check(escProc.calls.slice(-2).join() === 'stopTask bash-1,interrupt' && esc.interrupted.length === 0 && esc.completed.length === 0, `Esc stops the command that is running and interrupts the SDK turn, and the turn is not over until the SDK says so (${escProc.calls.slice(-2).join()})`);
 await feed(escProc, sdk({ type: 'result', subtype: 'error_during_execution', is_error: false, terminal_reason: 'aborted_tools', errors: [] }));
 check(esc.interrupted.length === 1 && esc.completed.length === 0 && esc.employee.status.kind === 'working', 'the aborted turn ends as interrupted: the office is told once and nobody is told it finished');
 const endAt = esc.terminal.findLastIndex((e) => e.k === 'end');
@@ -315,8 +317,11 @@ const folded2 = new TerminalBuffer('/work/repo');
 for (const e of esc.terminal) folded2.apply(e);
 const after = screenOf({ blocks: folded2.all(), live: folded2.live, status: { kind: 'idle' }, now: 0, cols: 80, rows: 30 }).map(rowText);
 check(after.some((r) => r.includes('Interrupted')) && after.some((r) => r.includes('● Bash(sleep 99)')), 'and the step that was running is on the screen with the interruption under it');
+await feed(escProc, sdk({ type: 'system', subtype: 'task_started', task_id: 'bash-late', tool_use_id: 'slow', is_backgrounded: true, task_type: 'local_bash' }));
+check(escProc.calls.at(-1) === 'stopTask bash-late', 'a command that only starts after Esc is stopped as it starts');
 esc.session.assign('next job', 'Next', 'next job');
-await feed(escProc, init('sess-esc2'), turnEnd());
+await feed(escProc, init('sess-esc2'), sdk({ type: 'system', subtype: 'task_started', task_id: 'bash-next', is_backgrounded: true, task_type: 'local_bash' }), turnEnd());
+check(escProc.calls.at(-1) !== 'stopTask bash-next', 'a command of the next turn is left alone');
 check(esc.completed.length === 1 && esc.interrupted.length === 1, 'the next turn is an ordinary one: it completes, and the interruption is not counted again');
 esc.session.stop();
 rec.session.stop();

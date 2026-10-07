@@ -241,6 +241,7 @@ TOOLS.Agent = TOOLS.Task!;
 const mcp = /^mcp__(.+?)__(.+)$/;
 function compact(input: Record<string, unknown>): string {
   return Object.entries(input)
+    .filter(([k]) => k !== 'requestId')
     .map(([k, v]) => `${k}: ${typeof v === 'string' ? `"${cut(flat(v), 80)}"` : cut(JSON.stringify(v) ?? '', 60)}`)
     .join(', ');
 }
@@ -252,11 +253,15 @@ function styleOf(name: string): ToolStyle {
   return {
     label: () => (m ? `${m[1]} - ${m[2]} (MCP)` : name),
     arg: (f) => cut(compact(f.input), 160),
-    done: (_f, r) => head(r.text, undefined, 2),
+    // A server that says only that it is fine has nothing to show under the call.
+    done: (_f, r) => (/^\s*\{\s*"ok"\s*:\s*true\s*\}\s*$/.test(r.text) ? [] : head(r.text, undefined, 2)),
   };
 }
 
 const DENIED = /^The boss did not allow this/;
+// What the SDK sends back for a call the owner stopped with Esc.
+const STOPPED = /^(The user doesn't want to proceed with this tool use|\[Request interrupted by user)/;
+const interruptedRow = (): Span[] => [sp('Interrupted', 'err'), sp(' · What should Claude do instead?', 'dim')];
 
 // The call, and the result under it when there is one.
 export function toolLines(name: string, input: Record<string, unknown>, cwd: string, result?: Result): TerminalLine[] {
@@ -270,7 +275,9 @@ export function toolLines(name: string, input: Record<string, unknown>, cwd: str
   let rows: Span[][];
   if (!result.ok) {
     const first = lines(result.text);
-    rows = DENIED.test(result.text)
+    rows = STOPPED.test(result.text)
+      ? [interruptedRow()]
+      : DENIED.test(result.text)
       ? [[sp(cut(first[0] ?? 'Denied', 240), 'err')]]
       : first.length
         ? first.slice(0, 3).map((l, i) => [sp(i === 0 ? `Error: ${cut(l, 230)}` : cut(l, 240), 'err')]).concat(first.length > 3 ? [[sp(`… +${plural(first.length - 3, 'line')}`, 'dim')]] : [])
@@ -293,6 +300,16 @@ const PROMPT_TEXT = 1200;
 
 const CLAWD = [' ▐▛███▜▌', '▝▜█████▛▘', '  ▘▘ ▝▝'];
 
+// The block glyphs the mascot is drawn with, as which quarters of the cell they fill: upper left, upper right, lower left, lower right.
+// A font draws them with gaps at the edges of the line, so both renderers fill the quarters themselves.
+const QUARTERS: Record<string, readonly [boolean, boolean, boolean, boolean]> = {
+  '▘': [true, false, false, false], '▝': [false, true, false, false], '▖': [false, false, true, false], '▗': [false, false, false, true],
+  '▌': [true, false, true, false], '▐': [false, true, false, true], '▀': [true, true, false, false], '▄': [false, false, true, true],
+  '▛': [true, true, true, false], '▜': [true, true, false, true], '▙': [true, false, true, true], '▟': [false, true, true, true],
+  '█': [true, true, true, true], '▚': [true, false, false, true], '▞': [false, true, true, false],
+};
+export const quartersOf = (ch: string): readonly [boolean, boolean, boolean, boolean] | undefined => QUARTERS[ch];
+
 // "claude-haiku-4-5-20251001" reads "Haiku 4.5", as the header of Claude Code writes a model. Another harness's model id stays as it is.
 export function modelName(id: string): string {
   const m = /^claude-([a-z]+)-(\d+)(?:-(\d+))?(?:-\d{8})?$/.exec(id);
@@ -313,7 +330,10 @@ export class TerminalBuffer {
   // Which block holds a text, thinking or tool id.
   private readonly byId = new Map<string, number>();
   private readonly tools = new Map<string, { name: string; input: Record<string, unknown> }>();
-  private readonly thinkingStart = new Map<string, number>();
+  // A call already says it was interrupted, so the end of the turn need not.
+  private stoppedCall = false;
+  // The last block added is a thought, so another one right after it joins it.
+  private lastIsThought = false;
   private dirty = new Set<number>();
   private from = 1;
   private everSent = false;
@@ -332,6 +352,7 @@ export class TerminalBuffer {
   }
 
   private add(ls: TerminalLine[], id?: string): number {
+    this.lastIsThought = false;
     const n = this.next++;
     this.put(n, ls);
     if (id) this.byId.set(id, n);
@@ -371,12 +392,15 @@ export class TerminalBuffer {
         return;
       }
       case 'thinking': {
+        // Thoughts with nothing printed between them are one line.
         const key = `think:${e.id}`;
-        const n = this.byId.get(key);
-        if (!this.thinkingStart.has(key)) this.thinkingStart.set(key, Date.now());
+        const n = this.byId.get(key) ?? (this.lastIsThought ? this.next - 1 : undefined);
         const ls = [line([sp(e.secs === undefined ? '∴ Thinking…' : `∴ Thought for ${Math.max(1, Math.round(e.secs))}s`, 'dim', { i: true })])];
-        if (n !== undefined && this.blocks.has(n)) this.put(n, ls);
-        else this.add(ls, key);
+        if (n !== undefined && this.blocks.has(n)) {
+          this.put(n, ls);
+          this.byId.set(key, n);
+        } else this.add(ls, key);
+        this.lastIsThought = true;
         return;
       }
       case 'tool': {
@@ -389,6 +413,7 @@ export class TerminalBuffer {
         return;
       }
       case 'result': {
+        if (!e.ok && STOPPED.test(e.text)) this.stoppedCall = true;
         const call = this.tools.get(e.id);
         const key = `tool:${e.id}`;
         const ls = toolLines(call?.name ?? 'Tool', call?.input ?? {}, this.cwd, { ok: e.ok, text: e.text.slice(0, 20_000), data: e.data });
@@ -400,14 +425,19 @@ export class TerminalBuffer {
       }
       case 'end': {
         // A call still waiting for its result will never get one.
+        let said = this.stoppedCall;
         for (const [id, call] of this.tools) {
           const n = this.byId.get(`tool:${id}`);
-          if (n !== undefined && this.blocks.has(n)) this.put(n, toolLines(call.name, call.input, this.cwd, { ok: false, text: e.how === 'interrupted' ? 'Interrupted' : 'Stopped' }));
+          if (n === undefined || !this.blocks.has(n)) continue;
+          this.put(n, toolLines(call.name, call.input, this.cwd, { ok: false, text: e.how === 'interrupted' ? "The user doesn't want to proceed with this tool use" : 'Stopped' }));
+          said ||= e.how === 'interrupted';
         }
         this.tools.clear();
+        this.stoppedCall = false;
         this.live = { tokens: 0 };
-        if (e.how === 'interrupted') this.add([line([sp('  ⎿  ', 'dim'), sp('Interrupted', 'err'), sp(' · What should Claude do instead?', 'dim')])]);
-        else if (e.how === 'error') this.add([line([sp('  ⎿  ', 'dim'), sp(`Error: ${cut(flat(e.message ?? 'The turn failed'), 300)}`, 'err')], { hang: 5 })]);
+        if (e.how === 'interrupted') {
+          if (!said) this.add([line([sp('  ⎿  ', 'dim'), ...interruptedRow()])]);
+        } else if (e.how === 'error') this.add([line([sp('  ⎿  ', 'dim'), sp(`Error: ${cut(flat(e.message ?? 'The turn failed'), 300)}`, 'err')], { hang: 5 })]);
         return;
       }
       case 'note':

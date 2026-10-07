@@ -239,7 +239,7 @@ function permissionBody(name: string, input: Record<string, unknown>, cwd: strin
 }
 
 // The part of the SDK's Query that a session uses, so a check can stand in for the SDK.
-type Live = AsyncIterable<SDKMessage> & Pick<Query, 'interrupt' | 'setModel' | 'setPermissionMode' | 'close'>;
+type Live = AsyncIterable<SDKMessage> & Pick<Query, 'interrupt' | 'stopTask' | 'setModel' | 'setPermissionMode' | 'close'>;
 export type ClaudeRun = (params: { prompt: AsyncIterable<SDKUserMessage>; options: Options }) => Live;
 
 // The SDK's streaming input takes an async iterable. This is the smallest one we can push into.
@@ -292,6 +292,11 @@ export class ClaudeSession implements EmployeeSession {
   private life = new AbortController();
   // Set from the moment the owner presses Esc until the turn it stopped reports that it ended.
   private ownerInterrupt = false;
+  // The commands and helpers this process runs that have not reported an end. An interrupt ends the turn but leaves a command running,
+  // so Esc stops these too.
+  private running = new Set<string>();
+  // Until this time a command that starts is one the owner stopped by pressing Esc before it got going, so it is stopped as it starts.
+  private stopStartsUntil = 0;
   // What the terminal shows of the message being written: the API message, and for each block the text or thinking so far.
   private messageId = '';
   private blocks = new Map<number, { id: string; kind: 'text' | 'thinking'; text: string; since: number }>();
@@ -336,9 +341,12 @@ export class ClaudeSession implements EmployeeSession {
 
   // Esc on the terminal: the same hard stop as `now`, with no message after it. The turn ends when the SDK reports the abort.
   interrupt() {
-    if (!this.q) return;
+    const { q } = this;
+    if (!q) return;
     this.ownerInterrupt = true;
-    this.q.interrupt().catch((e: unknown) => {
+    this.stopStartsUntil = Date.now() + 15_000;
+    for (const id of this.running) q.stopTask(id).catch((e: unknown) => debug('stopTask failed:', e));
+    q.interrupt().catch((e: unknown) => {
       debug('interrupt failed:', e);
       this.ownerInterrupt = false;
     });
@@ -429,6 +437,7 @@ export class ClaudeSession implements EmployeeSession {
     this.hops.clear();
     if (!this.q) this.start();
     this.hop('push');
+    this.stopStartsUntil = 0;
     if (shown !== undefined) this.host.terminal({ k: 'prompt', text: shown });
     this.inbox.push({
       type: 'user',
@@ -496,6 +505,7 @@ export class ClaudeSession implements EmployeeSession {
     if (!this.gotInit) this.host.setSessionId('');
     this.q?.close();
     this.q = undefined;
+    this.running.clear();
     this.life.abort();
     for (const id of this.subagents) this.host.subagentFinished(id);
     this.subagents.clear();
@@ -533,7 +543,11 @@ export class ClaudeSession implements EmployeeSession {
       this.onStream(m);
     } else if (m.type === 'assistant') {
       this.onAssistant(m);
+    } else if (m.type === 'system' && m.subtype === 'task_started') {
+      this.running.add(m.task_id);
+      if (Date.now() < this.stopStartsUntil) this.q?.stopTask(m.task_id).catch((e: unknown) => debug('stopTask failed:', e));
     } else if (m.type === 'system' && m.subtype === 'task_notification') {
+      this.running.delete(m.task_id);
       this.subagentEnded(m.tool_use_id);
     } else if (m.type === 'user') {
       this.onUser(m);
@@ -667,9 +681,11 @@ export class ClaudeSession implements EmployeeSession {
     if (aborted || (this.interrupting && m.subtype !== 'success')) {
       this.tokensDone = 0;
       if (!this.ownerInterrupt) return debug('turn aborted, next turn incoming');
-      // The owner pressed Esc and nothing follows: the turn is over.
+      // The owner pressed Esc and nothing follows: the turn is over, and so is a command it started in the background, which the
+      // SDK's interrupt leaves running.
       this.ownerInterrupt = false;
       this.interrupting = false;
+      for (const id of this.running) this.q?.stopTask(id).catch((e: unknown) => debug('stopTask failed:', e));
       host.terminal({ k: 'end', how: 'interrupted' });
       return host.taskInterrupted();
     }

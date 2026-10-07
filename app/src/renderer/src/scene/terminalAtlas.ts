@@ -3,7 +3,7 @@
 // the atlas itself is never uploaded again. Pure drawing and bookkeeping: when to draw is the scene's call (MonitorScreens.tsx).
 import { DataTexture, LinearFilter, LinearMipmapLinearFilter, RGBAFormat, SRGBColorSpace, Texture, UnsignedByteType, Vector2, type WebGLRenderer } from 'three';
 import type { EmployeeStatus, PermissionMode } from '../../../shared/protocol.ts';
-import { rowText, screenOf, type Row, type TermBlock, type TermLive } from '../../../shared/terminal.ts';
+import { quartersOf, rowText, screenOf, type Row, type TermBlock, type TermLive } from '../../../shared/terminal.ts';
 import { BGS, FONT, SCREEN_BG, TONES } from '../hud/terminal/theme.ts';
 
 // A cell of the atlas holds one tile. The picture sits inside it, and the rim round it is the screen's own colour, so the mip levels
@@ -91,7 +91,11 @@ function paint(ctx: CanvasRenderingContext2D, screen: readonly Row[], cols: numb
       } else {
         [...span.t].forEach((ch, i) => {
           const cx = x + i * charW;
-          if (ch === '█') return void ctx.fillRect(cx, y + charH * 0.1, charW * 0.9, charH * 0.8);
+          const q = quartersOf(ch);
+          if (q) {
+            q.forEach((on, k) => on && ctx.fillRect(cx + (k % 2) * (charW / 2), y + Math.floor(k / 2) * (charH / 2), charW / 2 + 0.5, charH / 2 + 0.5));
+            return;
+          }
           ctx.setTransform(sx, 0, 0, 1, cx, y);
           ctx.fillText(ch, 0, charH * 0.78);
         });

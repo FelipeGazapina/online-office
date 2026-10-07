@@ -38,7 +38,7 @@ const MIN_READABLE_PX = 12;
 const REDRAW_MS = 250;
 const DRAWS_PER_FRAME = 2;
 // The owner is this close to a desk for F to open its terminal, in meters.
-const REACH = 2.3;
+const REACH = 2.7;
 
 const budget = { frame: -1, left: 0, turn: 0 };
 

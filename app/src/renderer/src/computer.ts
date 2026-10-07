@@ -5,6 +5,8 @@ import type { BlockId, EmployeeId } from '../../shared/protocol.ts';
 // The terminal on an employee's monitor. `near` is the employee whose desk the owner stands at, `open` the one whose monitor the camera
 // is zoomed into and whose terminal is open.
 export const useMonitor = create<{ near: EmployeeId | null; open: EmployeeId | null }>(() => ({ near: null, open: null }));
+// For the tests.
+(window as unknown as { __officeMonitor: unknown }).__officeMonitor = useMonitor;
 
 export function enterMonitor(employeeId: EmployeeId) {
   const s = get();

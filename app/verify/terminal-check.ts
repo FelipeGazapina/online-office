@@ -43,8 +43,30 @@ check(text(t.all()[5]!.lines)[0] === '● office - message (MCP)(to: "owner", te
 t.apply({ k: 'tool', id: 't4', name: 'Bash', input: { command: 'sleep 99' } });
 t.apply({ k: 'end', how: 'interrupted' });
 blocks = t.all();
-check(blocks.at(-2)!.lines[0]!.spans[0]!.c === 'err' && text(blocks.at(-1)!.lines)[0] === '  ⎿  Interrupted · What should Claude do instead?', 'an interrupted turn closes the call that never returned and says so under it');
+check(blocks.at(-1)!.lines[0]!.spans[0]!.c === 'err' && text(blocks.at(-1)!.lines).join('|') === '● Bash(sleep 99)|  ⎿  Interrupted · What should Claude do instead?', 'an interrupted turn closes the call that never returned and says so under it');
+const quiet = new TerminalBuffer('/work/repo');
+quiet.apply({ k: 'text', id: 'q', text: 'thinking out loud' });
+quiet.apply({ k: 'end', how: 'interrupted' });
+check(text(quiet.all().at(-1)!.lines)[0] === '  ⎿  Interrupted · What should Claude do instead?' && quiet.all().length === 3, 'an interruption with no call in flight is a line of its own');
+const stopped = new TerminalBuffer('/work/repo');
+stopped.apply({ k: 'tool', id: 's', name: 'Bash', input: { command: 'make' } });
+stopped.apply({ k: 'result', id: 's', ok: false, text: "The user doesn't want to proceed with this tool use. The tool use was rejected (eg. if it was a file edit, the new_string was NOT written to the file)." });
+stopped.apply({ k: 'end', how: 'interrupted' });
+check(stopped.all().length === 2 && text(stopped.all()[1]!.lines).join('|') === '● Bash(make)|  ⎿  Interrupted · What should Claude do instead?', 'the SDK\'s rejection of a stopped call reads as the interruption, and the end of the turn does not say it twice');
 check(text(toolLines('Edit', { file_path: '/work/repo/a.ts' }, '/work/repo', { ok: true, text: 'x', data: { structuredPatch: [{ oldStart: 9, newStart: 9, lines: [' a', '-b', '+c', '+d'] }] } })).join('|') === '● Update(a.ts)|  ⎿  Updated a.ts with 2 additions and 1 removal|      9   a|     10 - b|     10 + c|     11 + d', 'an edit counts what it added and removed and numbers its diff rows from the patch');
+
+const thoughts = new TerminalBuffer('/work/repo');
+thoughts.apply({ k: 'thinking', id: 'a:0' });
+thoughts.apply({ k: 'thinking', id: 'a:0', secs: 2 });
+thoughts.apply({ k: 'thinking', id: 'b:0' });
+thoughts.apply({ k: 'thinking', id: 'b:0', secs: 1 });
+check(thoughts.all().length === 2 && text(thoughts.all()[1]!.lines)[0] === '∴ Thought for 1s', 'thoughts with nothing printed between them are one line');
+thoughts.apply({ k: 'text', id: 'c', text: 'hello' });
+thoughts.apply({ k: 'thinking', id: 'd:0', secs: 3 });
+check(thoughts.all().length === 4, 'a thought after some text is a new line');
+thoughts.apply({ k: 'tool', id: 'm', name: 'mcp__office__reply', input: { requestId: 'abc123', outcome: 'done', text: 'ok' } });
+thoughts.apply({ k: 'result', id: 'm', ok: true, text: '{"ok":true}' });
+check(text(thoughts.all().at(-1)!.lines).join('|') === '● office - reply (MCP)(outcome: "done", text: "ok")', 'an office tool that only says ok has no result line, and its ids stay out of the call');
 
 console.log('\n# pushes');
 const fresh = new TerminalBuffer('/work/repo');

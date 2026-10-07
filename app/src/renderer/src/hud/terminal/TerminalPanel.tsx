@@ -5,7 +5,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import { ALLOW_ANSWER } from '../../../../shared/permissions.ts';
 import type { Employee, Question } from '../../../../shared/protocol.ts';
-import { layoutBlocks, optionsOf, questionTitle, spinnerRow, wrap, type Row, type Span } from '../../../../shared/terminal.ts';
+import { layoutBlocks, optionsOf, questionTitle, quartersOf, spinnerRow, wrap, type Row, type Span } from '../../../../shared/terminal.ts';
 import { escapeMonitor, leaveMonitor, useMonitor } from '../../computer.ts';
 import { monitorPoses, zoomFrame } from '../../scene/monitorPose.ts';
 import { get, send, useStore } from '../../store.ts';
@@ -20,10 +20,31 @@ const spanStyle = (s: Span) => ({
   ...(s.bg ? { background: BGS[s.bg] } : {}),
 });
 
+// A block glyph is drawn by filling the quarters of its cell, so the mascot is one piece whatever the font does at the edge of a line.
+const quarters = (ch: string) => {
+  const q = quartersOf(ch);
+  if (!q) return undefined;
+  const at = ['0 0', '100% 0', '0 100%', '100% 100%'];
+  return q.flatMap((on, i) => (on ? [`linear-gradient(currentColor, currentColor) ${at[i]} / 50% 50% no-repeat`] : [])).join(', ');
+};
+
+function SpanView({ s }: { s: Span }) {
+  const style = spanStyle(s);
+  if (!/[▘▝▖▗▌▐▀▄▛▜▙▟█▚▞]/.test(s.t)) return <span style={style}>{s.t}</span>;
+  return (
+    <span style={style}>
+      {[...s.t].map((ch, i) => {
+        const bg = quarters(ch);
+        return bg ? <span key={i} className="qd" style={{ background: bg }}>{' '}</span> : ch;
+      })}
+    </span>
+  );
+}
+
 function RowView({ row }: { row: Row }) {
   return (
     <div className="term-row" style={row.fill ? { background: BGS[row.fill] } : undefined}>
-      {row.spans.length ? row.spans.map((s, i) => <span key={i} style={spanStyle(s)}>{s.t}</span>) : ' '}
+      {row.spans.length ? row.spans.map((s, i) => <SpanView key={i} s={s} />) : ' '}
     </div>
   );
 }
@@ -198,7 +219,6 @@ function Panel({ employee }: { employee: Employee }) {
   };
 
   const hint = status.kind === 'working' ? 'esc to interrupt' : question ? 'esc to stop · 1-3 to choose' : 'esc to leave';
-  const verb = status.kind === 'working' || question ? 'sends to ' : 'asks ';
 
   return (
     <div
@@ -238,7 +258,7 @@ function Panel({ employee }: { employee: Employee }) {
               value={draft}
               rows={1}
               spellCheck={false}
-              placeholder={question ? (question.kind === 'permission' ? 'or tell them what to do differently' : 'or type an answer') : `${verb}${employee.name}`}
+              placeholder={question ? (question.kind === 'permission' ? 'or tell them what to do differently' : 'or type an answer') : `Message ${employee.name}…`}
               onChange={(e) => setDraft(e.target.value)}
               onKeyDown={onKey}
               autoFocus
@@ -247,7 +267,11 @@ function Panel({ employee }: { employee: Employee }) {
           </div>
           <div className="term-rule" />
           <div className="term-status">
-            <span className="term-mode">{employee.permissions.mode === 'ask' ? '? for shortcuts' : `▸▸ ${employee.permissions.mode === 'inherit' ? 'accept edits on' : employee.permissions.mode === 'auto' ? 'auto mode on' : 'bypass permissions on'} (shift+tab to cycle)`}</span>
+            {employee.permissions.mode === 'ask' ? (
+              <span>? for shortcuts</span>
+            ) : (
+              <span className="term-mode">▸▸ {employee.permissions.mode === 'inherit' ? 'accept edits on' : employee.permissions.mode === 'auto' ? 'auto mode on' : 'bypass permissions on'} (shift+tab to cycle)</span>
+            )}
             <span className="term-who">
               {hint} · {employee.name} · {modelLabel(employee.model)}
             </span>
