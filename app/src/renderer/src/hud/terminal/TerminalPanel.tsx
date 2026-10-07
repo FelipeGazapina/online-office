@@ -90,12 +90,21 @@ function Dialog({ q, picked, choose }: { q: Question; picked: number; choose: (i
 export function TerminalPanel() {
   const id = useMonitor((s) => s.open);
   const employee = useStore((s) => s.company?.employees.find((e) => e.id === id));
+  // Someone who was fired while their terminal was open takes the monitor with them.
+  useEffect(() => {
+    if (id && !employee) leaveMonitor();
+  }, [id, employee]);
   if (!id || !employee) return null;
   return <Panel key={id} employee={employee} />;
 }
 
 function Panel({ employee }: { employee: Employee }) {
   const version = useTerminalVersion(employee.id);
+  // The rest of the HUD steps back while the owner looks into a screen.
+  useEffect(() => {
+    document.body.dataset.monitor = 'open';
+    return () => void delete document.body.dataset.monitor;
+  }, []);
   const [size, setSize] = useState({ w: window.innerWidth, h: window.innerHeight });
   const [draft, setDraft] = useState('');
   const [picked, setPicked] = useState(0);

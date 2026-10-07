@@ -161,7 +161,7 @@ export function Screens({ geom }: { geom: FloorGeometry }) {
     }
     const now = Date.now();
     const owner = runtime.owner;
-    let nearest: { id: Employee['id']; d: number } | null = null;
+    const nearest: { id: Employee['id'] | null; d: number } = { id: null, d: Infinity };
 
     slots.forEach(({ desk, setup, local, x, z, screen, cols }, i) => {
       const e = sitters.current.bySeat.get(desk.id);
@@ -182,7 +182,7 @@ export function Screens({ geom }: { geom: FloorGeometry }) {
 
       if (geom.index === owner.floor) {
         const d = Math.hypot(owner.pos.x - x, owner.pos.z - z);
-        if (d < REACH && (!nearest || d < nearest.d)) nearest = { id: e.id, d };
+        if (d < REACH && d < nearest.d) Object.assign(nearest, { id: e.id, d });
       }
       if (budget.left <= 0) return;
       point.set(x, geom.index * STORY_H + screen.y, z);
@@ -210,8 +210,7 @@ export function Screens({ geom }: { geom: FloorGeometry }) {
     a.flush(gl);
     // Only the story the owner is on says who is within reach.
     if (geom.index === owner.floor) {
-      const id = (nearest as { id: Employee['id'] } | null)?.id ?? null;
-      if (useMonitor.getState().near !== id) useMonitor.setState({ near: id });
+      if (useMonitor.getState().near !== nearest.id) useMonitor.setState({ near: nearest.id });
     }
   });
 

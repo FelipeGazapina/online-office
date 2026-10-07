@@ -109,3 +109,4 @@
 }
 .term-leave::after { content: ' · F'; opacity: 0.6; font-weight: 400; }
 .qd { display: inline-block; width: 1ch; height: 1lh; vertical-align: top; }
+body[data-monitor] .hud { visibility: hidden; }

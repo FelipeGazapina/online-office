@@ -345,6 +345,8 @@ export class TerminalBuffer {
   // The last block added is a thought, so another one right after it joins it.
   private lastIsThought = false;
   private dirty = new Set<number>();
+  // The token count changed, though no block did.
+  private liveDirty = false;
   private from = 1;
   private everSent = false;
   live: TermLive = { tokens: 0 };
@@ -458,7 +460,7 @@ export class TerminalBuffer {
         return;
       case 'tokens':
         this.live = { tokens: e.out };
-        this.dirty.add(-1);
+        this.liveDirty = true;
         return;
       case 'banner':
         this.put(0, bannerLines(e.title, e.model, e.cwd));
@@ -468,9 +470,10 @@ export class TerminalBuffer {
 
   // The blocks that changed since the last call, or undefined when nothing did.
   take(): TerminalPush | undefined {
-    if (!this.dirty.size && this.everSent) return undefined;
-    const blocks = [...this.dirty].filter((n) => n >= 0).sort((a, b) => a - b).map((n) => this.blocks.get(n)!).filter(Boolean);
+    if (!this.dirty.size && !this.liveDirty && this.everSent) return undefined;
+    const blocks = [...this.dirty].sort((a, b) => a - b).flatMap((n) => this.blocks.get(n) ?? []);
     this.dirty = new Set();
+    this.liveDirty = false;
     const reset = !this.everSent;
     this.everSent = true;
     return { from: this.from, blocks, live: this.live, ...(reset ? { reset } : {}) };
@@ -480,6 +483,7 @@ export class TerminalBuffer {
   full(): TerminalPush {
     this.everSent = true;
     this.dirty = new Set();
+    this.liveDirty = false;
     return { from: this.from, blocks: [...this.blocks.values()].sort((a, b) => a.n - b.n), live: this.live, reset: true };
   }
 
