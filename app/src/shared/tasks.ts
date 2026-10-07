@@ -3,7 +3,7 @@
 //
 // Time is not state. The mailroom's ledger says who was in a turn and when, and every message carries the root request
 // of its chain, so a task's time is a fold over that ledger. The one thing a task stores is the root requests it started.
-import type { LedgerEntry, MessageId, Outcome, TurnId } from './mail.ts';
+import type { ActorId, LedgerEntry, MessageId, Outcome, TurnId } from './mail.ts';
 import { DEFAULT_LINEAR_FILTERS, taskBoardStatusLabel, type BlockId, type EmployeeId, type LinearFilters, type TaskBoardSource, type TaskCard, type TaskProvider } from './protocol.ts';
 
 export type BoardId = string & { readonly __brand: 'BoardId' };
@@ -39,6 +39,15 @@ export type HoursLog = {
   error?: { message: string; at: number };
 };
 
+// Who moved a stage: the owner, the office when a run settled (`mailroom`), a teammate, or Linear or CronoSpark changing the card.
+export type StageBy = ActorId | 'provider';
+
+// What happened to a task that the mailroom's ledger does not say. Append-only: the activity log folds it in with the mail.
+export type TaskEvent =
+  | { kind: 'stage'; at: number; from: TaskStage; to: TaskStage; by: StageBy; cause?: MessageId }
+  // An hours entry sent to CronoSpark, or one that failed (`error`).
+  | { kind: 'hours'; at: number; employeeId: EmployeeId; date: LocalDate; hours: number; error?: string };
+
 export type Task = {
   id: TaskId;
   boardId: BoardId;
@@ -55,7 +64,16 @@ export type Task = {
   updatedAt: number;
   lastOutcome?: LastOutcome;
   hours?: HoursLog;
+  history?: TaskEvent[];
 };
+
+export const withEvent = (task: Task, event: TaskEvent): Task => ({ ...task, history: [...(task.history ?? []), event] });
+
+// The task in `to`, with the move on its history. Moving a task to where it already is changes nothing.
+export function restage(task: Task, to: TaskStage, by: StageBy, at: number, cause?: MessageId): Task {
+  if (task.stage === to) return task;
+  return withEvent({ ...task, stage: to }, { kind: 'stage', at, from: task.stage, to, by, ...(cause ? { cause } : {}) });
+}
 
 export type BoardSync =
   | { kind: 'idle' }
