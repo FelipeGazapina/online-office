@@ -120,7 +120,7 @@ const REAL = {
   lunchbox: [22, 15, 8],
   books_row: [32, 16, 25],
   sticky_notes: [8, 8, 3],
-  headphones: [21, 9, 10],
+  headphones: [19, 8, 9],
   water_bottle: [7, 7, 23],
   tumbler: [8, 8, 17],
   takeaway_cup: [8, 8, 14],

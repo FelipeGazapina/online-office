@@ -235,7 +235,7 @@ const headphones = (look: number) => {
       lean(cyl(0.04, 0.04, 0.012, 0, 0, 0, '#1c1f27', 14), 0, Math.PI / 2, sx * 0.082, 0.045, 0),
       lean(cyl(0.03, 0.03, 0.004, 0, 0, 0, trim, 12), 0, Math.PI / 2, sx * 0.114, 0.045, 0),
     ]),
-  ]);
+  ]).scale(0.85, 0.85, 0.85);
 };
 
 const BOTTLES = [['#4f9bd9', '#f4f0e6'], ['#8fd0b8', '#2b2e38'], ['#c9cdd8', '#2b2e38'], ['#e8828f', '#f4f0e6']] as const;

@@ -3,7 +3,7 @@
 // Run: pnpm build:verify && OFFICE_OUT_DIR=out/verify OFFICE_CDP_PORT=9341 node verify/cdp.mjs verify/e2e-dressing.mjs
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { dressingOf, floorItems, ITEM_DEFS, topRect } from '../src/shared/space/index.ts';
+import { clustersOf, dressingOf, floorItems, ITEM_DEFS, topRect } from '../src/shared/space/index.ts';
 import { unitsOverlap } from '../src/shared/space/surface.ts';
 import { itemRect } from '../src/shared/space/geom.ts';
 import { assert, scratch } from './lib.mjs';
@@ -40,8 +40,10 @@ export default async function (s) {
   const disk = readFileSync(file, 'utf8');
   assert(JSON.parse(disk).building && !disk.includes('~wear'), 'the building file holds the desks and none of what they wear');
 
-    const target = worn.find((i) => !i.lvl && i.v < 4 && i.def !== 'mug');
-  const desk = desks.find((d) => d.id === target.on);
+  const deskWith = desks.find((d) => clustersOf(first).get(d.id).length === 3);
+  const laid = clustersOf(first).get(deskWith.id);
+  const target = laid[laid.length - 1].things.find((i) => !i.lvl && i.def !== 'mug') ?? laid[laid.length - 1].things[0];
+  const desk = deskWith;
   const onDesk = worn.filter((i) => i.on === desk.id);
   const mug = { id: 'owner-mug', def: 'mug', on: desk.id, u: target.u, v: target.v, rot: 0 };
   await s.eval(`window.office.send({ type: 'build', ops: ${JSON.stringify([{ t: 'items', story: 0, put: [mug], del: [] }])} })`);
@@ -50,7 +52,9 @@ export default async function (s) {
   const next = dressingOf(await s.eval(story()));
   const left = next.filter((i) => i.on === desk.id);
   const gone = !left.some((i) => i.def === target.def && i.u === target.u && i.v === target.v);
-  assert(gone && left.length >= onDesk.length - 5 && left.every((i) => !unitsOverlap(topRect(i, ITEM_DEFS[i.def]), topRect(mug, ITEM_DEFS.mug))), `the mug takes the place of the ${target.def} that stood there, nothing worn touches it and the desk still wears ${left.length} things (${onDesk.length} before)`);
+  const earlier = laid.slice(0, -1).flatMap((c) => c.things);
+  const kept = earlier.every((m) => left.some((i) => i.def === m.def && i.look === m.look && i.u === m.u && i.v === m.v));
+  assert(gone && kept && left.length >= onDesk.length - 5 && left.every((i) => !unitsOverlap(topRect(i, ITEM_DEFS[i.def]), topRect(mug, ITEM_DEFS.mug))), `the mug takes the place of the ${target.def} that stood there, nothing worn touches it, the clusters before it stay and the desk still wears ${left.length} things (${onDesk.length} before)`);
   const redrawn = await s.eval(`__office.probe('dressing')`);
   assert(redrawn.length === 1 && redrawn[0].digest === digest(next) && redrawn[0].digest !== drawn[0].digest, `and the scene draws the ${next.length} that are left, with the mug's desk changed`);
 
