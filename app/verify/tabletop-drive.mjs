@@ -45,7 +45,7 @@ export function drive(s, { shots } = {}) {
   };
   // Pans until the point is within `tol` pixels of the middle of the screen, so a close view has the thing it is about in the middle of it.
   const centerOn = async (x, y, z, tol = 70) => {
-    for (let i = 0; i < 14; i++) {
+    for (let i = 0; i < 40; i++) {
       const p = await at(x, y, z);
       const [dx, dy] = [p.x - 720, p.y - 400];
       if (Math.hypot(dx, dy) < tol) break;

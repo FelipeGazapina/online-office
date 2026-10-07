@@ -59,7 +59,7 @@ export default async function (s, { launch }) {
   if (SHOTS) await s.eval(`document.documentElement.classList.remove('test-run'); document.querySelector('.test-banner')?.remove();`);
   await s.sleep(800);
 
-  const { at, hold, release, building, tool, level, verdict, waitBuilding, park, still, bring, centerOn, hoverPx, probeOf, waitProbe, enterBuild, exitBuild, zoom, shotTo, choose, openCatalog, turnTo } = drive(s, { shots: SHOTS });
+  const { at, building, tool, level, verdict, waitBuilding, park, still, bring, centerOn, hoverPx, probeOf, waitProbe, enterBuild, exitBuild, zoom, shotTo, choose, openCatalog, turnTo } = drive(s, { shots: SHOTS });
   const rev = (b) => JSON.stringify(b.stories.map((st) => st.rev));
   const unchanged = (before, after) => rev(before) === rev(after);
   const rectOf = (sel) => s.eval(`(() => { const e = document.querySelector(${JSON.stringify(sel)}); if (!e) return null; const r = e.getBoundingClientRect(); return r.width && r.height ? { x0: r.left, y0: r.top, x1: r.right, y1: r.bottom } : null; })()`);

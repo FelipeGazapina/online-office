@@ -879,7 +879,6 @@ const flat = (stories = 1, size = 20): Building => {
   check(hostGone.ok && hostGone.building.stories[0].items.length === 1 && eq(must(applyOps(hostGone.building, hostGone.inverse, noCtx)), books2), 'deleting the desk deletes the whole stack, and undo brings it all back');
 
   // picking and aiming
-  const topY = (b: Building, it: Item) => poseOf(b, it).y;
   const down = (x: number, z: number): PickRay => ({ o: { x, y: 4, z }, d: { x: 0, y: -1, z: 0 } });
   const mugPose = poseOf(stackedMug, mugOn);
   check(topItemAt(stackedMug.stories[0], down(mugPose.x, mugPose.z))?.id === 'mug', 'a ray down onto the mug on the notebook picks the mug');
@@ -905,7 +904,6 @@ const flat = (stories = 1, size = 20): Building => {
   check(mugNow.on === 'b:desk' && mugNow.lvl === 1 && mugNow.look === 2 && mugNow.ang === 5 && validate(shifted, noCtx).every((v) => v.kind === 'story_unreachable'), 'a block moved and turned keeps a mug on its notebook, with its look and turn');
   const upstairs = must(applyOps(dressed, moveBlockOps(blockStory, 0, 'blk', blockPose(blockItems(blockStory, 'blk'), 0, { x: 20, z: 12 }), 1), noCtx));
   check(upstairs.stories[1].items.filter((i) => i.on !== undefined).map((i) => `${i.id}:${i.lvl ?? 0}`).sort().join() === 'b:mug:1,b:nb:0', 'and carried to another floor');
-  void topY;
 
   // the verdict that drives the ghost stays fast with stacks about
   const t0 = performance.now();

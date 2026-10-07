@@ -87,7 +87,9 @@ export default async function (s) {
   await s.waitFor('window.__officeCamera && Math.abs(window.__officeCamera.blend) < 0.001', 10000);
 
 
-  // place.png: the item in hand over a table, its footprint green on the top, the catalog folded to its bar
+  // place.png: the item in hand over a table, its footprint green on the top, the catalog folded to its bar. The owner stands well away from it.
+  await s.eval(`__office.teleport(${table.x + 5}, ${table.z + 8}, 0)`);
+  await s.sleep(500);
   await d.enterBuild();
   await d.zoom(-1400);
   await d.choose(PLACE_ITEM);
