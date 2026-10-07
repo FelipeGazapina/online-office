@@ -11,7 +11,8 @@ import type { FloorItem, ItemId, Rot, Story, TopItem } from './types.ts';
 
 /** A thing of an arrangement: [def, u, v, { rot, look, ang, lvl }] in 12.5 cm units of the desk's own frame, like the dressing of a table. */
 export type Spot = readonly [def: string, u: number, v: number, extra?: { rot?: Rot; look?: number; ang?: number; lvl?: number }];
-type Zone = { name: string; origin: readonly [number, number]; skip: number; pool: readonly (readonly Spot[])[] };
+/** A place on a desk an arrangement goes. `skip` is how often the dice leave it empty; zones that draw on the same `list` (the three along the back) share its arrangements. */
+type Zone = { name: string; list: string; origin: readonly [number, number]; skip: number; pool: readonly (readonly Spot[])[] };
 
 /** The plant models. A pod (the desks of one block) wears each of them at most this often, so the same leaves are not on every desk. */
 export const PLANT_MODELS: ReadonlySet<string> = new Set(['potted_plant', 'succulent', 'succulent_trio', 'cactus', 'snake_plant', 'pothos']);
@@ -85,12 +86,12 @@ const FRONT: readonly (readonly Spot[])[] = [
 ];
 
 export const ZONES: readonly Zone[] = [
-  { name: 'back-left', origin: [0, 6], skip: 0.1, pool: BACK },
-  { name: 'back-middle', origin: [4, 6], skip: 0.45, pool: BACK },
-  { name: 'back-right', origin: [8, 6], skip: 0.2, pool: BACK },
-  { name: 'left', origin: [0, 0], skip: 0.1, pool: LEFT },
-  { name: 'right', origin: [0, 0], skip: 0.25, pool: RIGHT },
-  { name: 'front', origin: [0, 0], skip: 0.6, pool: FRONT },
+  { name: 'back-left', list: 'back', origin: [0, 6], skip: 0.1, pool: BACK },
+  { name: 'back-middle', list: 'back', origin: [4, 6], skip: 0.45, pool: BACK },
+  { name: 'back-right', list: 'back', origin: [8, 6], skip: 0.2, pool: BACK },
+  { name: 'left', list: 'left', origin: [0, 0], skip: 0.1, pool: LEFT },
+  { name: 'right', list: 'right', origin: [0, 0], skip: 0.25, pool: RIGHT },
+  { name: 'front', list: 'front', origin: [0, 0], skip: 0.6, pool: FRONT },
 ];
 
 /** A small generator of numbers in [0, 1) from a seed, so every choice of a desk comes from its id and nothing else. */
@@ -141,7 +142,7 @@ export function dressingOf(story: Story): readonly TopItem[] {
         const dice = seeded(seed);
         const skipped = dice() < zone.skip;
         if (skipped && round === 0) continue;
-        const useKey = (n: number) => `${pod}|${zone.pool === BACK ? 'back' : zone.name}|${n}`;
+        const useKey = (n: number) => `${pod}|${zone.list}|${n}`;
         const order = zone.pool.map((_, n) => n).sort((a, b) => (used.get(useKey(a)) ?? 0) - (used.get(useKey(b)) ?? 0) || hash(`${seed}/${a}`) - hash(`${seed}/${b}`));
         const shift = ([[0, 0], [1, 0], [0, 1], [-1, 0]] as const)[Math.floor(dice() * 4)];
         const looks = Math.floor(dice() * 8);
