@@ -9,6 +9,7 @@ import type {
   QuestionBody,
   Subagent,
 } from '../../../shared/protocol.ts';
+import type { TermEvent } from '../../../shared/terminal.ts';
 
 // What the company hands each session. `employee` and `block` are live views of company state;
 // every mutation goes back through the callbacks so persistence and broadcast stay in one place.
@@ -73,12 +74,22 @@ export type SessionHost = {
   // is done, not when the call that launched it returns. There is no need to report ends when the session stops: the
   // office clears every subagent then.
   subagentFinished(id: string): void;
+  // What happened in the turn, for the terminal on the employee's monitor (shared/terminal.ts). Report each in the order it
+  // happens: the message the harness was handed (`prompt`, when it is handed over, not when it was asked for), the model's
+  // text, each tool call and its result, the end of the turn. Say what you can. A harness that reports nothing here still
+  // gets the owner's messages, the final text and a notice that there is no live view.
+  terminal(event: TermEvent): void;
+  // The turn ended because the owner interrupted it (`EmployeeSession.interrupt`), with no message to follow. Call it
+  // instead of `taskCompleted`: the office settles what the turn served as failed, with the owner's interruption as the reason,
+  // and puts the employee back to idle.
+  taskInterrupted(): void;
 };
 
 // One per employee. Construction must be cheap: the real adapter starts its process on first message.
 export interface EmployeeSession {
-  // `task` is the whole prompt for the turn. `title` is a short name for it, for the desk and the status line.
-  assign(task: string, title?: string): void;
+  // `task` is the whole prompt for the turn. `title` is a short name for it, for the desk and the status line. `shown` is
+  // what the terminal echoes as the prompt: the words the owner or a teammate wrote, without the office's wrapping.
+  assign(task: string, title?: string, shown?: string): void;
   // Company routes interjections to a blocked employee into the question it is waiting on, so this only sees idle/working/error.
   interject(text: string, style: InterruptStyle): void;
   // The owner picked another model. `host.model` already returns it. Apply it from the next turn, and never interrupt
@@ -98,6 +109,9 @@ export interface EmployeeSession {
   // `session/prompt` during a turn). With no turn running, put it in front of the next task. With no harness process
   // running, do nothing, because the next start reads `host.rules()`.
   rulesChanged(text: string): void;
+  // The owner pressed Esc: drop the step that is running and wait for what comes next. Report the end with
+  // `host.taskInterrupted()`. Optional: a harness that cannot do it leaves the turn running.
+  interrupt?(): void;
   // Start the harness process now, so the first `assign` does not pay for it. Optional, and a no-op when it is running.
   // A process that dies while only warm is not an error: the next `assign` starts a new one.
   warm?(): void;

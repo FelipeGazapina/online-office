@@ -11,6 +11,7 @@ import { createInterface } from 'node:readline';
 import { PassThrough } from 'node:stream';
 import { covers, ruleFor } from '../src/shared/permissions.ts';
 import type { BlockId, Employee, EmployeeId, ModelId, PermissionMode, PermissionPolicy, QuestionBody, Subagent } from '../src/shared/protocol.ts';
+import type { TermEvent } from '../src/shared/terminal.ts';
 import {
   inheritedPolicy,
   insideBlock,
@@ -286,6 +287,8 @@ function scripted(sessionId?: string, policy: PermissionPolicy = { mode: 'ask', 
   const started: Subagent[] = [];
   const finished: string[] = [];
   const activity: string[] = [];
+  const terminal: TermEvent[] = [];
+  let interrupted = 0;
   let xp = 0;
   let answer = 'Allow';
   let rules = '';
@@ -321,10 +324,13 @@ function scripted(sessionId?: string, policy: PermissionPolicy = { mode: 'ask', 
     taskCompleted: () => void xp++,
     subagentStarted: (subagent) => void started.push(subagent),
     subagentFinished: (id) => void finished.push(id),
+    terminal: (event) => void terminal.push(event),
+    taskInterrupted: () => void interrupted++,
   };
   return {
     employee,
     host,
+    terminal,
     asked,
     said,
     logs,

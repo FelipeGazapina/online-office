@@ -13,6 +13,7 @@ import {
 } from '@anthropic-ai/claude-agent-sdk';
 import { SHELL_TOOL, isAllow } from '../../../shared/permissions.ts';
 import type { InterruptStyle, ModelCatalog, ModelId, ModelOption, PermissionMode, PermissionPolicy, QuestionBody } from '../../../shared/protocol.ts';
+import type { TermEvent } from '../../../shared/terminal.ts';
 import { logger } from '../debug.ts';
 import { persona } from '../persona.ts';
 import { trace } from '../trace.ts';
@@ -289,6 +290,14 @@ export class ClaudeSession implements EmployeeSession {
   private bubbles = new Map<number, { json: string; sent: number }>();
   // Ends with the process, so a permission question left open by a dead process is withdrawn from the owner's desk.
   private life = new AbortController();
+  // Set from the moment the owner presses Esc until the turn it stopped reports that it ended.
+  private ownerInterrupt = false;
+  // What the terminal shows of the message being written: the API message, and for each block the text or thinking so far.
+  private messageId = '';
+  private blocks = new Map<number, { id: string; kind: 'text' | 'thinking'; text: string; since: number }>();
+  // Output tokens of the turn: what finished messages wrote, and what the one in flight has written so far.
+  private tokensDone = 0;
+  private tokensLive = 0;
 
   // What the last `permissionsChanged` said. The next process starts on it.
   private policy: PermissionPolicy;
@@ -306,9 +315,9 @@ export class ClaudeSession implements EmployeeSession {
     this.policy = host.permissions;
   }
 
-  assign(task: string, title?: string) {
+  assign(task: string, title?: string, shown?: string) {
     this.beginTask(title ?? task);
-    this.send(this.withNotices(task));
+    this.send(this.withNotices(task), undefined, shown ?? title ?? task);
   }
 
   interject(text: string, style: InterruptStyle) {
@@ -317,24 +326,36 @@ export class ClaudeSession implements EmployeeSession {
     this.host.log(`Boss said: ${text}`);
     if (kind === 'idle' || kind === 'error') {
       this.beginTask(short(text, 80));
-      this.send(this.withNotices(framed));
+      this.send(this.withNotices(framed), undefined, text);
     } else if (style === 'now') {
-      void this.interruptThenSend(framed);
+      void this.interruptThenSend(framed, text);
     } else {
-      this.send(framed, 'next');
+      this.send(framed, 'next', text);
     }
+  }
+
+  // Esc on the terminal: the same hard stop as `now`, with no message after it. The turn ends when the SDK reports the abort.
+  interrupt() {
+    if (!this.q) return;
+    this.ownerInterrupt = true;
+    this.q.interrupt().catch((e: unknown) => {
+      debug('interrupt failed:', e);
+      this.ownerInterrupt = false;
+    });
   }
 
   // priority 'now' alone only aborts at the next tool boundary: a Bash that is already running finishes first.
   // interrupt() kills the running step, so we do both to honour "drop the current step and listen".
-  private async interruptThenSend(text: string) {
+  private async interruptThenSend(text: string, shown: string) {
     this.interrupting = true;
     try {
       await this.q?.interrupt();
     } catch (e) {
       debug('interrupt failed:', e);
     }
-    if (!this.stopped) this.send(text, 'now');
+    if (this.stopped) return;
+    this.host.terminal({ k: 'end', how: 'interrupted' });
+    this.send(text, 'now', shown);
   }
 
   // A live session switches models for its next turn. Without one, the next start reads `host.model`. The SDK refuses an
@@ -403,11 +424,12 @@ export class ClaudeSession implements EmployeeSession {
     this.start();
   }
 
-  private send(text: string, priority?: InterruptStyle) {
+  private send(text: string, priority?: InterruptStyle, shown?: string) {
     this.warming = false;
     this.hops.clear();
     if (!this.q) this.start();
     this.hop('push');
+    if (shown !== undefined) this.host.terminal({ k: 'prompt', text: shown });
     this.inbox.push({
       type: 'user',
       message: { role: 'user', content: text },
@@ -490,6 +512,7 @@ export class ClaudeSession implements EmployeeSession {
   // This turn failed but the process is fine, so the conversation carries on with the next message.
   private reportError(message: string) {
     debug('error:', message);
+    this.host.terminal({ k: 'end', how: 'error', message });
     this.host.setStatus({ kind: 'error', message });
     this.host.setActivity(`Something went wrong: ${short(message, 80)}`);
     this.host.log(`Error: ${message}`);
@@ -502,6 +525,7 @@ export class ClaudeSession implements EmployeeSession {
       this.gotInit = true;
       this.interrupting = false;
       if (host.employee.sessionId !== m.session_id) host.setSessionId(m.session_id);
+      host.terminal({ k: 'banner', title: `Claude Code v${m.claude_code_version}`, model: m.model, cwd: m.cwd });
       debug(
         `init model=${m.model} tools=${m.tools.length} skills=${m.skills.length} plugins=${m.plugins.map((p) => p.name)} mcp=${m.mcp_servers.map((s) => `${s.name}:${s.status}`)}`,
       );
@@ -518,10 +542,55 @@ export class ClaudeSession implements EmployeeSession {
     }
   }
 
-  // Streams the text of a `message` or `reply` call as the model writes it, so the first bubble shows within the first tokens.
   private onStream(m: Extract<SDKMessage, { type: 'stream_event' }>) {
-    const { event } = m;
-    if (m.parent_tool_use_id !== null || !this.host.streamed) return;
+    if (m.parent_tool_use_id !== null) return;
+    this.streamToTerminal(m.event);
+    this.streamBubbles(m.event);
+  }
+
+  // What the terminal shows while the model writes: its text as it comes, a marker while it thinks, the tokens so far.
+  private streamToTerminal(event: Extract<SDKMessage, { type: 'stream_event' }>['event']) {
+    const { host } = this;
+    switch (event.type) {
+      case 'message_start':
+        this.messageId = event.message.id;
+        this.blocks.clear();
+        this.tokensLive = 0;
+        return;
+      case 'content_block_start': {
+        const kind = event.content_block.type;
+        if (kind !== 'text' && kind !== 'thinking') return;
+        const block = { id: `${this.messageId}:${event.index}`, kind, text: '', since: Date.now() };
+        this.blocks.set(event.index, block);
+        if (kind === 'thinking') host.terminal({ k: 'thinking', id: block.id });
+        return;
+      }
+      case 'content_block_delta': {
+        const block = this.blocks.get(event.index);
+        if (block?.kind !== 'text' || event.delta.type !== 'text_delta') return;
+        block.text += event.delta.text;
+        host.terminal({ k: 'text', id: block.id, text: block.text });
+        return;
+      }
+      case 'content_block_stop': {
+        const block = this.blocks.get(event.index);
+        if (block?.kind === 'thinking') host.terminal({ k: 'thinking', id: block.id, secs: (Date.now() - block.since) / 1000 });
+        return;
+      }
+      case 'message_delta':
+        this.tokensLive = event.usage.output_tokens ?? this.tokensLive;
+        host.terminal({ k: 'tokens', out: this.tokensDone + this.tokensLive });
+        return;
+      case 'message_stop':
+        this.tokensDone += this.tokensLive;
+        this.tokensLive = 0;
+        return;
+    }
+  }
+
+  // Streams the text of a `message` or `reply` call as the model writes it, so the first bubble shows within the first tokens.
+  private streamBubbles(event: Extract<SDKMessage, { type: 'stream_event' }>['event']) {
+    if (!this.host.streamed) return;
     if (event.type === 'content_block_start' && event.content_block.type === 'tool_use' && BUBBLE_TOOLS.has(event.content_block.name)) {
       this.bubbles.set(event.index, { json: '', sent: 0 });
     } else if (event.type === 'content_block_delta' && event.delta.type === 'input_json_delta') {
@@ -552,7 +621,14 @@ export class ClaudeSession implements EmployeeSession {
   private onUser(m: SDKUserMessage) {
     const { content } = m.message;
     if (typeof content === 'string') return;
-    for (const block of content) if (block.type === 'tool_result' && block.is_error) this.subagentEnded(block.tool_use_id);
+    for (const block of content) {
+      if (block.type !== 'tool_result') continue;
+      if (block.is_error) this.subagentEnded(block.tool_use_id);
+      // What a subagent does inside stays inside: the terminal shows its call and its result, not each of its steps.
+      if (m.parent_tool_use_id !== null) continue;
+      const text = typeof block.content === 'string' ? block.content : (block.content ?? []).flatMap((c) => (c.type === 'text' ? [c.text] : [])).join('\n');
+      this.host.terminal({ k: 'result', id: block.tool_use_id, ok: !block.is_error, text, data: m.tool_use_result });
+    }
   }
 
   private onAssistant(m: Extract<SDKMessage, { type: 'assistant' }>) {
@@ -568,6 +644,7 @@ export class ClaudeSession implements EmployeeSession {
         const line = describeTool(block.name, input, host.block.cwd);
         host.setActivity(line);
         if (block.name !== `${OFFICE_TOOL_PREFIX}ask_owner`) host.log(line); // the office logs the question itself
+        if (m.parent_tool_use_id === null) host.terminal({ k: 'tool', id: block.id, name: block.name, input });
       } else if (block.type === 'text' && m.parent_tool_use_id === null) {
         const text = block.text.trim();
         if (!text) continue;
@@ -575,6 +652,9 @@ export class ClaudeSession implements EmployeeSession {
         this.lastSaid = text;
         host.said(text);
         host.log(`Said: ${text}`);
+        // The text was on the terminal as it streamed. Whole again here, under the same id, it corrects anything the stream missed.
+        const streamed = [...this.blocks.values()].find((b) => b.kind === 'text' && b.text.trim() === text);
+        host.terminal({ k: 'text', id: streamed?.id ?? `${m.uuid}:${text.length}`, text });
       }
     }
   }
@@ -585,13 +665,21 @@ export class ClaudeSession implements EmployeeSession {
     // a success with empty text, so only terminal_reason tells it apart from a finished task.
     const aborted = m.terminal_reason === 'aborted_tools' || m.terminal_reason === 'aborted_streaming';
     if (aborted || (this.interrupting && m.subtype !== 'success')) {
-      debug('turn aborted, next turn incoming');
-      return;
+      this.tokensDone = 0;
+      if (!this.ownerInterrupt) return debug('turn aborted, next turn incoming');
+      // The owner pressed Esc and nothing follows: the turn is over.
+      this.ownerInterrupt = false;
+      this.interrupting = false;
+      host.terminal({ k: 'end', how: 'interrupted' });
+      return host.taskInterrupted();
     }
+    this.ownerInterrupt = false;
+    this.tokensDone = 0;
     if (m.subtype !== 'success' || m.is_error) {
       return this.reportError(('errors' in m && m.errors.join('; ')) || ('result' in m && m.result) || m.subtype);
     }
     const text = m.result.trim();
+    host.terminal({ k: 'end', how: 'done' });
     host.taskCompleted(text);
     host.setActivity(short(text, 120) || 'Finished the task');
     host.setStatus({ kind: 'idle' });
