@@ -21,3 +21,4 @@ export type { BlockPose } from './blocks.ts';
 export { NEIGHBOUR_GAP, SETUP_COUNT, setupsOf } from './setups.ts';
 export { composeVignette } from './compose.ts';
 export { VIGNETTES } from './vignettes.ts';
+export { dressingOf, PLANT_MODELS, PLANTS_PER_POD, ZONES } from './dressing.ts';
