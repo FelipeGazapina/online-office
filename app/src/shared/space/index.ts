@@ -21,4 +21,5 @@ export type { BlockPose } from './blocks.ts';
 export { NEIGHBOUR_GAP, SETUP_COUNT, setupsOf } from './setups.ts';
 export { composeVignette } from './compose.ts';
 export { VIGNETTES } from './vignettes.ts';
-export { dressingOf, PLANT_MODELS, PLANTS_PER_POD, ZONES } from './dressing.ts';
+export { clustersOf, dressingOf, KIND_PER_POD, kindsOf, MANY, perPod, PLANT_MODELS, PLANTS_PER_POD, spotsOf, STRICT, tierOf, WORKING, wornKey, ZONES } from './dressing.ts';
+export type { Cluster, Kinds, Spot, Tier, Worn, ZoneName } from './dressing.ts';

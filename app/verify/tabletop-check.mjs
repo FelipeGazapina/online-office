@@ -8,6 +8,7 @@ import { readFileSync } from 'node:fs';
 import { Box3, Vector3 } from 'three';
 import { CELL, ITEM_DEFS, SETUP_COUNT, TOP_UNIT, placementOf } from '../src/shared/space/index.ts';
 import { PROP_DEFS, computerOf, modelOf } from '../src/renderer/src/scene/building/models.ts';
+import { TABLETOP_MODELS } from '../src/renderer/src/scene/building/tabletop.ts';
 import { check, finish } from './check.ts';
 
 const SLACK = 0.02;
@@ -97,6 +98,76 @@ for (const def of small) {
   if (looks > 1) {
     const [a, b] = [modelOf(def.id, 0).getAttribute('color'), modelOf(def.id, 1).getAttribute('color')];
     check(a && b && a.array.some((v, i) => v !== b.array[i]), `${def.id}: look 1 is not look 0 over again`);
+  }
+}
+// The size of every small thing is the size of the thing in the world, in centimeters: [longer side, shorter side, height, the sides held to 10%].
+// Everything else is held to 30% (and a centimeter and a half), which catches a cube drawn as big as a mug and a phone as wide as a notebook. A model
+// drawn in code and the baked prop of the same def are both held to it, because the one is what a desk wears and the other what the owner puts down.
+const REAL = {
+  laptop: [33, 23, 24],
+  books: [24, 17, 9],
+  papers: [29, 21, 5],
+  mug: [11, 8, 9, 'h'],
+  picture_frame: [20, 10, 22],
+  vase: [16, 16, 34],
+  pen_cup: [8, 8, 15],
+  desk_clock: [11, 5, 13],
+  trophy: [16, 12, 22],
+  notebook: [30, 21, 3],
+  folder: [32, 23, 3],
+  magazine: [30, 22, 1],
+  coaster: [10, 10, 1],
+  lunchbox: [22, 15, 8],
+  books_row: [32, 16, 25],
+  sticky_notes: [8, 8, 3],
+  headphones: [19, 8, 9],
+  water_bottle: [7, 7, 23],
+  tumbler: [8, 8, 17],
+  takeaway_cup: [8, 8, 14],
+  desk_organizer: [30, 20, 13],
+  frame_small: [11, 6, 14],
+  succulent: [14, 14, 16],
+  succulent_trio: [34, 10, 11],
+  potted_plant: [21, 19, 34],
+  cable_tray: [34, 10, 6],
+  snack_bowl: [20, 20, 9],
+  calculator: [17, 10, 2.5],
+  phone_stand: [10, 10, 15],
+  phone: [14.7, 7.1, 0.8, 'wd'],
+  tablet: [21, 13, 15],
+  candle: [8, 8, 9],
+  cat_statue: [8, 7, 15],
+  letter_tray: [32, 24, 10],
+  glasses: [13, 10, 2],
+  stapler: [15, 4.5, 5],
+  speaker: [9, 9, 11],
+  cactus: [11, 8, 14],
+  snake_plant: [16, 16, 34],
+  pothos: [22, 20, 20],
+  rubber_duck: [9, 6, 7],
+  puzzle_cube: [5.7, 5.7, 5.7, 'wdh'],
+  tray: [48, 35, 3],
+  runner: [100, 24, 1],
+  lamp_desk: [29, 9.4, 42],
+  plant_small: [28, 26, 42],
+  plant_cactus: [28, 26, 42],
+  coffee_machine: [40, 35, 68],
+};
+const alone = small.filter((d) => !d.group);
+check(alone.every((d) => REAL[d.id]) && Object.keys(REAL).every((id) => ITEM_DEFS[id]), `every one of the ${alone.length} small defs has its real size listed, and every listed size is a def`, alone.filter((d) => !REAL[d.id]).map((d) => d.id).join(' '));
+const cm = (n) => n * 100;
+const size = (box) => [...[cm(box.max.x - box.min.x), cm(box.max.z - box.min.z)].sort((a, b) => b - a), cm(box.max.y)];
+for (const def of alone) {
+  const [w, d, h, strict = ''] = REAL[def.id] ?? [];
+  if (w === undefined) continue;
+  const baked = PROP_DEFS[def.id];
+  const models = [...(TABLETOP_MODELS[def.id] || !baked ? [[`${def.id}`, (look) => new Box3().setFromBufferAttribute(modelOf(def.id, look).getAttribute('position'))]] : []), ...(baked ? [[`${def.id} (${baked.prop})`, () => bakedBox(baked.prop)]] : [])];
+  for (const [at, boxOf] of models) {
+    for (let look = 0; look < (at === def.id ? (def.looks ?? 1) : 1); look++) {
+      const got = size(boxOf(look));
+      const off = [['w', got[0], w], ['d', got[1], d], ['h', got[2], h]].filter(([k, v, real]) => Math.abs(v - real) > Math.max(strict.includes(k) ? 0.1 : 0.3, 0) * real + (strict.includes(k) ? 0.7 : 1.5));
+      check(off.length === 0, `${at}${(def.looks ?? 1) > 1 && at === def.id ? ` look ${look}` : ''}: ${got.map((n) => n.toFixed(1)).join(' x ')} cm against ${w} x ${d} x ${h} cm in the world`, off.map(([k, v, real]) => `${k} ${v.toFixed(1)} vs ${real}`).join(', '));
+    }
   }
 }
 finish();
