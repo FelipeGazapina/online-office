@@ -113,6 +113,7 @@ const furniture: readonly [string, string, TabId, boolean][] = [
   ['frame_small', 'Small frame', 'tabletop', false],
   ['succulent', 'Succulent', 'tabletop', false],
   ['succulent_trio', 'Succulent trio', 'tabletop', false],
+  ['potted_plant', 'Potted plant', 'tabletop', false],
   ['cable_tray', 'Cable tray', 'tabletop', false],
   ['snack_bowl', 'Snack bowl', 'tabletop', false],
   ['calculator', 'Calculator', 'tabletop', false],

@@ -35,7 +35,7 @@ export const VIGNETTES: readonly Vignette[] = [
     looks: 4,
     members: [
       { def: 'runner', u: 0, v: 0 },
-      { def: 'succulent', u: 0, v: 0, lvl: 1, ang: 12 },
+      { def: 'potted_plant', u: 0, v: 0, lvl: 1, ang: 12 },
       { def: 'candle', u: 2, v: 1, lvl: 1 },
       { def: 'candle', u: 3, v: 0, lvl: 1, look: 2 },
       { def: 'books_row', u: 4, v: 0, lvl: 1 },

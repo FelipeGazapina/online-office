@@ -11,16 +11,16 @@ const DESKS = [
   [
     ['vg_coffee', 0, 1, { look: 0 }],
     ['water_bottle', 10, 0, { look: 0 }],
-    ['succulent', 10, 6, { look: 1, ang: 20 }],
+    ['potted_plant', 10, 6, { look: 1, ang: 20 }],
     ['frame_small', 6, 7, { look: 2, ang: -6 }],
     ['sticky_notes', 11, 3, { look: 0, ang: 14 }],
   ],
   // a stack of books with a plant on top on the right, headphones and a mug on the left
   [
     ['vg_stack', 10, 1, { rot: 1, look: 1 }],
-    ['headphones', 0, 4, { look: 0, ang: 8 }],
+    ['headphones', 0, 3, { look: 0, ang: 8 }],
     ['mug', 0, 1, { look: 2, ang: 14 }],
-    ['desk_organizer', 5, 6, { look: 0, ang: 2 }],
+    ['lamp_desk', 0, 5, { ang: 10 }],
     ['candle', 10, 6, { look: 2 }],
   ],
   // a runner across the back with its candles, a notebook and a pen cup in front of it
@@ -42,7 +42,8 @@ const DESKS = [
   [
     ['vg_snack', 0, 0, { rot: 1, look: 2 }],
     ['vg_stack', 10, 4, { rot: 1, look: 2 }],
-    ['succulent_trio', 5, 7, { look: 1 }],
+    ['lamp_desk', 0, 5, { ang: -8 }],
+    ['succulent_trio', 8, 7, { look: 1 }],
     ['water_bottle', 10, 0, { look: 3 }],
   ],
   // the laptop one: a laptop beside the computer, books in a row, glasses on a folder

@@ -148,6 +148,7 @@ const tabletop: ItemDef[] = [
   small('frame_small', 1, 1, 0.14, { looks: 4 }),
   small('succulent', 2, 2, 0.16, { looks: 4 }),
   small('succulent_trio', 3, 1, 0.11, { looks: 2 }),
+  small('potted_plant', 2, 2, 0.34, { looks: 4 }),
   small('cable_tray', 3, 1, 0.07, { looks: 2 }),
   small('snack_bowl', 2, 2, 0.09, { looks: 3 }),
   small('calculator', 1, 2, 0.025, { looks: 2 }),
