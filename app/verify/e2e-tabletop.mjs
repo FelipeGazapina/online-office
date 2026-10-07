@@ -3,7 +3,7 @@
 // restarts. Real mouse and key events through the DevTools protocol; the checks read the building main holds and the
 // instances the scene draws.
 // Small things come in looks, sit a few degrees off square, stack on flat ones, and the catalog folds out of the way while one is in hand.
-// Set OFFICE_SHOTS_DIR to also write close.png (1440x900) there; place.png and decorated.png come from shots-tabletop.mjs.
+// Set OFFICE_SHOTS_DIR to also write close.png (1440x900) there; place.png and desks.png come from shots-tabletop.mjs.
 // Run: pnpm build:verify && OFFICE_OUT_DIR=out/verify OFFICE_CDP_PORT=9341 node verify/cdp.mjs verify/e2e-tabletop.mjs
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -312,6 +312,13 @@ export default async function (s, { launch }) {
     await s.click(px.x, px.y);
     await waitBuilding(`b.stories[0].items.some((i) => i.def === 'books' && i.lvl === 1)`, 'the second books did not land');
     dressing.push((await building()).stories[0].items.find((i) => i.def === 'books' && i.lvl === 1));
+    await s.press('Escape');
+    await park();
+  }
+  // The props desks used to wear on their own are cards of the tab like the rest: each is picked from its card and lands like the others.
+  for (const [entry, u, v] of [['phone', 19, 1], ['puzzle_cube', 21, 1], ['rubber_duck', 21, 3], ['cactus', 19, 4], ['snake_plant', 21, 5], ['pothos', 12, 9]]) {
+    assert(cards.includes(entry), `${entry} is a card of the Tabletop tab`);
+    await dress(entry, entry, TABLE, u, v, 0);
     await s.press('Escape');
     await park();
   }
