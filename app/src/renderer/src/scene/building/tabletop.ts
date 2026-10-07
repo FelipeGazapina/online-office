@@ -1,7 +1,7 @@
 // The models of the small things that stand on desks, tables and shelves. Each sits on y = 0, the surface it stands on, with
 // its origin at the middle of its footprint (`ItemDef.top`, in 12.5 cm units) and faces +z at rot 0 like every other model:
 // a laptop's keys are toward +z, its screen toward -z. They are a few boxes and cylinders each, so one def stays one draw call.
-import { BoxGeometry, type BufferGeometry } from 'three';
+import { BoxGeometry, Vector3, type BufferGeometry } from 'three';
 import { blob, box, cyl, lathe, lean, merge, paint, rbox } from './parts.ts';
 
 const SILVER = '#c9cdd8';
@@ -11,12 +11,12 @@ const GOLD = '#d9b45a';
 
 const laptop = () => {
   // The lid and its lit screen, hinged at the back of the base and leaned away from the keys.
-  const lid = merge([paint(new BoxGeometry(0.34, 0.22, 0.01).translate(0, 0.11, 0), SILVER), paint(new BoxGeometry(0.31, 0.19, 0.003).translate(0, 0.11, 0.0065), '#8fb6ff')]);
+  const lid = merge([paint(new BoxGeometry(0.33, 0.19, 0.01).translate(0, 0.095, 0), SILVER), paint(new BoxGeometry(0.3, 0.165, 0.003).translate(0, 0.095, 0.0065), '#8fb6ff')]);
   return merge([
-    box(0.34, 0.014, 0.23, 0, 0.007, 0.0, SILVER),
-    box(0.29, 0.003, 0.1, 0, 0.0155, -0.02, INK),
-    box(0.1, 0.002, 0.045, 0, 0.015, 0.075, '#aeb3c0'),
-    lean(lid, -0.34, 0, 0, 0.014, -0.105),
+    box(0.33, 0.014, 0.2, 0, 0.007, 0.0, SILVER),
+    box(0.28, 0.003, 0.085, 0, 0.0155, -0.015, INK),
+    box(0.1, 0.002, 0.04, 0, 0.015, 0.065, '#aeb3c0'),
+    lean(lid, -0.28, 0, 0, 0.014, -0.095),
   ]);
 };
 
@@ -129,14 +129,22 @@ const trophy = () =>
     box(0.022, 0.05, 0.01, 0.07, 0.17, 0, GOLD),
   ]);
 
+// A footprint on a top hugs its model, so each model is centered on it, whatever the parts that stick out to one side do.
+const around = (make: () => BufferGeometry) => () => {
+  const g = make();
+  g.computeBoundingBox();
+  const c = g.boundingBox!.getCenter(new Vector3());
+  return g.translate(-c.x, 0, -c.z);
+};
+
 export const TABLETOP_MODELS: Readonly<Record<string, () => BufferGeometry>> = {
-  laptop,
-  books,
-  papers,
-  mug,
-  picture_frame: frame,
-  vase,
-  pen_cup: penCup,
-  desk_clock: deskClock,
-  trophy,
+  laptop: around(laptop),
+  books: around(books),
+  papers: around(papers),
+  mug: around(mug),
+  picture_frame: around(frame),
+  vase: around(vase),
+  pen_cup: around(penCup),
+  desk_clock: around(deskClock),
+  trophy: around(trophy),
 };

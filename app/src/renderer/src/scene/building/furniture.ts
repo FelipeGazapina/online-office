@@ -120,7 +120,7 @@ export const FURNITURE: Readonly<Record<string, () => BufferGeometry>> = {
   // ---- tables
   meeting_round: () => merge([cyl(1.0, 1.0, 0.08, 0, 0.72, 0, OAK, 28), cyl(0.1, 0.16, 0.7, 0, 0.35, 0, DARK, 10), cyl(0.5, 0.5, 0.04, 0, 0.02, 0, DARK, 18)]),
   meeting_long: () => merge([bbox(3.9, 0.1, 1.4, 0, 0.72, 0, OAK, 0.04), box(0.12, 0.7, 1.1, -1.7, 0.35, 0, DARK), box(0.12, 0.7, 1.1, 1.7, 0.35, 0, DARK), box(3.2, 0.06, 0.1, 0, 0.5, 0, DARK)]),
-  coffee_table: () => merge([bbox(0.9, 0.05, 0.9, 0, 0.42, 0, WALNUT, 0.02), ...legs(0.9, 0.9, 0.4, 0.07, DARK), cyl(0.07, 0.07, 0.01, 0.1, 0.46, 0.1, SKY, 12)]),
+  coffee_table: () => merge([bbox(0.9, 0.05, 0.9, 0, 0.42, 0, WALNUT, 0.02), ...legs(0.9, 0.9, 0.4, 0.07, DARK)]),
   side_table: () => merge([cyl(0.22, 0.22, 0.04, 0, 0.52, 0, WALNUT, 16), cyl(0.03, 0.03, 0.5, 0, 0.25, 0, DARK, 8), cyl(0.15, 0.15, 0.03, 0, 0.02, 0, DARK, 12)]),
   high_table: () => merge([bbox(1.4, 0.06, 0.9, 0, 1.05, 0, OAK, 0.025), ...legs(1.4, 0.9, 1.02, 0.08, STEEL), box(1.2, 0.03, 0.7, 0, 0.3, 0, STEEL)]),
   cafe_table: () => merge([cyl(0.45, 0.45, 0.05, 0, 0.74, 0, CREAM, 22), cyl(0.04, 0.04, 0.72, 0, 0.36, 0, INK, 8), cyl(0.28, 0.28, 0.03, 0, 0.02, 0, INK, 16)]),

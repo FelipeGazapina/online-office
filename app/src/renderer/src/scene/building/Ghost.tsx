@@ -9,7 +9,8 @@ import { mergeVertices } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { cellBounds, ITEM_DEFS, STORY_H, WALL_HALF, YAW, footprint, rotateLocal, stairsInfo, type FloorItem, type TopItem, type TopPose, type Vec2 } from '../../../../shared/space/index.ts';
 import { draft, type Ghost } from '../../hud/build/state.ts';
 import { useStore } from '../../store.ts';
-import { modelOf } from './models.ts';
+import { propOf } from '../props.ts';
+import { modelOf, PROP_DEFS } from './models.ts';
 
 const GREEN = '#2fe06a';
 const RED = '#ff4d4d';
@@ -46,6 +47,16 @@ const MATERIALS = {
 // The piece is tinted to the verdict's colour, not just lit by it: a pale piece over pale floor reads as glass.
 const ghostModel = (ok: boolean, depthTest: boolean) =>
   new MeshStandardMaterial({ vertexColors: true, color: ok ? '#3fd97e' : '#ff5c5c', transparent: true, opacity: depthTest ? 0.92 : 0.28, emissive: ok ? GREEN : RED, emissiveIntensity: 0.22, depthWrite: false, depthTest });
+// A baked prop has no vertex colors: the verdict's color is its whole color.
+const flatModel = (ok: boolean, depthTest: boolean) => {
+  const m = ghostModel(ok, depthTest);
+  m.vertexColors = false;
+  return m;
+};
+const FLAT_OK = flatModel(true, true);
+const FLAT_BAD = flatModel(false, true);
+const FLAT_XRAY_OK = flatModel(true, false);
+const FLAT_XRAY_BAD = flatModel(false, false);
 const MODEL_OK = ghostModel(true, true);
 const MODEL_BAD = ghostModel(false, true);
 const XRAY_OK = ghostModel(true, false);
@@ -72,11 +83,14 @@ const rim = (color: string, px: number) =>
   });
 const RIM = { ink: rim('#232640', RIM_INK), ok: rim('#a6ffc4', RIM_TONE), bad: rim('#ffb0b0', RIM_TONE) };
 const hulls = new Map<string, BufferGeometry>();
+// The small things that are drawn from a baked prop show that prop as their ghost, so the piece in hand is the piece that lands.
+const GHOST_BAKED: ReadonlySet<string> = new Set(['lamp_desk', 'laptop', 'picture_frame', 'vase', 'desk_clock']);
+const shapeOf = (def: string): BufferGeometry => (GHOST_BAKED.has(def) && PROP_DEFS[def] ? propOf(PROP_DEFS[def].prop).geometry : modelOf(def));
 /** The model's shape with its vertices welded and smoothly shaded, so pushing it outward does not tear it at the corners. */
 function hullOf(def: string): BufferGeometry {
   let g = hulls.get(def);
   if (!g) {
-    const src = modelOf(def);
+    const src = shapeOf(def);
     const bare = new BufferGeometry().setAttribute('position', src.getAttribute('position').clone());
     if (src.index) bare.setIndex(src.index.clone());
     g = mergeVertices(bare, 1e-4);
@@ -294,12 +308,13 @@ function TurnMark({ box, ok, min = 0.26 }: { box: { x0: number; z0: number; x1: 
 // The piece itself, tinted by the verdict, outlined, and again through whatever stands in front of it.
 function Model({ def, at, yaw, ok }: { def: string; at: [number, number, number]; yaw: number; ok: boolean }) {
   const hull = hullOf(def);
+  const flat = GHOST_BAKED.has(def);
   return (
     <>
       <mesh geometry={hull} material={RIM.ink} position={at} rotation-y={yaw} renderOrder={6} />
       <mesh geometry={hull} material={ok ? RIM.ok : RIM.bad} position={at} rotation-y={yaw} renderOrder={7} userData={{ probe: 'ghost-rim', ok }} />
-      <mesh geometry={modelOf(def)} material={ok ? XRAY_OK : XRAY_BAD} position={at} rotation-y={yaw} renderOrder={8} />
-      <mesh geometry={modelOf(def)} material={ok ? MODEL_OK : MODEL_BAD} position={at} rotation-y={yaw} renderOrder={9} />
+      <mesh geometry={shapeOf(def)} material={flat ? (ok ? FLAT_XRAY_OK : FLAT_XRAY_BAD) : ok ? XRAY_OK : XRAY_BAD} position={at} rotation-y={yaw} renderOrder={8} />
+      <mesh geometry={shapeOf(def)} material={flat ? (ok ? FLAT_OK : FLAT_BAD) : ok ? MODEL_OK : MODEL_BAD} position={at} rotation-y={yaw} renderOrder={9} />
     </>
   );
 }

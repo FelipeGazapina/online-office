@@ -52,7 +52,7 @@ const defs: ItemDef[] = [
   { id: 'team_sign', kind: 'decor', w: 2, d: 1, height: 1.2, walkable: false },
   { id: 'plant', kind: 'decor', w: 1, d: 1, height: 1.1, walkable: false },
   { id: 'sofa', kind: 'seat', w: 4, d: 2, height: 0.85, walkable: false },
-  { id: 'coffee_machine', kind: 'decor', w: 1, d: 1, height: 1.0, walkable: false },
+  { id: 'coffee_machine', kind: 'decor', w: 1, d: 1, height: 0.68, walkable: false },
   { id: 'meeting_table', kind: 'table', w: 6, d: 3, height: 0.75, walkable: false },
   { id: 'chair', kind: 'seat', w: 1, d: 1, height: 0.9, walkable: false },
   { id: 'rug', kind: 'decor', w: 6, d: 4, height: 0.02, walkable: true, layer: 'floor' },
@@ -90,15 +90,15 @@ const more: ItemDef[] = [
   piece('rug_small', 'decor', 4, 3, 0.03, true),
   piece('rug_round', 'decor', 4, 4, 0.03, true),
   piece('lamp_floor', 'decor', 1, 1, 1.7),
-  piece('lamp_desk', 'decor', 1, 1, 0.5),
+  piece('lamp_desk', 'decor', 1, 1, 0.42),
   piece('wall_art', 'decor', 2, 1, 1.4),
   piece('clock', 'decor', 1, 1, 1.75),
   piece('divider', 'decor', 4, 1, 1.65),
   // plants
-  piece('plant_small', 'decor', 1, 1, 0.55),
+  piece('plant_small', 'decor', 1, 1, 0.42),
   piece('plant_large', 'decor', 1, 1, 1.9),
   piece('plant_tree', 'decor', 2, 2, 2.5),
-  piece('plant_cactus', 'decor', 1, 1, 0.85),
+  piece('plant_cactus', 'decor', 1, 1, 0.42),
   piece('plant_fern', 'decor', 1, 1, 0.85),
   piece('plant_planter', 'decor', 3, 1, 0.8),
   piece('plant_hedge', 'decor', 4, 1, 1.15),
@@ -117,15 +117,15 @@ const more: ItemDef[] = [
 const small = (id: string, w: number, d: number, height: number): ItemDef => ({ id, kind: 'decor', w: 1, d: 1, height, walkable: false, placement: 'surface', top: { w, d } });
 
 const tabletop: ItemDef[] = [
-  small('laptop', 3, 2, 0.22),
-  small('books', 3, 2, 0.14),
-  small('papers', 3, 2, 0.03),
-  small('mug', 1, 1, 0.1),
-  small('picture_frame', 2, 1, 0.24),
-  small('vase', 2, 2, 0.42),
-  small('pen_cup', 1, 1, 0.15),
-  small('desk_clock', 2, 1, 0.14),
-  small('trophy', 2, 2, 0.28),
+  small('laptop', 3, 2, 0.28),
+  small('books', 3, 2, 0.1),
+  small('papers', 3, 2, 0.04),
+  small('mug', 1, 1, 0.09),
+  small('picture_frame', 2, 1, 0.25),
+  small('vase', 2, 2, 0.34),
+  small('pen_cup', 1, 1, 0.16),
+  small('desk_clock', 2, 1, 0.15),
+  small('trophy', 2, 2, 0.22),
 ];
 
 // What a project block brings besides its desks, board, terminal and sign. The kit places these around the block's middle
@@ -151,7 +151,7 @@ const pod: ItemDef[] = [
 // The tops of furniture, in TOP_UNITs from the footprint's corner in its unturned frame. `blocked` is what a def's model already
 // carries on its top: the monitor, the keyboard and the mouse of a desk. A rect inside the footprint keeps a thing off the
 // rim of a round or rounded top.
-const bench: Surface = { height: 0.73, rect: { u0: 0, v0: 0, u1: 12, v1: 8 }, blocked: [{ u0: 4, v0: 1, u1: 10, v1: 4 }, { u0: 3, v0: 5, u1: 9, v1: 6 }] };
+const bench: Surface = { height: 0.72, rect: { u0: 0, v0: 0, u1: 12, v1: 8 }, blocked: [{ u0: 4, v0: 1, u1: 10, v1: 4 }, { u0: 3, v0: 5, u1: 9, v1: 6 }] };
 const SURFACES: Readonly<Record<string, Surface>> = {
   bench_desk: bench,
   po_desk: { ...bench, blocked: [...bench.blocked!, { u0: 0, v0: 1, u1: 4, v1: 3 }] },
@@ -164,7 +164,7 @@ const SURFACES: Readonly<Record<string, Surface>> = {
   high_table: { height: 1.08, rect: { u0: 1, v0: 1, u1: 11, v1: 7 } },
   cafe_table: { height: 0.765, rect: { u0: 2, v0: 2, u1: 6, v1: 6 } },
   folding_table: { height: 0.765, rect: { u0: 1, v0: 1, u1: 15, v1: 7 } },
-  pod_huddle_table: { height: 0.73, rect: { u0: 2, v0: 2, u1: 10, v1: 10 } },
+  pod_huddle_table: { height: 0.725, rect: { u0: 2, v0: 0, u1: 10, v1: 8 } },
   pod_credenza: { height: 0.76, rect: { u0: 0, v0: 1, u1: 6, v1: 20 } },
   shelf_low: { height: 0.94, rect: { u0: 1, v0: 0, u1: 15, v1: 4 } },
   sideboard: { height: 0.89, rect: { u0: 1, v0: 0, u1: 15, v1: 4 } },

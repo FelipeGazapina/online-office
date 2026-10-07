@@ -142,6 +142,11 @@ export const PROP_DEFS: Readonly<Record<string, { prop: PropName; onTop?: (def: 
   plant_fern: { prop: 'plant_syngonium' },
   plant_small: { prop: 'plant_succulent' },
   plant_cactus: { prop: 'plant_succulent' },
+  lamp_desk: { prop: 'desk_lamp' },
+  laptop: { prop: 'laptop' },
+  picture_frame: { prop: 'picture_frame' },
+  vase: { prop: 'vase' },
+  desk_clock: { prop: 'desk_clock' },
   bench_desk: { prop: 'desk', onTop: () => desk(false, false) },
   po_desk: { prop: 'desk', onTop: () => desk(true, false) },
 };
