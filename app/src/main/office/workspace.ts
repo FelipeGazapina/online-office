@@ -141,6 +141,12 @@ export const integrate = (home: string, ws: Workspace, name: string, title: stri
   return paths.length ? { kind: 'conflict', branch, paths } : { kind: 'held', branch, reason: `git could not merge it: ${firstLine(merged.err || merged.out)}` };
 };
 
+// For work whose home is not there: commits what is left on the employee's branch and lands nowhere.
+export const hold = (ws: Workspace, name: string, title: string, reason: string): Integration => {
+  const committed = commitAll(ws, name, title);
+  return { kind: 'held', branch: ws.branch, reason: committed.ok ? reason : `could not commit ${name}'s changes: ${firstLine(committed.err || committed.out)}` };
+};
+
 export const commitsAhead = (home: string, ws: Workspace): number => Number(run(home, ['rev-list', '--count', `HEAD..${ws.branch}`]).out) || 0;
 
 // What this employee changed and the block has not absorbed yet: committed work since the merge base, plus whatever is
@@ -270,4 +276,12 @@ export const pushBranch = async (path: string, branch: string, name = 'Online Of
     else if (unmerged(path).length) run(path, ['merge', '--abort']);
   }
   return pushed.ok ? { kind: 'pushed' } : { kind: 'failed', reason: firstLine(pushed.err || pushed.out) };
+};
+
+// Commits the last push did not carry: a branch never pushed, or one that moved since. Reads the remote-tracking ref this
+// repo already has, so it asks no one.
+export const unpushed = (path: string, branch: string): boolean => {
+  if (!run(path, ['remote', 'get-url', 'origin']).ok) return false;
+  if (!exists(path, `refs/remotes/origin/${branch}`)) return true;
+  return Number(run(path, ['rev-list', '--count', `refs/remotes/origin/${branch}..${branch}`]).out) > 0;
 };

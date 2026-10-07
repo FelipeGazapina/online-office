@@ -39,6 +39,15 @@ export type HoursLog = {
   error?: { message: string; at: number };
 };
 
+// A pull request as the owner sees it on GitHub: a draft until someone marks it ready, then open, then merged or closed.
+export type PrState = 'draft' | 'open' | 'merged' | 'closed';
+export type TaskPr = { number: number; url: string; state: PrState };
+
+// Where a task's work lives in git: its branch, the branch its pull request targets, the pull request once there is one, and
+// `note` for the one thing the owner should know, such as why there is no pull request. A task in a block that is not a git
+// repository has none of this.
+export type TaskGit = { branch: string; base: string; pr?: TaskPr; note?: string };
+
 export type Task = {
   id: TaskId;
   boardId: BoardId;
@@ -55,6 +64,7 @@ export type Task = {
   updatedAt: number;
   lastOutcome?: LastOutcome;
   hours?: HoursLog;
+  git?: TaskGit;
 };
 
 export type BoardSync =
@@ -201,7 +211,47 @@ export function newTask(a: { id: TaskId; boardId: BoardId; title: string; notes?
 export function runRequest(task: Task, board: Board): { title: string; text: string } {
   const o = task.origin;
   const source = o.kind === 'manual' ? '' : `\n\nFrom ${o.sourceLabel}: ${o.identifier}${o.url ? ` ${o.url}` : ''}`;
-  return { title: task.title, text: `${task.title}${task.notes ? `\n\n${task.notes}` : ''}${source}\n\nTask board: ${board.name}.` };
+  const where = task.git ? `\n\nThis task has its own git branch, ${task.git.branch}. Whatever you and your team finish is merged into it for you and sent to GitHub as a pull request for the owner to review, so the block's main folder stays as it is.` : '';
+  return { title: task.title, text: `${task.title}${task.notes ? `\n\n${task.notes}` : ''}${source}${where}\n\nTask board: ${board.name}.` };
+}
+
+// ───────────────────────────── Git ─────────────────────────────
+
+// What a task branch name ends with, and what finds the branch again when the title has changed since.
+export const taskKey = (id: string): string => id.toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 8) || 'task';
+
+export const taskBranchName = (title: string, id: string): string => {
+  const slug = title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+/, '').slice(0, 32).replace(/-+$/, '');
+  return `task/${slug || 'task'}-${taskKey(id)}`;
+};
+
+// What the pull request says: the task's notes, where it came from, and who is on it.
+export function prBody(task: Task, people: readonly string[]): string {
+  const o = task.origin;
+  const rows = [
+    ...(o.kind === 'manual' ? [] : [`**From ${o.sourceLabel}:** ${o.url ? `[${o.identifier}](${o.url})` : o.identifier}`]),
+    ...(people.length ? [`**People:** ${people.join(', ')}`] : []),
+  ];
+  return [task.notes?.trim(), rows.join('\n'), 'Opened by Online Office. The work of each person on this task is merged into this branch as they finish it.'].filter(Boolean).join('\n\n');
+}
+
+export const prIsOpen = (pr: TaskPr | undefined): boolean => pr?.state === 'draft' || pr?.state === 'open';
+
+// The task once its pull request is known. A merged pull request is the owner's word that the work is done.
+export function withPr(task: Task, pr: TaskPr, now: number): Task {
+  if (!task.git) return task;
+  const { note: _, ...git } = task.git;
+  const next = { ...git, pr };
+  const stage = pr.state === 'merged' ? 'done' : task.stage;
+  if (JSON.stringify(next) === JSON.stringify(task.git) && stage === task.stage) return task;
+  return { ...task, git: next, stage, updatedAt: now };
+}
+
+// The task with a note about its branch, or with the note cleared.
+export function withGitNote(task: Task, note: string | undefined, now: number): Task {
+  if (!task.git || task.git.note === note) return task;
+  const { note: _, ...git } = task.git;
+  return { ...task, git: note ? { ...git, note } : git, updatedAt: now };
 }
 
 const sourceKey = (o: ProviderOrigin) => `${o.kind}:${o.externalId}`;
