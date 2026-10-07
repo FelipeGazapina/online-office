@@ -3,7 +3,7 @@
 // a board it has not seen.
 import type { BlockId, Employee } from '../../../../shared/protocol.ts';
 import type { Board, BoardId, Task, TaskId, TaskStage } from '../../../../shared/tasks.ts';
-import { newTaskMessage, type Draft } from '../../boardView.ts';
+import { foldStep, foldedOf, newTaskMessage, type Draft } from '../../boardView.ts';
 import type { Aim } from '../../deskDrop.ts';
 import { get, send, set, toast, useStore } from '../../store.ts';
 
@@ -17,6 +17,12 @@ function hold(task: Task, stage: TaskStage) {
   set((s) => ({ stageHold: { ...s.stageHold, [task.id]: { from: task.stage, stage, until: Date.now() + HOLD_MS } } }));
   // When the hold runs out the card goes where main says it is, which is where it was if main refused the move.
   setTimeout(() => set((s) => ({ stageHold: Object.fromEntries(Object.entries(s.stageHold).filter(([, h]) => h.until > Date.now())) })), HOLD_MS + 50);
+}
+
+// Hides a column of the board, or shows it again. A provider board stops pulling the cards that belong in a hidden column.
+export function foldColumn(board: Board, stage: TaskStage) {
+  const next = foldStep(foldedOf(board), stage);
+  if (next) send({ type: 'update_board', boardId: board.id, collapsed: next });
 }
 
 export function moveTask(task: Task, stage: TaskStage) {
