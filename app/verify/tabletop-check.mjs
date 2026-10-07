@@ -102,7 +102,7 @@ for (const def of small) {
 }
 // The size of every small thing is the size of the thing in the world, in centimeters: [longer side, shorter side, height, the sides held to 10%].
 // Everything else is held to 30% (and a centimeter and a half), which catches a cube drawn as big as a mug and a phone as wide as a notebook. A model
-// drawn in code and the baked prop of the same def are both held to it, because the one is what a desk wears and the other what the owner puts down.
+// drawn in code and the baked prop of the same def are both held to it, because either may be what the owner puts down.
 const REAL = {
   laptop: [33, 23, 24],
   books: [24, 17, 9],

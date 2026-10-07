@@ -1,5 +1,5 @@
-// What the owner puts on a team's huddle table, a meeting table and a shelf, as data. The team desks are not here: each wears its own things
-// from the building itself (`shared/space/dressing.ts`). Shared by the shots script, perf-dressed and dressing-check so the picture the panel
+// What the owner puts on a team's huddle table, a meeting table and a shelf, as data. The team desks are not here: a desk wears only its
+// computer, and the owner decorates it. Shared by the shots script, perf-dressed and dressing-check so the picture the panel
 // sees is the one the rules accepted. A spot is [def, u, v, { rot, look, ang, lvl }] in 12.5 cm units of the host's own frame.
 import { applyOps, composeVignette, floorItems, ITEM_DEFS } from '../src/shared/space/index.ts';
 

@@ -12,14 +12,14 @@ export const SETUP_COUNT = 8;
 export const NEIGHBOUR_GAP = 2;
 
 /** A stable number for a string: what a desk's id says about the desk, for every derived thing that differs from desk to desk. */
-export const hash = (s: string): number => {
+const hash = (s: string): number => {
   let h = 2166136261;
   for (let i = 0; i < s.length; i++) h = Math.imul(h ^ s.charCodeAt(i), 16777619);
   return h >>> 0;
 };
 
 /** The distance in cells between two items' footprints, edge to edge. */
-export const gap = (a: FloorItem, b: FloorItem): number => {
+const gap = (a: FloorItem, b: FloorItem): number => {
   const [p, q] = [itemRect(a, ITEM_DEFS[a.def]), itemRect(b, ITEM_DEFS[b.def])];
   return Math.max(q.x0 - p.x1, p.x0 - q.x1, q.z0 - p.z1, p.z0 - q.z1, 0);
 };

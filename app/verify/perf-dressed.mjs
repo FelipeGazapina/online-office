@@ -1,6 +1,5 @@
-// What a dressed office costs: the same fixture office measured as it opens (every desk already wears its own things, which are one draw call
-// per story) and then with the huddle table, a table and a shelf dressed by the owner in many looks (one draw call per look, so this is the
-// worst case for the number of draws). Shows the window, like e2e-perf.mjs.
+// What a dressed office costs: the same fixture office measured as it opens (bare desks with their computers) and then with the huddle table,
+// a table and a shelf dressed by the owner in many looks (one draw call per look, so this is the worst case for the number of draws). Shows the window, like e2e-perf.mjs.
 // Run: pnpm build:verify && OFFICE_OUT_DIR=out/verify OFFICE_CDP_PORT=9341 node verify/cdp.mjs verify/perf-dressed.mjs
 // OFFICE_PERF_ASSERT=1 fails the run unless the dressed office keeps fpsAvg >= 59.5 with at most 1% of frames over 25 ms.
 import { readFileSync, writeFileSync } from 'node:fs';
