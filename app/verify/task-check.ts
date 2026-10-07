@@ -33,6 +33,7 @@ import {
   type TaskId,
   type TaskTime,
 } from '../src/shared/tasks.ts';
+import { noInputs, type LiveInputs } from '../src/shared/activity.ts';
 import { Office } from '../src/main/office/company.ts';
 import { OfficeError } from '../src/main/office/error.ts';
 import { HARNESSES } from '../src/main/office/adapters/index.ts';
@@ -471,6 +472,116 @@ console.log('\n# a retried assign never posts twice');
   check(requests() === 1 && retry.view(0).tasks[0]!.runs.length === 1 && retry.view(0).tasks[0]!.runs[0] === healed.runs[0], 'a retry that has not seen the run finds the request by its key and links it');
 }
 
+console.log('\n# the activity of a task, and the owner answering its questions');
+{
+  const x = taskWorld();
+  const quick = x.tasks.boardsOf(B1).find((b) => b.kind === 'quick')!;
+  const noAsks: LiveInputs = noInputs;
+  const made = x.tasks.createTask(quick.id, 'Add the export');
+  x.w.fresh.add('app/export.ts');
+  x.tasks.assign(made.id, ANA);
+  x.sync();
+  const view = () => x.tasks.view(x.now(), noAsks);
+  const live = () => view().taskLive[made.id]!;
+  check(live().people.find((p) => p.employeeId === ANA)?.state === 'working', 'the snapshot carries what each person on a task is doing: Ana is working');
+  check(view().taskLive[x.tasks.createTask(quick.id, 'Not started').id] === undefined, 'a task nobody worked on has no summary');
+
+  x.advance(5_000);
+  const root = view().tasks.find((y) => y.id === made.id)!.runs[0]!;
+  const blocked = x.w.room.reply(ANA, root, { outcome: 'blocked', text: 'CSV or JSON?' });
+  x.w.room.turnEnded(ANA, 'blocked', true);
+  x.sync();
+  check(blocked.ok && live().questions.length === 1 && live().questions[0]!.text === 'CSV or JSON?' && live().questions[0]!.asker === ANA, 'a blocked reply shows up as a question on the task in the same sync', JSON.stringify(live().questions));
+  check(view().tasks.find((y) => y.id === made.id)!.stage === 'todo', 'and the run ending blocked still sends the task back to todo');
+
+  const qid = (live().questions[0]!.ref as { id: MessageId }).id;
+  const requests = () => x.w.room.state.order.filter((id) => x.w.room.state.messages.get(id)!.kind === 'request').length;
+  const before = requests();
+  const said = (f: () => unknown) => {
+    try {
+      f();
+    } catch (error) {
+      return error instanceof OfficeError ? error.message : String(error);
+    }
+    return '';
+  };
+  check(/some words/.test(said(() => x.tasks.answer(made.id, qid, '   ', noAsks))), 'an empty answer is refused');
+  check(/no longer|any more/.test(said(() => x.tasks.answer(made.id, 'nope' as MessageId, 'CSV', noAsks))), 'a question that is not open is refused');
+  x.advance(5_000);
+  x.tasks.answer(made.id, qid, 'CSV, please.', noAsks);
+  x.sync();
+  const after = view().tasks.find((y) => y.id === made.id)!;
+  const answerRun = x.w.room.state.messages.get(after.runs[1]!)!;
+  check(after.runs.length === 2 && answerRun.kind === 'request' && answerRun.from === 'owner' && answerRun.to === ANA && answerRun.rootId === root && answerRun.parentId === root, 'the answer is a new run for the one who stopped, in the same chain', JSON.stringify(answerRun));
+  check(answerRun.kind === 'request' && /CSV, please\./.test(answerRun.text) && /CSV or JSON\?/.test(answerRun.text) && /Add the export/.test(answerRun.text), 'it carries the answer, what they said, and the task');
+  check(after.stage === 'doing' && after.history!.at(-1)!.kind === 'stage' && (after.history!.at(-1) as { by: string }).by === 'owner', 'the task is back in doing, moved by the owner');
+  check(live().questions.length === 0 && live().people.find((p) => p.employeeId === ANA)?.state === 'working', 'the question closed and Ana resumed');
+  x.tasks.answer(made.id, qid, 'CSV, please.', noAsks);
+  x.tasks.answer(made.id, qid, 'CSV, please.', noAsks);
+  check(requests() === before + 1 && view().tasks.find((y) => y.id === made.id)!.runs.length === 2, 'answering again posts nothing: the same answer is the same run');
+
+  x.advance(60_000);
+  x.w.room.reply(ANA, answerRun.id, { outcome: 'done', text: 'Exported as CSV.', artifact: ['app/export.ts'] });
+  x.w.room.turnEnded(ANA, 'done', true);
+  x.sync();
+  const done = view().tasks.find((y) => y.id === made.id)!;
+  check(done.stage === 'review' && done.lastOutcome?.outcome === 'done' && done.lastOutcome.text === 'Exported as CSV.', 'the answer\'s run settling done moves the task to review with its result');
+  check(live().people.find((p) => p.employeeId === ANA)?.state === 'done', 'and Ana is done');
+  const time = view().taskTime[made.id]!;
+  check(time.byEmployee[ANA]! > 0 && !time.running.length, 'the answer\'s time counts for the task like any run');
+  const log = x.tasks.activityOf(made.id, noAsks);
+  const tags = log.entries.map((e) => (e.kind === 'stage' ? `stage:${e.by}:${e.to}` : e.kind === 'reply' ? `reply:${e.outcome}` : e.kind === 'request' ? `request:${e.answers ? 'answer' : 'run'}` : e.kind));
+  check(tags.join() === 'created,request:run,started,stage:owner:doing,reply:blocked,stage:mailroom:todo,request:answer,started,stage:owner:doing,reply:done,stage:mailroom:review', 'the log reads: asked, picked up, blocked, answered, resumed, done, each stage move with who made it', tags.join());
+  const moved = log.entries.filter((e) => e.kind === 'stage' && e.by === 'mailroom');
+  check(moved.every((e) => e.kind === 'stage' && !!e.cause && x.w.room.state.messages.get(e.cause as MessageId)?.kind === 'reply'), 'a move the office made names the reply that caused it');
+
+  // The crash window: the answer is in the ledger and the task file never heard of it.
+  const file = JSON.parse(readFileSync(x.file, 'utf8')) as { tasks: { id: string; runs: string[] }[] };
+  file.tasks.find((y) => y.id === made.id)!.runs = [root];
+  writeFileSync(x.file, JSON.stringify(file));
+  const crashed = new Tasks(x.file, x.host, x.w.persisted);
+  crashed.recover([B1, B2], []);
+  check(crashed.view(x.now()).tasks.find((y) => y.id === made.id)!.runs.includes(answerRun.id), 'a restart that never saw the answer relinks its run by key');
+}
+
+console.log('\n# a question put to a teammate is answered where the asker will read it');
+{
+  const x = taskWorld();
+  const quick = x.tasks.boardsOf(B1).find((b) => b.kind === 'quick')!;
+  const made = x.tasks.createTask(quick.id, 'Ship the export');
+  x.tasks.assign(made.id, PO);
+  x.sync();
+  const root = x.tasks.view(x.now()).tasks[0]!.runs[0]!;
+  const piece = x.w.room.post({ from: PO, to: 'Ana', body: { kind: 'request', text: 'the exporter' } });
+  if (!piece.ok) throw new Error('refused');
+  x.w.room.reply(ANA, piece.id, { outcome: 'blocked', text: 'I need the schema.' });
+  x.w.room.turnEnded(ANA, 'blocked', true);
+  x.sync();
+  const live = () => x.tasks.view(x.now()).taskLive[made.id]!;
+  const q = live().questions[0]!;
+  check(q.asker === ANA && q.to === PO && q.how === 'blocked', 'Ana\'s block on a piece is a question to the PO');
+  x.tasks.answer(made.id, (q.ref as { id: MessageId }).id, 'Use schema.ts.', noInputs);
+  x.sync();
+  const say = [...x.w.room.state.messages.values()].find((y) => y.kind === 'say' && y.from === 'owner' && y.to === PO);
+  check(say?.kind === 'say' && say.rootId === root && say.parentId === root && /Use schema\.ts\./.test(say.text) && /new request/.test(say.text), 'the owner\'s answer is a word to the PO inside the chain, who must act on it', JSON.stringify(say));
+  check(x.tasks.view(x.now()).tasks[0]!.runs.length === 1, 'it adds no run: the PO\'s own request is still open');
+  check(live().questions.length === 0, 'and the question closes');
+
+  const help = x.w.room.post({ from: ANA, to: 'Bruno', parentId: piece.id, body: { kind: 'request', intent: 'help', text: 'Which port?' } });
+  if (!help.ok) throw new Error('refused');
+  x.sync();
+  const hq = live().questions.find((y) => y.how === 'help')!;
+  x.tasks.answer(made.id, (hq.ref as { id: MessageId }).id, '5173', noInputs);
+  x.sync();
+  const note = [...x.w.room.state.messages.values()].find((y) => y.kind === 'say' && y.to === ANA && /5173/.test(y.text));
+  check(note?.kind === 'say' && note.parentId === help.id && /question to Bruno/.test(note.text), 'a help request is answered with a word to the one who asked, under the request', JSON.stringify(note));
+  check(!live().questions.some((y) => y.how === 'help'), 'and it closes');
+
+  const ask: LiveInputs = { awaiting: new Set(), asks: [{ employeeId: ANA, question: { id: 'q9' as never, askedAt: 1, kind: 'ask', text: 'In person?' } }] };
+  check(x.tasks.view(x.now(), ask).taskLive[made.id]!.questions.some((y) => y.how === 'ask'), 'an employee on the task waiting on the owner in person is a question on it');
+  check(/not waiting/.test((() => { try { x.tasks.answer(made.id, 'q9' as MessageId, 'x', ask); return ''; } catch (e2) { return e2 instanceof Error ? e2.message : ''; } })()), 'Tasks.answer takes only mail questions: the office answers the ones asked in person');
+}
+
 console.log('\n# a task made with its assignee and priority');
 {
   const x = taskWorld();
@@ -612,6 +723,10 @@ console.log('\n# CronoSpark hours go out only when the owner sends them');
   check(Math.abs(anaHours - 210 / 3600) < 0.0001, `Ana's 210 s went out as ${anaHours} h in all, the rounding of the first call carried into the second`);
   await x.tasks.sendHours(target.id);
   check(x.provider.calls.length === 3, 'and then it is sent for good');
+  const history = taskOf(target.id).history ?? [];
+  check(history.filter((h) => h.kind === 'stage').map((h) => `${h.by}:${h.to}`).join() === 'owner:doing,mailroom:review,owner:done,owner:doing,mailroom:review', 'the task\'s history says who moved each stage', JSON.stringify(history));
+  const sends = history.filter((h): h is Extract<typeof h, { kind: 'hours' }> => h.kind === 'hours');
+  check(sends.length === 4 && sends.filter((h) => h.error).length === 1 && /CronoSpark is down/.test(sends.find((h) => h.error)?.error ?? '') && sends.filter((h) => !h.error).length === 3, 'every hours send is on the history, and the one that failed says why', JSON.stringify(sends));
 
   // Only a CronoSpark task has hours.
   const linear = x.tasks.createBoard(B1, 'Linear', { kind: 'feature', sources: [{ provider: 'linear', projectId: 'team:ENG' }] });

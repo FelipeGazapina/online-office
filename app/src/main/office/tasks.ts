@@ -6,6 +6,7 @@
 // Plain Node: verify/task-check.ts imports it without Electron.
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
+import { activityIndexOf, answerKey, clipText, emptyActivity, foldActivity, liveOf, logOf, noInputs, noteKey, type ActivityEntry, type ActivityIndex, type LiveInputs, type TaskLive } from '../../shared/activity.ts';
 import type { LedgerEntry, MessageId } from '../../shared/mail.ts';
 import type { BlockId, EmployeeId, LinearPeople, LinearPerson, TaskBoardSource, TaskCard } from '../../shared/protocol.ts';
 import {
@@ -19,6 +20,7 @@ import {
   newTask,
   outcomeFromRuns,
   patchBoard,
+  restage,
   runRequest,
   sliceTasks,
   syncCards,
@@ -26,6 +28,7 @@ import {
   turnLogOf,
   unsentOf,
   wantsCard,
+  withEvent,
   type Board,
   type BoardId,
   type BoardPatch,
@@ -35,6 +38,7 @@ import {
   type LegacySources,
   type Priority,
   type RunState,
+  type StageBy,
   type Task,
   type TaskId,
   type TaskStage,
@@ -67,7 +71,7 @@ type TasksFile = { v: 1; boards: Board[]; tasks: Task[]; people: Record<string, 
 // What a task made by hand may carry beyond its title. `assignee` hands it over in the same step.
 export type NewTask = { notes?: string; stage?: TaskStage; priority?: Priority; assignee?: EmployeeId };
 
-export type TasksView = { boards: Board[]; tasks: Task[]; boardSync: Record<BoardId, BoardSync>; taskTime: Record<TaskId, TaskTime>; linearPeople: LinearPeople };
+export type TasksView = { boards: Board[]; tasks: Task[]; boardSync: Record<BoardId, BoardSync>; taskTime: Record<TaskId, TaskTime>; taskLive: Record<TaskId, TaskLive>; linearPeople: LinearPeople };
 
 // What pulling a board depends on: its sources, filters included, and the columns it has folded away.
 const pulls = (board: Board): string => (board.kind === 'quick' ? '' : JSON.stringify([board.sources, board.collapsed ?? []]));
@@ -85,6 +89,9 @@ function runStateOf(mail: MailState, id: MessageId): RunState | undefined {
 // person already had of it.
 const runKey = (task: TaskId, who: EmployeeId, nth: number) => `task:${task}:${who}:${nth}`;
 
+const QUESTION_QUOTE_CAP = 1500;
+const quote = (text: string) => text.split('\n').map((l) => `> ${l}`).join('\n');
+
 export class Tasks {
   private boards: Board[] = [];
   private tasks: Task[] = [];
@@ -93,6 +100,8 @@ export class Tasks {
   private readonly sync = new Map<BoardId, BoardSync>();
   private linearPeople: LinearPeople = { kind: 'unknown' };
   private log: TurnLog;
+  // The ledger as the activity log reads it: kept up to date entry by entry, like the turn log.
+  private activity: ActivityIndex;
   private readonly file: string;
   private readonly host: TasksHost;
   private refreshing = new Map<BoardId, Promise<void>>();
@@ -105,6 +114,7 @@ export class Tasks {
     this.file = file;
     this.host = host;
     this.log = turnLogOf(ledger);
+    this.activity = activityIndexOf(ledger);
     const stored = read(file);
     this.existed = !!stored;
     if (stored) ({ boards: this.boards, tasks: this.tasks, people: this.people } = stored);
@@ -132,7 +142,7 @@ export class Tasks {
       const [tag, taskId, who] = key.split(':');
       const task = tag === 'task' ? this.tasks.find((t) => t.id === taskId) : undefined;
       if (!task || !who || task.runs.includes(id)) continue;
-      this.tasks = this.tasks.map((t) => (t === task ? this.withRun(t, id, who as EmployeeId) : t));
+      this.tasks = this.tasks.map((t) => (t === task ? this.withRun(t, id, who as EmployeeId, 'mailroom') : t));
       changed = true;
     }
     if (changed || !this.existed) this.save();
@@ -140,7 +150,7 @@ export class Tasks {
 
   // ── what the renderer sees ──
 
-  view(now: number): TasksView {
+  view(now: number, inputs: LiveInputs = noInputs): TasksView {
     const worked = this.tasks.filter((t) => t.runs.length);
     const slices = sliceTasks(this.log, worked, now);
     const taskTime = {} as Record<TaskId, TaskTime>;
@@ -150,7 +160,14 @@ export class Tasks {
       const unsent = t.origin.kind === 'cronospark' ? unsentOf(t, mine) : undefined;
       taskTime[t.id] = unsent ? { ...time, unsent } : time;
     }
-    return { boards: this.boards, tasks: this.tasks, boardSync: Object.fromEntries(this.sync) as Record<BoardId, BoardSync>, taskTime, linearPeople: this.linearPeople };
+    const taskLive = Object.fromEntries(worked.map((t) => [t.id, liveOf(t, this.activity, inputs)])) as Record<TaskId, TaskLive>;
+    return { boards: this.boards, tasks: this.tasks, boardSync: Object.fromEntries(this.sync) as Record<BoardId, BoardSync>, taskTime, taskLive, linearPeople: this.linearPeople };
+  }
+
+  // Everything that happened on a task and what is happening now. Folded from the ledger and the task's history each time it is asked.
+  activityOf(taskId: TaskId, inputs: LiveInputs): { entries: ActivityEntry[]; live: TaskLive } {
+    const task = this.task(taskId);
+    return { entries: logOf(task, this.activity), live: liveOf(task, this.activity, inputs) };
   }
 
   boardsOf(blockId: BlockId): Board[] {
@@ -184,6 +201,7 @@ export class Tasks {
     this.people = {};
     this.sync.clear();
     this.log = emptyTurnLog();
+    this.activity = emptyActivity();
     this.save();
   }
 
@@ -192,6 +210,7 @@ export class Tasks {
   // Every ledger entry, in order, as the mailroom writes it.
   observe(entry: LedgerEntry) {
     foldTurn(this.log, entry);
+    foldActivity(this.activity, entry);
   }
 
   // Takes in how runs ended.
@@ -203,7 +222,10 @@ export class Tasks {
       const outcome = outcomeFromRuns(t, (run) => runStateOf(mail, run));
       if (!outcome) return t;
       moved = true;
-      return { ...t, ...outcome, updatedAt: this.host.now() };
+      const now = this.host.now();
+      const { stage, ...taken } = outcome;
+      const noted = { ...t, ...taken, updatedAt: now };
+      return stage ? restage(noted, stage, 'mailroom', now, outcome.lastOutcome.reply) : noted;
     });
     if (moved) this.save();
   }
@@ -281,7 +303,7 @@ export class Tasks {
     // What the board pulls changed while this was out, and the change asked for its own round.
     if (pulls(board) !== pulls(before)) return;
     const synced = syncCards(board, this.tasks, result.cards, { now: this.host.now(), complete: result.errors.length === 0, newId: () => this.taskId() });
-    this.tasks = synced.tasks;
+    this.tasks = this.noteMoves(synced.tasks, 'provider');
     if (synced.changed) this.save();
     this.sync.set(boardId, result.errors.length && !result.cards.length ? { kind: 'error', message: result.errors.join(' ') } : { kind: 'ready', lastFetchedAt: this.host.now() });
     this.host.changed();
@@ -339,7 +361,8 @@ export class Tasks {
       if (origin.kind !== 'manual') throw new OfficeError(`The priority of a ${origin.sourceLabel} task is set in ${origin.sourceLabel}.`);
       origin = patch.priority === null ? { kind: 'manual' } : { kind: 'manual', priority: patch.priority };
     }
-    this.replace({ ...rest, ...(notes ? { notes } : {}), origin, title, stage: patch.stage ?? task.stage, ...(pin ? { stagePinned: true as const } : {}), updatedAt: this.host.now() });
+    const now = this.host.now();
+    this.replace(restage({ ...rest, ...(notes ? { notes } : {}), origin, title, stage: task.stage, ...(pin ? { stagePinned: true as const } : {}), updatedAt: now }, patch.stage ?? task.stage, 'owner', now));
   }
 
   deleteTask(taskId: TaskId) {
@@ -363,18 +386,53 @@ export class Tasks {
     const { title, text } = runRequest(task, board);
     const posted = mail.post({ from: 'owner', to: employeeId, blockId: board.blockId, key: runKey(task.id, employeeId, theirs.length), body: { kind: 'request', intent: 'work', title, text } });
     if (!posted.ok) throw new OfficeError(posted.detail);
-    this.replace(this.withRun(task, posted.id, employeeId));
+    this.replace(this.withRun(task, posted.id, employeeId, 'owner'));
   }
 
-  // The task with `who` taking the run that starts at `root`, and in doing: what assigning means.
-  private withRun(task: Task, root: MessageId, who: EmployeeId): Task {
-    return {
+  // The task with `who` taking the run that starts at `root`, and in doing: what assigning means. `by` is who moved it.
+  private withRun(task: Task, root: MessageId, who: EmployeeId, by: StageBy, cause?: MessageId): Task {
+    const now = this.host.now();
+    const taken = {
       ...task,
       runs: task.runs.includes(root) ? task.runs : [...task.runs, root],
       assignees: task.assignees.includes(who) ? task.assignees : [...task.assignees, who],
-      stage: 'doing',
-      updatedAt: this.host.now(),
+      updatedAt: now,
     };
+    return restage(taken, 'doing', by, now, cause);
+  }
+
+  // ── questions ──
+
+  // The owner answers a question from the board. A blocked request cannot take another word, so the answer starts a new run
+  // for whoever stopped, inside the same chain (the key makes a second click the same run). A question the asker put to a
+  // teammate or to the owner's own desk reaches whoever has to act on it as a word in the thread. In both the owner's words
+  // go through the mailroom, so the person wakes the way any teammate would.
+  answer(taskId: TaskId, id: MessageId, text: string, inputs: LiveInputs) {
+    const answer = text.trim();
+    if (!answer) throw new OfficeError('An answer needs some words.');
+    const task = this.task(taskId);
+    if (this.activity.answered.has(id)) return;
+    const question = liveOf(task, this.activity, inputs).questions.find((q) => q.ref.kind === 'mail' && q.ref.id === id);
+    if (!question || question.how === 'ask' || question.how === 'permission') throw new OfficeError('That question is not waiting for an answer any more.');
+    const board = this.board(task.boardId);
+    const mail = this.host.mail();
+    const asked = this.activity.msgs.get(question.piece.id);
+    if (asked?.kind !== 'request') throw new OfficeError('That question is not waiting for an answer any more.');
+    const said = clipText(question.text, QUESTION_QUOTE_CAP);
+    const asker = this.nameOf(question.asker);
+    if (question.how === 'blocked' && question.to === 'owner') {
+      const text = `The owner answers: ${answer}\n\nYou stopped on "${asked.title}" and told them:\n${quote(said)}\n\nCarry on with the task now.\n\n${runRequest(task, board).text}`;
+      const posted = mail.post({ from: 'owner', to: question.asker, blockId: board.blockId, parentId: asked.rootId, key: answerKey(task.id, question.asker, id), body: { kind: 'request', intent: 'work', title: asked.title, text } });
+      if (!posted.ok) throw new OfficeError(posted.detail);
+      this.replace(this.withRun(task, posted.id, question.asker, 'owner', id));
+      return;
+    }
+    const nudge = question.how === 'blocked'
+      ? { to: question.to as EmployeeId, parentId: asked.parentId ?? undefined, text: `The owner answers ${asker}'s block on "${asked.title}": ${answer}\n\n${asker} stopped and said:\n${quote(said)}\n\nA message alone does not restart ${asker}: send them a new request that carries this answer, or do the piece yourself.` }
+      : { to: question.asker, parentId: asked.id, text: `The owner answers your question to ${this.nameOf(question.to as EmployeeId)}: ${answer}` };
+    const posted = mail.post({ from: 'owner', to: nudge.to, blockId: board.blockId, ...(nudge.parentId ? { parentId: nudge.parentId } : {}), key: noteKey(task.id, id), body: { kind: 'say', text: nudge.text, urgency: 'next' } });
+    if (!posted.ok) throw new OfficeError(posted.detail);
+    this.host.changed();
   }
 
   private assertMember(employeeId: EmployeeId, blockId: BlockId) {
@@ -425,7 +483,9 @@ export class Tasks {
     const now = this.tasks.find((t) => t.id === taskId);
     if (!now) return failure === undefined;
     const { inflight: _, error: __, ...hours } = failure === undefined ? (now.hours ?? { pushed: {} }) : moveMark(now.hours, e, -1);
-    this.replace({ ...now, hours: failure === undefined ? hours : { ...hours, error: { message: `Could not send ${e.hours} h for ${this.nameOf(e.employeeId)} on ${e.date} to CronoSpark: ${failure}`, at: this.host.now() } } });
+    const at = this.host.now();
+    const settled = { ...now, hours: failure === undefined ? hours : { ...hours, error: { message: `Could not send ${e.hours} h for ${this.nameOf(e.employeeId)} on ${e.date} to CronoSpark: ${failure}`, at } } };
+    this.replace(withEvent(settled, { kind: 'hours', at, employeeId: e.employeeId, date: e.date, hours: e.hours, ...(failure === undefined ? {} : { error: failure }) }));
     return failure === undefined;
   }
 
@@ -451,6 +511,16 @@ export class Tasks {
     this.tasks = this.tasks.map((t) => (t.id === next.id ? next : t));
     this.save();
     if (notify) this.host.changed();
+  }
+
+  // Tasks a provider's cards moved to another stage, with the move on their history.
+  private noteMoves(next: readonly Task[], by: StageBy): Task[] {
+    const before = new Map(this.tasks.map((t) => [t.id, t]));
+    const now = this.host.now();
+    return next.map((t) => {
+      const was = before.get(t.id);
+      return was && was.stage !== t.stage ? withEvent(t, { kind: 'stage', at: now, from: was.stage, to: t.stage, by }) : t;
+    });
   }
 
   private boardId = () => this.host.newId() as BoardId;

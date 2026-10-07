@@ -14,7 +14,7 @@ const isEmployee = (a: ActorId): a is EmployeeId => a !== 'owner' && a !== 'mail
 
 // A text longer than this is cut, so one pasted log does not make the activity of a task heavy to ship.
 export const ACTIVITY_TEXT_CAP = 8000;
-const clip = (t: string) => (t.length > ACTIVITY_TEXT_CAP ? `${t.slice(0, ACTIVITY_TEXT_CAP - 1)}…` : t);
+export const clipText = (t: string, cap = ACTIVITY_TEXT_CAP) => (t.length > cap ? `${t.slice(0, cap - 1)}…` : t);
 
 // ───────────────────────────── What the owner reads ─────────────────────────────
 
@@ -139,7 +139,7 @@ export function foldActivity(ix: ActivityIndex, entry: LedgerEntry): ActivityInd
             to: m.to,
             intent: m.intent,
             title: m.title,
-            text: clip(m.text),
+            text: clipText(m.text),
             parent: m.parentId,
             ...(m.bar?.length ? { bar: m.bar } : {}),
             ...(round ? { round } : {}),
@@ -149,7 +149,7 @@ export function foldActivity(ix: ActivityIndex, entry: LedgerEntry): ActivityInd
         }
         case 'say':
           if (m.wake && mailbox) ix.life.set(m.id, { s: 'queued', redelivered: false });
-          out = { ...stamp(0, m.id, m.at), kind: 'say', msg: m.id, from: m.from, to: m.to, text: clip(m.text), ...(answers ? { answers } : {}) };
+          out = { ...stamp(0, m.id, m.at), kind: 'say', msg: m.id, from: m.from, to: m.to, text: clipText(m.text), ...(answers ? { answers } : {}) };
           break;
         case 'reply': {
           if (mailbox) ix.life.set(m.id, { s: 'queued', redelivered: false });
@@ -165,7 +165,7 @@ export function foldActivity(ix: ActivityIndex, entry: LedgerEntry): ActivityInd
             from: m.from,
             to: m.to,
             outcome: m.outcome,
-            text: clip(m.text),
+            text: clipText(m.text),
             ...(m.artifact?.length ? { artifact: m.artifact } : {}),
             ...(m.verdict ? { verdict: m.verdict } : {}),
             ...(m.auto ? { auto: true } : {}),

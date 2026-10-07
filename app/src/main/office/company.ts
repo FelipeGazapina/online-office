@@ -37,7 +37,8 @@ import {
   type Subagent,
   type TaskBoardSource,
 } from '../../shared/protocol.ts';
-import type { LegacySources } from '../../shared/tasks.ts';
+import type { ActivityEntry, LiveInputs, TaskLive } from '../../shared/activity.ts';
+import type { LegacySources, TaskId } from '../../shared/tasks.ts';
 import { addShells, applyOps, BuildHistory, deskOf, encodeBuilding, freeDesk, legacyBuilding, parseBuilding, placeDesk, shellItems, teamKit, ITEM_DEFS } from '../../shared/space/index.ts';
 import type { Building, BuildOp, EmployeeId as SpaceEmployeeId, ItemId, SpaceContext, Violation } from '../../shared/space/index.ts';
 import type { ActorId, ConvoKey, LedgerEntry, MailView, MessageId } from '../../shared/mail.ts';
@@ -78,6 +79,8 @@ export type OfficeEvents = {
   mail?(view: MailView): void;
   stream?(employeeId: EmployeeId, replyingTo: MessageId | null, delta: string, done: boolean): void;
   history?(convo: ConvoKey, messages: import('../../shared/mail.ts').Message[], hasMore: boolean): void;
+  // What `load_activity` asked for.
+  activity?(taskId: TaskId, entries: ActivityEntry[], live: TaskLive): void;
   // Something the owner must hear about that no request is open for, like a folder that was deleted.
   error?(message: string): void;
 };
@@ -509,10 +512,19 @@ export class Office {
   }
 
   snapshot(): Snapshot {
+    const mail = this.mail.view();
     return {
       type: 'snapshot', company: this.company, harnesses: this.harnesses, catalogs: this.catalogs, meetingDoor: this.meetingDoor, buildingRev: this.buildingRev,
-      ...this.tasks.view(Date.now()), taskConnections: this.services.taskBoards.connectionStates(), mail: this.mail.view(),
+      ...this.tasks.view(Date.now(), this.liveInputs(mail)), taskConnections: this.services.taskBoards.connectionStates(), mail,
     };
+  }
+
+  // What a task's live summary needs that the ledger does not hold: who is parked waiting for replies, and what employees are
+  // asking the owner in person.
+  private liveInputs(mail: MailView): LiveInputs {
+    const awaiting = new Set(Object.entries(mail.actors).filter(([, a]) => a.state === 'awaiting').map(([id]) => id as EmployeeId));
+    const asks = this.company.employees.flatMap((e) => (e.status.kind === 'blocked_on_owner' ? [{ employeeId: e.id, question: e.status.question }] : []));
+    return { awaiting, asks };
   }
 
   buildingState(): { building: Building; rev: number } {
@@ -576,6 +588,12 @@ export class Office {
         return this.events.changed();
       case 'send_hours':
         return void this.tasks.sendHours(msg.taskId);
+      case 'load_activity': {
+        const { entries, live } = this.tasks.activityOf(msg.taskId, this.liveInputs(this.mail.view()));
+        return this.events.activity?.(msg.taskId, entries, live);
+      }
+      case 'answer_question':
+        return this.answerQuestion(msg);
       case 'connect_task_provider':
         this.services.taskBoards.connect(msg.provider);
         this.events.changed();
@@ -622,6 +640,13 @@ export class Office {
         throw new OfficeError(`Unhandled message ${JSON.stringify(unreachable)}`);
       }
     }
+  }
+
+  // A question on a task's board. An employee waiting on the owner in person gets the answer the way the chat gives it. A blocked
+  // reply or a help request is answered through the mailroom (Tasks.answer).
+  private answerQuestion(msg: Extract<ClientMessage, { type: 'answer_question' }>) {
+    if (msg.ref.kind === 'ask') return this.answer(msg.ref.employeeId, msg.ref.id, msg.text);
+    this.tasks.answer(msg.taskId, msg.ref.id, msg.text, this.liveInputs(this.mail.view()));
   }
 
   private postFromOwner(msg: Extract<ClientMessage, { type: 'post' }>) {
