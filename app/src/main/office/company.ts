@@ -1100,6 +1100,7 @@ export class Office {
           if (e.workspace) removeWorkspace(block.cwd, e.workspace, e.name);
           delete e.workspace;
         }
+        this.tasks.releaseWorktrees(blockId);
         block.cwd = next;
         // Claude sessions are stored per directory, so an old sessionId cannot be resumed in the new one.
         for (const e of members) {

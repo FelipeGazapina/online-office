@@ -225,7 +225,9 @@ export const createTaskWorkspace = (blockCwd: string, path: string, task: TaskBr
     rmSync(path, { recursive: true, force: true });
     run(blockCwd, ['worktree', 'prune']);
     mkdirSync(dirname(path), { recursive: true });
-    const made = run(blockCwd, ['worktree', 'add', ...(have ? [path, branch] : ['-b', branch, path, base.ref])]);
+    // A branch this repo only knows from origin (the block moved to another clone) continues from there, not from the base.
+    const sent = `refs/remotes/origin/${branch}`;
+    const made = run(blockCwd, ['worktree', 'add', ...(have ? [path, branch] : ['-b', branch, path, exists(blockCwd, sent) ? sent : base.ref])]);
     if (!made.ok) throw new Error(`Could not make the worktree of ${branch}: ${firstLine(made.err)}`);
   }
   const ws = { path, branch };

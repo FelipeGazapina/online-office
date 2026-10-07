@@ -5,8 +5,8 @@ import { PRIORITY_LABEL, STAGE_LABEL, fmtAgo, fmtClock, fmtHours, originOf, pres
 import { send, useStore } from '../../store.ts';
 import { isPo } from '../chat/model.ts';
 import { moveTask } from './actions.ts';
-import { Avatar } from './Card.tsx';
-import { Alert, Check, Close, External, OriginTile, PriorityIcon, StageIcon } from './icons.tsx';
+import { Avatar, PR_STATE_LABEL } from './Card.tsx';
+import { Alert, Branch, Check, Close, External, OriginTile, PriorityIcon, StageIcon } from './icons.tsx';
 
 // A field that saves when the owner leaves it. Esc puts back what is saved. The saved value coming in replaces the draft.
 function useDraft(saved: string, commit: (value: string) => void, opt: { multiline?: boolean; allowEmpty?: boolean } = {}) {
@@ -148,6 +148,37 @@ export function Detail({ task, board, blockPeople, people, time, stage, now, onC
           </dd>
           <dt>Board</dt>
           <dd>{board.name}</dd>
+          {task.git && (
+            <>
+              <dt>Branch</dt>
+              <dd>
+                <Branch size={13} />
+                <code className="tb-branch" data-testid="task-branch" title={`Work on this task lands here, then goes to GitHub as a pull request into ${task.git.base}`}>{task.git.branch}</code>
+              </dd>
+              <dt>Pull request</dt>
+              <dd>
+                {task.git.pr ? (
+                  <>
+                    <a href={task.git.pr.url} target="_blank" rel="noreferrer" data-testid="task-pr-link">
+                      #{task.git.pr.number}
+                      <External size={12} />
+                    </a>
+                    <span className={`tb-chip tb-pr ${task.git.pr.state}`} data-testid="task-pr-state" data-pr-state={task.git.pr.state}>{PR_STATE_LABEL[task.git.pr.state]}</span>
+                    <span className="tb-hint">into {task.git.base}</span>
+                  </>
+                ) : (
+                  <span className="tb-hint" data-testid="task-pr-note">{task.git.note ?? 'Opening it…'}</span>
+                )}
+              </dd>
+              {task.git.pr && task.git.note && (
+                <dd className="tb-wide">
+                  <p className="tb-note bad" data-testid="task-git-note">
+                    <Alert size={13} /> {task.git.note}
+                  </p>
+                </dd>
+              )}
+            </>
+          )}
         </dl>
 
         <section className="tb-section">

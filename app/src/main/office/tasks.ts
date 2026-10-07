@@ -119,6 +119,7 @@ export class Tasks {
   // The tasks whose branch is going to GitHub right now, and those that moved again while it was.
   private readonly publishing = new Map<TaskId, Promise<void>>();
   private readonly publishAgain = new Set<TaskId>();
+  private prRound: Promise<void> | undefined;
   private readonly existed: boolean;
 
   constructor(file: string, host: TasksHost, ledger: readonly LedgerEntry[]) {
@@ -187,7 +188,7 @@ export class Tasks {
 
   dropBlock(blockId: BlockId) {
     const gone = new Set(this.boardsOf(blockId).map((b) => b.id));
-    for (const t of this.tasks) if (gone.has(t.boardId)) this.releaseWorktree(t);
+    this.releaseWorktrees(blockId);
     this.boards = this.boards.filter((b) => b.blockId !== blockId);
     this.tasks = this.tasks.filter((t) => !gone.has(t.boardId));
     for (const id of gone) this.sync.delete(id);
@@ -505,12 +506,21 @@ export class Tasks {
 
   // Asks GitHub where the open pull requests stand, and with `retry` tries again for the tasks that have no pull request yet.
   // Merged moves the task to done. Closed is only shown. Never throws, and one pull request that cannot be read leaves the
-  // others to be read.
-  async refreshPrs(retry = false): Promise<void> {
+  // others to be read. A round that is already out answers a plain ask; a retry waits for it and goes next.
+  refreshPrs(retry = false): Promise<void> {
+    if (this.prRound) return retry ? this.prRound.then(() => this.refreshPrs(true)) : this.prRound;
+    const round = this.readPrs(retry).finally(() => (this.prRound = undefined));
+    this.prRound = round;
+    return round;
+  }
+
+  private async readPrs(retry: boolean) {
     const git = this.host.git;
     if (!git) return;
-    for (const task of [...this.tasks]) {
-      if (!task.git) continue;
+    for (const { id } of [...this.tasks]) {
+      // Read again each time: the ones before this took a while, and this one may have moved on meanwhile.
+      const task = this.tasks.find((t) => t.id === id);
+      if (!task?.git) continue;
       if (!task.git.pr) {
         if (retry) void this.publish(task.id);
         continue;
@@ -546,6 +556,13 @@ export class Tasks {
   private settled(taskId: TaskId) {
     const t = this.tasks.find((x) => x.id === taskId);
     if (t?.git?.pr && !prIsOpen(t.git.pr)) this.releaseWorktree(t);
+  }
+
+  // The block's repository is about to change or go: the task worktrees made in it go first. Their branches and pull requests stay,
+  // and the next run of a task makes its worktree again in whichever repository the block has then.
+  releaseWorktrees(blockId: BlockId) {
+    const mine = new Set(this.boardsOf(blockId).map((b) => b.id));
+    for (const t of this.tasks) if (mine.has(t.boardId)) this.releaseWorktree(t);
   }
 
   private releaseWorktree(task: Task) {

@@ -182,6 +182,10 @@ const bare = (): { origin: string; block: string } => {
   git(ws.path, 'commit', '-q', '-m', 'our work');
   const behind = await pushBranch(ws.path, ws.branch);
   check(behind.kind === 'pushed' && existsSync(join(ws.path, 'from-github.txt')) && git(origin, 'rev-parse', `refs/heads/${want.branch}`) === git(ws.path, 'rev-parse', 'HEAD'), 'when origin moved on, its commits are merged in and the push goes through, never forced', JSON.stringify(behind));
+  const second = join(root, `clone-two-${seq}`);
+  git(root, 'clone', '-q', origin, second);
+  const found = createTaskWorkspace(second, join(root, 'data', `task-e-${seq}`), want, defaultBase(second));
+  check(found.branch === want.branch && git(found.path, 'rev-parse', 'HEAD') === git(origin, 'rev-parse', `refs/heads/${want.branch}`) && existsSync(join(found.path, 'ours.txt')), 'in another clone of the same origin the task continues from the branch origin has, not from the base');
   const offline = repo();
   const lone = createTaskWorkspace(offline, join(root, 'data', `task-c-${seq}`), { branch: 'task/solo-aaaaaaaa', title: 'Solo', key: 'aaaaaaaa' }, defaultBase(offline));
   check((await pushBranch(lone.path, lone.branch)).kind === 'no-remote' && git(offline, 'rev-parse', '--verify', `refs/heads/${lone.branch}`) !== '', 'with no remote there is nothing to push and the branch stays local');

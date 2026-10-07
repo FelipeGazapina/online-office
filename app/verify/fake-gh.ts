@@ -28,8 +28,9 @@ export function installFakeGh(dir: string) {
   const write = (s: FakeGhState) => writeFileSync(stateFile, JSON.stringify(s));
   return {
     bin,
-    // Every call, as the arguments gh received.
-    calls: (): string[][] => (existsSync(logFile) ? readFileSync(logFile, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l) as { args: string[] }).map((c) => c.args) : []),
+    // Every call, as the arguments gh received and when.
+    log: (): { args: string[]; cwd: string; at: number }[] => (existsSync(logFile) ? readFileSync(logFile, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l) as { args: string[]; cwd: string; at: number }) : []),
+    calls: (): string[][] => (existsSync(logFile) ? readFileSync(logFile, 'utf8').split('\n').filter(Boolean).map((l) => (JSON.parse(l) as { args: string[] }).args) : []),
     state: read,
     prs: (): FakePr[] => read().prs,
     mode: (mode: FakeGhState['mode']) => write({ ...read(), mode }),
@@ -48,7 +49,7 @@ const flag = (args: string[], name: string) => {
 
 function main(args: string[]) {
   const stateFile = process.env.FAKE_GH_STATE!;
-  appendFileSync(process.env.FAKE_GH_LOG!, `${JSON.stringify({ args, cwd: process.cwd() })}\n`);
+  appendFileSync(process.env.FAKE_GH_LOG!, `${JSON.stringify({ args, cwd: process.cwd(), at: Date.now() })}\n`);
   const lock = `${stateFile}.lock`;
   for (let i = 0; i < 100; i++) {
     try {
