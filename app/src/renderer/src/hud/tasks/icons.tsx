@@ -64,6 +64,8 @@ export const Alert = ({ size }: P) => <Svg size={size}><path d="M8 2.2L14 13H2z"
 export const Whiteboard = ({ size }: P) => <Svg size={size}><rect x="2" y="2.5" width="12" height="8" rx="1.2" /><path d="M8 10.5v3M5.5 13.5h5" /></Svg>;
 export const Clock = ({ size }: P) => <Svg size={size}><circle cx="8" cy="8" r="5.6" /><path d="M8 4.8V8l2.1 1.4" /></Svg>;
 export const Notes = ({ size }: P) => <Svg size={size}><path d="M3 4.5h10M3 8h10M3 11.5h6" /></Svg>;
+export const EyeOff = ({ size }: P) => <Svg size={size}><path d="M2 8s2.2-4.2 6-4.2S14 8 14 8s-2.2 4.2-6 4.2S2 8 2 8z" /><circle cx="8" cy="8" r="1.8" /><path d="M3 13L13 3" /></Svg>;
+export const Eye = ({ size }: P) => <Svg size={size}><path d="M2 8s2.2-4.2 6-4.2S14 8 14 8s-2.2 4.2-6 4.2S2 8 2 8z" /><circle cx="8" cy="8" r="1.8" /></Svg>;
 export const Chevron = ({ size }: P) => <Svg size={size}><path d="M4.5 6.5L8 10l3.5-3.5" /></Svg>;
 
 // Bars for how pressing it is, the way a tracker draws it. Urgent is a red square with a mark. No priority is three faint bars.

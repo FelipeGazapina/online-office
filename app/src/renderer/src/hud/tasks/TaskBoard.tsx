@@ -2,15 +2,15 @@ import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent }
 import { createPortal } from 'react-dom';
 import type { BlockId, Employee, EmployeeId } from '../../../../shared/protocol.ts';
 import type { Board, BoardSync, Task, TaskId, TaskStage } from '../../../../shared/tasks.ts';
-import { STAGE_LABEL, boardFor, boardsOf, columnsOf, fmtAgo, fmtClock, isRunning, peopleOf, stageOf, stageStep, statsOf, type Column } from '../../boardView.ts';
+import { STAGE_LABEL, boardFor, boardsOf, columnsOf, fmtAgo, fmtClock, foldedOf, foldStep, isRunning, peopleOf, stageOf, stageStep, statsOf, type Column } from '../../boardView.ts';
 import { send, set, useStore } from '../../store.ts';
 import { useNow } from '../hooks.ts';
-import { dropOnDesk, moveTask, openBoard, pickBoard } from './actions.ts';
+import { dropOnDesk, foldColumn, moveTask, openBoard, pickBoard } from './actions.ts';
 import { Card } from './Card.tsx';
 import { Composer } from './Composer.tsx';
 import { Detail } from './Detail.tsx';
 import { useCardDrag } from './drag.ts';
-import { Alert, Close, Plus, Sliders, StageIcon, Sync, Whiteboard } from './icons.tsx';
+import { Alert, Close, Eye, EyeOff, Plus, Sliders, StageIcon, Sync, Whiteboard } from './icons.tsx';
 import { Settings } from './Settings.tsx';
 import { BoardTabs } from './Tabs.tsx';
 import { CarryTray, RestTray } from './Tray.tsx';
@@ -48,9 +48,11 @@ type ColumnProps = {
   press: ReturnType<typeof useCardDrag>['press'];
   wasDragged: () => boolean;
   onKey: (task: Task, stage: TaskStage, e: KeyboardEvent<HTMLElement>) => void;
+  // Hides the column. Undefined when it is the last one open.
+  onHide: (() => void) | undefined;
 };
 
-function ColumnView({ column, board, composing, dragOver, dragging, selected, times, people, team, now, open, compose, press, wasDragged, onKey }: ColumnProps) {
+function ColumnView({ column, board, composing, dragOver, dragging, selected, times, people, team, now, open, compose, press, wasDragged, onKey, onHide }: ColumnProps) {
   return (
     <section className={`tb-col ${dragOver ? 'over' : ''}`} data-stage={column.stage} aria-label={`${column.label}, ${column.tasks.length} tasks`}>
       <header className="tb-col-head">
@@ -60,6 +62,9 @@ function ColumnView({ column, board, composing, dragOver, dragging, selected, ti
         <span className="tb-grow" />
         <button type="button" className="tb-icon" aria-label={`Add a task to ${column.label}`} title={`Add a task to ${column.label}`} onClick={() => compose(composing ? null : column.stage)}>
           <Plus />
+        </button>
+        <button type="button" className="tb-icon" aria-label={`Hide ${column.label}`} title={onHide ? `Hide ${column.label}${board.kind === 'quick' ? '' : ': its issues are not pulled while it is hidden'}` : 'A board keeps at least one column open.'} disabled={!onHide} onClick={onHide}>
+          <EyeOff />
         </button>
       </header>
       <div className="tb-col-body">
@@ -83,6 +88,26 @@ function ColumnView({ column, board, composing, dragOver, dragging, selected, ti
         {!column.tasks.length && !composing && <p className="tb-col-empty">{column.stage === 'todo' ? 'Nothing waiting. Add a task with +.' : 'Nothing here yet.'}</p>}
       </div>
     </section>
+  );
+}
+
+// Columns the owner hid, the way Linear lists its hidden columns: narrow, each with its count, a click brings one back.
+function HiddenColumns({ board, columns }: { board: Board; columns: readonly Column[] }) {
+  const hidden = columns.filter((c) => foldedOf(board).includes(c.stage));
+  if (!hidden.length) return null;
+  return (
+    <aside className="tb-hidden" aria-label="Hidden columns" data-testid="hidden-columns">
+      <h3>Hidden columns</h3>
+      {hidden.map((c) => (
+        <button key={c.stage} type="button" className="tb-hidden-row" data-stage={c.stage} aria-label={`Show ${c.label}, ${c.tasks.length} ${c.tasks.length === 1 ? 'task' : 'tasks'}`} title={`Show ${c.label}`} onClick={() => foldColumn(board, c.stage)}>
+          <StageIcon stage={c.stage} />
+          <span>{c.label}</span>
+          <span className="tb-count" data-testid="hidden-count">{c.tasks.length}</span>
+          <Eye size={14} />
+        </button>
+      ))}
+      {board.kind !== 'quick' && <p className="tb-hint">Sync does not pull issues for these columns, so their share of the limit goes to the open ones.</p>}
+    </aside>
   );
 }
 
@@ -114,6 +139,7 @@ export function TaskBoardModal({ blockId }: { blockId: BlockId }) {
   const now = useNow(anyRunning ? 1000 : 20_000);
   const columns = useMemo(() => columnsOf(boardTasks, holds, Date.now()), [boardTasks, holds]);
   const sync = board ? syncs[board.id] : undefined;
+  const hiddenStages = foldedOf(board);
 
   // After a card goes to a desk the board stays folded as a tray of what is left to hand out, so the owner can take the next
   // card without opening the board again. Opening the board from anywhere (the Tasks chip, the tray's button) unfolds it.
@@ -185,7 +211,7 @@ export function TaskBoardModal({ blockId }: { blockId: BlockId }) {
       } else if (e.shiftKey && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) {
         e.preventDefault();
         e.stopPropagation();
-        const to = stageStep(stage, e.key === 'ArrowRight' ? 1 : -1);
+        const to = stageStep(stage, e.key === 'ArrowRight' ? 1 : -1, hiddenStages);
         if (to) {
           moveTask(task, to);
           focusCard(task.id);
@@ -193,12 +219,12 @@ export function TaskBoardModal({ blockId }: { blockId: BlockId }) {
       } else if (e.key === 'ArrowDown') go(here[at + 1]);
       else if (e.key === 'ArrowUp') go(here[at - 1]);
       else if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
-        const to = stageStep(stage, e.key === 'ArrowRight' ? 1 : -1);
+        const to = stageStep(stage, e.key === 'ArrowRight' ? 1 : -1, hiddenStages);
         const side = to ? cards(to) : [];
         go(side[Math.min(at, side.length - 1)]);
       }
     },
-    [open],
+    [open, hiddenStages],
   );
 
   if (!block) return null;
@@ -339,8 +365,8 @@ export function TaskBoardModal({ blockId }: { blockId: BlockId }) {
         )}
 
         <div className="tb-main">
-          <div className="tb-cols" data-testid="task-board-columns">
-            {columns.map((c) => (
+          <div className="tb-cols" data-testid="task-board-columns" style={{ ['--cols' as string]: columns.length - hiddenStages.length }}>
+            {columns.filter((c) => !hiddenStages.includes(c.stage)).map((c) => (
               <ColumnView
                 key={c.stage}
                 column={c}
@@ -358,9 +384,11 @@ export function TaskBoardModal({ blockId }: { blockId: BlockId }) {
                 press={press}
                 wasDragged={wasDragged}
                 onKey={onCardKey}
+                onHide={foldStep(hiddenStages, c.stage) ? () => foldColumn(board, c.stage) : undefined}
               />
             ))}
           </div>
+          <HiddenColumns board={board} columns={columns} />
           {settings ? (
             <Settings key={board.id} board={board} isLast={mine.length === 1} taskCount={boardTasks.length} onClose={() => dock({})} />
           ) : selected ? (
