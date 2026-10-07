@@ -1,5 +1,5 @@
-// The pictures the panel compares to Sims 4: an item held over a table with its green footprint (place), a dressed desk pod and table seen close
-// (decorated, in build mode with a small thing in hand) and a person's-eye view of a dressed desk (close). Writes them at 1440x900 to
+// The pictures the panel compares to Sims 4: an item held over a table with its green footprint (place), a row of desks, each with only its computer,
+// and a dressed table seen close (desks, in build mode with a small thing in hand) and a person's-eye view of a desk (close). Writes them at 1440x900 to
 // OFFICE_SHOTS_DIR (default /tmp/office-shots).
 // Run: pnpm build:verify && OFFICE_SHOTS_DIR=... OFFICE_OUT_DIR=out/verify OFFICE_CDP_PORT=9341 node verify/cdp.mjs verify/shots-tabletop.mjs
 import { readFileSync, writeFileSync } from 'node:fs';
@@ -18,7 +18,7 @@ const store = '__office.store.getState()';
 const file = join(dataDir, 'company.json');
 const PLACE_HOST = process.env.OFFICE_PLACE_HOST ?? 'blk-a:pod_huddle_table:00';
 const PLACE_ITEM = process.env.OFFICE_PLACE_ITEM ?? 'succulent';
-const DECORATED_DIST = Number(process.env.OFFICE_DECORATED_DIST ?? 7.5);
+const DESKS_DIST = Number(process.env.OFFICE_DESKS_DIST ?? 7.5);
 const disk = () => JSON.parse(readFileSync(file, 'utf8'));
 const ctxOf = (c) => ({
   blocks: new Set(c.blocks.map((b) => b.id)),
@@ -68,7 +68,7 @@ export default async function (s) {
   const row = middle(desks.find((i) => !taken.has(i.id)) ?? desks[0]);
   const table = middle(host);
 
-  // close.png: a person's-eye view of a dressed desk
+  // close.png: a person's-eye view of a desk
   const freeDesk = desks.find((i) => !taken.has(i.id)) ?? desks[0];
   const seat = seatPose(b, freeDesk.id);
   await s.press('Tab');
@@ -81,19 +81,19 @@ export default async function (s) {
   await s.press('Tab');
   await s.waitFor('window.__officeCamera && Math.abs(window.__officeCamera.blend) < 0.001', 10000);
 
-  // decorated.png: build mode with a small thing in hand, so the catalog is folded to its bar, and the pointer parked off the office. The pod is
+  // desks.png: build mode with a small thing in hand, so the catalog is folded to its bar, and the pointer parked off the office. The pod is
   // in the upper half and the huddle table in the lower right, 7.5 meters from the point looked at.
   await s.eval(`__office.teleport(${table.x + 5}, ${table.z + 8}, 0)`);
   await s.sleep(500);
   await d.enterBuild();
-  await d.zoomTo(DECORATED_DIST);
+  await d.zoomTo(DESKS_DIST);
   await d.choose(PLACE_ITEM);
   await d.park();
   const aim = { x: row.x + (table.x - row.x) * 0.25, z: row.z + (table.z - row.z) * 0.25 };
   await d.centerOn(aim.x, 0.75, aim.z);
   await d.park();
   await s.sleep(400);
-  await d.shotTo('decorated');
+  await d.shotTo('desks');
   await s.press('Escape');
 
   // place.png: the item in hand over a table, its footprint green on the top, the catalog folded to its bar. The owner stands well away from it.
