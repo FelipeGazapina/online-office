@@ -5,6 +5,7 @@ import { BufferGeometry, IcosahedronGeometry, PlaneGeometry } from 'three';
 import { ITEM_DEFS, STORY_H } from '../../../../shared/space/index.ts';
 import type { PropName } from '../props.ts';
 import { FURNITURE } from './furniture.ts';
+import { POD_DYNAMIC } from './pod.ts';
 import { at, bbox, blob, box, cyl, merge, paint } from './parts.ts';
 
 export { blob, box, cyl, merge, paint };
@@ -171,7 +172,7 @@ export function modelOf(def: string): BufferGeometry {
 }
 
 /** Defs that carry their own behavior or texture and are drawn one by one by React, not instanced. */
-export const DYNAMIC: ReadonlySet<string> = new Set(['owner_desk', 'board_terminal', 'whiteboard', 'team_sign']);
+export const DYNAMIC: ReadonlySet<string> = new Set(['owner_desk', 'board_terminal', 'whiteboard', 'team_sign', ...POD_DYNAMIC]);
 
 /** Instance color of a def when its item has no tint. */
 export const DEFAULT_TINT: Readonly<Record<string, number>> = { chair: 0x5c7892 };

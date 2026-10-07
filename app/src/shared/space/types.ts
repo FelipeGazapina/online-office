@@ -30,7 +30,8 @@ export type Story = {
   walls: readonly WallSeg[];
   items: readonly Item[];
 };
-export type Building = { v: 1; lot: Lot; stories: readonly Story[] };
+/** `shelled` is set once every project block's own pieces (rug, pod boundary, decor, huddle) exist as items. A building without it is migrated on load. */
+export type Building = { v: 1; lot: Lot; stories: readonly Story[]; shelled?: true };
 
 export type Item = {
   id: ItemId;
@@ -42,6 +43,8 @@ export type Item = {
   tint?: number;
 };
 
+/** A floor item lies on the ground: people walk over it, objects stand on it, and two floor items never overlap. Everything else is an object. */
+export type ItemLayer = 'floor' | 'object';
 export type ItemKind = 'bench_desk' | 'po_desk' | 'owner_desk' | 'decor' | 'table' | 'seat' | 'board' | 'terminal' | 'stairs';
 export type ItemDef = {
   id: string;
@@ -50,6 +53,7 @@ export type ItemDef = {
   d: number;
   height: number;
   walkable: boolean;
+  layer?: ItemLayer;
   seat?: { chair: Vec2; exit: Vec2; yaw: number };
   stairs?: { rise: 1; holeLen: number };
 };
@@ -112,6 +116,8 @@ export type FloorGeometry = {
   story: Story;
   hole: Uint8Array;
   occ: Uint16Array;
+  /** Like `occ`, for floor-layer items only: the cell's floor item, as its index in the story plus one. */
+  floorOcc: Uint16Array;
   overlaps: readonly (readonly [ItemId, ItemId])[];
   wallAt: ReadonlyMap<number, WallSeg>;
   roomOf: Uint16Array;

@@ -4,6 +4,7 @@ import { get, useStore, type BuildTool } from '../../store.ts';
 import { addFloor, canTurn, chooseEntry, enterBuild, exitBuild, isActive, patchBuild, peek, redo, rotate, selectTab, setLevel, setTool, undo } from './actions.ts';
 import { footprintText, TABS, visibleEntries, type Entry } from './catalog.ts';
 import { BlockIcon, BuildIcon, FillIcon, FloorIcon, PieceIcon, Redo, Search, TabIcon, ToolIcon, Turn, Undo, WALL_MODES, WallsIcon } from './icons.tsx';
+import { consequences, keepBlock, removal, removeBlock } from './removal.ts';
 import { floorSwatch, wallSwatch } from './swatches.ts';
 import { useThumbs } from './thumbs.ts';
 import './build.css';
@@ -12,7 +13,7 @@ import './build.css';
 type Hint = [key: string, does: string, danger?: true];
 const HINTS: Record<BuildTool['kind'], (t: BuildTool) => Hint[]> = {
   select: () => [['Click or drag', 'move furniture'], ['Shift-click', 'move its whole block'], ['E', 'copy it'], ['Delete', 'delete the piece under the pointer', true]],
-  block: (t) => (t.kind === 'block' && t.carry ? [['Click', 'drop the block here'], [', .', 'turn'], ['Esc', 'put it back']] : [['Click or drag', 'pick up a block'], ['Esc', 'back to furniture']]),
+  block: (t) => (t.kind === 'block' && t.carry ? [['Click', 'drop the block here'], [', .', 'turn'], ['PgUp PgDn', 'change floor'], ['Esc', 'put it back'], ['Delete', 'remove the block and its people', true]] : [['Click or drag', 'pick up a block'], ['Esc', 'back to furniture']]),
   wall: () => [['Drag', 'draw a wall'], ['Ctrl-drag', 'delete walls']],
   room: () => [['Drag', 'draw a room'], ['Ctrl-drag', 'delete its walls'], ['Shift', 'wall tool']],
   floor: () => [['Click or drag', 'paint'], ['Shift', 'fill the room']],
@@ -126,10 +127,10 @@ function TeamPick() {
   if (!teamed) return null;
   return (
     <label className="bh-team">
-      <span>Seat for</span>
+      <span>{ITEM_DEFS[tool.def].seat ? 'Seat for' : 'For team'}</span>
       <i style={{ background: blocks.find((b) => b.id === tool.blockId)?.color ?? '#999' }} />
       <select
-        aria-label="Team the desk belongs to"
+        aria-label="Team the piece belongs to"
         value={tool.blockId ?? ''}
         onChange={(e) => {
           const t = get().build?.tool;
@@ -218,6 +219,29 @@ function EnterButton() {
   );
 }
 
+// The question asked before a block is deleted: who would be fired. Enter says yes, Esc says no.
+function RemoveBlockDialog() {
+  const blockId = removal((s) => s.blockId);
+  const ask = blockId ? consequences(blockId) : null;
+  if (!ask) return null;
+  const { name, people } = ask;
+  const who = people.length === 0 ? 'Nobody works there.' : `${people.join(', ')} would be fired.`;
+  return (
+    <div className="bh-confirm-veil" role="presentation">
+      <div className="bh-confirm" role="alertdialog" aria-labelledby="bh-confirm-title" data-testid="remove-block-dialog">
+        <b id="bh-confirm-title">Remove {name}?</b>
+        <p data-testid="remove-block-people">{who} Every piece of the block goes with it: its desks, board, rug and decor. This cannot be undone.</p>
+        <div className="bh-confirm-row">
+          <button className="bh-confirm-keep" onClick={keepBlock} data-testid="remove-block-keep">Keep it <kbd>Esc</kbd></button>
+          <button className="bh-confirm-yes" onClick={removeBlock} data-testid="remove-block-yes">
+            {people.length ? `Fire ${people.length} and remove` : 'Remove'} <kbd>Enter</kbd>
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function BuildHud() {
   const on = useStore((s) => !!s.build);
   useEffect(() => {
@@ -231,6 +255,7 @@ export function BuildHud() {
       <Levels />
       <Dock />
       <Readout />
+      <RemoveBlockDialog />
     </>
   );
 }

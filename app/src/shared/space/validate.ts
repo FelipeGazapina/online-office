@@ -1,4 +1,4 @@
-import { ITEM_DEFS, PAINT_COUNT, rotateLocal } from './catalog.ts';
+import { ITEM_DEFS, PAINT_COUNT, layerOf, rotateLocal } from './catalog.ts';
 import { deriveFloors } from './derive.ts';
 import { defOf, hasFloorAt, inLotTile, itemRect, stairsInfo, tileIndex, wkey, type CellRect } from './geom.ts';
 import { route } from './nav.ts';
@@ -239,6 +239,8 @@ function reachability(b: Building, ctx: SpaceContext, floors: readonly FloorGeom
 // ---------------------------------------------------------------- incremental path for item-only edits
 
 function fastEligible(b: Building, ops: readonly BuildOp[]): boolean {
+  // An edit that moves pieces between stories can strand a desk: it takes the full rules, with reachability.
+  if (new Set(ops.map((op) => (op.t === 'items' ? op.story : -1))).size > 1) return false;
   for (const op of ops) {
     if (op.t !== 'items' || !b.stories[op.story]) return false;
     for (const it of op.put) if (ITEM_DEFS[it.def]?.stairs) return false;
@@ -280,13 +282,14 @@ export function fastViolations(b: Building, ops: readonly BuildOp[]): Violation[
       const old = findItem(b.stories[s], id);
       if (old && sameItem(old, item)) continue;
       out.push(...itemViolations(g, item, def));
-      if (def.walkable || !itemInLot(g.lot, item)) continue;
+      if (!itemInLot(g.lot, item)) continue;
       const rect = itemRect(item, def);
       const cw = g.lot.w * 2;
+      const grid = layerOf(def) === 'floor' ? g.floorOcc : g.occ;
       const hit = new Set<ItemId>();
       for (let cz = rect.z0; cz < rect.z1; cz++) {
         for (let cx = rect.x0; cx < rect.x1; cx++) {
-          const owner = g.occ[(cz - g.lot.z0 * 2) * cw + (cx - g.lot.x0 * 2)];
+          const owner = grid[(cz - g.lot.z0 * 2) * cw + (cx - g.lot.x0 * 2)];
           if (!owner) continue;
           const otherId = g.story.items[owner - 1].id;
           if (m.has(otherId)) continue;
@@ -298,6 +301,7 @@ export function fastViolations(b: Building, ops: readonly BuildOp[]): Violation[
     }
     for (let i = 0; i < added.length; i++) {
       for (let j = i + 1; j < added.length; j++) {
+        if (layerOf(added[i].def) !== layerOf(added[j].def)) continue;
         const a = added[i].rect;
         const c = added[j].rect;
         if (a.x0 < c.x1 && c.x0 < a.x1 && a.z0 < c.z1 && c.z0 < a.z1) out.push({ kind: 'overlap', story: s, ids: [added[i].item.id, added[j].item.id] });

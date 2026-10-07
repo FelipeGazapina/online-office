@@ -38,7 +38,7 @@ import {
   type TaskBoardSource,
 } from '../../shared/protocol.ts';
 import type { LegacySources } from '../../shared/tasks.ts';
-import { applyOps, BuildHistory, deskOf, encodeBuilding, freeDesk, legacyBuilding, parseBuilding, placeDesk, teamKit, ITEM_DEFS } from '../../shared/space/index.ts';
+import { addShells, applyOps, BuildHistory, deskOf, encodeBuilding, freeDesk, legacyBuilding, parseBuilding, placeDesk, shellItems, teamKit, ITEM_DEFS } from '../../shared/space/index.ts';
 import type { Building, BuildOp, EmployeeId as SpaceEmployeeId, ItemId, SpaceContext, Violation } from '../../shared/space/index.ts';
 import type { ActorId, ConvoKey, LedgerEntry, MailView, MessageId } from '../../shared/mail.ts';
 import { HARNESSES } from './adapters/index.ts';
@@ -267,7 +267,9 @@ function load(file: string): Loaded | undefined {
     for (const e of company.employees) e.seat = legacy.seats.get(e.id) ?? null;
   }
   const legacy = stored.blocks.flatMap((b) => (b.taskBoard?.sources?.length ? [{ blockId: b.id, sources: b.taskBoard.sources }] : []));
-  return { company, building: seatEveryone(company, building), legacy };
+  // Offices saved before the pod around each team was made of items get those items once, where the pod stood.
+  const shelled = addShells(building, company.blocks.map((b) => ({ id: b.id, slot: b.slot })));
+  return { company, building: seatEveryone(company, shelled), legacy };
 }
 
 // Subagents belong to a running session, so they are never written.
@@ -1016,7 +1018,19 @@ export class Office {
     blocks.push(block);
     this.tasks.addBlock();
     this.apply(teamKit(this.building, block.id, slot));
+    this.placePod(block);
     this.commit();
+  }
+
+  // The rug, boundary, decor and huddle of a new team, each on its own so that a spot the owner has already furnished costs
+  // the team that piece and nothing else.
+  private placePod(block: ProjectBlock) {
+    let b = this.building;
+    for (const piece of shellItems(block.id, block.slot)) {
+      const placed = applyOps(b, [{ t: 'items', story: 0, put: [piece], del: [] }], this.ctx());
+      if (placed.ok) b = placed.building;
+    }
+    if (b !== this.building) this.setBuilding(b);
   }
 
   private assertFolderFree(cwd: string, except?: BlockId) {

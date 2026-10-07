@@ -2,7 +2,7 @@ import { useFrame, type ThreeEvent } from '@react-three/fiber';
 import { memo, useLayoutEffect, useMemo, useRef } from 'react';
 import { AdditiveBlending, BackSide, BoxGeometry, BufferGeometry, Color, DoubleSide, Group, InstancedMesh, Matrix4, MeshBasicMaterial, MeshStandardMaterial, PlaneGeometry, Quaternion, Vector2, Vector3 } from 'three';
 import { PROVIDERS, type Employee } from '../../../../shared/protocol.ts';
-import { ITEM_DEFS, STORY_H, WALL_STYLES, YAW, type FloorGeometry, type ItemId } from '../../../../shared/space/index.ts';
+import { ITEM_DEFS, STORY_H, WALL_STYLES, YAW, layerOf, type FloorGeometry, type ItemId } from '../../../../shared/space/index.ts';
 import { hasFloorAt, tileIndex } from '../../../../shared/space/geom.ts';
 import { runtime } from '../../runtime.ts';
 import { buildView, draft } from '../../hud/build/state.ts';
@@ -17,6 +17,7 @@ import { floorGeometry } from './floor.ts';
 import { inVoid, lobbyVoid } from '../lobbyVoid.ts';
 import { propOf } from '../props.ts';
 import { box, cyl, merge, DEFAULT_TINT, DYNAMIC, modelOf, onTopOf, PROP_DEFS, screenGeometry } from './models.ts';
+import { trimOf, TRIMMED } from './pod.ts';
 import { crossesView, curbModel, facesCamera, frameModel, glassModel, occludes, octantOf, VARIANTS, wallMatrix, wallModel, wallRecords, ZERO, type Variant, type WallRecord } from './walls.ts';
 
 const up = new Vector3(0, 1, 0);
@@ -40,6 +41,9 @@ reflective.set(floorMaterials[0], 0.3);
 reflective.set(floorMaterials[2], 1.2);
 const chairMaterial = new MeshStandardMaterial({ vertexColors: true, roughness: 0.6 });
 const furnitureMaterial = detail(new MeshStandardMaterial({ vertexColors: true, roughness: 0.75 }), 'furniture');
+// The low boundary around a team's rug: tinted slate, a little see-through so the desks read across it.
+const boundaryMaterial = new MeshStandardMaterial({ vertexColors: true, roughness: 0.85, transparent: true, opacity: 0.82 });
+const BOUNDARY: ReadonlySet<string> = new Set(['pod_rail_back', 'pod_rail_side']);
 const plaster = plasterSurface();
 const wallMaterial = detail(new MeshStandardMaterial({ vertexColors: true, roughness: 0.95 }), 'wall', { ...plaster, mean: PLASTER_MEAN, metresPerRepeat: PLASTER_METRES });
 // Clear glass: the sky, the lawn and the trees show through it, with a faint cool tint and a sheen of the room on it.
@@ -65,7 +69,8 @@ const aoGeometry = new PlaneGeometry(1, 1.1).rotateX(-Math.PI / 2);
 // The light a screen throws on the desk in front of it, tinted by what the screen shows.
 const glowMaterial = new MeshBasicMaterial({ map: poolTexture(), transparent: true, depthWrite: false, blending: AdditiveBlending, toneMapped: false, polygonOffset: true, polygonOffsetFactor: -4 });
 const glowGeometry = new PlaneGeometry(1.2, 0.8).rotateX(-Math.PI / 2).translate(0, 0.78, -0.12);
-const NO_BLOB: ReadonlySet<string> = new Set(['rug', 'rail', 'stairs']);
+// No blob under these: the stairs make their own shade and the daily sign hangs in the air. Floor items are skipped by their layer.
+const NO_BLOB: ReadonlySet<string> = new Set(['rail', 'stairs', 'pod_daily_sign']);
 const CEILING_Y = STORY_H - 0.3;
 // Walnut beams on the pendants' 4 m grid divide the ceiling into coffers, each lamp in the middle of one.
 const beamGeometry = new BoxGeometry(1.04, 0.16, 0.12).translate(0, -0.08, 0);
@@ -235,6 +240,10 @@ const shade = (hex: string, amount: number) => color.set(hex).multiplyScalar(amo
 function Furniture({ geom }: { geom: FloorGeometry }) {
   const blocks = useStore((s) => s.company?.blocks);
   const hue = useMemo(() => new Map((blocks ?? []).map((b) => [b.id as string, b.color])), [blocks]);
+  // A trimmed piece of a team wears the team's trim color, so it follows the block's color and not the item.
+  const teamOf = useMemo(() => new Map(geom.story.items.flatMap((i) => (i.blockId ? [[i.id, i.blockId] as const] : []))), [geom]);
+  const trim = useMemo(() => new Map([...hue].map(([id, c]) => [id, trimOf(c)])), [hue]);
+  const trimTint = useMemo(() => (id: ItemId) => trim.get(teamOf.get(id) ?? '') ?? null, [trim, teamOf]);
   const defs = useMemo(() => [...geom.render.items].filter(([def]) => !DYNAMIC.has(def)), [geom]);
   const desks = useMemo(() => geom.story.items.filter((i) => ITEM_DEFS[i.def]?.seat), [geom]);
 
@@ -249,7 +258,7 @@ function Furniture({ geom }: { geom: FloorGeometry }) {
   return (
     <>
       {defs.map(([def, data]) => (
-        <ModelInstances key={def} def={def} matrices={data.matrices} ids={data.ids} onClick={pick(data.ids)} />
+        <ModelInstances key={def} def={def} matrices={data.matrices} ids={data.ids} onClick={pick(data.ids)} tintOf={TRIMMED.has(def) ? trimTint : undefined} />
       ))}
       <Instances
         geometry={propOf('chair').geometry}
@@ -275,19 +284,20 @@ function Furniture({ geom }: { geom: FloorGeometry }) {
   );
 }
 
-function ModelInstances({ def, matrices, ids, onClick }: { def: string; matrices: Float32Array; ids: readonly ItemId[]; onClick: (e: ThreeEvent<MouseEvent>) => void }) {
+function ModelInstances({ def, matrices, ids, onClick, tintOf }: { def: string; matrices: Float32Array; ids: readonly ItemId[]; onClick: (e: ThreeEvent<MouseEvent>) => void; tintOf?: (id: ItemId) => Color | null }) {
   const fill = useMemo(
     () => (mesh: InstancedMesh) => {
       const m = new Matrix4();
       for (let i = 0; i < ids.length; i++) {
         mesh.setMatrixAt(i, place(m, matrices[i * 5], matrices[i * 5 + 1], matrices[i * 5 + 2], matrices[i * 5 + 3]));
         const tint = matrices[i * 5 + 4];
-        mesh.setColorAt(i, tint >= 0 ? color.setHex(tint) : color.setHex(DEFAULT_TINT[def] ?? 0xffffff));
+        mesh.setColorAt(i, tint >= 0 ? color.setHex(tint) : (tintOf?.(ids[i]) ?? color.setHex(DEFAULT_TINT[def] ?? 0xffffff)));
       }
     },
-    [def, matrices, ids],
+    [def, matrices, ids, tintOf],
   );
   const baked = PROP_DEFS[def];
+  if (BOUNDARY.has(def)) return <Instances geometry={modelOf(def)} material={boundaryMaterial} count={ids.length} fill={fill} onClick={onClick} castShadow={false} />;
   if (!baked) return <Instances geometry={modelOf(def)} material={furnitureMaterial} count={ids.length} fill={fill} onClick={onClick} />;
   const { geometry, material } = propOf(baked.prop);
   const onTop = onTopOf(def);
@@ -305,7 +315,7 @@ function ContactShadows({ geom }: { geom: FloorGeometry }) {
     const out: { x: number; z: number; yaw: number; w: number; d: number }[] = [];
     for (const [def, data] of geom.render.items) {
       const dims = ITEM_DEFS[def];
-      if (!dims || NO_BLOB.has(def)) continue;
+      if (!dims || NO_BLOB.has(def) || layerOf(dims) === 'floor') continue;
       for (let i = 0; i < data.ids.length; i++) {
         out.push({ x: data.matrices[i * 5], z: data.matrices[i * 5 + 2], yaw: data.matrices[i * 5 + 3], w: dims.w / 2 + 0.3, d: dims.d / 2 + 0.3 });
       }

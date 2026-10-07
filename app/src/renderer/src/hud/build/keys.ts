@@ -2,6 +2,7 @@ import { removeItemOp } from '../../../../shared/space/buildersGesture.ts';
 import { runtime } from '../../runtime.ts';
 import { get } from '../../store.ts';
 import { enterBuild, exitBuild, redo, rotate, sendOps, setLevel, setTool, stepBack, undo } from './actions.ts';
+import { removal, askToRemove, keepBlock, removeBlock } from './removal.ts';
 import { buildView, modifiers } from './state.ts';
 
 export const PAN_KEYS: readonly string[] = ['KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'];
@@ -25,6 +26,13 @@ export function buildKey(e: KeyboardEvent): boolean {
     return true;
   }
   if (e.altKey || s.modal) return false;
+  // A question about a whole block takes the keyboard until it is answered.
+  if (removal.getState().blockId) {
+    if (e.code === 'Enter') removeBlock();
+    else if (e.code === 'Escape') keepBlock();
+    e.preventDefault();
+    return true;
+  }
   const level = build.level;
   const taken = () => {
     e.preventDefault();
@@ -60,8 +68,11 @@ export function buildKey(e: KeyboardEvent): boolean {
       return taken();
     case 'Delete':
     case 'Backspace': {
-      // A block in hand is never deleted by a key: its pieces are many and one slip would take the team's office with it.
-      if (build.tool.kind === 'block') return taken();
+      // A block in hand is only deleted after a question that names the people it would fire: one slip would take the team with it.
+      if (build.tool.kind === 'block') {
+        if (build.tool.carry) askToRemove(build.tool.carry.blockId);
+        return taken();
+      }
       const id = build.tool.kind === 'item' ? build.tool.carry : s.buildCursor.hover;
       if (id) {
         sendOps([removeItemOp(level, id)]);

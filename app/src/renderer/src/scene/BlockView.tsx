@@ -1,19 +1,22 @@
 import { memo, useEffect, useMemo, useState, type ReactNode } from 'react';
-import { Color, DoubleSide, MeshStandardMaterial } from 'three';
+import { AdditiveBlending, Color, DoubleSide, MeshBasicMaterial, MeshStandardMaterial, PlaneGeometry } from 'three';
 import type { Employee, ProjectBlock } from '../../../shared/protocol.ts';
 import { blocksWithTasks } from '../boardView.ts';
-import { BLOCK_D, BLOCK_W, STORY_H, YAW, blockCenter, type Building, type Item } from '../../../shared/space/index.ts';
+import { BLOCK_D, BLOCK_W, STORY_H, YAW, type Building, type Item } from '../../../shared/space/index.ts';
 import { enterProjectComputer } from '../computer.ts';
 import { set, useStore } from '../store.ts';
 import { itemCenter } from '../world.ts';
-import { PodDecor } from './Decor.tsx';
+import { DYNAMIC } from './building/models.ts';
+import { rugOf, trimOf } from './building/pod.ts';
 import { TaskBoardWhiteboard } from './TaskBoardWall.tsx';
-import { Chair, RoundedPlane } from './Furniture.tsx';
-import { fitText, FONT_BODY, FONT_DISPLAY, ownerComputerTexture, roundRect, useCanvasTexture } from './textures.ts';
+import { RoundedPlane } from './Furniture.tsx';
+import { fitText, FONT_BODY, FONT_DISPLAY, ownerComputerTexture, poolTexture, roundRect, useCanvasTexture } from './textures.ts';
 import { carpetSurface } from './surfaceTextures.ts';
 import { useDiagram } from './whiteboard.ts';
 
-// The block presentation is intentionally a light prototype: neutral pods, a visible PO desk, and a small DAILY huddle spot.
+// Everything a block shows is an item of the building with the block's id, drawn where that item stands. The pieces below
+// carry a texture or a material of their own, so React draws them one by one; the rest of the pod is instanced with the
+// other furniture (building/StoryView.tsx).
 
 function shade(hex: string, amount: number) {
   return `#${new Color(hex).multiplyScalar(amount).getHexString()}`;
@@ -59,31 +62,34 @@ function Sign({ name, cwd, color }: { name: string; cwd: string; color: string }
   );
 }
 
-function DailyHuddle({ color }: { color: string }) {
-  const tex = useCanvasTexture(420, 180, (g) => {
-    g.fillStyle = '#fffdf7'; roundRect(g, 0, 0, 420, 180, 22); g.fill();
-    g.fillStyle = '#344256'; g.font = `800 58px ${FONT_DISPLAY}`; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText('DAILY', 210, 76);
-    g.font = `500 25px ${FONT_BODY}`; g.fillStyle = '#7c8794'; g.fillText('team sync', 210, 132);
-  }, []);
+// The round table of the team's daily, on a mat in the team's trim color. Its chairs and its sign are items of their own.
+function HuddleTable({ color }: { color: string }) {
   return (
-    <group>
+    <group position={[0.05, 0, -0.25]}>
       <mesh receiveShadow position={[0, 0.035, 0]}><cylinderGeometry args={[1.25, 1.25, 0.06, 56]} /><meshStandardMaterial color={color} roughness={0.9} /></mesh>
       <mesh castShadow position={[0, 0.7, 0]}><cylinderGeometry args={[0.8, 0.8, 0.05, 56]} /><meshStandardMaterial color="#eadfc9" roughness={0.45} /></mesh>
       <mesh castShadow position={[0, 0.665, 0]}><cylinderGeometry args={[0.76, 0.76, 0.03, 56]} /><meshStandardMaterial color="#8c6a4a" roughness={0.6} /></mesh>
       <mesh castShadow position={[0, 0.35, 0]}><cylinderGeometry args={[0.07, 0.1, 0.65, 16]} /><meshStandardMaterial color="#3a3f4e" roughness={0.5} /></mesh>
       <mesh castShadow position={[0, 0.03, 0]}><cylinderGeometry args={[0.38, 0.4, 0.04, 40]} /><meshStandardMaterial color="#3a3f4e" roughness={0.5} /></mesh>
-      {[-1, 1].map((x) => <Chair key={x} position={[x * 0.95, 0, 0]} color={color} rotationY={x < 0 ? -Math.PI / 2 : Math.PI / 2} />)}
-      <mesh position={[0, 1.05, -0.82]}><planeGeometry args={[1.5, 0.64]} /><meshBasicMaterial map={tex} transparent /></mesh>
     </group>
   );
+}
+
+function DailySign() {
+  const tex = useCanvasTexture(420, 180, (g) => {
+    g.fillStyle = '#fffdf7'; roundRect(g, 0, 0, 420, 180, 22); g.fill();
+    g.fillStyle = '#344256'; g.font = `800 58px ${FONT_DISPLAY}`; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText('DAILY', 210, 76);
+    g.font = `500 25px ${FONT_BODY}`; g.fillStyle = '#7c8794'; g.fillText('team sync', 210, 132);
+  }, []);
+  return <mesh position={[0.05, 1.05, -0.07]}><planeGeometry args={[1.5, 0.64]} /><meshBasicMaterial map={tex} transparent /></mesh>;
 }
 
 // The pod's front edge: a pane of clear glass between a thin sill and a thin top rail, so the team's desks read through it.
 const railMaterial = new MeshStandardMaterial({ color: '#c9ced4', roughness: 0.4, metalness: 0.5 });
 const paneMaterial = new MeshStandardMaterial({ color: '#dcefff', roughness: 0.06, transparent: true, opacity: 0.16, depthWrite: false, side: DoubleSide });
-function GlassRail({ x, z, w }: { x: number; z: number; w: number }) {
+function GlassRail({ w }: { w: number }) {
   return (
-    <group position={[x, 0, z]}>
+    <group position={[0, 0, -0.03]}>
       <mesh receiveShadow material={railMaterial} position={[0, 0.02, 0]}><boxGeometry args={[w, 0.04, 0.06]} /></mesh>
       <mesh material={railMaterial} position={[0, 0.76, 0]}><boxGeometry args={[w, 0.03, 0.05]} /></mesh>
       {[-w / 2, w / 2].map((px) => <mesh key={px} material={railMaterial} position={[px, 0.39, 0]}><boxGeometry args={[0.04, 0.78, 0.05]} /></mesh>)}
@@ -92,15 +98,23 @@ function GlassRail({ x, z, w }: { x: number; z: number; w: number }) {
   );
 }
 
-function PodBoundary({ color }: { color: string }) {
-  const edge = '#d2d8dd';
+// A team's rug, and the two pools of lamplight that lie on it: they belong to the rug, so they go where it goes.
+const poolGeometry = new PlaneGeometry(1, 1).rotateX(-Math.PI / 2);
+const poolMaterial = (color: string) =>
+  new MeshBasicMaterial({ map: poolTexture(), color, transparent: true, depthWrite: false, blending: AdditiveBlending, opacity: 0.24, fog: false, polygonOffset: true, polygonOffsetFactor: -3 });
+const POOLS = [
+  { x: 0, z: 0.4, r: 7.8, material: poolMaterial('#ffe0a8') },
+  { x: 3, z: -1.5, r: 4, material: poolMaterial('#ffc27a') },
+];
+function Rug({ color }: { color: string }) {
+  const carpet = useMemo(() => carpetSurface(), []);
+  const rug = useMemo(() => rugOf(color).getStyle(), [color]);
   return (
-    <group>
-      {[[0, -3.72, 9.6, 0.08], [-4.72, 0, 0.08, 7.4], [4.72, 0, 0.08, 7.4]].map(([x, z, w, d], i) => (
-        <mesh key={i} receiveShadow position={[x, 0.28, z]}><boxGeometry args={[w, 0.56, d]} /><meshStandardMaterial color={i === 0 ? color : edge} roughness={0.85} transparent opacity={0.82} /></mesh>
-      ))}
-      <GlassRail x={0} z={3.72} w={3.1} />
-    </group>
+    <>
+      <RoundedPlane w={RUG_W + 0.5} d={RUG_D + 0.5} r={0.5} color="#d9c9a8" y={0.008} surface={carpet} />
+      <RoundedPlane w={RUG_W} d={RUG_D} r={0.35} color={rug} y={0.014} surface={carpet} />
+      {POOLS.map((p) => <mesh key={p.x} geometry={poolGeometry} material={p.material} position={[p.x, 0.025, p.z]} scale={[p.r * 2, 1, p.r * 2]} renderOrder={4} />)}
+    </>
   );
 }
 
@@ -260,14 +274,11 @@ const RUG_W = BLOCK_W - 1;
 const RUG_D = BLOCK_D - 1;
 
 type Placed = { item: Item; story: number };
-const find = (b: Building | null, def: string, blockId: string): Placed | undefined => {
-  if (!b) return undefined;
-  for (let story = 0; story < b.stories.length; story++) {
-    const item = b.stories[story].items.find((i) => i.def === def && i.blockId === blockId);
-    if (item) return { item, story };
-  }
-  return undefined;
-};
+/** Every piece of the block that React draws, wherever on the building it stands now. */
+function piecesOf(b: Building | null, blockId: string): Placed[] {
+  if (!b) return [];
+  return b.stories.flatMap((s, story) => s.items.filter((i) => i.blockId === blockId && DYNAMIC.has(i.def)).map((item) => ({ item, story })));
+}
 
 // Items that are drawn one by one carry the story's height and the turn of their item.
 function AtItem({ at, children }: { at: Placed; children: ReactNode }) {
@@ -322,39 +333,38 @@ function Terminal({ blockId }: { blockId: ProjectBlock['id'] }) {
 export const BlockView = memo(function BlockView({ block, employees }: { block: ProjectBlock; employees: Employee[] }) {
   const building = useStore((s) => s.building);
   const hasTasks = useStore((s) => blocksWithTasks(s.boards, s.tasks).has(block.id));
-  const c = blockCenter(block.slot);
-  const sign = useMemo(() => find(building, 'team_sign', block.id), [building, block.id]);
-  const board = useMemo(() => find(building, 'whiteboard', block.id), [building, block.id]);
-  const terminal = useMemo(() => find(building, 'board_terminal', block.id), [building, block.id]);
-  const carpet = useMemo(() => carpetSurface(), []);
-  const rug = useMemo(() => new Color(block.color).lerp(new Color('#f1cd8e'), 0.9).getStyle(), [block.color]);
-  const trim = useMemo(() => new Color(block.color).lerp(new Color('#738195'), 0.5).getStyle(), [block.color]);
+  const pieces = useMemo(() => piecesOf(building, block.id), [building, block.id]);
+  const trim = useMemo(() => trimOf(block.color).getStyle(), [block.color]);
   const author = block.whiteboard ? employees.find((e) => e.id === block.whiteboard!.by)?.name : undefined;
+
+  const view = (def: string): ReactNode => {
+    switch (def) {
+      case 'team_sign':
+        return <Sign name={block.name} cwd={block.cwd} color={block.color} />;
+      case 'whiteboard':
+        return block.linearBoardUrl ? <LinearBoardWhiteboard block={block} /> : hasTasks ? <TaskBoardWhiteboard block={block} employees={employees} /> : block.githubRepo ? <GithubWhiteboard block={block} /> : <Whiteboard block={block} authorName={author} />;
+      case 'board_terminal':
+        return <Terminal blockId={block.id} />;
+      case 'pod_rug':
+        return <Rug color={block.color} />;
+      case 'pod_glass_rail':
+        return <GlassRail w={3.1} />;
+      case 'pod_huddle_table':
+        return <HuddleTable color={trim} />;
+      case 'pod_daily_sign':
+        return <DailySign />;
+      default:
+        return null;
+    }
+  };
 
   return (
     <group>
-      <group position={[c.x, 0, c.z]}>
-        <RoundedPlane w={RUG_W + 0.5} d={RUG_D + 0.5} r={0.5} color="#d9c9a8" y={0.008} surface={carpet} />
-        <RoundedPlane w={RUG_W} d={RUG_D} r={0.35} color={rug} y={0.014} surface={carpet} />
-        <PodBoundary color={trim} />
-        <PodDecor />
-      </group>
-      {sign && (
-        <AtItem at={sign}>
-          <Sign name={block.name} cwd={block.cwd} color={block.color} />
+      {pieces.map((at) => (
+        <AtItem key={at.item.id} at={at}>
+          {view(at.item.def)}
         </AtItem>
-      )}
-      {board && (
-        <AtItem at={board}>
-          {block.linearBoardUrl ? <LinearBoardWhiteboard block={block} /> : hasTasks ? <TaskBoardWhiteboard block={block} employees={employees} /> : block.githubRepo ? <GithubWhiteboard block={block} /> : <Whiteboard block={block} authorName={author} />}
-        </AtItem>
-      )}
-      {terminal && (
-        <AtItem at={terminal}>
-          <Terminal blockId={block.id} />
-        </AtItem>
-      )}
-      <group position={[c.x + 3.3, 0, c.z + 2.5]}><DailyHuddle color={trim} /></group>
+      ))}
     </group>
   );
 });

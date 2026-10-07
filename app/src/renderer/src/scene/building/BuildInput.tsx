@@ -4,7 +4,7 @@
 import { useThree } from '@react-three/fiber';
 import { useEffect } from 'react';
 import { Vector3 } from 'three';
-import { blockAt, blockItems, blockPose, CELL, checkOps, FLOOR_PAINTS, ITEM_DEFS, moveBlockOp, placeBlock, rectWalls, STORY_H, WALL_STYLES, type Building, type BuildOp, type Item, type ItemId, type Vec2 } from '../../../../shared/space/index.ts';
+import { blockAt, blockItems, blockPose, CELL, checkOps, FLOOR_PAINTS, ITEM_DEFS, moveBlockOps, placeBlock, rectWalls, STORY_H, WALL_STYLES, type Building, type BuildOp, type Item, type ItemId, type Vec2 } from '../../../../shared/space/index.ts';
 import {
   floodRoom,
   itemAt,
@@ -41,6 +41,11 @@ const tkey = (t: Vec2) => `${t.x},${t.z}`;
 function lineTiles(a: Vec2, b: Vec2): Vec2[] {
   const n = Math.max(Math.abs(b.x - a.x), Math.abs(b.z - a.z), 1);
   return Array.from({ length: n + 1 }, (_, i) => ({ x: Math.round(a.x + ((b.x - a.x) * i) / n), z: Math.round(a.z + ((b.z - a.z) * i) / n) }));
+}
+
+/** The story that holds the block's pieces, or -1 when it has none. */
+function storyOf(b: Building, blockId: string): number {
+  return b.stories.findIndex((st) => blockItems(st, blockId).length > 0);
 }
 
 function storyItem(b: Building, level: number, id: ItemId | null): Item | null {
@@ -122,13 +127,16 @@ function plan(b: Building, build: BuildState, p: Vec2, drag: Drag | null, shift:
         const items = id ? blockItems(story, id) : [];
         return { ops: [], ghost: () => (items.length ? { kind: 'blockSelect', items } : null), readout: null };
       }
-      const items = blockItems(story, carry.blockId);
-      if (!items.length) return null;
+      // A block lives on one story: the one it was picked up from. The floor the owner is looking at is where it would land.
+      const from = storyOf(b, carry.blockId);
+      if (from < 0) return null;
+      const items = blockItems(b.stories[from], carry.blockId);
       const pose = blockPose(items, carry.quarter, { x: p.x / CELL - carry.grab.x, z: p.z / CELL - carry.grab.z });
-      const op = moveBlockOp(story, level, carry.blockId, pose);
+      const ops = moveBlockOps(b.stories[from], from, carry.blockId, pose, level);
       const placed = placeBlock(items, pose);
       const name = get().company?.blocks.find((x) => x.id === carry.blockId)?.name ?? 'Block';
-      return { ops: op ? [op] : [], ghost: (ok) => ({ kind: 'block', items: placed, ok }), readout: `${name} · ${items.length} pieces` };
+      const floor = level === from ? '' : ` · to floor ${level + 1}`;
+      return { ops, ghost: (ok) => ({ kind: 'block', items: placed, ok }), readout: `${name} · ${items.length} pieces${floor}` };
     }
   }
 }
