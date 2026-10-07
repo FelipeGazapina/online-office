@@ -103,7 +103,7 @@ export function legacyBuilding(
     { t: 'walls', story: 0, put: [...walls.values()], del: [] },
     { t: 'items', story: 0, put: items, del: [] },
   ];
-  let building: Building = { ...applyAll(emptyBuilding(lot), ops, []).b, shelled: true };
+  let building: Building = { ...applyAll(emptyBuilding(lot), ops, []).b, shelled: 2 };
 
   const known = new Set(blocks.map((b) => b.id));
   const seated = employees.filter((e) => known.has(e.blockId));
