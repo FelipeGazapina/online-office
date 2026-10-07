@@ -392,7 +392,7 @@ export class Office {
           (who) => {
             const e = this.company.employees.find((x) => x.id === who);
             const block = e && this.company.blocks.find((b) => b.id === e.blockId);
-            return e?.workspace && block ? { blockCwd: block.cwd, ws: e.workspace } : undefined;
+            return e?.workspace && block ? { home: block.cwd, ws: e.workspace } : undefined;
           },
           folderArtifacts((who) => {
             const e = this.company.employees.find((x) => x.id === who);
