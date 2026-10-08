@@ -1,9 +1,9 @@
-import { blockItems, cellBounds, CELL, ITEM_DEFS, type BuildOp, type Item, type ItemId, type Rot, type Vec2 } from '../../../../shared/space/index.ts';
+import { blockItems, cellBounds, CELL, ITEM_DEFS, missingEssentials, type BuildOp, type FloorItem, type Item, type ItemId, type Rot, type TopItem, type Vec2 } from '../../../../shared/space/index.ts';
 import { leaveComputer } from '../../computer.ts';
 import { runtime } from '../../runtime.ts';
-import { get, send, set, setSetting, useStore, type BuildState, type BuildTool } from '../../store.ts';
-import { ENTRIES, type Entry, type TabId } from './catalog.ts';
-import { BUILD_DIST, buildView, modifiers, setGhost } from './state.ts';
+import { get, send, set, setSetting, toast, useStore, type BuildState, type BuildTool } from '../../store.ts';
+import { ENTRIES, TOP_PREFIX, type Entry, type TabId } from './catalog.ts';
+import { BUILD_DIST, buildView, hand, modifiers, rollHand, setGhost, spaceContext } from './state.ts';
 
 const FRESH: Omit<BuildState, 'level'> = { tool: { kind: 'select' }, tab: 'desks', search: '', searching: false, peek: null, fill: false, paint: 1, style: 0, wallsMode: 'cutaway' };
 
@@ -25,9 +25,10 @@ export function enterBuild() {
   buildView.dist = runtime.view.isoDist;
   runtime.view.isoDist = Math.min(runtime.view.isoDist, BUILD_DIST);
   set({ build: { ...FRESH, level }, story: level, selectedId: null, menu: null });
+  send({ type: 'build_begin' });
 }
 
-export function exitBuild() {
+function leaveBuild() {
   if (!get().build) return;
   setGhost(null);
   buildView.keys.clear();
@@ -35,7 +36,29 @@ export function exitBuild() {
   set({ build: null, buildCursor: { readout: null, verdict: null, hover: null } });
 }
 
-export const toggleBuild = () => (get().build ? exitBuild() : enterBuild());
+/** Keeps the draft and leaves, or stays and says what is missing. Main checks the same rules again before it saves. */
+export function saveBuild() {
+  const s = get();
+  if (!s.build || !s.building) return;
+  const missing = missingEssentials(s.building, spaceContext(s.company));
+  if (missing.length) {
+    toast('The office cannot be saved yet. The checklist shows what is missing.', 'warn');
+    return;
+  }
+  send({ type: 'build_save' });
+  leaveBuild();
+}
+
+/** Leaves without keeping anything done since build mode opened. */
+export function discardBuild() {
+  if (!get().build) return;
+  send({ type: 'build_discard' });
+  leaveBuild();
+}
+
+export const clearBuild = () => send({ type: 'build_clear' });
+
+export const toggleBuild = () => (get().build ? saveBuild() : enterBuild());
 
 /** Esc and a right click. A block in hand goes back and the block tool stays, so the next block is one click away. */
 export function stepBack() {
@@ -54,6 +77,7 @@ export function pickUpBlock(blockId: string, at: Vec2): boolean {
 
 export function setTool(tool: BuildTool) {
   setGhost(null);
+  if (tool.kind === 'item' && !tool.carry) rollHand(tool.def);
   patchBuild({ tool });
 }
 
@@ -112,9 +136,9 @@ export function setLevel(level: number) {
   const next = Math.max(0, Math.min(s.building.stories.length - 1, level));
   if (next === s.build.level) return;
   setGhost(null);
-  // A moved item or block belongs to the story it was picked up on.
+  // A moved item belongs to the story it was picked up on. A block in hand goes with the owner to the new floor: that is how it changes floors.
   const t = s.build.tool;
-  const tool: BuildTool = t.kind === 'item' && t.carry ? { kind: 'select' } : t.kind === 'block' && t.carry ? { kind: 'block', carry: null } : t;
+  const tool: BuildTool = t.kind === 'item' && t.carry ? { kind: 'select' } : t;
   set({ build: { ...s.build, level: next, tool }, story: next });
 }
 
@@ -156,16 +180,28 @@ export function newItemId(def: string): ItemId {
   return `${def}:b${Date.now().toString(36)}${(serial++).toString(36)}` as ItemId;
 }
 
+/** The small item as the tool would stand it on `host`, new or moved. A moved one keeps its look and its turn; a new one takes the hand's. */
+export function toolTopItem(tool: Extract<BuildTool, { kind: 'item' }>, host: ItemId, spot: { rot: Rot; u: number; v: number; lvl?: number }, existing: Item | null): TopItem {
+  const item: TopItem = { id: tool.carry ?? newItemId(tool.def), def: tool.def, on: host, rot: spot.rot, u: spot.u, v: spot.v };
+  const from = existing ?? (hand.def === tool.def ? hand : null);
+  if (from?.look) item.look = from.look;
+  // A set shows its own angles in its model, so the hand's extra turn would make the ghost differ from what lands.
+  if (from?.ang && !ITEM_DEFS[tool.def].group) item.ang = from.ang;
+  if (spot.lvl) item.lvl = spot.lvl;
+  if (existing?.tint !== undefined) item.tint = existing.tint;
+  return item;
+}
+
 /** The item as the tool would put it at the cell, new or moved. */
-export function toolItem(tool: Extract<BuildTool, { kind: 'item' }>, at: { x: number; z: number }, existing: Item | null): Item {
-  const item: Item = { id: tool.carry ?? newItemId(tool.def), def: tool.def, x: at.x, z: at.z, rot: tool.rot };
+export function toolItem(tool: Extract<BuildTool, { kind: 'item' }>, at: { x: number; z: number }, existing: Item | null): FloorItem {
+  const item: FloorItem = { id: tool.carry ?? newItemId(tool.def), def: tool.def, x: at.x, z: at.z, rot: tool.rot };
   if (tool.blockId) item.blockId = tool.blockId;
   if (existing?.tint !== undefined) item.tint = existing.tint;
   return item;
 }
 
 export function entryOfDef(def: string): Entry | undefined {
-  return ENTRIES.find((e) => e.kind === 'item' && e.def === def);
+  return ENTRIES.find((e) => e.kind === 'item' && e.def === def && !e.id.startsWith(TOP_PREFIX));
 }
 
 export function holdModifier(code: string, down: boolean) {

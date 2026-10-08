@@ -174,7 +174,7 @@ export function Desk({
 
 export function Chair({ position, color, rotationY = 0 }: { position: [number, number, number]; color: string; rotationY?: number }) {
   return (
-    <group position={position} rotation-y={rotationY}>
+    <group position={position} rotation-y={rotationY} userData={{ probe: 'chair' }}>
       <mesh castShadow position={[0, 0.02, 0]}>
         <cylinderGeometry args={[0.26, 0.26, 0.04, 16]} />
         <meshStandardMaterial color="#2b2e38" roughness={0.6} />

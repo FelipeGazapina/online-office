@@ -18,11 +18,12 @@ import {
   stairLinks,
   wallName,
   YAW,
+  floorItems,
   type Building,
   type FloorGeometry,
+  type FloorItem,
   type FloorNav,
   type FloorPos,
-  type Item,
   type Leg,
   type Lot,
   type SeatPose,
@@ -150,11 +151,11 @@ export function ownerSeat(w: World): SeatPose | null {
   }
 }
 
-export function itemsOf(w: World, def: string, blockId?: BlockId): { floor: number; item: Item }[] {
-  return w.building.stories.flatMap((s, floor) => s.items.filter((i) => i.def === def && (blockId === undefined || i.blockId === blockId)).map((item) => ({ floor, item })));
+export function itemsOf(w: World, def: string, blockId?: BlockId): { floor: number; item: FloorItem }[] {
+  return w.building.stories.flatMap((s, floor) => floorItems(s).filter((i) => i.def === def && (blockId === undefined || i.blockId === blockId)).map((item) => ({ floor, item })));
 }
 
-const centerOf = (item: Item): Vec2 => {
+const centerOf = (item: FloorItem): Vec2 => {
   const def = ITEM_DEFS[item.def];
   const f = item.rot % 2 === 0 ? { w: def.w, d: def.d } : { w: def.d, d: def.w };
   return { x: (item.x + f.w / 2) / 2, z: (item.z + f.d / 2) / 2 };
@@ -175,7 +176,7 @@ export function whiteboardAt(w: World, blockId: BlockId): { floor: number; at: V
   return found ? { floor: found.floor, at: centerOf(found.item) } : null;
 }
 
-export function chairOf(item: Item): Vec2 | null {
+export function chairOf(item: FloorItem): Vec2 | null {
   const def = ITEM_DEFS[item.def];
   if (!def.seat) return null;
   const o = rotateLocal(def, item.rot, def.seat.chair);

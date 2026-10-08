@@ -1,7 +1,7 @@
 import { useFrame, useThree } from '@react-three/fiber';
 import { useEffect, useLayoutEffect, useMemo, useRef } from 'react';
 import { AdditiveBlending, DirectionalLight, HemisphereLight, Color, CubeCamera, HalfFloatType, Texture, WebGLCubeRenderTarget, InstancedMesh, Matrix4, MeshBasicMaterial, MeshStandardMaterial, Object3D, PlaneGeometry, PMREMGenerator, Quaternion, Scene, Vector3 } from 'three';
-import { blockCenter, DOOR_X } from '../../../shared/space/index.ts';
+import { DOOR_X } from '../../../shared/space/index.ts';
 import type { Bounds } from './Environment.tsx';
 import { runtime } from '../runtime.ts';
 import { poolTexture } from './textures.ts';
@@ -17,7 +17,7 @@ const one = new Vector3();
 
 type Pool = { x: number; z: number; r: number; color: string };
 
-export function poolsFor(b: Bounds, slots: readonly number[]): Pool[] {
+export function poolsFor(b: Bounds): Pool[] {
   const cx = (b.x0 + b.x1) / 2;
   const right = b.x1 - 4;
   const warm = '#ffb766';
@@ -29,10 +29,6 @@ export function poolsFor(b: Bounds, slots: readonly number[]): Pool[] {
     { x: -14.5, z: 5, r: 6, color: '#ffb166' },
     { x: DOOR_X, z: b.z1 - 1.6, r: 5.5, color: '#ffd391' },
   ];
-  for (const s of slots) {
-    const c = blockCenter(s);
-    pools.push({ x: c.x, z: c.z + 0.4, r: 7.8, color: '#ffe0a8' }, { x: c.x + 3, z: c.z - 1.5, r: 4, color: '#ffc27a' });
-  }
   return pools;
 }
 
@@ -52,9 +48,8 @@ export function LightPools({ pools }: { pools: Pool[] }) {
   return <instancedMesh key={pools.length} ref={ref} args={[poolGeometry, poolMaterial, pools.length]} frustumCulled={false} renderOrder={4} />;
 }
 
-export function usePools(b: Bounds, slots: readonly number[]) {
-  const key = slots.join(',');
-  return useMemo(() => poolsFor(b, slots), [b.x0, b.x1, b.z0, b.z1, key]);
+export function usePools(b: Bounds) {
+  return useMemo(() => poolsFor(b), [b.x0, b.x1, b.z0, b.z1]);
 }
 
 // Materials that take the room reflection, and how strongly. Only polished floors do: lit through the whole scene it would
@@ -122,7 +117,7 @@ function useRoomReflections(at: Vector3) {
 
 // Late afternoon sun through the windows. Its shadows are wide and soft, and the sky and bounce fill is strong enough that
 // the rooms read inside a streak of shade, so a close look at a desk shows the desk and not a black bar across it.
-export function Lights({ b, slots }: { b: Bounds; slots: readonly number[] }) {
+export function Lights({ b }: { b: Bounds }) {
   const cx = (b.x0 + b.x1) / 2;
   const cz = (b.z0 + b.z1) / 2;
   const ext = Math.max(b.x1 - b.x0, b.z1 - b.z0) * 0.66;
@@ -132,7 +127,7 @@ export function Lights({ b, slots }: { b: Bounds; slots: readonly number[] }) {
     target.updateMatrixWorld();
   }, [target, cx, cz]);
   useRoomReflections(useMemo(() => new Vector3(cx, 1.5, cz), [cx, cz]));
-  const pools = usePools(b, slots);
+  const pools = usePools(b);
   const sun = useRef<DirectionalLight>(null);
   const sky = useRef<HemisphereLight>(null);
   // From above the rooms the sun stands higher and its shadows are lighter, so a streak of shade never hides a desk; at eye

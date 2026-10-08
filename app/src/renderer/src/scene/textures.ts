@@ -58,13 +58,18 @@ export function codeTexture() {
   c.width = 64;
   c.height = 64;
   const g = c.getContext('2d')!;
-  g.fillStyle = '#000';
+  // A dark editor: a keyword in a colour, then the rest of the line in pale, so a lit screen has colour in it and not only white on black.
+  g.fillStyle = '#0d1626';
   g.fillRect(0, 0, 64, 64);
-  g.fillStyle = '#fff';
+  const words = ['#7fb8ff', '#f2b84b', '#8fd0b8', '#e8828f', '#c9a6ff'];
   for (let row = 0; row < 12; row++) {
     const indent = ((row * 5) % 3) * 5;
     const len = 12 + ((row * 37) % 34);
-    g.fillRect(4 + indent, 3 + row * 5, len, 2);
+    const word = 4 + ((row * 7) % 4) * 2;
+    g.fillStyle = words[(row * 3) % words.length];
+    g.fillRect(4 + indent, 3 + row * 5, word, 2);
+    g.fillStyle = '#e6ecf8';
+    g.fillRect(4 + indent + word + 2, 3 + row * 5, Math.max(4, len - word - 2), 2);
   }
   const t = new CanvasTexture(c);
   t.wrapS = t.wrapT = RepeatWrapping;

@@ -5,8 +5,8 @@ import { Edges, Html } from '@react-three/drei';
 import { useFrame } from '@react-three/fiber';
 import { useRef } from 'react';
 import { DoubleSide, type MeshBasicMaterial } from 'three';
-import { ITEM_DEFS, STORY_H, rotateLocal, type Item } from '../../../shared/space/index.ts';
-import { itemRect } from '../../../shared/space/geom.ts';
+import { ITEM_DEFS, STORY_H, rotateLocal, type FloorItem } from '../../../shared/space/index.ts';
+import { floorItems, itemRect } from '../../../shared/space/geom.ts';
 import { labelOf, toneOf, type Aim, type Tone } from '../deskDrop.ts';
 import { useStore } from '../store.ts';
 
@@ -16,11 +16,11 @@ const MARGIN = 0.14;
 export function DeskAim() {
   const aim = useStore((s) => s.aim);
   const building = useStore((s) => s.building);
-  const item = aim && building?.stories[aim.story]?.items.find((i) => i.id === aim.deskId);
+  const item = aim && building?.stories[aim.story] && floorItems(building.stories[aim.story]!).find((i) => i.id === aim.deskId);
   return aim && item ? <Lit aim={aim} item={item} /> : null;
 }
 
-function Lit({ aim, item }: { aim: Aim; item: Item }) {
+function Lit({ aim, item }: { aim: Aim; item: FloorItem }) {
   const plate = useRef<MeshBasicMaterial>(null);
   useFrame((state) => {
     if (plate.current) plate.current.opacity = 0.42 + Math.sin(state.clock.elapsedTime * 6) * 0.1;

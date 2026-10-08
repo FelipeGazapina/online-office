@@ -5,7 +5,7 @@
 // Run: pnpm build:verify && OFFICE_SHOT_COMPANY=/path/to/company.json OFFICE_OUT_DIR=out/verify OFFICE_CDP_PORT=9341 node verify/cdp.mjs verify/shots-build-move.mjs
 import { copyFileSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { blockItems, cellBounds, checkOps, moveBlockOp, parseBuilding } from '../src/shared/space/index.ts';
+import { blockItems, cellBounds, checkOps, moveBlockOps, parseBuilding } from '../src/shared/space/index.ts';
 import { assert, scratch } from './lib.mjs';
 
 const source = process.env.OFFICE_SHOT_COMPANY;
@@ -46,7 +46,7 @@ function legal(min, max, step, op) {
   return found.sort((a, b) => a.d - b.d);
 }
 const box = cellBounds(mine);
-const blockOffsets = legal(9, 24, 1, (x, z) => moveBlockOp(story, 0, block.id, { quarter: 0, origin: { x: box.x0 + x * 2, z: box.z0 + z * 2 } }));
+const blockOffsets = legal(9, 24, 1, (x, z) => moveBlockOps(story, 0, block.id, { quarter: 0, origin: { x: box.x0 + x * 2, z: box.z0 + z * 2 } })[0]);
 // The desk goes where it has the most air around it, so the picture shows one piece on open floor like the Sims placement shot.
 const others = story.items.filter((i) => i.id !== desk.id);
 const air = (o) => Math.min(...others.map((i) => Math.hypot(i.x / 2 - (desk.x / 2 + o.x), i.z / 2 - (desk.z / 2 + o.z))));

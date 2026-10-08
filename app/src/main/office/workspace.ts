@@ -1,7 +1,9 @@
 // One git worktree and branch per employee, so teammates never write the same folder. The office, not the employee,
-// commits and merges: a done request lands on the block's checked-out branch only when the owner's tree is clean.
+// commits and merges. A done request lands in a "home": the block's checked-out branch (only when the owner's tree is
+// clean) or, for work that belongs to a task, the task's own branch in its own worktree. Every function that takes a
+// `home` takes either one and treats it the same way.
 // Plain Node and real git, no Electron: workspace-check.ts runs it against temp repos.
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync } from 'node:fs';
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import type { ArtifactPort, ArtifactState } from './mail-artifacts.ts';
@@ -25,7 +27,8 @@ const run = (cwd: string, args: string[], identity?: string, raw = false): Out =
 };
 
 const lines = (s: string) => s.split('\n').filter(Boolean);
-const firstLine = (s: string) => lines(s)[0] ?? 'git failed';
+// The line that says what went wrong: git prints progress before it.
+const firstLine = (s: string) => lines(s).find((l) => /^(fatal|error):/.test(l)) ?? lines(s)[0] ?? 'git failed';
 const real = (p: string) => {
   try {
     return realpathSync(p);
@@ -95,14 +98,22 @@ export const removeWorkspace = (blockCwd: string, ws: Workspace, name: string): 
   run(blockCwd, ['worktree', 'prune']);
 };
 
-// Brings the block's current HEAD into the employee's branch before a request starts, or when one reaches them mid-turn. A conflict is left in the
+// Whether another branch already has everything this one has. Then the branch holds no work of its own, and what it
+// holds can be dropped from the worktree without losing a commit.
+const delivered = (ws: Workspace): boolean =>
+  lines(run(ws.path, ['for-each-ref', '--contains', 'HEAD', '--format=%(refname)', 'refs/heads', 'refs/remotes']).out).some((ref) => ref !== `refs/heads/${ws.branch}`);
+
+// Brings the home's current HEAD into the employee's branch before a request starts, or when one reaches them mid-turn. A conflict is left in the
 // worktree for the employee to resolve, because the request that follows a failed integration is exactly that.
-export const syncWorkspace = (blockCwd: string, ws: Workspace, name: string, midTurn = false): Sync => {
+// A branch that already delivered its work somewhere else (another task's branch, the block) starts over from the home instead of
+// merging, so one task's commits never ride into another task's pull request.
+export const syncWorkspace = (home: string, ws: Workspace, name: string, midTurn = false): Sync => {
   const stuck = unresolved(ws.path);
   if (stuck.length) return { kind: 'conflict', paths: stuck };
-  const head = headOf(blockCwd);
+  const head = headOf(home);
+  if (!midTurn && !isAncestor(ws.path, 'HEAD', head) && !dirty(ws.path, true) && delivered(ws) && run(ws.path, ['reset', '--hard', '-q', head]).ok) return { kind: 'merged' };
   if (isAncestor(ws.path, head, 'HEAD')) return { kind: 'current' };
-  const merged = run(ws.path, ['merge', '--no-edit', '--no-verify', '-m', `Sync ${ws.branch} with the block`, head], name);
+  const merged = run(ws.path, ['merge', '--no-edit', '--no-verify', '-m', `Sync ${ws.branch} with the latest work`, head], name);
   if (merged.ok) return { kind: 'merged' };
   const paths = unmerged(ws.path);
   // Someone in the middle of a turn is not handed a half-open merge: it waits for their next request.
@@ -115,27 +126,33 @@ export const syncWorkspace = (blockCwd: string, ws: Workspace, name: string, mid
 
 // Commits what is left in the worktree, then merges the branch into the block's checked-out branch. Re-running after
 // a crash converges: a branch the block already contains is a no-op.
-export const integrate = (blockCwd: string, ws: Workspace, name: string, title: string): Integration => {
+export const integrate = (home: string, ws: Workspace, name: string, title: string): Integration => {
   const { branch } = ws;
   const stuck = unresolved(ws.path);
   if (stuck.length) return { kind: 'conflict', branch, paths: stuck };
   const committed = commitAll(ws, name, title);
   if (!committed.ok) return { kind: 'held', branch, reason: `could not commit ${name}'s changes: ${firstLine(committed.err || committed.out)}` };
-  if (isAncestor(blockCwd, branch, 'HEAD')) return { kind: 'already', branch };
-  if (dirty(blockCwd, false)) return { kind: 'held', branch, reason: 'the block folder has uncommitted changes, so the office left it alone' };
-  const merged = run(blockCwd, ['merge', '--no-ff', '--no-verify', '-m', `Merge ${branch}: ${title}`, branch], name);
+  if (isAncestor(home, branch, 'HEAD')) return { kind: 'already', branch };
+  if (dirty(home, false)) return { kind: 'held', branch, reason: 'the block folder has uncommitted changes, so the office left it alone' };
+  const merged = run(home, ['merge', '--no-ff', '--no-verify', '-m', `Merge ${branch}: ${title}`, branch], name);
   if (merged.ok) return { kind: 'merged', branch };
-  const paths = unmerged(blockCwd);
-  run(blockCwd, ['merge', '--abort']);
+  const paths = unmerged(home);
+  run(home, ['merge', '--abort']);
   return paths.length ? { kind: 'conflict', branch, paths } : { kind: 'held', branch, reason: `git could not merge it: ${firstLine(merged.err || merged.out)}` };
 };
 
-export const commitsAhead = (blockCwd: string, ws: Workspace): number => Number(run(blockCwd, ['rev-list', '--count', `HEAD..${ws.branch}`]).out) || 0;
+// For work whose home is not there: commits what is left on the employee's branch and lands nowhere.
+export const hold = (ws: Workspace, name: string, title: string, reason: string): Integration => {
+  const committed = commitAll(ws, name, title);
+  return { kind: 'held', branch: ws.branch, reason: committed.ok ? reason : `could not commit ${name}'s changes: ${firstLine(committed.err || committed.out)}` };
+};
+
+export const commitsAhead = (home: string, ws: Workspace): number => Number(run(home, ['rev-list', '--count', `HEAD..${ws.branch}`]).out) || 0;
 
 // What this employee changed and the block has not absorbed yet: committed work since the merge base, plus whatever is
 // uncommitted. It is the employee's own work only, however much the block moved meanwhile.
-export const changedInWorkspace = (blockCwd: string, ws: Workspace): string[] => {
-  const base = run(ws.path, ['merge-base', 'HEAD', headOf(blockCwd)]);
+export const changedInWorkspace = (home: string, ws: Workspace): string[] => {
+  const base = run(ws.path, ['merge-base', 'HEAD', headOf(home)]);
   const committed = base.ok ? lines(run(ws.path, ['diff', '--name-only', base.out, 'HEAD']).out) : [];
   const status = run(ws.path, ['status', '--porcelain=v1', '-z', '-uall'], undefined, true).out.split('\0').filter(Boolean);
   const uncommitted: string[] = [];
@@ -149,10 +166,10 @@ export const changedInWorkspace = (blockCwd: string, ws: Workspace): string[] =>
 
 const SHA = /^[0-9a-f]{7,40}$/;
 
-export const checkInWorkspace = (blockCwd: string, ws: Workspace, ref: string, changed: readonly string[]): ArtifactState => {
+export const checkInWorkspace = (home: string, ws: Workspace, ref: string, changed: readonly string[]): ArtifactState => {
   if (SHA.test(ref)) {
     if (!run(ws.path, ['cat-file', '-e', `${ref}^{commit}`]).ok) return 'missing';
-    return isAncestor(ws.path, ref, 'HEAD') && !isAncestor(ws.path, ref, headOf(blockCwd)) ? 'changed' : 'unchanged';
+    return isAncestor(ws.path, ref, 'HEAD') && !isAncestor(ws.path, ref, headOf(home)) ? 'changed' : 'unchanged';
   }
   const abs = resolve(ws.path, ref);
   const rel = relative(ws.path, abs);
@@ -162,15 +179,111 @@ export const checkInWorkspace = (blockCwd: string, ws: Workspace, ref: string, c
 };
 
 // Artifacts for done come from the employee's own branch. A person without a worktree keeps the shared-folder proof.
-export const workspaceArtifacts = (of: (who: string) => { blockCwd: string; ws: Workspace } | undefined, shared: ArtifactPort): ArtifactPort => ({
+export const workspaceArtifacts = (of: (who: string) => { home: string; ws: Workspace } | undefined, shared: ArtifactPort): ArtifactPort => ({
   check: (who, refs, since) => {
     const w = of(who);
     if (!w) return shared.check(who, refs, since);
-    const changed = changedInWorkspace(w.blockCwd, w.ws);
-    return refs.map((r) => checkInWorkspace(w.blockCwd, w.ws, r, changed));
+    const changed = changedInWorkspace(w.home, w.ws);
+    return refs.map((r) => checkInWorkspace(w.home, w.ws, r, changed));
   },
   changed: (who, since) => {
     const w = of(who);
-    return w ? changedInWorkspace(w.blockCwd, w.ws).slice(0, 20) : shared.changed(who, since);
+    return w ? changedInWorkspace(w.home, w.ws).slice(0, 20) : shared.changed(who, since);
   },
 });
+
+// ───────────────────────────── a task's own branch ─────────────────────────────
+
+// Where a task's branch starts and which branch its pull request targets. `ref` is something any worktree of the repo
+// resolves; `origin` says whether the repo has a remote to push to.
+export type Base = { name: string; ref: string; origin: boolean };
+
+const exists = (dir: string, ref: string) => run(dir, ['show-ref', '--verify', '--quiet', ref]).ok;
+
+// The default branch of the block's repo: what origin's HEAD points at when there is a remote that has it, else the branch the owner has checked out.
+export const defaultBase = (blockCwd: string): Base => {
+  const origin = run(blockCwd, ['remote', 'get-url', 'origin']).ok;
+  if (origin) {
+    const head = run(blockCwd, ['symbolic-ref', '--quiet', '--short', 'refs/remotes/origin/HEAD']);
+    const name = head.ok ? head.out.replace(/^origin\//, '') : ['main', 'master'].find((n) => exists(blockCwd, `refs/remotes/origin/${n}`));
+    if (name && exists(blockCwd, `refs/remotes/origin/${name}`)) return { name, ref: `refs/remotes/origin/${name}`, origin };
+  }
+  const branch = run(blockCwd, ['symbolic-ref', '--quiet', 'HEAD']);
+  return branch.ok ? { name: branch.out.replace(/^refs\/heads\//, ''), ref: branch.out, origin } : { name: 'HEAD', ref: headOf(blockCwd), origin };
+};
+
+export type TaskBranch = { branch: string; title: string; key: string };
+
+// Idempotent. The branch is found by `key` (the short id every task branch name ends with), so a task whose title changed since still
+// gets its own branch back. A worktree that is already on it is reused, and a branch with no commit of its own gets the one a pull request needs.
+export const createTaskWorkspace = (blockCwd: string, path: string, task: TaskBranch, base: Base): Workspace => {
+  run(blockCwd, ['worktree', 'prune']);
+  const branch = lines(run(blockCwd, ['for-each-ref', '--format=%(refname:short)', `refs/heads/task/*-${task.key}`]).out)[0] ?? task.branch;
+  const have = exists(blockCwd, `refs/heads/${branch}`);
+  const there = existsSync(path) && run(path, ['rev-parse', '--abbrev-ref', 'HEAD']);
+  if (!(there && there.ok && there.out === branch && sameRepo(path, blockCwd))) {
+    rmSync(path, { recursive: true, force: true });
+    run(blockCwd, ['worktree', 'prune']);
+    mkdirSync(dirname(path), { recursive: true });
+    // A branch this repo only knows from origin (the block moved to another clone) continues from there, not from the base.
+    const sent = `refs/remotes/origin/${branch}`;
+    const made = run(blockCwd, ['worktree', 'add', ...(have ? [path, branch] : ['-b', branch, path, exists(blockCwd, sent) ? sent : base.ref])]);
+    if (!made.ok) throw new Error(`Could not make the worktree of ${branch}: ${firstLine(made.err)}`);
+  }
+  const ws = { path, branch };
+  // GitHub does not open a pull request for a branch that has nothing the base lacks.
+  if (!(Number(run(path, ['rev-list', '--count', `${base.ref}..HEAD`]).out) > 0)) run(path, ['commit', '--allow-empty', '--no-verify', '-m', `Start: ${task.title}`], 'Online Office');
+  return ws;
+};
+
+// The worktree goes, the branch stays: it may be the head of a pull request.
+export const removeTaskWorkspace = (blockCwd: string | undefined, path: string): void => {
+  if (blockCwd && existsSync(path)) run(blockCwd, ['worktree', 'remove', '--force', path]);
+  rmSync(path, { recursive: true, force: true });
+  if (blockCwd) run(blockCwd, ['worktree', 'prune']);
+};
+
+export type Pushed = { kind: 'pushed' } | { kind: 'no-remote' } | { kind: 'failed'; reason: string };
+
+// Never waits on git in the main process: network time belongs to the event loop. A prompt for credentials is refused, not waited on.
+const runAsync = (cwd: string, args: string[], timeoutMs: number, identity?: string): Promise<Out> =>
+  new Promise((done) => {
+    const who = identity ? ['-c', `user.name=${identity}`, '-c', `user.email=${slug(identity)}@office.local`, '-c', 'commit.gpgsign=false'] : [];
+    const child = spawn('git', [...who, ...args], { cwd, env: { ...process.env, GIT_TERMINAL_PROMPT: '0' }, stdio: ['ignore', 'pipe', 'pipe'] });
+    let out = '';
+    let err = '';
+    const timer = setTimeout(() => child.kill('SIGKILL'), timeoutMs);
+    child.stdout.on('data', (d: Buffer) => (out += d));
+    child.stderr.on('data', (d: Buffer) => (err += d));
+    child.on('error', (e) => {
+      clearTimeout(timer);
+      done({ ok: false, out: '', err: e.message });
+    });
+    child.on('close', (code) => {
+      clearTimeout(timer);
+      done({ ok: code === 0, out: out.trim(), err: err.trim() });
+    });
+  });
+
+// Pushes the task's branch to origin. When origin has moved on (the owner pressed "Update branch" on GitHub) it merges that in first. The branch is
+// the office's own, so nothing is ever forced.
+export const pushBranch = async (path: string, branch: string, name = 'Online Office'): Promise<Pushed> => {
+  if (!run(path, ['remote', 'get-url', 'origin']).ok) return { kind: 'no-remote' };
+  const push = () => runAsync(path, ['push', '--set-upstream', 'origin', `${branch}:${branch}`], 120_000);
+  let pushed = await push();
+  if (!pushed.ok && /rejected|non-fast-forward|fetch first/i.test(pushed.err)) {
+    const fetched = await runAsync(path, ['fetch', 'origin', branch], 120_000);
+    const merged = fetched.ok && (await runAsync(path, ['merge', '--no-edit', '--no-verify', `origin/${branch}`], 60_000, name));
+    if (merged && merged.ok) pushed = await push();
+    else if (unmerged(path).length) run(path, ['merge', '--abort']);
+  }
+  return pushed.ok ? { kind: 'pushed' } : { kind: 'failed', reason: firstLine(pushed.err || pushed.out) };
+};
+
+// Commits the last push did not carry: a branch never pushed, or one that moved since. Reads the remote-tracking ref this
+// repo already has, so it asks no one.
+export const unpushed = (path: string, branch: string): boolean => {
+  if (!run(path, ['remote', 'get-url', 'origin']).ok) return false;
+  if (!exists(path, `refs/remotes/origin/${branch}`)) return true;
+  return Number(run(path, ['rev-list', '--count', `refs/remotes/origin/${branch}..${branch}`]).out) > 0;
+};

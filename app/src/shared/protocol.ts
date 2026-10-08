@@ -2,7 +2,10 @@
 // Main is the source of truth for *logical* state. The renderer derives every avatar pose from it:
 // an employee whose status is `blocked_on_owner` walks to the owner; everyone else walks back to their desk.
 
+import type { ActivityEntry, QuestionRef, TaskLive } from './activity.ts';
+import type { TerminalPush } from './terminal.ts';
 import type { Building, BuildOp, ItemId, Violation } from './space/types.ts';
+import type { Missing } from './space/essentials.ts';
 import type { MailClientMessage, MailServerMessage, MailView } from './mail.ts';
 import type { Board, BoardId, BoardPatch, BoardSpec, BoardSync, Priority, Task, TaskId, TaskStage, TaskTime } from './tasks.ts';
 import type { VoiceApi } from './voice.ts';
@@ -112,11 +115,26 @@ export type Whiteboard = {
 };
 
 export type TaskProvider = 'linear' | 'cronospark';
-export type TaskBoardSource = {
-  provider: TaskProvider;
-  projectId: string;
-  label?: string;
-};
+
+// What a Linear source pulls. The first value of each is what the board always did: everyone's issues, from any cycle, as
+// many as Linear's first page holds. A source with no `filters` has exactly those.
+export type LinearAssignee = 'anyone' | 'me' | { id: string; name: string };
+export const LINEAR_LIMITS = [50, 200] as const;
+export type LinearLimit = (typeof LINEAR_LIMITS)[number];
+export type LinearFilters = { assignee: LinearAssignee; cycle: 'any' | 'current'; limit: LinearLimit };
+export const DEFAULT_LINEAR_FILTERS: LinearFilters = { assignee: 'anyone', cycle: 'any', limit: 50 };
+
+// CronoSpark's listing tool takes a project and a status and nothing about people (its limit stops at 100), so a CronoSpark
+// source has no filters.
+export type TaskBoardSource =
+  | { provider: 'cronospark'; projectId: string; label?: string }
+  | { provider: 'linear'; projectId: string; label?: string; filters?: LinearFilters };
+
+export const filtersOf = (source: TaskBoardSource): LinearFilters => (source.provider === 'linear' && source.filters) || DEFAULT_LINEAR_FILTERS;
+
+// Who the picker offers, as Linear's own user list gives them. `unknown` until someone asks (`load_linear_people`).
+export type LinearPerson = { id: string; name: string };
+export type LinearPeople = { kind: 'unknown' } | { kind: 'loading' } | { kind: 'ready'; people: LinearPerson[] } | { kind: 'error'; message: string };
 // A card as a provider lists it. A board turns each card into a task (shared/tasks.ts), keyed by `externalId`.
 export type TaskCard = {
   id: string;
@@ -145,6 +163,7 @@ const TASK_BOARD_STATUS_ALIASES: Record<string, (typeof TASK_BOARD_STATUS_ORDER)
   dev: 'In Dev',
   deferred: 'Deferred',
   done: 'Done',
+  duplicate: 'Done',
   indevelopment: 'In Dev',
   indev: 'In Dev',
   indesign: 'In Design',
@@ -236,6 +255,8 @@ export type ClientMessage =
   | { type: 'configure_linear_board'; blockId: BlockId; url: string }
   | { type: 'connect_task_provider'; provider: TaskProvider }
   | { type: 'configure_task_provider'; provider: 'cronospark'; apiKey: string; userId: string }
+  // Asks Linear who the assignee picker can offer. The answer arrives in the snapshot as `linearPeople`.
+  | { type: 'load_linear_people' }
   // Boards and tasks. A block always keeps at least one board. A quick board takes no sources, so `spec` and `update_board`
   // refuse them on one.
   | { type: 'create_board'; blockId: BlockId; name: string; spec: BoardSpec }
@@ -254,6 +275,11 @@ export type ClientMessage =
   | { type: 'delete_task'; taskId: TaskId }
   // `employeeId` is the block's PO or any employee of the block. Posts one root request to them, so they start at once.
   | { type: 'assign_task'; taskId: TaskId; employeeId: EmployeeId }
+  // Asks for everything that happened on a task. The answer arrives as an `activity` message, and the renderer asks again
+  // whenever the mailroom or the task changed under an open task.
+  | { type: 'load_activity'; taskId: TaskId }
+  // The owner's answer to a question the board shows: a blocked reply, a help request, or an employee waiting on them.
+  | { type: 'answer_question'; taskId: TaskId; ref: QuestionRef; text: string }
   // Sends the time a CronoSpark task has worked and not sent yet: closed time only, one hours entry per person and day, and the
   // same time never twice. This is the only way hours leave the app.
   | { type: 'send_hours'; taskId: TaskId }
@@ -268,11 +294,21 @@ export type ClientMessage =
   | { type: 'remove_allow_rule'; employeeId: EmployeeId; rule: AllowRule }
   // Stops the employee's session and starts another with no memory of the conversation. Notes, model and rules stay.
   | { type: 'fresh_session'; employeeId: EmployeeId }
+  // Esc on an employee's terminal: the step that is running stops and the turn ends, with nothing sent after it. Ignored
+  // for someone who is not working. The owner's words to a terminal take the same paths as the chat: `post` and `answer`.
+  | { type: 'interrupt'; employeeId: EmployeeId }
+  // Asks for everything every terminal holds. The answer arrives as one `terminal` message per employee, and after it only changes do.
+  | { type: 'load_terminal' }
   | { type: 'reset_company' }
   // Edits to the building. Main applies them all or none and answers a refusal with `build_rejected`.
   | { type: 'build'; ops: BuildOp[] }
   | { type: 'undo' }
   | { type: 'redo' }
+  // A build session edits a draft. Save keeps it only once nothing essential is missing; discard drops it.
+  | { type: 'build_begin' }
+  | { type: 'build_clear' }
+  | { type: 'build_save' }
+  | { type: 'build_discard' }
   // Everything the owner says to anyone, a task or a word, goes through the mailroom.
   | MailClientMessage;
 
@@ -284,6 +320,8 @@ export type Snapshot = {
   meetingDoor: MeetingDoor;
   // Changes whenever the building does. The building itself arrives on its own channel.
   buildingRev: number;
+  // A build session is open: the building shown is its draft, which is not saved yet.
+  buildDraft: boolean;
   // Every block has at least one board, in the order the owner sees them.
   boards: Board[];
   tasks: Task[];
@@ -292,7 +330,10 @@ export type Snapshot = {
   // Time worked per task with at least one run, derived from the mailroom's ledger. A person in `running` keeps counting
   // after `at`, at `share` of wall time.
   taskTime: Record<TaskId, TaskTime>;
+  // What each person on a task with runs is doing, and the questions waiting on the owner. Derived from the ledger.
+  taskLive: Record<TaskId, TaskLive>;
   taskConnections: Record<TaskProvider, TaskConnectionState>;
+  linearPeople: LinearPeople;
   mail: MailView;
 };
 
@@ -301,7 +342,11 @@ export type ServerMessage =
   | { type: 'said'; employeeId: EmployeeId; text: string }
   | { type: 'log'; employeeId: EmployeeId; line: string; at: number }
   | { type: 'building'; building: Building; rev: number }
+  | { type: 'activity'; taskId: TaskId; entries: ActivityEntry[]; live: TaskLive }
   | { type: 'build_rejected'; violations: readonly Violation[] }
+  | { type: 'build_incomplete'; missing: readonly Missing[] }
+  // What changed on an employee's terminal (shared/terminal.ts). Throttled to a few a second per employee.
+  | ({ type: 'terminal'; employeeId: EmployeeId } & TerminalPush)
   | { type: 'error'; message: string }
   | MailServerMessage;
 

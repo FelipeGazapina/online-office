@@ -1,9 +1,9 @@
 // What a build gesture means to the building, as pure functions over a story. The renderer turns pointer input into
 // these arguments and sends the ops to main, which runs the same rules (`applyOps`) before anything changes.
 import { footprint, ITEM_DEFS } from './catalog.ts';
-import { defOf, hasFloorAt, inLotTile, itemRect, tileIndex, wrefKey } from './geom.ts';
+import { defOf, floorItems, hasFloorAt, inLotTile, itemRect, tileIndex, wrefKey } from './geom.ts';
 import { rectWalls, type TileRect } from './builders.ts';
-import type { BuildOp, FloorCell, Item, ItemId, Lot, PaintId, Rot, Story, Vec2, WallRef, WallSeg } from './types.ts';
+import type { BuildOp, FloorCell, FloorItem, Item, ItemId, Lot, PaintId, Rot, Story, Vec2, WallRef, WallSeg } from './types.ts';
 import { CELL } from './types.ts';
 
 const ref = (x: number, z: number, d: 'e' | 's'): WallRef => ({ x, z, d });
@@ -160,12 +160,12 @@ export function itemOrigin(defId: string, rot: Rot, cursor: Vec2): { x: number; 
   return { x: snap(cursor.x, f.w), z: snap(cursor.z, f.d) };
 }
 
-/** The item under a point in meters. Furniture wins over a rug lying beneath it. */
-export function itemAt(s: Story, p: Vec2): Item | null {
+/** The floor item under a point in meters. Furniture wins over a rug lying beneath it. */
+export function itemAt(s: Story, p: Vec2): FloorItem | null {
   const cx = p.x / CELL;
   const cz = p.z / CELL;
-  let found: Item | null = null;
-  for (const item of s.items) {
+  let found: FloorItem | null = null;
+  for (const item of floorItems(s)) {
     const def = defOf(item);
     if (!def) continue;
     const r = itemRect(item, def);

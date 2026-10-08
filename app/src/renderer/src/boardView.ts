@@ -1,6 +1,6 @@
 // What the task screens draw, worked out from the snapshot: which board a block shows, which column a task sits in, how
 // time reads. Pure, so the 3D board, the HUD board and the per-frame sim agree and verify/board-view-check.ts can run it.
-import { taskBoardStatusLabel, type BlockId, type ClientMessage, type Employee, type EmployeeId, type TaskProvider } from '../../shared/protocol.ts';
+import { DEFAULT_LINEAR_FILTERS, filtersOf, taskBoardStatusLabel, type BlockId, type ClientMessage, type Employee, type EmployeeId, type LinearFilters, type LinearPerson, type TaskBoardSource, type TaskProvider } from '../../shared/protocol.ts';
 import { STAGES, primaryBoard, stageOfStatus, totalWorkedMs, workedMs, type Board, type BoardId, type Priority, type Task, type TaskId, type TaskStage, type TaskTime } from '../../shared/tasks.ts';
 
 export const STAGE_LABEL: Record<TaskStage, string> = { todo: 'Todo', doing: 'In Progress', review: 'In Review', done: 'Done' };
@@ -26,7 +26,36 @@ export function columnsOf(tasks: readonly Task[], holds: StageHolds = {}, now = 
   return STAGES.map((stage) => ({ stage, label: STAGE_LABEL[stage], tasks: by.get(stage)!.sort(newestFirst) }));
 }
 
-export const stageStep = (stage: TaskStage, dir: 1 | -1): TaskStage | undefined => STAGES[STAGES.indexOf(stage) + dir];
+// The next column over that is open: a folded column is not a place a card can go.
+export function stageStep(stage: TaskStage, dir: 1 | -1, folded: readonly TaskStage[] = []): TaskStage | undefined {
+  for (let at = STAGES.indexOf(stage) + dir; at >= 0 && at < STAGES.length; at += dir) if (!folded.includes(STAGES[at]!)) return STAGES[at];
+  return undefined;
+}
+
+// ───────────────────────────── Folded columns ─────────────────────────────
+
+const NONE: readonly TaskStage[] = [];
+export const foldedOf = (board: Pick<Board, 'collapsed'> | undefined): readonly TaskStage[] => board?.collapsed ?? NONE;
+
+// The folded columns after the owner folds or unfolds `stage`, or undefined when that would fold the last open one.
+export function foldStep(folded: readonly TaskStage[], stage: TaskStage): TaskStage[] | undefined {
+  const next = folded.includes(stage) ? folded.filter((s) => s !== stage) : [...folded, stage];
+  return next.length < STAGES.length ? next : undefined;
+}
+
+// A Linear source with one filter changed. The defaults are not kept, so a source set back to them equals the one saved.
+export function withFilters(source: TaskBoardSource, patch: Partial<LinearFilters>): TaskBoardSource {
+  if (source.provider !== 'linear') return source;
+  const { filters: _, ...rest } = source;
+  const next: LinearFilters = { ...filtersOf(source), ...patch };
+  return JSON.stringify(next) === JSON.stringify(DEFAULT_LINEAR_FILTERS) ? rest : { ...rest, filters: next };
+}
+
+// What the people list offers for what the owner typed: names that contain it, in Linear's order.
+export const findPeople = (people: readonly LinearPerson[], typed: string): LinearPerson[] => {
+  const q = typed.trim().toLowerCase();
+  return q ? people.filter((p) => p.name.toLowerCase().includes(q)) : [...people];
+};
 
 // ───────────────────────────── Boards ─────────────────────────────
 

@@ -4,9 +4,10 @@
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { BlockId, EmployeeId, TaskCard } from '../src/shared/protocol.ts';
+import type { BlockId, EmployeeId, LinearFilters, TaskBoardSource, TaskCard } from '../src/shared/protocol.ts';
 import type { LedgerEntry, MessageId, TurnId } from '../src/shared/mail.ts';
 import {
+  cleanCollapsed,
   closedDayWork,
   emptyTurnLog,
   ensureBoards,
@@ -23,6 +24,7 @@ import {
   timesOf as timesOfTasks,
   totalWorkedMs,
   turnLogOf,
+  wantsCard,
   workedMs,
   type Board,
   type BoardId,
@@ -31,6 +33,7 @@ import {
   type TaskId,
   type TaskTime,
 } from '../src/shared/tasks.ts';
+import { noInputs, type LiveInputs } from '../src/shared/activity.ts';
 import { Office } from '../src/main/office/company.ts';
 import { OfficeError } from '../src/main/office/error.ts';
 import { HARNESSES } from '../src/main/office/adapters/index.ts';
@@ -191,6 +194,49 @@ console.log('\n# boards');
   check(!makeBoard(board('f'), B1, '  ', { kind: 'quick' }).ok, 'a board needs a name');
 }
 
+console.log('\n# what a Linear source pulls and which columns a board folds');
+{
+  const linear = (filters?: LinearFilters): TaskBoardSource => ({ provider: 'linear', projectId: 'team:BLOOM', ...(filters ? { filters } : {}) });
+  const f = (over: Partial<LinearFilters> = {}): LinearFilters => ({ assignee: 'anyone', cycle: 'any', limit: 50, ...over });
+  const feature = (sources: TaskBoardSource[]) => {
+    const made = makeBoard(board('f'), B1, 'Sprint', { kind: 'feature', sources });
+    if (!made.ok) throw new Error(made.reason);
+    return made.board;
+  };
+  const sourcesOf = (b: Board) => (b.kind === 'quick' ? [] : b.sources);
+
+  check(JSON.stringify(sourcesOf(feature([linear(f())]))) === JSON.stringify([linear()]), 'filters that are the defaults are not stored: the source reads as it always did');
+  check(JSON.stringify(sourcesOf(feature([linear(f({ assignee: 'me', cycle: 'current', limit: 200 }))]))[0]) === JSON.stringify(linear(f({ assignee: 'me', cycle: 'current', limit: 200 }))), 'a filter that is not the default is stored as given');
+  const picked = sourcesOf(feature([linear(f({ assignee: { id: ' u1 ', name: ' Ana ' } }))]))[0];
+  check(picked?.provider === 'linear' && JSON.stringify(picked.filters?.assignee) === JSON.stringify({ id: 'u1', name: 'Ana' }), 'a picked person is stored trimmed');
+  const once = feature([linear(f({ limit: 200 }))]);
+  const twice = patchBoard(once, { sources: sourcesOf(once) });
+  check(twice.ok && JSON.stringify(twice.board) === JSON.stringify(once), 'cleaning cleaned sources changes nothing');
+  check(JSON.stringify(sourcesOf(feature([{ provider: 'cronospark', projectId: 'p', filters: f({ limit: 200 }) } as never]))[0]) === JSON.stringify({ provider: 'cronospark', projectId: 'p' }), 'a CronoSpark source carries no filters');
+
+  check(JSON.stringify(cleanCollapsed(['done', 'todo', 'done'])) === JSON.stringify(['todo', 'done']), 'folded columns come back once each, in column order');
+  check(JSON.stringify(cleanCollapsed([])) === '[]', 'no column folded is an empty list');
+  check(!Array.isArray(cleanCollapsed(['todo', 'doing', 'review', 'done'])), 'the last open column cannot be folded');
+
+  const open = feature([linear()]);
+  const folded = patchBoard(open, { collapsed: ['done'] });
+  check(folded.ok && JSON.stringify(folded.board.collapsed) === '["done"]' && folded.board.name === 'Sprint' && JSON.stringify(sourcesOf(folded.board)) === JSON.stringify([linear()]), 'a board folds a column and keeps its name and sources');
+  const renamedFolded = folded.ok ? patchBoard(folded.board, { name: 'Next' }) : folded;
+  check(renamedFolded.ok && JSON.stringify(renamedFolded.board.collapsed) === '["done"]', 'a rename leaves the folded columns alone');
+  const unfolded = folded.ok ? patchBoard(folded.board, { collapsed: [] }) : folded;
+  check(unfolded.ok && !('collapsed' in unfolded.board), 'unfolding every column leaves no trace on the board');
+  check(!patchBoard(open, { collapsed: ['todo', 'doing', 'review', 'done'] }).ok, 'a board refuses to fold every column');
+  const quickBoard = makeBoard(board('q'), B1, 'Ideas', { kind: 'quick' });
+  const foldedQuick = quickBoard.ok ? patchBoard(quickBoard.board, { collapsed: ['review'] }) : quickBoard;
+  check(foldedQuick.ok && foldedQuick.board.kind === 'quick' && JSON.stringify(foldedQuick.board.collapsed) === '["review"]', 'a quick board folds a column too');
+
+  const card = (status: string) => ({ status });
+  check(wantsCard(open, card('Done')) && wantsCard(open, card('Canceled')), 'a board with nothing folded wants every card');
+  const noDone = folded.ok ? folded.board : open;
+  check(!wantsCard(noDone, card('Done')) && !wantsCard(noDone, card('Canceled')) && !wantsCard(noDone, card('Completed')) && !wantsCard(noDone, card('Duplicate')), 'a folded Done wants neither done, canceled, completed nor duplicate cards');
+  check(wantsCard(noDone, card('Backlog')) && wantsCard(noDone, card('Todo')) && wantsCard(noDone, card('In Progress')) && wantsCard(noDone, card('In Review')), 'and every other status');
+}
+
 console.log('\n# the mail moves the stage');
 {
   const base = (over: Partial<Task> = {}): Task => ({ ...newTask({ id: task('A'), boardId: board('b'), title: 'x', origin: { kind: 'manual' }, stage: 'doing', now: 0 }), runs: [m('r1'), m('r2')], ...over });
@@ -286,8 +332,15 @@ class FakeProvider {
   errors: string[] = [];
   calls: HoursCall[] = [];
   failing = 0;
-  async fetchSources() {
-    return { cards: this.cards, errors: this.errors };
+  asked: { sources: readonly TaskBoardSource[]; kept: number }[] = [];
+  people: { id: string; name: string }[] = [];
+  async fetchSources(sources: readonly TaskBoardSource[], keep: (card: TaskCard) => boolean = () => true) {
+    const cards = this.cards.filter(keep);
+    this.asked.push({ sources, kept: cards.length });
+    return { cards, errors: this.errors };
+  }
+  async linearPeople() {
+    return this.people;
   }
   async logHours(entry: HoursCall) {
     if (this.failing > 0) {
@@ -417,6 +470,308 @@ console.log('\n# a retried assign never posts twice');
   const retry = new Tasks(x.file, x.host, x.w.persisted);
   retry.assign(made.id, ANA);
   check(requests() === 1 && retry.view(0).tasks[0]!.runs.length === 1 && retry.view(0).tasks[0]!.runs[0] === healed.runs[0], 'a retry that has not seen the run finds the request by its key and links it');
+}
+
+console.log('\n# the activity of a task, and the owner answering its questions');
+{
+  const x = taskWorld();
+  const quick = x.tasks.boardsOf(B1).find((b) => b.kind === 'quick')!;
+  const noAsks: LiveInputs = noInputs;
+  const made = x.tasks.createTask(quick.id, 'Add the export');
+  x.w.fresh.add('app/export.ts');
+  x.tasks.assign(made.id, ANA);
+  x.sync();
+  const view = () => x.tasks.view(x.now(), noAsks);
+  const live = () => view().taskLive[made.id]!;
+  check(live().people.find((p) => p.employeeId === ANA)?.state === 'working', 'the snapshot carries what each person on a task is doing: Ana is working');
+  check(view().taskLive[x.tasks.createTask(quick.id, 'Not started').id] === undefined, 'a task nobody worked on has no summary');
+
+  x.advance(5_000);
+  const root = view().tasks.find((y) => y.id === made.id)!.runs[0]!;
+  const blocked = x.w.room.reply(ANA, root, { outcome: 'blocked', text: 'CSV or JSON?' });
+  x.w.room.turnEnded(ANA, 'blocked', true);
+  x.sync();
+  check(blocked.ok && live().questions.length === 1 && live().questions[0]!.text === 'CSV or JSON?' && live().questions[0]!.asker === ANA, 'a blocked reply shows up as a question on the task in the same sync', JSON.stringify(live().questions));
+  check(view().tasks.find((y) => y.id === made.id)!.stage === 'todo', 'and the run ending blocked still sends the task back to todo');
+
+  const qid = (live().questions[0]!.ref as { id: MessageId }).id;
+  const requests = () => x.w.room.state.order.filter((id) => x.w.room.state.messages.get(id)!.kind === 'request').length;
+  const before = requests();
+  const said = (f: () => unknown) => {
+    try {
+      f();
+    } catch (error) {
+      return error instanceof OfficeError ? error.message : String(error);
+    }
+    return '';
+  };
+  check(/some words/.test(said(() => x.tasks.answer(made.id, qid, '   ', noAsks))), 'an empty answer is refused');
+  check(/no longer|any more/.test(said(() => x.tasks.answer(made.id, 'nope' as MessageId, 'CSV', noAsks))), 'a question that is not open is refused');
+  x.advance(5_000);
+  x.tasks.answer(made.id, qid, 'CSV, please.', noAsks);
+  x.sync();
+  const after = view().tasks.find((y) => y.id === made.id)!;
+  const answerRun = x.w.room.state.messages.get(after.runs[1]!)!;
+  check(after.runs.length === 2 && answerRun.kind === 'request' && answerRun.from === 'owner' && answerRun.to === ANA && answerRun.rootId === root && answerRun.parentId === root, 'the answer is a new run for the one who stopped, in the same chain', JSON.stringify(answerRun));
+  check(answerRun.kind === 'request' && /CSV, please\./.test(answerRun.text) && /CSV or JSON\?/.test(answerRun.text) && /Add the export/.test(answerRun.text), 'it carries the answer, what they said, and the task');
+  check(after.stage === 'doing' && after.history!.at(-1)!.kind === 'stage' && (after.history!.at(-1) as { by: string }).by === 'owner', 'the task is back in doing, moved by the owner');
+  check(live().questions.length === 0 && live().people.find((p) => p.employeeId === ANA)?.state === 'working', 'the question closed and Ana resumed');
+  x.tasks.answer(made.id, qid, 'CSV, please.', noAsks);
+  x.tasks.answer(made.id, qid, 'CSV, please.', noAsks);
+  check(requests() === before + 1 && view().tasks.find((y) => y.id === made.id)!.runs.length === 2, 'answering again posts nothing: the same answer is the same run');
+
+  x.advance(60_000);
+  x.w.room.reply(ANA, answerRun.id, { outcome: 'done', text: 'Exported as CSV.', artifact: ['app/export.ts'] });
+  x.w.room.turnEnded(ANA, 'done', true);
+  x.sync();
+  const done = view().tasks.find((y) => y.id === made.id)!;
+  check(done.stage === 'review' && done.lastOutcome?.outcome === 'done' && done.lastOutcome.text === 'Exported as CSV.', 'the answer\'s run settling done moves the task to review with its result');
+  check(live().people.find((p) => p.employeeId === ANA)?.state === 'done', 'and Ana is done');
+  const time = view().taskTime[made.id]!;
+  check(time.byEmployee[ANA]! > 0 && !time.running.length, 'the answer\'s time counts for the task like any run');
+  const log = x.tasks.activityOf(made.id, noAsks)!;
+  check(x.tasks.activityOf('gone' as TaskId, noAsks) === undefined, 'the log of a task that does not exist is nothing, not an error');
+  const tags = log.entries.map((e) => (e.kind === 'stage' ? `stage:${e.by}:${e.to}` : e.kind === 'reply' ? `reply:${e.outcome}` : e.kind === 'request' ? `request:${e.answers ? 'answer' : 'run'}` : e.kind));
+  check(tags.join() === 'created,request:run,started,stage:owner:doing,reply:blocked,stage:mailroom:todo,request:answer,started,stage:owner:doing,reply:done,stage:mailroom:review', 'the log reads: asked, picked up, blocked, answered, resumed, done, each stage move with who made it', tags.join());
+  const moved = log.entries.filter((e) => e.kind === 'stage' && e.by === 'mailroom');
+  check(moved.every((e) => e.kind === 'stage' && !!e.cause && x.w.room.state.messages.get(e.cause as MessageId)?.kind === 'reply'), 'a move the office made names the reply that caused it');
+
+  // The crash window: the answer is in the ledger and the task file never heard of it.
+  const file = JSON.parse(readFileSync(x.file, 'utf8')) as { tasks: { id: string; runs: string[] }[] };
+  file.tasks.find((y) => y.id === made.id)!.runs = [root];
+  writeFileSync(x.file, JSON.stringify(file));
+  const crashed = new Tasks(x.file, x.host, x.w.persisted);
+  crashed.recover([B1, B2], []);
+  check(crashed.view(x.now()).tasks.find((y) => y.id === made.id)!.runs.includes(answerRun.id), 'a restart that never saw the answer relinks its run by key');
+}
+
+console.log('\n# a question put to a teammate is answered where the asker will read it');
+{
+  const x = taskWorld();
+  const quick = x.tasks.boardsOf(B1).find((b) => b.kind === 'quick')!;
+  const made = x.tasks.createTask(quick.id, 'Ship the export');
+  x.tasks.assign(made.id, PO);
+  x.sync();
+  const root = x.tasks.view(x.now()).tasks[0]!.runs[0]!;
+  const piece = x.w.room.post({ from: PO, to: 'Ana', body: { kind: 'request', text: 'the exporter' } });
+  if (!piece.ok) throw new Error('refused');
+  x.w.room.reply(ANA, piece.id, { outcome: 'blocked', text: 'I need the schema.' });
+  x.w.room.turnEnded(ANA, 'blocked', true);
+  x.sync();
+  const live = () => x.tasks.view(x.now()).taskLive[made.id]!;
+  const q = live().questions[0]!;
+  check(q.asker === ANA && q.to === PO && q.how === 'blocked', 'Ana\'s block on a piece is a question to the PO');
+  x.tasks.answer(made.id, (q.ref as { id: MessageId }).id, 'Use schema.ts.', noInputs);
+  x.sync();
+  const say = [...x.w.room.state.messages.values()].find((y) => y.kind === 'say' && y.from === 'owner' && y.to === PO);
+  check(say?.kind === 'say' && say.rootId === root && say.parentId === root && /Use schema\.ts\./.test(say.text) && /new request/.test(say.text), 'the owner\'s answer is a word to the PO inside the chain, who must act on it', JSON.stringify(say));
+  check(x.tasks.view(x.now()).tasks[0]!.runs.length === 1, 'it adds no run: the PO\'s own request is still open');
+  check(live().questions.length === 0, 'and the question closes');
+
+  const help = x.w.room.post({ from: ANA, to: 'Bruno', parentId: piece.id, body: { kind: 'request', intent: 'help', text: 'Which port?' } });
+  if (!help.ok) throw new Error('refused');
+  x.sync();
+  const hq = live().questions.find((y) => y.how === 'help')!;
+  x.tasks.answer(made.id, (hq.ref as { id: MessageId }).id, '5173', noInputs);
+  x.sync();
+  const note = [...x.w.room.state.messages.values()].find((y) => y.kind === 'say' && y.to === ANA && /5173/.test(y.text));
+  check(note?.kind === 'say' && note.parentId === help.id && /question to Bruno/.test(note.text), 'a help request is answered with a word to the one who asked, under the request', JSON.stringify(note));
+  check(!live().questions.some((y) => y.how === 'help'), 'and it closes');
+
+  const ask: LiveInputs = { awaiting: new Set(), asks: [{ employeeId: ANA, question: { id: 'q9' as never, askedAt: 1, kind: 'ask', text: 'In person?' } }] };
+  check(x.tasks.view(x.now(), ask).taskLive[made.id]!.questions.some((y) => y.how === 'ask'), 'an employee on the task waiting on the owner in person is a question on it');
+  check(/not waiting/.test((() => { try { x.tasks.answer(made.id, 'q9' as MessageId, 'x', ask); return ''; } catch (e2) { return e2 instanceof Error ? e2.message : ''; } })()), 'Tasks.answer takes only mail questions: the office answers the ones asked in person');
+}
+
+console.log('\n# a teammate moves the card');
+{
+  const x = taskWorld();
+  const quick = x.tasks.boardsOf(B1).find((b) => b.kind === 'quick')!;
+  const view = (id: TaskId) => x.tasks.view(x.now()).tasks.find((y) => y.id === id)!;
+  const stages = (id: TaskId) => (view(id).history ?? []).flatMap((h) => (h.kind === 'stage' ? [`${h.by}:${h.to}`] : []));
+  const verdict = (r: ReturnType<Tasks['moveByAgent']>) => (r.ok ? (r.changed ? 'moved' : 'unchanged') : r.reason);
+  const csv = x.tasks.createTask(quick.id, 'Write the export');
+  x.w.fresh.add('export.ts');
+  x.tasks.assign(csv.id, ANA);
+  x.sync();
+  const root = view(csv.id).runs[0]!;
+
+  check(verdict(x.tasks.moveByAgent(BRUNO, 'review', 'looks done to me', csv.id)) === 'not_on_task' && view(csv.id).stage === 'doing' && stages(csv.id).join() === 'owner:doing', 'someone who is not on the task cannot move it, and nothing is recorded');
+  check(verdict(x.tasks.moveByAgent(e('zed'), 'review', 'x', 'Write the export')) === 'unknown_task', 'a task of another block cannot even be named');
+  check(verdict(x.tasks.moveByAgent(ANA, 'review', 'x', 'Not a task')) === 'unknown_task' && verdict(x.tasks.moveByAgent(ANA, 'review', 'x', 'zz')) === 'unknown_task', 'a name or an id that matches nothing is refused');
+
+  x.advance(5_000);
+  const toReview = x.tasks.moveByAgent(ANA, 'review', 'The export is written and tested.');
+  check(toReview.ok && toReview.changed && toReview.from === 'doing' && toReview.task === 'Write the export', 'the one person holding the task moves it without naming it', JSON.stringify(toReview));
+  const ev = view(csv.id).history!.at(-1)!;
+  check(view(csv.id).stage === 'review' && ev.kind === 'stage' && ev.by === ANA && ev.to === 'review' && ev.from === 'doing' && ev.reason === 'The export is written and tested.' && ev.at === x.now(), 'the move is on the task under her name with her reason', JSON.stringify(ev));
+  const updated = view(csv.id).updatedAt;
+  x.advance(1_000);
+  check(verdict(x.tasks.moveByAgent(ANA, 'review', 'Saying it again.', csv.id)) === 'unchanged' && stages(csv.id).length === 2 && view(csv.id).updatedAt === updated, 'asking again for where the card already is records nothing');
+  x.w.room.reply(ANA, root, { outcome: 'done', text: 'Export written.', artifact: ['export.ts'] });
+  x.w.room.turnEnded(ANA, 'done', true);
+  x.sync();
+  check(stages(csv.id).join() === 'owner:doing,ana:review' && view(csv.id).lastOutcome?.outcome === 'done', 'the run settling afterwards adds no second move from the office, and the outcome is still taken in');
+  check(verdict(x.tasks.moveByAgent(ANA, 'doing', 'Back on it.', csv.id)) === 'not_resumed' && view(csv.id).stage === 'review', 'someone holding none of its requests cannot take it back to doing');
+  check(verdict(x.tasks.moveByAgent(ANA, 'done', 'Shipped.', csv.id)) === 'moved' && view(csv.id).stage === 'done', 'review goes to done when nothing is open');
+  check(verdict(x.tasks.moveByAgent(ANA, 'review', 'x', csv.id)) === 'not_allowed' && view(csv.id).stage === 'done', 'done does not go back to review: only to doing');
+
+  const log = x.tasks.activityOf(csv.id, noInputs)!.entries.filter((l) => l.kind === 'stage');
+  check(log.map((l) => (l.kind === 'stage' ? `${l.by}:${l.to}:${l.reason ?? ''}` : '')).join('|') === 'owner:doing:|ana:review:The export is written and tested.|ana:done:Shipped.', 'the activity log carries each move with who and why', JSON.stringify(log));
+  const reloaded = taskWorld(x.file, x.w.persisted);
+  check(JSON.stringify(reloaded.tasks.view(x.now()).tasks.find((y) => y.id === csv.id)!.history) === JSON.stringify(view(csv.id).history), 'the moves and their reasons survive a restart');
+
+  // Resuming: a second run puts her back to work, and the card follows her.
+  x.tasks.assign(csv.id, ANA);
+  x.sync();
+  check(view(csv.id).stage === 'doing' && stages(csv.id).at(-1) === 'owner:doing', 'the owner giving the task to her again puts it in doing');
+  x.tasks.moveByAgent(ANA, 'review', 'Second pass ready.', csv.id);
+  check(verdict(x.tasks.moveByAgent(ANA, 'doing', 'More to do.', csv.id)) === 'moved' && view(csv.id).stage === 'doing', 'while she holds a request of it she takes it from review back to doing');
+  x.w.room.reply(ANA, view(csv.id).runs[1]!, { outcome: 'done', text: 'Export written again.', artifact: ['export.ts'] });
+  x.w.room.turnEnded(ANA, 'done', true);
+  x.sync();
+}
+
+console.log('\n# a PO moves its card once its pieces are in');
+{
+  const x = taskWorld();
+  const quick = x.tasks.boardsOf(B1).find((b) => b.kind === 'quick')!;
+  const view = (id: TaskId) => x.tasks.view(x.now()).tasks.find((y) => y.id === id)!;
+  const verdict = (r: ReturnType<Tasks['moveByAgent']>) => (r.ok ? (r.changed ? 'moved' : 'unchanged') : r.reason);
+  const made = x.tasks.createTask(quick.id, 'Ship the report');
+  x.w.fresh.add('report.md');
+  x.tasks.assign(made.id, PO);
+  x.sync();
+  const piece = x.w.room.post({ from: PO, to: 'Ana', body: { kind: 'request', title: 'Write the numbers', text: 'the numbers' } });
+  if (!piece.ok) throw new Error('delegation refused');
+  x.sync();
+
+  const early = x.tasks.moveByAgent(PO, 'done', 'All done.', made.id);
+  check(!early.ok && early.reason === 'open_pieces' && /Ana: "Write the numbers"/.test(early.detail) && view(made.id).stage === 'doing', 'the PO cannot call it done while a piece is open, and the refusal names the piece', JSON.stringify(early));
+  const earlyReview = x.tasks.moveByAgent(PO, 'review', 'Ready.', made.id);
+  check(!earlyReview.ok && earlyReview.reason === 'open_pieces', 'nor ready for the owner');
+  const helper = x.tasks.moveByAgent(ANA, 'review', 'My part is done.', made.id);
+  check(!helper.ok && helper.reason === 'open_pieces' && /Pia: "Ship the report"/.test(helper.detail), 'the person holding a piece cannot finish the task for its PO: the PO\'s own request is still open', JSON.stringify(helper));
+  check(verdict(x.tasks.moveByAgent(BRUNO, 'done', 'x', made.id)) === 'not_on_task', 'a teammate the chain never reached is refused');
+  const both = x.tasks.moveByAgent(ANA, 'doing', 'Starting the numbers.', made.id);
+  check(both.ok && !both.changed, 'a piece worker saying doing on a card already in doing changes nothing');
+
+  x.w.room.reply(ANA, piece.id, { outcome: 'done', text: 'numbers in', artifact: ['report.md'] });
+  x.w.room.turnEnded(ANA, 'done', true);
+  x.sync();
+  check(view(made.id).stage === 'doing', 'her piece settling does not move the task: the PO has not replied');
+  const done = x.tasks.moveByAgent(PO, 'done', 'Both pieces are in and I checked the numbers.', made.id);
+  check(done.ok && done.changed && view(made.id).stage === 'done' && (view(made.id).history!.at(-1) as { by: string }).by === PO, 'with every piece settled the PO moves its task to done');
+  x.w.room.reply(PO, view(made.id).runs[0]!, { outcome: 'done', text: 'Report shipped.', artifact: ['report.md'] });
+  x.w.room.turnEnded(PO, 'done', true);
+  x.sync();
+  check(view(made.id).stage === 'done' && view(made.id).lastOutcome?.text === 'Report shipped.', 'its own reply afterwards leaves the card in done');
+
+  x.w.room.turnEnded(PO, 'read the last reply', true);
+  const second = x.tasks.createTask(quick.id, 'Cancel one');
+  x.tasks.assign(second.id, PO);
+  x.sync();
+  const side = x.w.room.post({ from: PO, to: 'Bruno', body: { kind: 'request', title: 'A side piece', text: 'x' } });
+  if (!side.ok) throw new Error('delegation refused');
+  x.sync();
+  check(verdict(x.tasks.moveByAgent(PO, 'done', 'x', second.id)) === 'open_pieces', 'a second task: a piece is open');
+  x.w.room.cancel(PO, side.id);
+  x.sync();
+  const dropped = x.tasks.moveByAgent(PO, 'done', 'Dropped the side piece and finished.', second.id);
+  check(verdict(dropped) === 'moved', 'cancelling the piece lets the PO finish', JSON.stringify(dropped));
+}
+
+console.log('\n# the owner\'s pin wins over a teammate');
+{
+  const x = taskWorld();
+  const quick = x.tasks.boardsOf(B1).find((b) => b.kind === 'quick')!;
+  const view = (id: TaskId) => x.tasks.view(x.now()).tasks.find((y) => y.id === id)!;
+  const verdict = (r: ReturnType<Tasks['moveByAgent']>) => (r.ok ? (r.changed ? 'moved' : 'unchanged') : r.reason);
+  const made = x.tasks.createTask(quick.id, 'Pinned by hand');
+  x.w.fresh.add('a.txt');
+  x.tasks.assign(made.id, ANA);
+  x.sync();
+  x.tasks.updateTask(made.id, { stage: 'todo' });
+  check(view(made.id).stagePinned === true && view(made.id).stage === 'todo', 'the owner moving the card pins it, a manual card too');
+  const refused = x.tasks.moveByAgent(ANA, 'review', 'Done, in my view.', made.id);
+  check(!refused.ok && refused.reason === 'pinned' && /todo/.test(refused.detail) && view(made.id).stage === 'todo' && view(made.id).history!.at(-1)!.kind === 'stage' && (view(made.id).history!.at(-1) as { by: string }).by === 'owner', 'a teammate holding its request is refused, the card stays, and nothing is recorded under her name');
+  check(verdict(x.tasks.moveByAgent(ANA, 'doing', 'Picking it up.', made.id)) === 'pinned', 'and so is taking it back to doing');
+  x.tasks.updateTask(made.id, { title: 'Pinned by hand, renamed' });
+  check(view(made.id).stagePinned === true, 'editing the card keeps the pin');
+  check(verdict(x.tasks.moveByAgent(ANA, 'doing', 'Picking it up.', made.id)) === 'pinned', 'still pinned');
+
+  const settled = view(made.id).runs[0]!;
+  x.w.room.reply(ANA, settled, { outcome: 'done', text: 'a.txt written', artifact: ['a.txt'] });
+  x.w.room.turnEnded(ANA, 'done', true);
+  x.sync();
+  check(view(made.id).stage === 'todo', 'the office leaves the owner\'s card alone when the run settles');
+  x.tasks.assign(made.id, ANA);
+  x.sync();
+  check(view(made.id).stagePinned === undefined && view(made.id).stage === 'doing', 'giving the task to someone lifts the pin: the owner handed it over');
+  check(verdict(x.tasks.moveByAgent(ANA, 'review', 'Second go done.', made.id)) === 'moved', 'and she can move it again');
+  x.tasks.updateTask(made.id, { stage: 'doing' });
+  check(verdict(x.tasks.moveByAgent(ANA, 'done', 'x', made.id)) === 'pinned', 'the owner putting it back pins it again');
+  check(x.tasks.moveByAgent(BRUNO, 'doing', 'x', made.id).ok === false && (x.tasks.moveByAgent(BRUNO, 'doing', 'x', made.id) as { reason: string }).reason === 'not_on_task', 'and someone off the task is told so before the pin is mentioned');
+}
+
+console.log('\n# a task with a pull request is merged by the owner');
+{
+  const x = taskWorld();
+  const quick = x.tasks.boardsOf(B1).find((b) => b.kind === 'quick')!;
+  const made = x.tasks.createTask(quick.id, 'Ship it on GitHub');
+  x.w.fresh.add('ship.txt');
+  x.tasks.assign(made.id, ANA);
+  x.sync();
+  const withPr = (state: 'draft' | 'open' | 'merged' | 'closed') => {
+    const file = JSON.parse(readFileSync(x.file, 'utf8')) as { tasks: { id: string; stage: string; git?: unknown }[] };
+    const row = file.tasks.find((y) => y.id === made.id)!;
+    row.stage = 'doing';
+    row.git = { branch: 'task/ship-it', base: 'main', pr: { number: 7, url: 'https://example.test/pull/7', state } };
+    writeFileSync(x.file, JSON.stringify(file));
+    const again = new Tasks(x.file, x.host, x.w.persisted);
+    again.recover([B1, B2], []);
+    for (const entry of x.w.persisted) again.observe(entry);
+    return again;
+  };
+  for (const state of ['draft', 'open'] as const) {
+    const t = withPr(state);
+    const refused = t.moveByAgent(ANA, 'done', 'Finished.', made.id);
+    check(!refused.ok && refused.reason === 'pr_open' && /#7/.test(refused.detail) && /owner merges/.test(refused.detail) && t.view(0).tasks[0]!.stage === 'doing', `a task whose pull request is ${state} cannot be called done by a teammate, and the refusal says the owner merges`, JSON.stringify(refused));
+    const review = t.moveByAgent(ANA, 'review', 'Ready to merge.', made.id);
+    check(review.ok && review.changed && t.view(0).tasks[0]!.stage === 'review', `but it goes to review while the pull request is ${state}`);
+    const fromReview = t.moveByAgent(ANA, 'done', 'Finished.', made.id);
+    check(!fromReview.ok && fromReview.reason === 'pr_open', `and from review it still cannot go to done while the pull request is ${state}`);
+  }
+  const closed = withPr('closed').moveByAgent(ANA, 'done', 'The pull request was closed, and the work is not needed.', made.id);
+  check(closed.ok && closed.changed, 'a closed pull request is no reason to hold it: done goes through');
+  const noPr = taskWorld();
+  const plain = noPr.tasks.createTask(noPr.tasks.boardsOf(B1).find((b) => b.kind === 'quick')!.id, 'No pull request here');
+  noPr.tasks.assign(plain.id, ANA);
+  noPr.sync();
+  check(noPr.tasks.moveByAgent(ANA, 'done', 'A task without a branch has no pull request to wait for.', plain.id).ok, 'a task with no pull request is not held');
+}
+
+console.log('\n# which card a teammate means');
+{
+  const x = taskWorld();
+  const quick = x.tasks.boardsOf(B1).find((b) => b.kind === 'quick')!;
+  const verdict = (r: ReturnType<Tasks['moveByAgent']>) => (r.ok ? 'ok' : r.reason);
+  const one = x.tasks.createTask(quick.id, 'First card');
+  const two = x.tasks.createTask(quick.id, 'Second card');
+  check(verdict(x.tasks.moveByAgent(ANA, 'review', 'x')) === 'no_task', 'a teammate holding no task, naming none, is told to name one');
+  x.tasks.assign(one.id, ANA);
+  x.tasks.assign(two.id, ANA);
+  x.sync();
+  check(verdict(x.tasks.moveByAgent(ANA, 'review', 'x')) === 'ok', 'the second request waits in the queue, so the one she holds is the card');
+  x.w.room.inbox(ANA, false);
+  x.sync();
+  const both = x.tasks.moveByAgent(ANA, 'done', 'x');
+  check(!both.ok && both.reason === 'ambiguous' && /First card/.test(both.detail) && /Second card/.test(both.detail), 'holding two, she has to say which', JSON.stringify(both));
+  check(verdict(x.tasks.moveByAgent(ANA, 'done', 'Second is done.', 'second card')) === 'ok', 'a title is matched without case');
+  check(verdict(x.tasks.moveByAgent(ANA, 'done', 'First is done.', one.id)) === 'ok', 'an id names it too');
+  x.tasks.createTask(quick.id, 'Second card');
+  const twins = x.tasks.moveByAgent(ANA, 'done', 'x', 'Second card');
+  check(!twins.ok && twins.reason === 'ambiguous', 'two cards with one title cannot be named by it');
 }
 
 console.log('\n# a task made with its assignee and priority');
@@ -560,6 +915,10 @@ console.log('\n# CronoSpark hours go out only when the owner sends them');
   check(Math.abs(anaHours - 210 / 3600) < 0.0001, `Ana's 210 s went out as ${anaHours} h in all, the rounding of the first call carried into the second`);
   await x.tasks.sendHours(target.id);
   check(x.provider.calls.length === 3, 'and then it is sent for good');
+  const history = taskOf(target.id).history ?? [];
+  check(history.filter((h) => h.kind === 'stage').map((h) => `${h.by}:${h.to}`).join() === 'owner:doing,mailroom:review,owner:done,owner:doing,mailroom:review', 'the task\'s history says who moved each stage', JSON.stringify(history));
+  const sends = history.filter((h): h is Extract<typeof h, { kind: 'hours' }> => h.kind === 'hours');
+  check(sends.length === 4 && sends.filter((h) => h.error).length === 1 && /CronoSpark is down/.test(sends.find((h) => h.error)?.error ?? '') && sends.filter((h) => !h.error).length === 3, 'every hours send is on the history, and the one that failed says why', JSON.stringify(sends));
 
   // Only a CronoSpark task has hours.
   const linear = x.tasks.createBoard(B1, 'Linear', { kind: 'feature', sources: [{ provider: 'linear', projectId: 'team:ENG' }] });
@@ -593,7 +952,7 @@ console.log('\n# CronoSpark hours go out only when the owner sends them');
   check(x.tasks.view(x.now()).tasks.find((y) => y.id === dragged.id)!.stagePinned === true, 'editing the title keeps the stage pinned');
   const byHand = x.tasks.createTask(x.tasks.boardsOf(B1).find((b) => b.kind === 'quick')!.id, 'by hand');
   x.tasks.updateTask(byHand.id, { stage: 'review' });
-  check(!('stagePinned' in x.tasks.view(x.now()).tasks.find((y) => y.id === byHand.id)!), 'a manual task has no provider to pin against');
+  check(x.tasks.view(x.now()).tasks.find((y) => y.id === byHand.id)!.stagePinned === true, 'a manual task is pinned too: the pin also holds teammates back');
 }
 
 console.log('\n# the CronoSpark client against a local server');
@@ -665,6 +1024,76 @@ console.log('\n# board and task rules');
 }
 
 // ───────────────────────────── the real office ─────────────────────────────
+
+console.log('\n# a folded column pulls nothing, and a source\'s filters reach the provider');
+{
+  const x = taskWorld();
+  const linearCard = (n: number, status: string): TaskCard => ({ id: `linear:i${n}`, provider: 'linear', externalId: `i${n}`, identifier: `BLM-${n}`, title: `Issue ${n}`, status, sourceLabel: 'Linear' });
+  const statuses = ['Todo', 'In Progress', 'In Review', 'Done', 'Canceled', 'Backlog', 'Done'];
+  x.provider.cards = statuses.map((status, i) => linearCard(i + 1, status));
+  const made = x.tasks.createBoard(B1, 'Linear', { kind: 'feature', sources: [{ provider: 'linear', projectId: 'team:BLOOM' }] });
+  await x.tasks.refresh(made.id);
+  const onBoard = () => x.tasks.view(x.now()).tasks.filter((t) => t.boardId === made.id);
+  const stages = () => onBoard().map((t) => t.stage).sort().join();
+  check(onBoard().length === 7 && x.provider.asked.at(-1)!.kept === 7, 'with nothing folded every card becomes a task', stages());
+
+  const worked = onBoard().find((t) => t.origin.kind === 'linear' && t.origin.externalId === 'i4')!;
+  x.tasks.assign(worked.id, ANA);
+  x.tasks.updateTask(worked.id, { stage: 'done' });
+  const moved = onBoard().find((t) => t.origin.kind === 'linear' && t.origin.externalId === 'i1')!;
+  x.tasks.updateTask(moved.id, { stage: 'done' });
+  const before = x.provider.asked.length;
+  x.tasks.updateBoard(made.id, { collapsed: ['done'] });
+  await x.tasks.refresh(made.id);
+  check(x.provider.asked.length > before && x.provider.asked.at(-1)!.kept === 4, 'folding Done asks the provider again, and it keeps only the four cards of the other columns', String(x.provider.asked.at(-1)!.kept));
+  check(onBoard().every((t) => t.stage !== 'done' || t.runs.length > 0 || t.id === moved.id) && onBoard().length === 5, 'the done tasks nobody worked on left the board', stages());
+  check(onBoard().some((t) => t.id === worked.id && t.stage === 'done'), 'a done task that has runs stays, in its folded column');
+  check(onBoard().some((t) => t.id === moved.id && t.stage === 'done'), 'so does one the owner moved there whose card is still pulled: the fold is about what a card says, not where it sits');
+  check(x.tasks.view(x.now()).boards.find((b) => b.id === made.id)!.collapsed?.join() === 'done', 'the snapshot says Done is folded');
+
+  const again = x.provider.asked.length;
+  x.tasks.updateBoard(made.id, { name: 'Renamed' });
+  check(x.provider.asked.length === again, 'a rename pulls nothing');
+
+  const restarted = new Tasks(x.file, x.host, []);
+  restarted.recover([B1, B2], []);
+  check(restarted.view(x.now()).boards.find((b) => b.id === made.id)!.collapsed?.join() === 'done', 'the folded column survives a restart');
+
+  x.tasks.updateBoard(made.id, { collapsed: [] });
+  await x.tasks.refresh(made.id);
+  check(onBoard().length === 7 && !('collapsed' in x.tasks.view(x.now()).boards.find((b) => b.id === made.id)!), 'unfolding Done brings its cards back on the next pull', stages());
+
+  const filters: LinearFilters = { assignee: { id: 'u-ana', name: 'Ana' }, cycle: 'current', limit: 200 };
+  x.tasks.updateBoard(made.id, { sources: [{ provider: 'linear', projectId: 'team:BLOOM', filters }] });
+  await x.tasks.refresh(made.id);
+  const last = x.provider.asked.at(-1)!.sources[0]!;
+  check(last.provider === 'linear' && JSON.stringify(last.filters) === JSON.stringify(filters), 'changing a filter pulls again with the filter in the source');
+  const kept = restarted.view(x.now()).boards.find((b) => b.id === made.id)!;
+  check(kept.kind !== 'quick' && kept.sources[0]!.provider === 'linear' && kept.sources[0]!.filters === undefined, 'the filter was saved after that restart opened its own copy, so it saw none');
+  const reopened = new Tasks(x.file, x.host, []);
+  reopened.recover([B1, B2], []);
+  const saved = reopened.view(x.now()).boards.find((b) => b.id === made.id)!;
+  check(saved.kind !== 'quick' && JSON.stringify((saved.sources[0] as Extract<TaskBoardSource, { provider: 'linear' }>).filters) === JSON.stringify(filters), 'the filters survive a restart');
+
+  x.tasks.updateBoard(made.id, { sources: [{ provider: 'linear', projectId: 'team:BLOOM', filters: { assignee: 'anyone', cycle: 'any', limit: 50 } }] });
+  const defaults = x.tasks.view(x.now()).boards.find((b) => b.id === made.id)!;
+  check(defaults.kind !== 'quick' && !('filters' in defaults.sources[0]!), 'setting the filters back to the defaults stores none');
+  await x.tasks.refresh(made.id);
+
+  check(x.tasks.view(0).linearPeople.kind === 'unknown', 'nobody is listed until the picker asks');
+  x.provider.people = [{ id: 'u-ana', name: 'Ana' }];
+  const asking = x.tasks.loadLinearPeople();
+  check(x.tasks.view(0).linearPeople.kind === 'loading', 'asking marks the list as loading');
+  await asking;
+  const ready = x.tasks.view(0).linearPeople;
+  check(ready.kind === 'ready' && ready.people.length === 1 && ready.people[0]!.name === 'Ana', 'and then it holds Linear\'s people');
+  x.provider.linearPeople = async () => {
+    throw new Error('Linear is not connected.');
+  };
+  await x.tasks.loadLinearPeople();
+  const failed = x.tasks.view(0).linearPeople;
+  check(failed.kind === 'error' && /not connected/.test(failed.message), 'a failed ask says why');
+}
 
 console.log('\n# the office, with a scripted harness');
 {

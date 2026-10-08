@@ -8,6 +8,7 @@ import type {
   EmployeeRole,
   HarnessStatus,
   InterruptStyle,
+  LinearPeople,
   MeetingDoor,
   ModelCatalog,
   Provider,
@@ -101,6 +102,7 @@ type State = Settings & {
   boardSync: Record<BoardId, BoardSync>;
   taskTime: Record<TaskId, TaskTime>;
   taskConnections: Record<'linear' | 'cronospark', TaskConnectionState>;
+  linearPeople: LinearPeople;
   // Task screens only: the board each block shows, and stages the owner just chose that the snapshot has not confirmed yet.
   boardPick: Record<string, BoardId>;
   stageHold: StageHolds;
@@ -158,6 +160,7 @@ export const useStore = create<State>()(() => ({
   boardSync: {},
   taskTime: {},
   taskConnections: { linear: { kind: 'needs_auth' }, cronospark: { kind: 'needs_auth' } },
+  linearPeople: { kind: 'unknown' },
   boardPick: {},
   stageHold: {},
   aim: null,

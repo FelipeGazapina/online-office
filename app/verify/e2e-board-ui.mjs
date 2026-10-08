@@ -2,7 +2,8 @@
 // store's snapshot or the page. Boards and tabs, the inline composer (title, notes, assignee and priority; Enter, Cmd+Enter,
 // Create more and Esc; mouse and keyboard alone; a task made with an assignee starts at once), a drag between columns, the
 // detail (title, notes, priority, assigning to the PO and to an employee, hours per person), a CronoSpark board from a fake
-// server with its origin link, the sync button and the error state, keyboard use, and F at the 3D board. Three real haiku
+// server with its origin link, the sync button and the error state, keyboard use, and F at the 3D board. Last comes a Linear
+// board against a fake Linear (board-linear-flow.mjs): assignee, cycle, limit, hiding Done, and a restart. Three real haiku
 // runs: a task the composer hands to the PO, one the detail hands to the PO, and one for an employee whose timer must tick
 // on the card while they work.
 // Run: pnpm build:verify && OFFICE_OUT_DIR=out/verify OFFICE_CDP_PORT=9342 node verify/cdp.mjs verify/e2e-board-ui.mjs
@@ -13,6 +14,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { HAIKU, assert, wallTime } from './lib.mjs';
 import { startFakeCronoSpark } from './fake-cronospark.ts';
+import { linearWorld, startFakeLinear, TOKEN as LINEAR_TOKEN } from './fake-linear.ts';
+import { linearBoardFlow } from './board-linear-flow.mjs';
 
 const WAIT_MS = Number(process.env.OFFICE_BOARD_WAIT_MIN ?? 6) * 60_000;
 
@@ -31,6 +34,9 @@ const fake = await startFakeCronoSpark({
   ],
 });
 
+const linearWorldData = linearWorld();
+const linear = await startFakeLinear(linearWorldData);
+
 export const env = {
   OFFICE_DATA_DIR: dataDir,
   OFFICE_START_LEVEL: '5',
@@ -38,7 +44,8 @@ export const env = {
   CRONOSPARK_MCP_URL: fake.url,
   CRONOSPARK_MCP_API_KEY: 'fake-key',
   CRONOSPARK_MCP_USER_ID: 'fake-user',
-  LINEAR_MCP_TOKEN: '',
+  LINEAR_MCP_TOKEN: LINEAR_TOKEN,
+  LINEAR_MCP_URL: linear.url,
   OFFICE_TASK_BOARD_FIXTURE: '',
 };
 
@@ -72,7 +79,7 @@ async function settled(s, title, label) {
   throw new Error(`${label}: no settled run after ${Math.round(WAIT_MS / 1000)} s`);
 }
 
-export default async (s) => {
+export default async (s, { launch }) => {
   await s.resize(1440, 900);
   await s.waitFor('!!window.__office && !!window.office');
   await s.eval('window.__sent = []; __office.tapSend((m) => { window.__sent.push(m); window.office.send(m); })');
@@ -245,17 +252,17 @@ export default async (s) => {
   await s.waitFor(`${state}.boardSync[${JSON.stringify(sprint.id)}]?.kind === 'ready' && ${state}.boardSync[${JSON.stringify(sprint.id)}].lastFetchedAt > ${syncedAt}`);
   assert((await sent('refresh_board')).length >= 1, 'the Sync button sends refresh_board and the board syncs again');
 
-  // The error state: a Linear source with no connection.
   await s.clickOn('[aria-label="Board settings"]');
   await s.waitFor("!!document.querySelector('[data-testid=board-settings]')");
   await s.clickOn('.tb-source [aria-label="Remove source"]');
   await s.clickOn('.tb-settings .tb-btn', 'Linear');
   await s.clickOn('.tb-source input[aria-label=Project]');
-  await s.type('bloomnetwork');
+  await s.type('team:NOPE');
   await s.clickOn('.tb-settings .tb-btn.primary', 'Save and sync');
   await s.waitFor(`${state}.boardSync[${JSON.stringify(sprint.id)}]?.kind === 'error'`);
   await s.waitFor("!!document.querySelector('[data-testid=sync-error]')");
-  assert(await s.eval("document.querySelector('[data-sync=error]')?.innerText.includes('Sync failed') && document.querySelector('[data-testid=sync-error]').innerText.includes('Connect Linear')"), 'a failed sync shows an error banner with Connect Linear and marks the header');
+  assert(await s.eval("document.querySelector('[data-sync=error]')?.innerText.includes('Sync failed') && document.querySelector('[data-testid=sync-error]').innerText.includes('Team not found: NOPE')"), 'a failed sync shows Linear\'s own message in an error banner and marks the header');
+  assert(await s.eval(`${state}.tasks.filter((t) => t.boardId === ${JSON.stringify(sprint.id)}).length === 2`), 'and the failed sync left the board\'s tasks where they were');
   await s.press('Escape');
 
   // ── rename and delete a board from its settings ──
@@ -548,6 +555,9 @@ export default async (s) => {
   assert(await s.eval(`(() => { const b = document.querySelector('[data-testid=send-hours]'); return !!b && !b.disabled && document.querySelector('[data-testid=hours-unsent]')?.innerText.includes('Ana') && !document.querySelector('[data-testid=send-hours-reason]'); })()`), 'the detail lists what is not sent per person and offers an enabled Send button');
   assert(await s.eval(`!!document.querySelector('.tb-card[data-task-id=${JSON.stringify(csTask.id)}] [data-testid=unsent-chip]')`), 'the card carries a small chip with the time to send');
   const markSend = await sentCount();
+  // The branch and pull request rows push the button below the fold of a short window, and a click lands on the pixel it is given.
+  await s.eval(`document.querySelector('[data-testid=send-hours]').scrollIntoView({ block: 'center' })`);
+  await s.sleep(300);
   await s.clickOn('[data-testid=send-hours]');
   assert((await sentSince(markSend)).filter((m) => m.type === 'send_hours').length === 1, 'the click sends one send_hours');
   await s.waitFor(`document.querySelector('[data-testid=send-hours]')?.disabled === true && document.querySelector('[data-testid=send-hours-reason]')?.innerText.includes('Nothing to send yet')`, 15000);
@@ -570,6 +580,9 @@ export default async (s) => {
   await s.press('KeyF', 'f');
   await s.waitFor("!!document.querySelector('[data-testid=task-board]')");
   assert(await s.eval("!!document.querySelector('.tb-card')"), 'F at the 3D board opens the same board with its cards');
+
+  await linearBoardFlow(s, { fake: linear, world: linearWorldData, launch, env });
+  assert(linear.auth.every((a) => a === `Bearer ${LINEAR_TOKEN}`), 'every call to Linear carried the token');
 };
 
 function ok(msg) {
@@ -578,4 +591,5 @@ function ok(msg) {
 
 process.on('exit', () => {
   for (const dir of [dataDir, repo]) rmSync(dir, { recursive: true, force: true });
+  void linear.close();
 });

@@ -1,6 +1,7 @@
 // Rebuilds assets/models/*.glb from the CC0 sources listed in app/assets-LICENSES.md.
 //   mkdir /tmp/props && cd /tmp/props && npm i @gltf-transform/core @gltf-transform/extensions @gltf-transform/functions meshoptimizer sharp
-//   node bake-props.mjs <sources dir> <out dir>
+//   node bake-props.mjs <sources dir> <out dir> [name,name,...]
+// With names, only those props are baked, so a source that is not on disk costs nothing.
 // <sources dir> holds the Poly Haven glTF folders (<id>/<id>.gltf with its textures) and kenney/<name>.glb from the Kenney Furniture Kit.
 // Each source is welded into ONE mesh with ONE material, so a prop is one instanced draw call:
 //   - Poly Haven models: their materials' colour, GL normal and ARM (occlusion red, roughness green, metal blue) maps are packed
@@ -17,7 +18,8 @@ import { join } from 'node:path';
 import { mkdirSync } from 'node:fs';
 import { writeFile } from 'node:fs/promises';
 
-const [src = '.', out = './out'] = process.argv.slice(2);
+const [src = '.', out = './out', only] = process.argv.slice(2);
+const wanted = only ? new Set(only.split(',')) : null;
 mkdirSync(out, { recursive: true });
 
 // size: [w, h, d] in metres, a number fits one axis (uniform scale), `fit: 'w' | 'h'` picks it.
@@ -31,7 +33,13 @@ const SPECS = [
   { name: 'bookshelf', from: 'wooden_bookshelf_worn/wooden_bookshelf_worn.gltf', size: [1.96, 2, 0.46], slot: 1024, maxTris: 3000 },
   { name: 'desk', from: 'wooden_table_02/wooden_table_02.gltf', size: [1.46, 0.72, 0.94], slot: 1024, rotY: 0 },
   { name: 'lamp', from: 'modern_ceiling_lamp_01/modern_ceiling_lamp_01.gltf', size: [0.42, 1, 0.42], uniform: 'w', slot: 512, anchor: 'top', cutTop: 0.38, maxTris: 1500 },
-  { name: 'chair', from: 'kenney/chairDesk.glb', size: [0.56, 1, 0.56], uniform: 'h', height: 1.0, tint: ['carpet'], rotY: Math.PI },
+  // Small things for the top of a desk, a table or a shelf. Sized to the footprint a def takes on a surface (ItemDef.top).
+  { name: 'desk_lamp', from: 'desk_lamp_arm_01/desk_lamp_arm_01.gltf', size: [0.3, 0.42, 0.3], uniform: 'h', slot: 512, maxTris: 1200 },
+  { name: 'laptop', from: 'classic_laptop/classic_laptop.gltf', size: [0.34, 0.2, 0.25], uniform: 'w', slot: 512, maxTris: 1500 },
+  { name: 'picture_frame', from: 'standing_picture_frame_01/standing_picture_frame_01.gltf', size: [0.2, 0.17, 0.08], uniform: 'w', slot: 512, maxTris: 700, rotY: -Math.PI / 2 },
+  { name: 'vase', from: 'ceramic_vase_01/ceramic_vase_01.gltf', size: [0.2, 0.34, 0.2], uniform: 'h', slot: 512, maxTris: 900 },
+  { name: 'desk_clock', from: 'alarm_clock_01/alarm_clock_01.gltf', size: [0.11, 0.1, 0.06], uniform: 'w', slot: 512, maxTris: 1000 },
+  { name: 'chair', from: 'kenney/chairDesk.glb', size: [0.56, 1, 0.56], uniform: 'h', height: 1.0, tint: ['carpet'], rotY: 0 },
 ];
 
 await MeshoptSimplifier.ready;
@@ -58,6 +66,7 @@ const atlas = async (slots, size, quality) => {
 };
 
 for (const spec of SPECS) {
+  if (wanted && !wanted.has(spec.name)) continue;
   const doc = await io.read(join(src, spec.from));
   const root = doc.getRoot();
   const mats = root.listMaterials();
@@ -168,12 +177,16 @@ for (const spec of SPECS) {
   } else {
     prim.setAttribute('TEXCOORD_0', acc(out_uv, 'VEC2')).setMaterial(material);
     const diffS = [], norS = [], armS = [];
+    // A material without a map (a laptop's screen glass) gets a flat one from its factors.
+    const flat = (r, g, bl) => sharp({ create: { width: 4, height: 4, channels: 3, background: { r, g, b: bl } } }).png().toBuffer();
+    const srgb = (v) => Math.round(Math.pow(v, 1 / 2.2) * 255);
     for (const m of mats) {
-      diffS.push(await slotOf(imageOf(m.getBaseColorTexture()), spec.slot, 'rgb'));
-      norS.push(await slotOf(imageOf(m.getNormalTexture()), spec.slot, 'rgb'));
+      const [cr, cg, cb] = m.getBaseColorFactor();
+      diffS.push(await slotOf(imageOf(m.getBaseColorTexture(), await flat(srgb(cr), srgb(cg), srgb(cb))), spec.slot, 'rgb'));
+      norS.push(await slotOf(imageOf(m.getNormalTexture(), await flat(128, 128, 255)), spec.slot, 'rgb'));
       const mr = m.getMetallicRoughnessTexture();
       const uri = mr?.getURI() ?? '';
-      armS.push(await slotOf(imageOf(mr), spec.slot, /arm/i.test(uri) ? 'rgb' : 'rough'));
+      armS.push(await slotOf(imageOf(mr, await flat(255, Math.round(m.getRoughnessFactor() * 255), Math.round(m.getMetallicFactor() * 255))), spec.slot, !mr || /arm/i.test(uri) ? 'rgb' : 'rough'));
     }
     // The maps stay beside the model as plain JPEGs: a packaged page reads those through <img>, which GLB-embedded images (blob: URLs) can't use.
     for (const [suffix, slotList] of [['diff', diffS], ['nor', norS], ['arm', armS]]) await writeFile(join(out, `${spec.name}-${suffix}.jpg`), await atlas(slotList, spec.slot, 85));

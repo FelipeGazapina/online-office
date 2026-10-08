@@ -113,7 +113,9 @@ async function waitForStage(s, taskId, stage, label) {
   while (Date.now() - t0 < WAIT_MS) {
     await unattended(s);
     const t = await s.eval(`(() => { const t = ${taskExpr(taskId)}; return t && { stage: t.stage, runs: t.runs.length, out: t.lastOutcome && { outcome: t.lastOutcome.outcome, text: t.lastOutcome.text.slice(0, 200) } }; })()`);
-    if (t?.stage === stage) return t;
+    // An employee may move the card to review before the reply that lands their work, so review counts once the run has settled.
+    if (t?.stage === stage && (stage !== 'review' || t.out)) return t;
+    if (stage === 'review' && t?.out && t.out.outcome !== 'done') throw new Error(`${label}: the run ended ${t.out.outcome}: ${t.out.text}`);
     if (t?.stage === 'todo' && t.out) throw new Error(`${label}: the task went back to todo (${t.out.outcome}: ${t.out.text})`);
     if ((Date.now() - t0) % 60_000 < 3100) console.log(`[${Math.round((Date.now() - t0) / 1000)} s] ${label}: ${JSON.stringify(t)}`);
     await s.sleep(3000);
@@ -188,7 +190,8 @@ export default async (s, { launch }) => {
     await s.sleep(1500);
     const done = await s.eval(`(() => { const t = ${taskExpr(hello.id)}; return { assignees: t.assignees, runs: t.runs, last: t.lastOutcome?.outcome, time: ${state}.taskTime[t.id] }; })()`);
     assert(done.last === 'done', 'the work settled done and the task moved doing to review');
-    assert(existsSync(join(repo, 'hello.txt')), 'hello.txt reached the block folder');
+    const helloBranch = await s.eval(`${taskExpr(hello.id)}.git.branch`);
+    assert(git('show', `${helloBranch}:hello.txt`).trim() === 'hello from tasks' && !existsSync(join(repo, 'hello.txt')), `hello.txt is a commit on the task branch ${helloBranch}, and the block folder the owner has open does not have it`);
     const mine = wallTime(done.runs);
     console.log('independent wall time per person (ms):', JSON.stringify(Object.fromEntries(Object.entries(mine.total).map(([k, v]) => [nameOf[k] ?? k, v]))), '| app:', JSON.stringify(Object.fromEntries(Object.entries(done.time.byEmployee).map(([k, v]) => [nameOf[k] ?? k, v]))));
     for (const [who, ms] of Object.entries(mine.total)) assert(Math.abs((done.time.byEmployee[who] ?? 0) - ms) <= TOLERANCE_MS, `${nameOf[who] ?? who}: the app says ${done.time.byEmployee[who] ?? 0} ms, mail.jsonl says ${ms} ms (within ${TOLERANCE_MS} ms)`);
@@ -291,7 +294,8 @@ export default async (s, { launch }) => {
     const linked = await s.eval(`${taskExpr(hireTask.id)}.runs[0]`);
     assert(!!run && run.id === linked && run.intent === 'work' && run.title === 'Add hire.txt', 'a request from the owner with the new hire as the addressee is the task\'s run, posted by the hire itself');
     await waitForStage(s, hireTask.id, 'review', 'hire.txt');
-    assert(existsSync(join(repo, 'hire.txt')), 'the new hire did the task without any further owner action');
+    const hireBranch = await s.eval(`${taskExpr(hireTask.id)}.git.branch`);
+    assert(git('show', `${hireBranch}:hire.txt`).trim() === 'hello from the new hire' && !existsSync(join(repo, 'hire.txt')), 'the new hire did the task without any further owner action, and it is on the task branch');
 
     // ── restart ──
     await quiet(s, [hello.id, card.id, hireTask.id]);

@@ -192,7 +192,7 @@ function BossBadge({ world }: { world: World }) {
   </group>;
 }
 
-function SharedFacilities({ b, world }: { b: Bounds; world: World }) {
+function SharedFacilities({ b }: { b: Bounds }) {
   const cx = (b.x0 + b.x1) / 2;
   const right = b.x1 - 4;
   return <>
@@ -200,7 +200,6 @@ function SharedFacilities({ b, world }: { b: Bounds; world: World }) {
     <Reception x={cx} z={b.z1 - 1.25} />
     <Kitchen x={right} z={b.z1 - 4.15} />
     <Lounge x={right} z={b.z1 - 1.75} />
-    <BossBadge world={world} />
   </>;
 }
 
@@ -289,21 +288,26 @@ export function Office({ company }: { company: Company | null }) {
   const b: Bounds = { x0: lot.x0, x1: lot.x0 + lot.w, z0: lot.z0, z1: lot.z0 + lot.h };
   return (
     <Staged>
-      <Lights b={b} slots={(company?.blocks ?? []).map((bl) => bl.slot)} />
+      <Lights b={b} />
       <LobbySun b={b} building={world.building} />
       <Environment b={b} />
       <Exterior b={b} />
       <CompanySign name={company?.name ?? 'Online Office'} b={b} />
-      <SharedFacilities b={b} world={world} />
-      <LobbyDecor cx={(b.x0 + b.x1) / 2} z1={b.z1} right={b.x1 - 4} doorX={DOOR_X} />
+      {!world.building.bare && (
+        <>
+          <SharedFacilities b={b} />
+          <LobbyDecor cx={(b.x0 + b.x1) / 2} z1={b.z1} right={b.x1 - 4} doorX={DOOR_X} />
+          <BrickWall b={b} building={world.building} />
+          <PatternRug x={(b.x0 + b.x1) / 2 + 1.5} z={5} w={9.4} d={5.2} />
+          <group position={[DOOR_X, 0, b.z1 - 1.1]}>
+            <RoundedPlane w={2.6} d={1.5} r={0.3} color="#6f9a90" y={0.01} />
+          </group>
+        </>
+      )}
+      <BossBadge world={world} />
       <LobbyVoid building={world.building} />
-      <BrickWall b={b} building={world.building} />
-      <PatternRug x={(b.x0 + b.x1) / 2 + 1.5} z={5} w={9.4} d={5.2} />
       <MeetingRoom world={world} />
       <OwnerCorner world={world} />
-      <group position={[DOOR_X, 0, b.z1 - 1.1]}>
-        <RoundedPlane w={2.6} d={1.5} r={0.3} color="#6f9a90" y={0.01} />
-      </group>
       {ghostSlot !== null && <GhostSlot slot={ghostSlot} />}
     </Staged>
   );

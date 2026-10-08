@@ -4,11 +4,13 @@
 // the owner asks (sendHours): nothing here sends them on its own.
 //
 // Plain Node: verify/task-check.ts imports it without Electron.
-import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
-import type { LedgerEntry, MessageId } from '../../shared/mail.ts';
-import type { BlockId, EmployeeId, TaskBoardSource, TaskCard } from '../../shared/protocol.ts';
+import { activityIndexOf, answerKey, clipText, emptyActivity, foldActivity, liveOf, logOf, noInputs, noteKey, rootsOf, type ActivityEntry, type ActivityIndex, type LiveInputs, type TaskLive } from '../../shared/activity.ts';
+import type { LedgerEntry, Message, MessageId } from '../../shared/mail.ts';
+import type { BlockId, EmployeeId, LinearPeople, LinearPerson, TaskBoardSource, TaskCard } from '../../shared/protocol.ts';
 import {
+  agentMoveRefusal,
   closedDayWork,
   emptyTurnLog,
   ensureBoards,
@@ -19,12 +21,22 @@ import {
   newTask,
   outcomeFromRuns,
   patchBoard,
+  prBody,
+  prIsOpen,
+  restage,
   runRequest,
   sliceTasks,
   syncCards,
+  taskBranchName,
+  taskKey,
   timeFromSlices,
   turnLogOf,
   unsentOf,
+  wantsCard,
+  withGitNote,
+  withPr,
+  withEvent,
+  type AgentStage,
   type Board,
   type BoardId,
   type BoardPatch,
@@ -32,8 +44,11 @@ import {
   type BoardSync,
   type HoursEntry,
   type LegacySources,
+  type MoveFacts,
+  type MoveRefusal,
   type Priority,
   type RunState,
+  type StageBy,
   type Task,
   type TaskId,
   type TaskStage,
@@ -42,7 +57,9 @@ import {
 } from '../../shared/tasks.ts';
 import { OfficeError } from './error.ts';
 import type { MailState, Mailroom } from './mail.ts';
+import { ensurePr, readPr, type Gh } from './pull-request.ts';
 import type { HoursCall } from './task-board.ts';
+import { createTaskWorkspace, defaultBase, isGitRepo, pushBranch, removeTaskWorkspace, unpushed, type Workspace } from './workspace.ts';
 
 export type TasksHost = {
   now(): number;
@@ -53,10 +70,21 @@ export type TasksHost = {
   // Everyone who works anywhere, PO included.
   members(): readonly { id: EmployeeId; name: string; blockId: BlockId }[];
   provider: {
-    fetchSources(sources: readonly TaskBoardSource[]): Promise<{ cards: TaskCard[]; errors: string[] }>;
+    // `keep` says which cards the board wants. A provider drops the others before it counts anything against a limit.
+    fetchSources(sources: readonly TaskBoardSource[], keep: (card: TaskCard) => boolean): Promise<{ cards: TaskCard[]; errors: string[] }>;
+    linearPeople(): Promise<LinearPerson[]>;
     logHours(entry: HoursCall): Promise<void>;
   };
   changed(): void;
+  // Absent, no task gets a branch or a pull request.
+  git?: TasksGit;
+};
+
+// What a task's branch and pull request need from the office: the block's repository, a place for the task's worktree, and gh.
+export type TasksGit = {
+  block(blockId: BlockId): { name: string; cwd: string } | undefined;
+  worktree(taskId: TaskId): string;
+  gh: Gh;
 };
 
 type TasksFile = { v: 1; boards: Board[]; tasks: Task[]; people: Record<string, string> };
@@ -64,7 +92,10 @@ type TasksFile = { v: 1; boards: Board[]; tasks: Task[]; people: Record<string, 
 // What a task made by hand may carry beyond its title. `assignee` hands it over in the same step.
 export type NewTask = { notes?: string; stage?: TaskStage; priority?: Priority; assignee?: EmployeeId };
 
-export type TasksView = { boards: Board[]; tasks: Task[]; boardSync: Record<BoardId, BoardSync>; taskTime: Record<TaskId, TaskTime> };
+export type TasksView = { boards: Board[]; tasks: Task[]; boardSync: Record<BoardId, BoardSync>; taskTime: Record<TaskId, TaskTime>; taskLive: Record<TaskId, TaskLive>; linearPeople: LinearPeople };
+
+// What pulling a board depends on: its sources, filters included, and the columns it has folded away.
+const pulls = (board: Board): string => (board.kind === 'quick' ? '' : JSON.stringify([board.sources, board.collapsed ?? []]));
 
 // The state of a root request as a task cares about it.
 function runStateOf(mail: MailState, id: MessageId): RunState | undefined {
@@ -79,25 +110,36 @@ function runStateOf(mail: MailState, id: MessageId): RunState | undefined {
 // person already had of it.
 const runKey = (task: TaskId, who: EmployeeId, nth: number) => `task:${task}:${who}:${nth}`;
 
+const QUESTION_QUOTE_CAP = 1500;
+const quote = (text: string) => text.split('\n').map((l) => `> ${l}`).join('\n');
+
 export class Tasks {
   private boards: Board[] = [];
   private tasks: Task[] = [];
   // The names of people who left, so hours they worked still go out under their name.
   private people: Record<string, string> = {};
   private readonly sync = new Map<BoardId, BoardSync>();
+  private linearPeople: LinearPeople = { kind: 'unknown' };
   private log: TurnLog;
+  // The ledger as the activity log reads it: kept up to date entry by entry, like the turn log.
+  private activity: ActivityIndex;
   private readonly file: string;
   private readonly host: TasksHost;
   private refreshing = new Map<BoardId, Promise<void>>();
   private refreshAgain = new Set<BoardId>();
   // The tasks whose hours are going out right now, so a second ask joins the first instead of sending the same time twice.
   private readonly sending = new Map<TaskId, Promise<void>>();
+  // The tasks whose branch is going to GitHub right now, and those that moved again while it was.
+  private readonly publishing = new Map<TaskId, Promise<void>>();
+  private readonly publishAgain = new Set<TaskId>();
+  private prRound: Promise<void> | undefined;
   private readonly existed: boolean;
 
   constructor(file: string, host: TasksHost, ledger: readonly LedgerEntry[]) {
     this.file = file;
     this.host = host;
     this.log = turnLogOf(ledger);
+    this.activity = activityIndexOf(ledger);
     const stored = read(file);
     this.existed = !!stored;
     if (stored) ({ boards: this.boards, tasks: this.tasks, people: this.people } = stored);
@@ -125,7 +167,7 @@ export class Tasks {
       const [tag, taskId, who] = key.split(':');
       const task = tag === 'task' ? this.tasks.find((t) => t.id === taskId) : undefined;
       if (!task || !who || task.runs.includes(id)) continue;
-      this.tasks = this.tasks.map((t) => (t === task ? this.withRun(t, id, who as EmployeeId) : t));
+      this.tasks = this.tasks.map((t) => (t === task ? this.withRun(t, id, who as EmployeeId, 'mailroom') : t));
       changed = true;
     }
     if (changed || !this.existed) this.save();
@@ -133,7 +175,7 @@ export class Tasks {
 
   // ── what the renderer sees ──
 
-  view(now: number): TasksView {
+  view(now: number, inputs: LiveInputs = noInputs): TasksView {
     const worked = this.tasks.filter((t) => t.runs.length);
     const slices = sliceTasks(this.log, worked, now);
     const taskTime = {} as Record<TaskId, TaskTime>;
@@ -143,7 +185,15 @@ export class Tasks {
       const unsent = t.origin.kind === 'cronospark' ? unsentOf(t, mine) : undefined;
       taskTime[t.id] = unsent ? { ...time, unsent } : time;
     }
-    return { boards: this.boards, tasks: this.tasks, boardSync: Object.fromEntries(this.sync) as Record<BoardId, BoardSync>, taskTime };
+    const taskLive = Object.fromEntries(worked.map((t) => [t.id, liveOf(t, this.activity, inputs)])) as Record<TaskId, TaskLive>;
+    return { boards: this.boards, tasks: this.tasks, boardSync: Object.fromEntries(this.sync) as Record<BoardId, BoardSync>, taskTime, taskLive, linearPeople: this.linearPeople };
+  }
+
+  // Everything that happened on a task and what is happening now. Folded from the ledger and the task's history each time it is asked.
+  // A task deleted while its detail was asking has no log, and that is not an error.
+  activityOf(taskId: TaskId, inputs: LiveInputs): { entries: ActivityEntry[]; live: TaskLive } | undefined {
+    const task = this.tasks.find((t) => t.id === taskId);
+    return task && { entries: logOf(task, this.activity), live: liveOf(task, this.activity, inputs) };
   }
 
   boardsOf(blockId: BlockId): Board[] {
@@ -160,6 +210,7 @@ export class Tasks {
 
   dropBlock(blockId: BlockId) {
     const gone = new Set(this.boardsOf(blockId).map((b) => b.id));
+    this.releaseWorktrees(blockId);
     this.boards = this.boards.filter((b) => b.blockId !== blockId);
     this.tasks = this.tasks.filter((t) => !gone.has(t.boardId));
     for (const id of gone) this.sync.delete(id);
@@ -172,11 +223,13 @@ export class Tasks {
   }
 
   reset() {
+    for (const t of this.tasks) this.releaseWorktree(t);
     this.boards = [];
     this.tasks = [];
     this.people = {};
     this.sync.clear();
     this.log = emptyTurnLog();
+    this.activity = emptyActivity();
     this.save();
   }
 
@@ -185,6 +238,7 @@ export class Tasks {
   // Every ledger entry, in order, as the mailroom writes it.
   observe(entry: LedgerEntry) {
     foldTurn(this.log, entry);
+    foldActivity(this.activity, entry);
   }
 
   // Takes in how runs ended.
@@ -196,7 +250,10 @@ export class Tasks {
       const outcome = outcomeFromRuns(t, (run) => runStateOf(mail, run));
       if (!outcome) return t;
       moved = true;
-      return { ...t, ...outcome, updatedAt: this.host.now() };
+      const now = this.host.now();
+      const { stage, ...taken } = outcome;
+      const noted = { ...t, ...taken, updatedAt: now };
+      return stage ? restage(noted, stage, 'mailroom', now, outcome.lastOutcome.reply) : noted;
     });
     if (moved) this.save();
   }
@@ -219,7 +276,8 @@ export class Tasks {
     if (!made.ok) throw new OfficeError(made.reason);
     this.boards = this.boards.map((b) => (b === board ? made.board : b));
     this.save();
-    if (made.board.kind !== 'quick' && board.kind !== 'quick' && JSON.stringify(made.board.sources) !== JSON.stringify(board.sources)) void this.refresh(boardId);
+    // What a board pulls is its sources and the columns it has open: changing either asks for a round of its own.
+    if (made.board.kind !== 'quick' && pulls(made.board) !== pulls(board)) void this.refresh(boardId);
   }
 
   deleteBoard(boardId: BoardId) {
@@ -267,15 +325,30 @@ export class Tasks {
     const last = this.sync.get(boardId);
     this.sync.set(boardId, { kind: 'loading', ...(last && 'lastFetchedAt' in last && last.lastFetchedAt ? { lastFetchedAt: last.lastFetchedAt } : {}) });
     this.host.changed();
-    const result = await this.host.provider.fetchSources(before.sources).catch((err: unknown) => ({ cards: [] as TaskCard[], errors: [err instanceof Error ? err.message : String(err)] }));
+    const result = await this.host.provider.fetchSources(before.sources, (card) => wantsCard(before, card)).catch((err: unknown) => ({ cards: [] as TaskCard[], errors: [err instanceof Error ? err.message : String(err)] }));
     const board = this.boards.find((b) => b.id === boardId);
     if (!board || board.kind === 'quick') return;
-    // The sources changed while this was out, and the change asked for its own round.
-    if (JSON.stringify(board.sources) !== JSON.stringify(before.sources)) return;
+    // What the board pulls changed while this was out, and the change asked for its own round.
+    if (pulls(board) !== pulls(before)) return;
     const synced = syncCards(board, this.tasks, result.cards, { now: this.host.now(), complete: result.errors.length === 0, newId: () => this.taskId() });
-    this.tasks = synced.tasks;
+    this.tasks = this.noteMoves(synced.tasks, 'provider');
     if (synced.changed) this.save();
     this.sync.set(boardId, result.errors.length && !result.cards.length ? { kind: 'error', message: result.errors.join(' ') } : { kind: 'ready', lastFetchedAt: this.host.now() });
+    this.host.changed();
+  }
+
+  // ── who the Linear assignee picker offers ──
+
+  // Asks Linear for its users. Two asks at once are one: the second sees `loading` and leaves.
+  async loadLinearPeople() {
+    if (this.linearPeople.kind === 'loading') return;
+    this.linearPeople = { kind: 'loading' };
+    this.host.changed();
+    try {
+      this.linearPeople = { kind: 'ready', people: await this.host.provider.linearPeople() };
+    } catch (err) {
+      this.linearPeople = { kind: 'error', message: err instanceof Error ? err.message : String(err) };
+    }
     this.host.changed();
   }
 
@@ -296,6 +369,7 @@ export class Tasks {
     try {
       this.assign(task.id, opt.assignee);
     } catch (err) {
+      this.releaseWorktree(this.task(task.id));
       this.tasks = this.tasks.filter((t) => t.id !== task.id);
       this.save();
       throw err;
@@ -309,20 +383,23 @@ export class Tasks {
     if (!title) throw new OfficeError('A task needs a title.');
     const { notes: _, ...rest } = task;
     const notes = patch.notes === undefined ? task.notes : patch.notes.trim() || undefined;
-    // A provider task the owner moves stays where the owner put it, whatever the provider says on the next sync.
-    const pin = patch.stage !== undefined && task.origin.kind !== 'manual';
+    // A task the owner moves stays where the owner put it: whatever its provider says on the next sync, and whatever a teammate
+    // would say, until the owner gives the task to someone again.
+    const pin = patch.stage !== undefined;
     let origin = task.origin;
     if (patch.priority !== undefined) {
       if (origin.kind !== 'manual') throw new OfficeError(`The priority of a ${origin.sourceLabel} task is set in ${origin.sourceLabel}.`);
       origin = patch.priority === null ? { kind: 'manual' } : { kind: 'manual', priority: patch.priority };
     }
-    this.replace({ ...rest, ...(notes ? { notes } : {}), origin, title, stage: patch.stage ?? task.stage, ...(pin ? { stagePinned: true as const } : {}), updatedAt: this.host.now() });
+    const now = this.host.now();
+    this.replace(restage({ ...rest, ...(notes ? { notes } : {}), origin, title, stage: task.stage, ...(pin ? { stagePinned: true as const } : {}), updatedAt: now }, patch.stage ?? task.stage, 'owner', now));
   }
 
   deleteTask(taskId: TaskId) {
     const task = this.task(taskId);
     const mail = this.host.mail();
     for (const run of task.runs) if (mail.state.unsettled.has(run)) mail.cancel('owner', run);
+    this.releaseWorktree(task);
     this.tasks = this.tasks.filter((t) => t !== task);
     this.save();
   }
@@ -337,20 +414,108 @@ export class Tasks {
     const mail = this.host.mail();
     const theirs = task.runs.filter((r) => mail.state.messages.get(r)?.to === employeeId);
     if (theirs.some((r) => mail.state.unsettled.has(r))) return;
-    const { title, text } = runRequest(task, board);
+    // The branch exists before the request is posted, because the person's first sync already comes from it.
+    const branched = this.startBranch(task);
+    const { title, text } = runRequest(branched, board);
     const posted = mail.post({ from: 'owner', to: employeeId, blockId: board.blockId, key: runKey(task.id, employeeId, theirs.length), body: { kind: 'request', intent: 'work', title, text } });
     if (!posted.ok) throw new OfficeError(posted.detail);
-    this.replace(this.withRun(task, posted.id, employeeId));
+    this.replace(this.withRun(this.task(task.id), posted.id, employeeId, 'owner'));
+    void this.publish(task.id);
   }
 
-  // The task with `who` taking the run that starts at `root`, and in doing: what assigning means.
-  private withRun(task: Task, root: MessageId, who: EmployeeId): Task {
-    return {
+  // The task with `who` taking the run that starts at `root`, and in doing: what assigning means. `by` is who moved it.
+  private withRun(task: Task, root: MessageId, who: EmployeeId, by: StageBy, cause?: MessageId): Task {
+    const now = this.host.now();
+    const taken = {
       ...task,
       runs: task.runs.includes(root) ? task.runs : [...task.runs, root],
       assignees: task.assignees.includes(who) ? task.assignees : [...task.assignees, who],
-      stage: 'doing',
-      updatedAt: this.host.now(),
+      updatedAt: now,
+    };
+    if (by === 'owner') delete taken.stagePinned;
+    return restage(taken, 'doing', by, now, cause);
+  }
+
+  // ── questions ──
+
+  // The owner answers a question from the board. A blocked request cannot take another word, so the answer starts a new run
+  // for whoever stopped, inside the same chain (the key makes a second click the same run). A question the asker put to a
+  // teammate or to the owner's own desk reaches whoever has to act on it as a word in the thread. In both the owner's words
+  // go through the mailroom, so the person wakes the way any teammate would.
+  answer(taskId: TaskId, id: MessageId, text: string, inputs: LiveInputs) {
+    const answer = text.trim();
+    if (!answer) throw new OfficeError('An answer needs some words.');
+    const task = this.task(taskId);
+    if (this.activity.answered.has(id)) return;
+    const question = liveOf(task, this.activity, inputs).questions.find((q) => q.ref.kind === 'mail' && q.ref.id === id);
+    if (!question || question.how === 'ask' || question.how === 'permission') throw new OfficeError('That question is not waiting for an answer any more.');
+    const board = this.board(task.boardId);
+    const mail = this.host.mail();
+    const asked = this.activity.msgs.get(question.piece.id);
+    if (asked?.kind !== 'request') throw new OfficeError('That question is not waiting for an answer any more.');
+    const said = clipText(question.text, QUESTION_QUOTE_CAP);
+    const asker = this.nameOf(question.asker);
+    if (question.how === 'blocked' && question.to === 'owner') {
+      const text = `The owner answers: ${answer}\n\nYou stopped on "${asked.title}" and told them:\n${quote(said)}\n\nCarry on with the task now.\n\n${runRequest(task, board).text}`;
+      const posted = mail.post({ from: 'owner', to: question.asker, blockId: board.blockId, parentId: asked.rootId, key: answerKey(task.id, question.asker, id), body: { kind: 'request', intent: 'work', title: asked.title, text } });
+      if (!posted.ok) throw new OfficeError(posted.detail);
+      this.replace(this.withRun(task, posted.id, question.asker, 'owner', id));
+      return;
+    }
+    const nudge = question.how === 'blocked'
+      ? { to: question.to as EmployeeId, parentId: asked.parentId ?? undefined, text: `The owner answers ${asker}'s block on "${asked.title}": ${answer}\n\n${asker} stopped and said:\n${quote(said)}\n\nA message alone does not restart ${asker}: send them a new request that carries this answer, or do the piece yourself.` }
+      : { to: question.asker, parentId: asked.id, text: `The owner answers your question to ${this.nameOf(question.to as EmployeeId)}: ${answer}` };
+    const posted = mail.post({ from: 'owner', to: nudge.to, blockId: board.blockId, ...(nudge.parentId ? { parentId: nudge.parentId } : {}), key: noteKey(task.id, id), body: { kind: 'say', text: nudge.text, urgency: 'next' } });
+    if (!posted.ok) throw new OfficeError(posted.detail);
+    this.host.changed();
+  }
+
+  // ── a teammate moves the card ──
+
+  // A teammate takes their task to review, to done, or back to doing, and says why. The card is the one they name (its id or
+  // its title), or the only one they are working on. The rules are shared/tasks.ts agentMoveRefusal, asked of what the mail
+  // says: the move is recorded on the task's history under their name with their reason, and a refused one changes nothing.
+  // Asking again for where the card already is changes nothing either.
+  moveByAgent(who: EmployeeId, to: AgentStage, reason: string, ref?: string): { ok: true; task: string; from: TaskStage; to: AgentStage; changed: boolean } | ({ ok: false } & MoveRefusal) {
+    const found = this.taskFor(who, ref);
+    if ('reason' in found) return { ok: false, ...found };
+    const refusal = agentMoveRefusal(found, to, this.movesOf(found, who));
+    if (refusal) return { ok: false, ...refusal };
+    const now = this.host.now();
+    const moved = restage({ ...found, updatedAt: now }, to, who, now, undefined, reason);
+    const changed = moved.stage !== found.stage;
+    if (changed) this.replace(moved);
+    return { ok: true, task: found.title, from: found.stage, to, changed };
+  }
+
+  // The task a teammate means: the one they name among their block's tasks, else the one they hold a request of.
+  private taskFor(who: EmployeeId, ref?: string): Task | MoveRefusal {
+    const blockId = this.host.members().find((m) => m.id === who)?.blockId;
+    const mine = this.tasks.filter((t) => this.board(t.boardId).blockId === blockId);
+    const line = (t: Task) => `"${t.title}" (${t.id})`;
+    if (ref) {
+      const key = ref.trim().toLowerCase();
+      const found = mine.filter((t) => t.id === ref || t.title.toLowerCase() === key);
+      if (found.length === 1) return found[0]!;
+      return { reason: found.length ? 'ambiguous' : 'unknown_task', detail: found.length ? `More than one task is called "${ref}": ${found.map(line).join(', ')}. Name one by its id.` : `No task of your block is called or numbered "${ref}".` };
+    }
+    const held = mine.filter((t) => this.movesOf(t, who).holding);
+    if (held.length === 1) return held[0]!;
+    return held.length
+      ? { reason: 'ambiguous', detail: `You are working on ${held.length} tasks: ${held.map(line).join(', ')}. Say which one with task.` }
+      : { reason: 'no_task', detail: 'You hold no request of a task right now. Say which task you mean with task (its title or id), if it is yours.' };
+  }
+
+  // What the mail says about `who` and a task: whether it is theirs, whether they hold one of its requests, and what else is open.
+  private movesOf(task: Task, who: EmployeeId): MoveFacts {
+    const ix = this.activity;
+    const chain = [...rootsOf(task, ix)].flatMap((root) => ix.members.get(root) ?? []).map((id) => ix.msgs.get(id)!);
+    const open = chain.filter((m): m is Extract<Message, { kind: 'request' }> => m.kind === 'request' && m.intent !== 'gauntlet' && ix.unsettled.has(m.id));
+    const mine = open.filter((r) => r.to === who && ix.life.get(r.id)?.s === 'delivered');
+    return {
+      onTask: task.assignees.includes(who) || chain.some((m) => m.from === who || m.to === who),
+      holding: mine.length > 0,
+      open: open.filter((r) => !mine.includes(r)).map((r) => `${this.nameOf(r.to as EmployeeId)}: "${r.title}"`),
     };
   }
 
@@ -361,6 +526,170 @@ export class Tasks {
   // Throws when `taskId` is not a task of `blockId`, so a hire can be refused before anyone is hired.
   assertOfBlock(taskId: TaskId, blockId: BlockId) {
     if (this.board(this.task(taskId).boardId).blockId !== blockId) throw new OfficeError('That task belongs to another block.');
+  }
+
+  // ── a branch and a pull request per task ──
+
+  // The task a chain of mail belongs to, by the root request: one of the task's runs, or a run still being posted, which
+  // carries the task in its key.
+  private taskOfRoot(root: MessageId): Task | undefined {
+    const known = this.tasks.find((t) => t.runs.includes(root));
+    if (known) return known;
+    const [tag, id] = (this.host.mail().state.messages.get(root)?.key ?? '').split(':');
+    return tag === 'task' ? this.tasks.find((t) => t.id === id) : undefined;
+  }
+
+  // Where the work of this chain lands: the task's own worktree, when the task has a branch. A task that has a branch whose
+  // worktree cannot be made says so instead: its work must not fall through to the owner's branch.
+  homeOf(roots: readonly MessageId[]): { taskId: TaskId; ws: Workspace } | { taskId: TaskId; lost: string } | undefined {
+    const git = this.host.git;
+    for (const root of roots) {
+      const task = this.taskOfRoot(root);
+      if (!git || !task?.git) continue;
+      const path = git.worktree(task.id);
+      if (!existsSync(path)) this.startBranch(task);
+      if (existsSync(path)) return { taskId: task.id, ws: { path, branch: task.git.branch } };
+      return { taskId: task.id, lost: this.task(task.id).git?.note ?? `${task.git.branch} has no worktree` };
+    }
+    return undefined;
+  }
+
+  // Makes sure the task has its branch and worktree, cut from the block's default branch the first time and found again after.
+  // Local and quick. A block that is not a git repository gets nothing, and a branch git refuses is told on the task, not thrown.
+  private startBranch(task: Task): Task {
+    const git = this.host.git;
+    const block = git?.block(this.board(task.boardId).blockId);
+    if (!git || !block || !existsSync(block.cwd) || !isGitRepo(block.cwd)) return task;
+    const base = defaultBase(block.cwd);
+    const branch = task.git?.branch ?? taskBranchName(task.title, task.id);
+    let note: string | undefined;
+    try {
+      createTaskWorkspace(block.cwd, git.worktree(task.id), { branch, title: task.title, key: taskKey(task.id) }, base);
+    } catch (err) {
+      note = err instanceof Error ? err.message : String(err);
+    }
+    const had = this.task(task.id);
+    const here = { ...had, git: { ...had.git, branch, base: had.git?.base ?? base.name } };
+    // A note about the start is only ever set here. The next publish clears it, or replaces it with what GitHub says.
+    const next = note ? withGitNote(here, note, this.host.now()) : here;
+    if (JSON.stringify(next.git) !== JSON.stringify(had.git)) this.replace(next);
+    return next;
+  }
+
+  // Sends the task's branch to origin and makes sure it has a pull request. Safe to ask again and again: two asks at once are
+  // one send and one more round, and a branch that already has its pull request is only pushed.
+  publish(taskId: TaskId): Promise<void> {
+    const running = this.publishing.get(taskId);
+    if (running) {
+      this.publishAgain.add(taskId);
+      return running;
+    }
+    const round = (async () => {
+      try {
+        do {
+          this.publishAgain.delete(taskId);
+          await this.publishOnce(taskId).catch((err: unknown) => console.error('Could not publish a task branch:', err));
+        } while (this.publishAgain.has(taskId));
+      } finally {
+        this.publishing.delete(taskId);
+      }
+    })();
+    this.publishing.set(taskId, round);
+    return round;
+  }
+
+  private async publishOnce(taskId: TaskId) {
+    const git = this.host.git;
+    const task = this.tasks.find((t) => t.id === taskId);
+    if (!git || !task?.git) return;
+    const path = git.worktree(taskId);
+    if (!existsSync(path)) return;
+    const pushed = await pushBranch(path, task.git.branch);
+    if (pushed.kind !== 'pushed') {
+      const note = pushed.kind === 'no-remote' ? 'There is no remote called origin, so the branch stays on this computer and there is no pull request.' : `Could not push ${task.git.branch} to origin: ${pushed.reason}`;
+      return this.update(taskId, (t) => withGitNote(t, note, this.host.now()));
+    }
+    if (this.tasks.find((t) => t.id === taskId)?.git?.pr) return this.update(taskId, (t) => withGitNote(t, undefined, this.host.now()));
+    const now = this.tasks.find((t) => t.id === taskId);
+    if (!now?.git) return;
+    const people = now.assignees.map((id) => this.nameOf(id));
+    const made = await ensurePr(git.gh, path, { branch: now.git.branch, base: now.git.base, title: now.title, body: prBody(now, people) });
+    this.update(taskId, (t) => (made.kind === 'pr' ? withPr(t, made.pr, this.host.now()) : withGitNote(t, made.note, this.host.now())));
+    if (made.kind === 'pr') this.settled(taskId);
+  }
+
+  // Asks GitHub where the open pull requests stand, and with `retry` tries again for the tasks that have no pull request yet.
+  // Merged moves the task to done. Closed is only shown. Never throws, and one pull request that cannot be read leaves the
+  // others to be read. A round that is already out answers a plain ask; a retry waits for it and goes next.
+  refreshPrs(retry = false): Promise<void> {
+    if (this.prRound) return retry ? this.prRound.then(() => this.refreshPrs(true)) : this.prRound;
+    const round = this.readPrs(retry).finally(() => (this.prRound = undefined));
+    this.prRound = round;
+    return round;
+  }
+
+  private async readPrs(retry: boolean) {
+    const git = this.host.git;
+    if (!git) return;
+    for (const { id } of [...this.tasks]) {
+      // Read again each time: the ones before this took a while, and this one may have moved on meanwhile.
+      const task = this.tasks.find((t) => t.id === id);
+      if (!task?.git) continue;
+      if (!task.git.pr) {
+        if (retry) void this.publish(task.id);
+        continue;
+      }
+      if (!prIsOpen(task.git.pr)) continue;
+      const path = git.worktree(task.id);
+      const block = git.block(this.board(task.boardId).blockId);
+      const seen = await readPr(git.gh, existsSync(path) ? path : (block?.cwd ?? path), task.git.pr.number).catch(() => undefined);
+      if (seen?.kind !== 'pr') continue;
+      this.update(task.id, (t) => withPr(t, seen.pr, this.host.now()));
+      this.settled(task.id);
+    }
+  }
+
+  // Whether there is a pull request worth asking about again later.
+  watchingPrs(): boolean {
+    return this.tasks.some((t) => prIsOpen(t.git?.pr));
+  }
+
+  // Run once at start: a crash can leave a branch unpushed or a pull request unopened, and the owner may have merged one while the app was closed.
+  resumeGit() {
+    const git = this.host.git;
+    if (!git) return;
+    for (const t of this.tasks) {
+      if (!t.git || (t.git.pr && !prIsOpen(t.git.pr))) continue;
+      const path = git.worktree(t.id);
+      if (existsSync(path) && (!t.git.pr || unpushed(path, t.git.branch))) void this.publish(t.id);
+    }
+    void this.refreshPrs();
+  }
+
+  // A pull request that is over does not need its worktree any more. The branch stays.
+  private settled(taskId: TaskId) {
+    const t = this.tasks.find((x) => x.id === taskId);
+    if (t?.git?.pr && !prIsOpen(t.git.pr)) this.releaseWorktree(t);
+  }
+
+  // The block's repository is about to change or go: the task worktrees made in it go first. Their branches and pull requests stay,
+  // and the next run of a task makes its worktree again in whichever repository the block has then.
+  releaseWorktrees(blockId: BlockId) {
+    const mine = new Set(this.boardsOf(blockId).map((b) => b.id));
+    for (const t of this.tasks) if (mine.has(t.boardId)) this.releaseWorktree(t);
+  }
+
+  private releaseWorktree(task: Task) {
+    const git = this.host.git;
+    if (!git || !task.git) return;
+    removeTaskWorkspace(git.block(this.board(task.boardId).blockId)?.cwd, git.worktree(task.id));
+  }
+
+  private update(taskId: TaskId, change: (t: Task) => Task) {
+    const t = this.tasks.find((x) => x.id === taskId);
+    if (!t) return;
+    const next = change(t);
+    if (next !== t) this.replace(next);
   }
 
   // ── hours ──
@@ -402,7 +731,9 @@ export class Tasks {
     const now = this.tasks.find((t) => t.id === taskId);
     if (!now) return failure === undefined;
     const { inflight: _, error: __, ...hours } = failure === undefined ? (now.hours ?? { pushed: {} }) : moveMark(now.hours, e, -1);
-    this.replace({ ...now, hours: failure === undefined ? hours : { ...hours, error: { message: `Could not send ${e.hours} h for ${this.nameOf(e.employeeId)} on ${e.date} to CronoSpark: ${failure}`, at: this.host.now() } } });
+    const at = this.host.now();
+    const settled = { ...now, hours: failure === undefined ? hours : { ...hours, error: { message: `Could not send ${e.hours} h for ${this.nameOf(e.employeeId)} on ${e.date} to CronoSpark: ${failure}`, at } } };
+    this.replace(withEvent(settled, { kind: 'hours', at, employeeId: e.employeeId, date: e.date, hours: e.hours, ...(failure === undefined ? {} : { error: failure }) }));
     return failure === undefined;
   }
 
@@ -428,6 +759,16 @@ export class Tasks {
     this.tasks = this.tasks.map((t) => (t.id === next.id ? next : t));
     this.save();
     if (notify) this.host.changed();
+  }
+
+  // Tasks a provider's cards moved to another stage, with the move on their history.
+  private noteMoves(next: readonly Task[], by: StageBy): Task[] {
+    const before = new Map(this.tasks.map((t) => [t.id, t]));
+    const now = this.host.now();
+    return next.map((t) => {
+      const was = before.get(t.id);
+      return was && was.stage !== t.stage ? withEvent(t, { kind: 'stage', at: now, from: was.stage, to: t.stage, by }) : t;
+    });
   }
 
   private boardId = () => this.host.newId() as BoardId;

@@ -8,6 +8,7 @@ import { hash } from '../util.ts';
 import { runtime } from '../runtime.ts';
 import { get, set, useStore } from '../store.ts';
 import { ResizableHud } from '../hud/ResizableHud.tsx';
+import { useMonitor } from '../computer.ts';
 import { labelLayer } from './labelLayer.ts';
 import { useLabelGate } from './labelGate.ts';
 import { Person, type Look } from './Person.tsx';
@@ -32,6 +33,8 @@ export const EmployeeView = memo(function EmployeeView({ employee }: { employee:
   const selected = useStore((s) => s.selectedId === employee.id);
   // People on a story above the one the owner is on are not drawn, like the story itself.
   const upstairs = useStore((s) => (s.avatarFloors[employee.id] ?? 0) > s.story);
+  // The camera stands where the sitter does while it looks into their monitor.
+  const atScreen = useMonitor((s) => s.open === employee.id);
   const ring = useRef<Mesh>(null);
   const gate = useRef<HTMLDivElement>(null);
   const tagAt = useRef(new Vector3());
@@ -53,7 +56,7 @@ export const EmployeeView = memo(function EmployeeView({ employee }: { employee:
   return (
     <Person
       look={lookFor(employee)}
-      hidden={upstairs}
+      hidden={upstairs || atScreen}
       read={() => runtime.avatars.get(employee.id) ?? null}
       typing={employee.status.kind === 'working'}
       onPick={({ x, y }) => set({ menu: { employeeId: employee.id, x, y } })}

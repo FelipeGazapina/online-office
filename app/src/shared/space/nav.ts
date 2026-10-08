@@ -1,5 +1,5 @@
 // Per-floor walkable grid, A* with a line-of-sight pull, and the stair graph between floors.
-import { defOf, hasFloorAt, itemRect, stairsInfo, tileIndex, wallName, wkey } from './geom.ts';
+import { defOf, floorItems, hasFloorAt, itemRect, stairsInfo, tileIndex, wallName, wkey } from './geom.ts';
 import { NAV_CELL, NAV_CLEARANCE, STORY_H, WALL_HALF, type FloorGeometry, type FloorNav, type FloorPos, type Leg, type StairLink, type Vec2, type WallSeg } from './types.ts';
 
 const EPS = 1e-9;
@@ -90,7 +90,7 @@ function buildNav(g: FloorGeometry, clearance: number): FloorNav {
       if (Math.hypot(px - (ax + t), pz - (az + t * dz)) < reach) close(i);
     });
   }
-  for (const item of story.items) {
+  for (const item of floorItems(story)) {
     const def = defOf(item);
     if (!def || def.walkable) continue;
     const r = itemRect(item, def);
@@ -309,7 +309,7 @@ export function stairLinks(floors: readonly FloorGeometry[]): readonly StairLink
   const links: StairLink[] = [];
   floors.forEach((g, floor) => {
     if (floor + 1 >= floors.length) return;
-    for (const item of g.story.items) {
+    for (const item of floorItems(g.story)) {
       const def = defOf(item);
       if (!def?.stairs) continue;
       const info = stairsInfo(item, def);

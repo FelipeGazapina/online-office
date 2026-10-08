@@ -2,7 +2,7 @@
 // footprints. It shows where the rooms and stairs below sit, so the upper floor can be laid out over them.
 import { useMemo } from 'react';
 import { BufferGeometry, DoubleSide, Float32BufferAttribute, MeshBasicMaterial } from 'three';
-import { footprint, ITEM_DEFS, STORY_H, type Story } from '../../../../shared/space/index.ts';
+import { floorItems, footprint, ITEM_DEFS, STORY_H, type Story } from '../../../../shared/space/index.ts';
 import { useStore } from '../../store.ts';
 
 export const GHOST_OPACITY = 0.3;
@@ -19,7 +19,7 @@ function bandsOf(story: Story) {
     if (w.d === 'e') quad(walls, w.x - h, w.z - h, w.x + 1 + h, w.z + h);
     else quad(walls, w.x - h, w.z - h, w.x + h, w.z + 1 + h);
   }
-  for (const it of story.items) {
+  for (const it of floorItems(story)) {
     const def = ITEM_DEFS[it.def];
     if (!def || def.walkable) continue;
     const f = footprint(def, it.rot);

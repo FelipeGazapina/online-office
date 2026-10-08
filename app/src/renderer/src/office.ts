@@ -1,6 +1,7 @@
 import type { MailView } from '../../shared/mail.ts';
 import type { ServerMessage } from '../../shared/protocol.ts';
 import { heard } from './audio.ts';
+import { enterBuild } from './hud/build/actions.ts';
 import { employeeById, get, set, toast } from './store.ts';
 
 const LOG_CAP = 200;
@@ -20,12 +21,17 @@ function settlePending(view: MailView) {
 export function applyServerMessage(msg: ServerMessage) {
   switch (msg.type) {
     case 'snapshot':
-      set({ company: msg.company, harnesses: msg.harnesses, catalogs: msg.catalogs, meetingDoor: msg.meetingDoor, boards: msg.boards, tasks: msg.tasks, boardSync: msg.boardSync, taskTime: msg.taskTime, taskConnections: msg.taskConnections, mail: msg.mail });
+      set({ company: msg.company, harnesses: msg.harnesses, catalogs: msg.catalogs, meetingDoor: msg.meetingDoor, boards: msg.boards, tasks: msg.tasks, boardSync: msg.boardSync, taskTime: msg.taskTime, taskConnections: msg.taskConnections, linearPeople: msg.linearPeople, mail: msg.mail });
       settlePending(msg.mail);
       if (msg.buildingRev !== get().buildingRev) void fetchBuilding();
       break;
     case 'building':
       if (msg.rev >= get().buildingRev) set({ building: msg.building, buildingRev: msg.rev });
+      break;
+    case 'build_incomplete':
+      // The renderer saw a complete office but main did not, so the draft is still open: go back to it.
+      enterBuild();
+      toast('The office was not saved. The checklist shows what is missing.', 'warn');
       break;
     case 'build_rejected':
       toast(`That change is not allowed: ${[...new Set(msg.violations.map((v) => v.kind.replaceAll('_', ' ')))].join(', ')}.`, 'warn');

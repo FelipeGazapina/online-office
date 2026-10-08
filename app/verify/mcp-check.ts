@@ -10,10 +10,11 @@ import type { BlockId, EmployeeId, Question } from '../src/shared/protocol.ts';
 import { Inbox } from '../src/main/office/inbox.ts';
 import { LIMITS, MemoryStore } from '../src/main/office/memory.ts';
 import { mailTools } from '../src/main/office/mail-tools.ts';
+import { Tasks } from '../src/main/office/tasks.ts';
 import { startOfficeMcp } from '../src/main/office/mcp.ts';
 import { PSTACK_WORKFLOW, persona, resolvePstackSkillsPath } from '../src/main/office/persona.ts';
 import { check, finish, sleep, until } from './check.ts';
-import { ANA, B1, BRUNO, PO, world } from './mail-world.ts';
+import { ANA, B1, B2, BRUNO, PO, world } from './mail-world.ts';
 
 const dir = mkdtempSync(join(tmpdir(), 'office-mcp-check-'));
 const memRoot = join(dir, 'memory');
@@ -43,6 +44,7 @@ function attach(employeeId: EmployeeId, blockId: BlockId) {
   return mcp.attach(employeeId, {
     ask: (body, signal) => inbox.ask(employeeId, body, signal),
     openBoard: async () => {},
+    moveTask: () => ({ ok: false }),
     mail: mailTools(mailWorld.room, employeeId, nameOf, false),
     drawDiagram: (title) => diagrams.push({ employeeId, title }),
     memory: memoryFor,
@@ -115,7 +117,7 @@ const c = await connect(urlC);
 check(a.client.getServerVersion()?.name === 'office', `server name is "office" (${a.client.getServerVersion()?.name})`);
 const listedTools = (await a.client.listTools()).tools;
 const listed = listedTools.map((t) => t.name).sort();
-check(JSON.stringify(listed) === JSON.stringify(['ask_owner', 'awaitReplies', 'cancelRequest', 'draw_diagram', 'forget', 'inbox', 'message', 'open_board', 'recall', 'remember', 'reply', 'request', 'requestGauntlet', 'team']), `tools: ${listed.join(', ')}`);
+check(JSON.stringify(listed) === JSON.stringify(['ask_owner', 'awaitReplies', 'cancelRequest', 'draw_diagram', 'forget', 'inbox', 'message', 'moveTask', 'open_board', 'recall', 'remember', 'reply', 'request', 'requestGauntlet', 'team']), `tools: ${listed.join(', ')}`);
 check(!listed.includes('delegate_to_teammate') && !listed.includes('hireTeammate'), 'delegate_to_teammate is gone and hireTeammate is not offered to an employee');
 const askOwnerDescription = listedTools.find((t) => t.name === 'ask_owner')?.description ?? '';
 check(/material .*decision|material .*product/i.test(askOwnerDescription) && /observable fact/i.test(askOwnerDescription) && /options.*tradeoffs/i.test(askOwnerDescription), 'ask_owner asks only material decisions and requests evidence-backed options');
@@ -301,6 +303,7 @@ check(p.includes('- Standup is at 09:40') && p.includes('remember, recall and fo
 const skillsPath = resolvePstackSkillsPath();
 check(isAbsolute(skillsPath) && p.includes(`PStack is installed at ${skillsPath}`), 'the persona carries the absolute PStack skills path');
 check(p.includes(`${join(skillsPath, 'poteto-mode', 'SKILL.md')}`), 'the persona points every provider at poteto-mode first');
+check(/moveTask/.test(p) && /Task board: \.\.\./.test(p) && /review/.test(p) && /done/.test(p), 'the persona tells everyone when to move the card of a board task');
 check(Object.isFrozen(PSTACK_WORKFLOW) && PSTACK_WORKFLOW.every((phase) => Object.isFrozen(phase)), 'the PStack workflow phases are immutable');
 check(PSTACK_WORKFLOW.every(({ name }, index) => p.indexOf(`${index + 1}. ${name}.`) < p.indexOf(`${index + 2}. `) || index === PSTACK_WORKFLOW.length - 1), 'the persona renders ordered PStack phases once');
 check(/acceptance criteria/i.test(p) && /real matching surface/i.test(p) && /final diff/i.test(p) && /DONE.*BLOCKED.*NEEDS_DECISION/s.test(p), 'the persona requires acceptance, real-surface verification, diff review, and explicit final states');
@@ -321,6 +324,7 @@ const mailUrl = (who: typeof PO) => mcp.attach(who, {
   ask: async () => '',
   openBoard: async () => {},
   drawDiagram: () => {},
+  moveTask: () => ({ ok: false }),
   memory: memory.notebook({ employeeId: who, blockId: BLOCK1, provider: 'claude-code' }),
   mail: mailTools(mailWorld.room, who, (actor) => mailWorld.members.find((m) => m.id === actor)?.name ?? actor, who === PO),
 });
@@ -352,6 +356,88 @@ check(hired.json().ok === true && hired2.json().id === hired.json().id, 'hireTea
 check(gh.ok && BRUNO !== ANA, 'the owner request reached the PO', JSON.stringify(gh));
 await po.client.close();
 await ana.client.close();
+
+console.log('\n# moveTask');
+{
+  const office = world();
+  let ids = 0;
+  const tasks = new Tasks(
+    join(dir, 'tasks.json'),
+    {
+      now: Date.now,
+      newId: () => `t${++ids}`,
+      mail: () => office.room,
+      blocks: () => [B1, B2],
+      members: () => office.members.map((m) => ({ id: m.id, name: m.name, blockId: m.blockId })),
+      provider: { fetchSources: async () => ({ cards: [], errors: [] }), linearPeople: async () => [], logHours: async () => {} },
+      changed() {},
+    },
+    [],
+  );
+  tasks.recover([B1, B2], []);
+  // The office feeds the tasks on every ledger append. Here the feed runs before each tool call instead.
+  let fed = 0;
+  const feed = () => {
+    for (const entry of office.persisted.slice(fed)) tasks.observe(entry);
+    fed = office.persisted.length;
+    tasks.onMail();
+  };
+  const urlOf = (who: typeof PO) =>
+    mcp.attach(who, {
+      ask: async () => '',
+      openBoard: async () => {},
+      drawDiagram: () => {},
+      memory: memory.notebook({ employeeId: who, blockId: BLOCK1, provider: 'claude-code' }),
+      moveTask: (a) => {
+        feed();
+        return tasks.moveByAgent(who, a.to, a.reason, a.task);
+      },
+      mail: mailTools(office.room, who, (actor) => office.members.find((m) => m.id === actor)?.name ?? actor, who === PO),
+    });
+  const pia = await connect(urlOf(PO));
+  const ana = await connect(urlOf(ANA));
+  const bruno = await connect(urlOf(BRUNO));
+  const quick = tasks.boardsOf(B1).find((b) => b.kind === 'quick')!;
+  const view = (title: string) => tasks.view(Date.now()).tasks.find((t) => t.title === title)!;
+  const last = (title: string) => view(title).history!.at(-1) as { kind: string; by: string; to: string; reason?: string };
+
+  const spec = (await ana.client.listTools()).tools.find((t) => t.name === 'moveTask')!;
+  const props = spec.inputSchema.properties as Record<string, { enum?: string[] }>;
+  check(JSON.stringify(props.to?.enum) === JSON.stringify(['doing', 'review', 'done']) && (spec.inputSchema.required ?? []).sort().join() === 'reason,to', 'moveTask takes to (doing, review or done: never todo), a reason, and optionally a task', JSON.stringify(spec.inputSchema));
+
+  const csv = tasks.createTask(quick.id, 'Write the export');
+  office.fresh.add('export.ts');
+  tasks.assign(csv.id, ANA);
+  const stranger = await call(bruno.client, 'moveTask', { to: 'review', reason: 'I like it', task: 'Write the export' });
+  check(stranger.json().ok === false && stranger.json().reason === 'not_on_task' && view('Write the export').stage === 'doing', 'a teammate who is not on the task is refused through the tool, and the card stays', stranger.text);
+  const toTodo = await call(ana.client, 'moveTask', { to: 'todo', reason: 'back to the pile' });
+  const noReason = await call(ana.client, 'moveTask', { to: 'review', reason: '   ' });
+  check(toTodo.isError && noReason.isError && view('Write the export').stage === 'doing', 'a column outside doing, review and done, or an empty reason, is refused before the office hears of it', `${toTodo.text.slice(0, 80)} | ${noReason.text.slice(0, 80)}`);
+  const moved = await call(ana.client, 'moveTask', { to: 'review', reason: 'The export is written and tested.' });
+  check(moved.json().ok === true && moved.json().changed === true && moved.json().from === 'doing' && moved.json().to === 'review' && moved.json().task === 'Write the export', 'the person holding the task moves it without naming it', moved.text);
+  check(view('Write the export').stage === 'review' && last('Write the export').by === ANA && last('Write the export').reason === 'The export is written and tested.', 'the move is on the task under the caller\'s own id, with the reason as given');
+  const again = await call(ana.client, 'moveTask', { to: 'review', reason: 'Again.' });
+  check(again.json().ok === true && again.json().changed === false && view('Write the export').history!.length === 2, 'the same move twice is one move');
+
+  const report = tasks.createTask(quick.id, 'Ship the report');
+  tasks.assign(report.id, PO);
+  const piece = await call(pia.client, 'request', { to: 'Bruno', text: 'the numbers', title: 'Write the numbers' });
+  check(piece.json().ok === true, 'the PO hands a piece out', piece.text);
+  const early = await call(pia.client, 'moveTask', { to: 'done', reason: 'All done.' });
+  check(early.json().ok === false && early.json().reason === 'open_pieces' && /Bruno: "Write the numbers"/.test(early.json().detail) && view('Ship the report').stage === 'doing', 'the PO is refused done while the piece is open, and told which one', early.text);
+  const piecework = await call(bruno.client, 'moveTask', { to: 'review', reason: 'My part is done.' });
+  check(piecework.json().ok === false && piecework.json().reason === 'open_pieces' && /Pia: "Ship the report"/.test(piecework.json().detail), 'the person doing the piece cannot close the PO\'s task either', piecework.text);
+  office.fresh.add('report.md');
+  const settled = await call(bruno.client, 'reply', { requestId: piece.json().id, outcome: 'done', text: 'numbers in', artifact: ['report.md'] });
+  check(settled.json().ok === true, 'the piece settles');
+  const finished = await call(pia.client, 'moveTask', { to: 'done', reason: 'The piece is in and checked.', task: 'ship the report' });
+  check(finished.json().ok === true && finished.json().changed === true && view('Ship the report').stage === 'done' && last('Ship the report').by === PO, 'with the piece settled the PO moves its task to done, named by its title in any case', finished.text);
+
+  tasks.updateTask(csv.id, { stage: 'todo' });
+  const pinned = await call(ana.client, 'moveTask', { to: 'doing', reason: 'Picking it up.' });
+  check(pinned.json().ok === false && pinned.json().reason === 'pinned' && view('Write the export').stage === 'todo', 'a card the owner moved stays where the owner put it', pinned.text);
+  for (const x of [pia, ana, bruno]) await x.client.close();
+}
 
 console.log('\n# lifecycle');
 await memory.archive(A);

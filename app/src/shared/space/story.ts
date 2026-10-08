@@ -1,5 +1,6 @@
 import { ITEM_DEFS, PAINT_COUNT } from './catalog.ts';
-import { hashStory, itemRect, sameLot, tileIndex, wrefKey } from './geom.ts';
+import { hashStory, isTop, itemRect, sameItem, sameLot, tileIndex, wrefKey } from './geom.ts';
+import { levelOf, MAX_LVL, supportViolation } from './surface.ts';
 import {
   MAX_LOT,
   MAX_STORIES,
@@ -40,23 +41,29 @@ export const wallInLot = (lot: Lot, s: WallRef): boolean => {
   return x >= lot.x0 && x < right && z >= lot.z0 && z < bottom;
 };
 
+/** A top item is inside the lot when its host is, and the host is checked on its own. */
 export const itemInLot = (lot: Lot, item: Item): boolean => {
   const def = ITEM_DEFS[item.def];
   if (!def) return false;
+  if (isTop(item)) return true;
   const r = itemRect(item, def);
   return r.x0 >= lot.x0 * 2 && r.z0 >= lot.z0 * 2 && r.x1 <= (lot.x0 + lot.w) * 2 && r.z1 <= (lot.z0 + lot.h) * 2;
 };
 
 const normWall = (w: WallSeg): WallSeg => (w.open ? { x: w.x, z: w.z, d: w.d, style: w.style, open: w.open } : { x: w.x, z: w.z, d: w.d, style: w.style });
 const normItem = (i: Item): Item => {
-  const o: Item = { id: i.id, def: i.def, x: i.x, z: i.z, rot: i.rot };
-  if (i.blockId !== undefined) o.blockId = i.blockId;
+  // A top item belongs to its host's block: it carries no block of its own.
+  const o: Item = isTop(i) ? { id: i.id, def: i.def, on: i.on, u: i.u, v: i.v, rot: i.rot } : { id: i.id, def: i.def, x: i.x, z: i.z, rot: i.rot };
+  if (isTop(i) && isTop(o)) {
+    if (i.look) o.look = i.look;
+    if (i.ang) o.ang = i.ang;
+    if (i.lvl) o.lvl = i.lvl;
+  }
+  if (i.blockId !== undefined && !isTop(i)) o.blockId = i.blockId;
   if (i.tint !== undefined) o.tint = i.tint;
   return o;
 };
 const sameWall = (a: WallSeg | undefined, b: WallSeg | undefined) => (!a || !b ? a === b : a.style === b.style && a.open === b.open);
-const sameItem = (a: Item | undefined, b: Item | undefined) =>
-  !a || !b ? a === b : a.def === b.def && a.x === b.x && a.z === b.z && a.rot === b.rot && a.blockId === b.blockId && a.tint === b.tint;
 
 const byId = (a: Item, b: Item) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
 
@@ -99,6 +106,12 @@ function droppedContent(story: Story, to: Lot, from: Lot, index: number, out: Vi
 /** Applies one op. Problems the op itself causes (bad indices, dropped content) go to `report`. Returns the same building when nothing changes. */
 export function applyOp(b: Building, op: BuildOp, report: Violation[]): { b: Building; inverse: BuildOp } {
   switch (op.t) {
+    case 'bare': {
+      const inverse: BuildOp = { t: 'bare', on: !!b.bare };
+      if (op.on === !!b.bare) return { b, inverse };
+      const { bare: _, ...rest } = b;
+      return { b: op.on ? { ...rest, bare: true } : rest, inverse };
+    }
     case 'lot': {
       const to = op.lot;
       const ok = Number.isInteger(to.x0) && Number.isInteger(to.z0) && Number.isInteger(to.w) && Number.isInteger(to.h) && to.w >= 1 && to.h >= 1 && to.w <= MAX_LOT && to.h <= MAX_LOT;
@@ -203,6 +216,26 @@ export function applyOp(b: Building, op: BuildOp, report: Violation[]): { b: Bui
       for (const id of op.del) {
         touch(id);
         map.delete(id);
+      }
+      // What stood on a deleted item goes with it, and comes back with it on undo, which `put`s everything it touched.
+      if (op.del.length) {
+        const gone = new Set<ItemId>(op.del);
+        for (const it of story.items) {
+          if (it.on !== undefined && gone.has(it.on)) {
+            touch(it.id);
+            map.delete(it.id);
+          }
+        }
+        // And what rested on a deleted thing falls with it: a stack never keeps a mug in the air.
+        for (let pass = 0; pass <= MAX_LVL; pass++) {
+          const left = [...map.values()];
+          const falling = left.filter((it) => isTop(it) && levelOf(it) > 0 && !!ITEM_DEFS[it.def] && supportViolation(it, ITEM_DEFS[it.def], left) !== null && supportViolation(it, ITEM_DEFS[it.def], story.items) === null);
+          if (!falling.length) break;
+          for (const it of falling) {
+            touch(it.id);
+            map.delete(it.id);
+          }
+        }
       }
       for (const it of op.put) {
         if (!ITEM_DEFS[it.def]) {

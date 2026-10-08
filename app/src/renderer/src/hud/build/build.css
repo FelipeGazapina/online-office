@@ -524,6 +524,110 @@ html[data-building] .labels * {
   outline: 2px solid var(--moss);
   outline-offset: 2px;
 }
+/* Cancel is always on screen while something is in hand, as a button as well as the key. */
+.bh-cancel {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 26px;
+  padding: 0 12px 0 14px;
+  border: 0;
+  border-radius: 999px;
+  background: #ff5d5d;
+  color: white;
+  font: 800 12.5px/1 var(--body);
+  cursor: pointer;
+}
+.bh-cancel:hover {
+  background: #ff7676;
+}
+.bh-cancel:focus-visible {
+  outline: 2px solid white;
+  outline-offset: 2px;
+}
+.bh-cancel kbd {
+  background: rgba(0, 0, 0, 0.22);
+  border-color: rgba(255, 255, 255, 0.35);
+  color: white;
+}
+/* A small thing in hand: the catalog folds into one slim bar so the desk or table under the pointer is never behind a panel. Pointing at the
+   bar opens the catalog above it again, to pick the next thing. */
+.bh-dock.held {
+  width: max-content;
+  max-width: calc(100vw - 340px);
+}
+.bh-dock.held .bh-panel {
+  display: none;
+  width: min(980px, calc(100vw - 340px));
+  margin-bottom: 8px;
+}
+.bh-dock.held:hover .bh-panel {
+  display: block;
+}
+.bh-dock.held:hover .bh-held-more i {
+  transform: rotate(180deg);
+}
+.bh-held {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  width: max-content;
+  max-width: 100%;
+  margin: 0 auto;
+  padding: 6px 10px 6px 8px;
+  background: rgba(35, 38, 64, 0.92);
+  color: var(--paper);
+  border-radius: 999px;
+  font-size: 12.5px;
+  box-shadow: 0 8px 22px rgba(24, 18, 44, 0.3);
+}
+.bh-held-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.bh-held-item img {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: white;
+  object-fit: contain;
+}
+.bh-held-item b {
+  font: 800 14px/1 var(--display);
+}
+.bh-held-item small {
+  opacity: 0.7;
+  font-size: 11.5px;
+}
+.bh-held-hints {
+  display: flex;
+  align-items: center;
+  gap: 4px 14px;
+}
+.bh-held kbd {
+  background: rgba(255, 255, 255, 0.14);
+  border-color: rgba(255, 255, 255, 0.22);
+  color: inherit;
+}
+.bh-held kbd.danger {
+  background: #ff4d4d;
+  border-color: #ff9a9a;
+  color: white;
+}
+.bh-held-more {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 0 4px 0 12px;
+  border-left: 1px solid rgba(255, 255, 255, 0.2);
+  opacity: 0.8;
+  font-weight: 700;
+}
+.bh-held-more i {
+  font-style: normal;
+  transition: transform 0.15s;
+}
 .bh-readout.anchored {
   transform: translate(-50%, -190%);
   padding: 5px 12px;
@@ -590,4 +694,134 @@ html[data-building] .labels * {
 .bh-fill:focus-visible {
   outline: 2px solid white;
   outline-offset: 2px;
+}
+
+/* The question before a whole block is deleted. */
+.bh-confirm-veil {
+  position: absolute;
+  inset: 0;
+  z-index: 8;
+  display: grid;
+  place-items: center;
+  background: rgba(24, 18, 44, 0.32);
+  pointer-events: auto;
+}
+.bh-confirm {
+  width: min(420px, calc(100vw - 48px));
+  padding: 18px 20px 16px;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: rgba(251, 249, 245, 0.98);
+  color: var(--ink);
+  box-shadow: 0 18px 48px rgba(24, 18, 44, 0.4);
+}
+.bh-confirm b {
+  font: 700 17px/1.2 var(--display);
+}
+.bh-confirm p {
+  margin: 8px 0 16px;
+  font-size: 13.5px;
+  line-height: 1.45;
+}
+.bh-confirm-row {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.bh-confirm-row button {
+  height: 36px;
+  padding: 0 14px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: white;
+  color: var(--ink);
+  font-weight: 600;
+  cursor: pointer;
+}
+.bh-confirm-row .bh-confirm-yes {
+  border-color: #d93a3a;
+  background: #ff4d4d;
+  color: white;
+}
+.bh-confirm-row kbd {
+  margin-left: 4px;
+}
+
+.bh-discard {
+  height: 34px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: white;
+  color: var(--ink);
+  font-weight: 600;
+  cursor: pointer;
+}
+.bh-discard.danger.armed {
+  background: #c8463d;
+  border-color: #c8463d;
+  color: white;
+}
+
+.bh-essentials {
+  position: absolute;
+  top: 132px;
+  right: 12px;
+  width: 260px;
+  max-height: calc(100vh - 360px);
+  overflow-y: auto;
+  padding: 12px 14px;
+  background: rgba(251, 249, 245, 0.95);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  box-shadow: 0 8px 24px rgba(24, 18, 44, 0.22);
+  font-size: 13px;
+}
+.bh-essentials b {
+  display: block;
+  margin-bottom: 8px;
+  font: 700 14px/1.2 var(--display);
+}
+.bh-essentials ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 6px;
+}
+.bh-essentials li {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+}
+.bh-essentials li i {
+  flex: none;
+  width: 16px;
+  font-style: normal;
+  font-weight: 700;
+  text-align: center;
+}
+.bh-essentials li.ok {
+  color: var(--moss);
+}
+.bh-essentials li.todo {
+  color: #b2443b;
+}
+.bh-essentials small {
+  display: block;
+  color: var(--ink);
+  opacity: 0.7;
+}
+.bh-essentials.done b {
+  color: var(--moss);
+}
+.bh-essentials.done {
+  width: auto;
+  padding: 8px 14px;
+}
+.bh-essentials.done b {
+  margin: 0;
+}
+.bh-essentials ul[hidden] {
+  display: none;
 }

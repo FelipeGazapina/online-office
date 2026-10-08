@@ -1,5 +1,5 @@
 import { footprint, ITEM_DEFS } from './catalog.ts';
-import { CELL, STORY_H, type Item, type ItemDef, type Lot, type Story, type Vec2, type WallDir, type WallRef } from './types.ts';
+import { CELL, STORY_H, type FloorItem, type Item, type ItemDef, type Lot, type Story, type TopItem, type Vec2, type WallDir, type WallRef } from './types.ts';
 
 const DIR_INDEX: Record<WallDir, number> = { e: 0, s: 1, sd: 2, nd: 3 };
 const OFF = 4096;
@@ -18,7 +18,21 @@ export const hasFloorAt = (s: Story, i: number): boolean => s.paint[i] > 0 || (s
 
 export type CellRect = { x0: number; z0: number; x1: number; z1: number };
 
-export function itemRect(item: Item, def: ItemDef): CellRect {
+export const isTop = (i: Item): i is TopItem => i.on !== undefined;
+export const isFloor = (i: Item): i is FloorItem => i.on === undefined;
+
+const floorOf = new WeakMap<Story, readonly FloorItem[]>();
+/** The items that stand on the floor. A story is never edited in place, so the list is made once per story. */
+export function floorItems(s: Story): readonly FloorItem[] {
+  let list = floorOf.get(s);
+  if (!list) floorOf.set(s, (list = s.items.filter(isFloor)));
+  return list;
+}
+
+export const sameItem = (a: Item | undefined, b: Item | undefined): boolean =>
+  !a || !b ? a === b : a.def === b.def && a.x === b.x && a.z === b.z && a.rot === b.rot && a.blockId === b.blockId && a.tint === b.tint && a.on === b.on && a.u === b.u && a.v === b.v && a.look === b.look && a.ang === b.ang && a.lvl === b.lvl;
+
+export function itemRect(item: FloorItem, def: ItemDef): CellRect {
   const f = footprint(def, item.rot);
   return { x0: item.x, z0: item.z, x1: item.x + f.w, z1: item.z + f.d };
 }
@@ -46,7 +60,7 @@ export type StairsInfo = {
   heightAt(p: Vec2): number;
 };
 
-export function stairsInfo(item: Item, def: ItemDef): StairsInfo {
+export function stairsInfo(item: FloorItem, def: ItemDef): StairsInfo {
   const rot = item.rot;
   const dir = CLIMB[rot];
   const f = footprint(def, rot);
@@ -106,9 +120,18 @@ export function hashStory(paint: Uint8Array, halfB: Readonly<Record<number, numb
   for (const it of items) {
     str(it.id);
     str(it.def);
-    mix(it.x);
-    mix(it.z);
+    if (it.on === undefined) {
+      mix(it.x);
+      mix(it.z);
+    } else {
+      str(it.on);
+      mix(it.u);
+      mix(it.v);
+    }
     mix(it.rot);
+    mix(it.look ?? 0);
+    mix(it.ang ?? 0);
+    mix(it.lvl ?? 0);
     str(it.blockId ?? '');
     mix(it.tint ?? -1);
   }

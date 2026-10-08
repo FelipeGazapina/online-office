@@ -1,7 +1,7 @@
 // Mutable build-mode state that changes every pointer move and must not re-render React: the ghost under the cursor, the
 // modifier keys held, and where the build camera looks. Anything the HUD shows lives in the store instead.
 import type { Company } from '../../../../shared/protocol.ts';
-import { cellBounds, footprint, ITEM_DEFS, type Item, type SpaceContext, type TileRect, type Vec2, type ViolationKind, type WallRef, type WallSeg } from '../../../../shared/space/index.ts';
+import { cellBounds, footprint, ITEM_DEFS, type FloorItem, type SpaceContext, type TopItem, type TopPose, type TileRect, type Vec2, type ViolationKind, type WallRef, type WallSeg } from '../../../../shared/space/index.ts';
 
 export type Ghost =
   | { kind: 'run'; refs: readonly WallRef[]; start: Vec2; end: Vec2; erase: boolean; ok: boolean }
@@ -9,10 +9,11 @@ export type Ghost =
   | { kind: 'tiles'; tiles: readonly Vec2[]; ok: boolean; color?: string }
   | { kind: 'walls'; walls: readonly WallSeg[]; ok: boolean; color?: string }
   | { kind: 'vertex'; at: Vec2 }
-  | { kind: 'item'; item: Item; ok: boolean }
-  | { kind: 'outline'; item: Item }
-  | { kind: 'block'; items: readonly Item[]; ok: boolean }
-  | { kind: 'blockSelect'; items: readonly Item[] };
+  | { kind: 'item'; item: FloorItem; ok: boolean }
+  | { kind: 'top'; item: TopItem; pose: TopPose; ok: boolean; outline?: boolean; surface?: { x0: number; z0: number; x1: number; z1: number; y: number; round?: true } }
+  | { kind: 'outline'; item: FloorItem }
+  | { kind: 'block'; items: readonly FloorItem[]; ok: boolean }
+  | { kind: 'blockSelect'; items: readonly FloorItem[] };
 
 export const draft = {
   ghost: null as Ghost | null,
@@ -24,7 +25,7 @@ export const draft = {
 };
 
 /** Center of an item's footprint in meters. */
-export function centerOf(item: Item): Vec2 {
+export function centerOf(item: FloorItem): Vec2 {
   const f = footprint(ITEM_DEFS[item.def], item.rot);
   return { x: item.x / 2 + f.w / 4, z: item.z / 2 + f.d / 4 };
 }
@@ -32,6 +33,7 @@ export function centerOf(item: Item): Vec2 {
 export function setGhost(g: Ghost | null, level = 0) {
   draft.ghost = g;
   if (g?.kind === 'item') draft.focus = { ...centerOf(g.item), level };
+  else if (g?.kind === 'top') draft.focus = { x: g.pose.x, z: g.pose.z, level };
   else if (g?.kind === 'block' || g?.kind === 'blockSelect') {
     const box = cellBounds(g.items);
     draft.focus = box ? { x: (box.x0 + box.x1) / 4, z: (box.z0 + box.z1) / 4, level } : null;
@@ -39,6 +41,23 @@ export function setGhost(g: Ghost | null, level = 0) {
   else if (g?.kind === 'tiles' && g.tiles.length) draft.focus = { x: g.tiles.reduce((n, t) => n + t.x + 0.5, 0) / g.tiles.length, z: g.tiles.reduce((n, t) => n + t.z + 0.5, 0) / g.tiles.length, level };
   else draft.focus = null;
   draft.version++;
+}
+
+/**
+ * How the next small thing the owner puts down will look and stand: one of its looks and a few degrees of turn, rolled again for every
+ * piece so a row of mugs is not a row of the same mug. The ghost shows exactly this, so the piece in hand is the piece that lands.
+ */
+export const hand = { def: '', look: 0, ang: 0 };
+const MAX_ANG = 12;
+
+export function rollHand(def: string) {
+  const looks = ITEM_DEFS[def]?.looks ?? 1;
+  const before = hand.def === def ? hand.look : -1;
+  let look = Math.floor(Math.random() * looks);
+  if (looks > 1 && look === before) look = (look + 1 + Math.floor(Math.random() * (looks - 1))) % looks;
+  hand.def = def;
+  hand.look = look;
+  hand.ang = Math.round((Math.random() * 2 - 1) * MAX_ANG);
 }
 
 export const modifiers = { shift: false, ctrl: false };
@@ -73,6 +92,12 @@ export const VIOLATION_TEXT: Readonly<Record<ViolationKind, string>> = {
   bad_diagonal_half: 'Diagonal walls need a half floor',
   bad_paint: 'Unknown paint',
   unknown_item: 'Unknown item',
+  no_host: 'Nothing to stand on',
+  not_surface: 'Nothing can stand on that',
+  off_surface: 'It would hang over the edge',
+  floor_only: 'That one stands on the floor',
+  needs_surface: 'Put it on a desk, table or shelf',
+  unsupported: 'Nothing under it to rest on',
   desk_wrong_block: 'A desk belongs to its team',
   desk_wrong_kind: 'Wrong kind of desk',
   desk_double_occupied: 'Two people on one desk',

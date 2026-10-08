@@ -6,11 +6,13 @@ import {
   type ClientMessage,
   type EmployeeId,
   type HarnessStatus,
+  type LinearFilters,
   type MeetingDoor,
   type ModelId,
   type Provider,
   type QuestionId,
   type ServerMessage,
+  type TaskBoardSource,
   type TaskProvider,
 } from '../shared/protocol.ts';
 import { PRIORITIES, type BoardId, type BoardSpec, type Priority, type TaskId, type TaskStage } from '../shared/tasks.ts';
@@ -23,6 +25,7 @@ import { OfficeError } from './office/error.ts';
 const employeeId = z.string().min(1).transform((s) => s as EmployeeId);
 const blockId = z.string().min(1).transform((s) => s as BlockId);
 const questionId = z.string().min(1).transform((s) => s as QuestionId);
+const messageId = z.string().min(1).transform((s) => s as MessageId);
 const modelId = z.string().min(1).transform((s) => s as ModelId);
 const provider = z.enum(['claude-code', 'codex', 'hermes']);
 const meetingDoor = z.enum(['open', 'closed']) satisfies z.ZodType<MeetingDoor>;
@@ -37,7 +40,22 @@ const boardId = z.string().min(1).transform((s) => s as BoardId);
 const taskId = z.string().min(1).transform((s) => s as TaskId);
 const taskStage = z.enum(['todo', 'doing', 'review', 'done']) satisfies z.ZodType<TaskStage>;
 const priority = z.enum(PRIORITIES) satisfies z.ZodType<Priority>;
-const taskSources = z.array(z.object({ provider: taskProvider, projectId: z.string().min(1).max(200), label: z.string().max(120).optional() })).max(8);
+const linearFilters = z.object({
+  assignee: z.union([z.enum(['anyone', 'me']), z.object({ id: z.string().min(1).max(200), name: z.string().min(1).max(200) })]),
+  cycle: z.enum(['any', 'current']),
+  limit: z.union([z.literal(50), z.literal(200)]),
+}) satisfies z.ZodType<LinearFilters>;
+const sourceProject = z.string().min(1).max(200);
+const sourceLabel = z.string().max(120).optional();
+// CronoSpark's tool has no filters to offer, so a filter sent along with its source is refused here instead of dropped.
+const taskSources = z
+  .array(
+    z.discriminatedUnion('provider', [
+      z.strictObject({ provider: z.literal('cronospark'), projectId: sourceProject, label: sourceLabel }),
+      z.object({ provider: z.literal('linear'), projectId: sourceProject, label: sourceLabel, filters: linearFilters.optional() }),
+    ]),
+  )
+  .max(8) satisfies z.ZodType<TaskBoardSource[]>;
 // A quick board is strict: a source sent along with one is refused here instead of dropped.
 const boardSpec = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('quick') }),
@@ -50,15 +68,17 @@ const wallDir = z.enum(['e', 's', 'sd', 'nd']);
 const wallRef = z.object({ x: tile, z: tile, d: wallDir });
 const wallSeg: z.ZodType<WallSeg> = z.object({ x: tile, z: tile, d: wallDir, style: z.number().int().min(0).max(255), open: z.enum(['door', 'window', 'arch']).optional() });
 const itemIdSchema = z.string().min(1).max(200).transform((s) => s as ItemId);
-const item: z.ZodType<Item> = z.object({
+const itemBase = {
   id: itemIdSchema,
   def: z.string().min(1).max(60),
-  x: tile,
-  z: tile,
   rot,
   blockId: z.string().min(1).optional(),
   tint: z.number().int().min(0).max(0xffffff).optional(),
-});
+};
+const unit = z.number().int().min(-1024).max(1024);
+// A small thing on a surface also says how it looks, how many degrees it stands off square, and how many things it is stacked above the top.
+const onTop = { look: z.number().int().min(0).max(63).optional(), ang: z.number().int().min(-180).max(180).optional(), lvl: z.number().int().min(0).max(3).optional() };
+const item: z.ZodType<Item> = z.union([z.object({ ...itemBase, x: tile, z: tile }), z.object({ ...itemBase, on: itemIdSchema, u: unit, v: unit, ...onTop })]);
 const lot = z.object({ x0: tile, z0: tile, w: z.number().int().min(1).max(64), h: z.number().int().min(1).max(64) });
 const MANY = 4096;
 const buildOp: z.ZodType<BuildOp> = z.discriminatedUnion('t', [
@@ -71,6 +91,7 @@ const buildOp: z.ZodType<BuildOp> = z.discriminatedUnion('t', [
     cells: z.array(z.object({ x: tile, z: tile, half: z.union([z.literal(0), z.literal(1)]), paint: z.number().int().min(0).max(255) })).max(MANY),
   }),
   z.object({ t: z.literal('items'), story: z.number().int().min(0).max(3), put: z.array(item).max(MANY), del: z.array(itemIdSchema).max(MANY) }),
+  z.object({ t: z.literal('bare'), on: z.boolean() }),
 ]);
 
 const clientMessage = z.discriminatedUnion('type', [
@@ -97,7 +118,7 @@ const clientMessage = z.discriminatedUnion('type', [
   z.object({ type: z.literal('remove_block'), blockId }),
   z.object({ type: z.literal('configure_linear_board'), blockId, url: z.string().url().max(1000) }),
   z.object({ type: z.literal('create_board'), blockId, name: z.string().min(1).max(120), spec: boardSpec }),
-  z.object({ type: z.literal('update_board'), boardId, name: z.string().min(1).max(120).optional(), sources: taskSources.optional() }),
+  z.object({ type: z.literal('update_board'), boardId, name: z.string().min(1).max(120).optional(), sources: taskSources.optional(), collapsed: z.array(taskStage).max(4).optional() }),
   z.object({ type: z.literal('delete_board'), boardId }),
   z.object({ type: z.literal('refresh_board'), boardId }),
   z.object({ type: z.literal('create_task'), boardId, title: z.string().min(1).max(500), notes: z.string().max(20_000).optional(), stage: taskStage.optional(), assignee: employeeId.optional(), priority: priority.optional() }),
@@ -105,7 +126,18 @@ const clientMessage = z.discriminatedUnion('type', [
   z.object({ type: z.literal('delete_task'), taskId }),
   z.object({ type: z.literal('assign_task'), taskId, employeeId }),
   z.object({ type: z.literal('send_hours'), taskId }),
+  z.object({ type: z.literal('load_activity'), taskId }),
+  z.object({
+    type: z.literal('answer_question'),
+    taskId,
+    ref: z.discriminatedUnion('kind', [
+      z.object({ kind: z.literal('mail'), id: messageId }),
+      z.object({ kind: z.literal('ask'), employeeId, id: questionId }),
+    ]),
+    text: z.string().min(1).max(20_000),
+  }),
   z.object({ type: z.literal('connect_task_provider'), provider: taskProvider }),
+  z.object({ type: z.literal('load_linear_people') }),
   z.object({ type: z.literal('configure_task_provider'), provider: z.literal('cronospark'), apiKey: z.string().max(2000), userId: z.string().max(200) }),
   z.object({
     type: z.literal('post'),
@@ -125,10 +157,16 @@ const clientMessage = z.discriminatedUnion('type', [
   z.object({ type: z.literal('set_permissions'), employeeId, mode: permissionMode }),
   z.object({ type: z.literal('remove_allow_rule'), employeeId, rule: allowRule }),
   z.object({ type: z.literal('fresh_session'), employeeId }),
+  z.object({ type: z.literal('interrupt'), employeeId }),
+  z.object({ type: z.literal('load_terminal') }),
   z.object({ type: z.literal('reset_company') }),
   z.object({ type: z.literal('build'), ops: z.array(buildOp).min(1).max(64) }),
   z.object({ type: z.literal('undo') }),
   z.object({ type: z.literal('redo') }),
+  z.object({ type: z.literal('build_begin') }),
+  z.object({ type: z.literal('build_clear') }),
+  z.object({ type: z.literal('build_save') }),
+  z.object({ type: z.literal('build_discard') }),
 ]);
 // Compile-time proof the schema and the contract agree in both directions.
 type Parsed = z.infer<typeof clientMessage>;
@@ -165,12 +203,15 @@ export function startOffice({ dataFile, harnesses, window, services }: Options) 
       },
       building: (building, rev) => emit({ type: 'building', building, rev }),
       rejected: (violations) => emit({ type: 'build_rejected', violations }),
+      incomplete: (missing) => emit({ type: 'build_incomplete', missing }),
       said: (employeeId, text) => emit({ type: 'said', employeeId, text }),
       log: (employeeId, line, at) => emit({ type: 'log', employeeId, line, at }),
       // Mail and live tokens are sparse and the owner is waiting on them, so they skip the coalescer.
       mail: (view) => emit({ type: 'mail', view }),
       stream: (employeeId, replyingTo, delta, done) => emit({ type: 'stream', employeeId, replyingTo, delta, ...(done ? { done } : {}) }),
       history: (convo, messages, hasMore) => emit({ type: 'history', convo, messages, hasMore }),
+      activity: (taskId, entries, live) => emit({ type: 'activity', taskId, entries, live }),
+      terminal: (employeeId, push) => emit({ type: 'terminal', employeeId, ...push }),
       error: (message) => emit({ type: 'error', message }),
     },
     services,

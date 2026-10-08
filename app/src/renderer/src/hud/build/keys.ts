@@ -1,8 +1,10 @@
 import { removeItemOp } from '../../../../shared/space/buildersGesture.ts';
+import { worldRotOf } from '../../../../shared/space/index.ts';
 import { runtime } from '../../runtime.ts';
 import { get } from '../../store.ts';
-import { enterBuild, exitBuild, redo, rotate, sendOps, setLevel, setTool, stepBack, undo } from './actions.ts';
-import { buildView, modifiers } from './state.ts';
+import { enterBuild, redo, saveBuild, rotate, sendOps, setLevel, setTool, stepBack, undo } from './actions.ts';
+import { removal, askToRemove, keepBlock, removeBlock } from './removal.ts';
+import { buildView, hand, modifiers } from './state.ts';
 
 export const PAN_KEYS: readonly string[] = ['KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'];
 
@@ -25,6 +27,13 @@ export function buildKey(e: KeyboardEvent): boolean {
     return true;
   }
   if (e.altKey || s.modal) return false;
+  // A question about a whole block takes the keyboard until it is answered.
+  if (removal.getState().blockId) {
+    if (e.code === 'Enter') removeBlock();
+    else if (e.code === 'Escape') keepBlock();
+    e.preventDefault();
+    return true;
+  }
   const level = build.level;
   const taken = () => {
     e.preventDefault();
@@ -36,7 +45,7 @@ export function buildKey(e: KeyboardEvent): boolean {
   }
   switch (e.code) {
     case 'KeyB':
-      if (!e.repeat) exitBuild();
+      if (!e.repeat) saveBuild();
       return taken();
     case 'Escape':
       if (s.helpOpen || s.menu) return false;
@@ -60,8 +69,11 @@ export function buildKey(e: KeyboardEvent): boolean {
       return taken();
     case 'Delete':
     case 'Backspace': {
-      // A block in hand is never deleted by a key: its pieces are many and one slip would take the team's office with it.
-      if (build.tool.kind === 'block') return taken();
+      // A block in hand is only deleted after a question that names the people it would fire: one slip would take the team with it.
+      if (build.tool.kind === 'block') {
+        if (build.tool.carry) askToRemove(build.tool.carry.blockId);
+        return taken();
+      }
       const id = build.tool.kind === 'item' ? build.tool.carry : s.buildCursor.hover;
       if (id) {
         sendOps([removeItemOp(level, id)]);
@@ -70,8 +82,16 @@ export function buildKey(e: KeyboardEvent): boolean {
       return taken();
     }
     case 'KeyE': {
-      const item = s.buildCursor.hover && s.building?.stories[level]?.items.find((i) => i.id === s.buildCursor.hover);
-      if (item) setTool({ kind: 'item', def: item.def, rot: item.rot, carry: null, blockId: item.blockId ?? null });
+      const story = s.building?.stories[level];
+      const item = s.buildCursor.hover && story?.items.find((i) => i.id === s.buildCursor.hover);
+      if (item && story) {
+        setTool({ kind: 'item', def: item.def, rot: worldRotOf(story, item), carry: null, blockId: item.blockId ?? null });
+        // A copy of a small thing looks like it and stands as it stands.
+        if (item.on !== undefined) {
+          hand.look = item.look ?? 0;
+          hand.ang = item.ang ?? 0;
+        }
+      }
       return taken();
     }
     case 'Tab':

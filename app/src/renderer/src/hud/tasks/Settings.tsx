@@ -1,7 +1,9 @@
 import { useEffect, useState, type KeyboardEvent } from 'react';
 import type { TaskBoardSource, TaskProvider } from '../../../../shared/protocol.ts';
+import { withFilters } from '../../boardView.ts';
 import type { Board } from '../../../../shared/tasks.ts';
 import { send } from '../../store.ts';
+import { LinearFiltersEditor } from './Filters.tsx';
 import { Close, KindIcon, Plus } from './icons.tsx';
 import { ProviderConnections } from './Providers.tsx';
 
@@ -33,7 +35,10 @@ export function Settings({ board, isLast, taskCount, onClose }: Props) {
       e.currentTarget.blur();
     } else if (e.key === 'Enter' && !e.nativeEvent.isComposing) e.currentTarget.blur();
   };
-  const patch = (i: number, p: Partial<TaskBoardSource>) => setSources((cur) => cur.map((s, j) => (j === i ? { ...s, ...p } : s)));
+  const patch = (i: number, p: { projectId?: string; label?: string }) => setSources((cur) => cur.map((s, j) => (j === i ? { ...s, ...p } : s)));
+  // A source keeps only what its provider can use, so a Linear source's filters do not follow it to CronoSpark.
+  const setProvider = (i: number, provider: TaskProvider) =>
+    setSources((cur) => cur.map((s, j) => (j === i && s.provider !== provider ? { provider, projectId: s.projectId, ...(s.label ? { label: s.label } : {}) } : s)));
   const add = (provider: TaskProvider) => setSources((cur) => [...cur, { provider, projectId: '' }]);
 
   return (
@@ -60,7 +65,7 @@ export function Settings({ board, isLast, taskCount, onClose }: Props) {
               <div className="tb-sources">
                 {sources.map((s, i) => (
                   <div className="tb-source" key={i} data-provider={s.provider}>
-                    <select aria-label="Provider" value={s.provider} onChange={(e) => patch(i, { provider: e.target.value as TaskProvider })}>
+                    <select aria-label="Provider" value={s.provider} onChange={(e) => setProvider(i, e.target.value as TaskProvider)}>
                       <option value="linear">Linear</option>
                       <option value="cronospark">CronoSpark</option>
                     </select>
@@ -69,6 +74,11 @@ export function Settings({ board, isLast, taskCount, onClose }: Props) {
                     </button>
                     <input className="tb-input" aria-label="Project" value={s.projectId} placeholder={PLACEHOLDER[s.provider]} onChange={(e) => patch(i, { projectId: e.target.value })} />
                     <input className="tb-input" aria-label="Label" value={s.label ?? ''} placeholder="Label on its cards (optional)" onChange={(e) => patch(i, { label: e.target.value })} />
+                    {s.provider === 'linear' ? (
+                      <LinearFiltersEditor source={s} onChange={(f) => setSources((cur) => cur.map((x, j) => (j === i ? withFilters(x, f) : x)))} />
+                    ) : (
+                      <p className="tb-hint tb-source-note">CronoSpark lists a project's tasks and cannot filter them by person or cycle.</p>
+                    )}
                   </div>
                 ))}
               </div>

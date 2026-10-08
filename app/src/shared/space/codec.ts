@@ -1,6 +1,7 @@
 // The only place untrusted JSON becomes a Building, and the inverse.
 import { ITEM_DEFS, PAINT_COUNT } from './catalog.ts';
 import { wrefKey } from './geom.ts';
+import { MAX_LVL } from './surface.ts';
 import { makeStory } from './story.ts';
 import { MAX_LOT, MAX_STORIES, type Building, type Item, type ItemId, type Rot, type Story, type WallDir, type WallSeg } from './types.ts';
 
@@ -94,11 +95,33 @@ export function parseBuilding(raw: unknown, warn: (msg: string) => void = (m) =>
       }
       const rot = int(it.rot, `${ip}.rot`);
       if (rot < 0 || rot > 3) return fail(`${ip}.rot`, 'must be 0 to 3');
-      const item: Item = { id: it.id as ItemId, def: it.def, x: int(it.x, `${ip}.x`), z: int(it.z, `${ip}.z`), rot: rot as Rot };
+      const item: Item =
+        it.on === undefined
+          ? { id: it.id as ItemId, def: it.def, x: int(it.x, `${ip}.x`), z: int(it.z, `${ip}.z`), rot: rot as Rot }
+          : { id: it.id as ItemId, def: it.def, on: typeof it.on === 'string' ? (it.on as ItemId) : fail(`${ip}.on`, 'must be an item id'), u: int(it.u, `${ip}.u`), v: int(it.v, `${ip}.v`), rot: rot as Rot };
+      if (item.on !== undefined) {
+        // How a thing looks and how it stands: all optional, none needed for the rules but the stack level.
+        for (const key of ['look', 'ang', 'lvl'] as const) {
+          if (it[key] === undefined) continue;
+          const n = int(it[key], `${ip}.${key}`);
+          if (key === 'lvl' && (n < 0 || n > MAX_LVL)) fail(`${ip}.lvl`, `must be 0 to ${MAX_LVL}`);
+          if (key === 'look' && n < 0) fail(`${ip}.look`, 'must not be negative');
+          if (n !== 0) item[key] = n;
+        }
+      }
       if (it.blockId !== undefined) item.blockId = typeof it.blockId === 'string' ? it.blockId : fail(`${ip}.blockId`, 'must be a string');
       if (it.tint !== undefined) item.tint = typeof it.tint === 'number' ? it.tint : fail(`${ip}.tint`, 'must be a number');
       items.set(item.id, item);
     });
+    // A top item whose host is gone (a file edited by hand) has nowhere to stand: it is dropped, like an unknown def.
+    for (const item of [...items.values()]) {
+      if (item.on === undefined) continue;
+      const host = items.get(item.on);
+      if (!host || host.on !== undefined) {
+        warn(`building: dropped ${item.id}, nothing to stand on`);
+        items.delete(item.id);
+      }
+    }
     return makeStory(
       paint,
       halfB,
@@ -106,7 +129,9 @@ export function parseBuilding(raw: unknown, warn: (msg: string) => void = (m) =>
       [...items.values()].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0)),
     );
   });
-  return { v: 1, lot, stories };
+  // A file from the build that made the pods items says `true`: that is level 1.
+  const shelled = raw.shelled === 2 ? 2 : raw.shelled === 1 || raw.shelled === true ? 1 : undefined;
+  return { v: 1, lot, stories, ...(shelled && { shelled }), ...(raw.bare === true && { bare: true as const }) };
 }
 
 /** Plain JSON: paint as a run-length string, everything else as it is. */
@@ -114,6 +139,8 @@ export function encodeBuilding(b: Building): unknown {
   return {
     v: 1,
     lot: { ...b.lot },
+    ...(b.shelled && { shelled: b.shelled }),
+    ...(b.bare && { bare: true }),
     stories: b.stories.map((s) => ({ paint: encodePaint(s.paint), halfB: { ...s.halfB }, walls: s.walls.map((w) => ({ ...w })), items: s.items.map((i) => ({ ...i })) })),
   };
 }
