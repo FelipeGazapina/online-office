@@ -30,11 +30,15 @@ export const env = {
 const TARGET_P50 = 2000;
 const TARGET_MAX = 3000;
 const TRIALS = 5;
+const BUSY_TRIALS = Number(process.env.FIRST_REPLY_BUSY_TRIALS ?? 3);
 const COLD_TRIALS = Number(process.env.FIRST_REPLY_COLD_TRIALS ?? 5);
 // The owner takes a few seconds between a hire and the first message, and a session warmed at hire uses them.
+const QUESTION = 'Which file in this project exports slugify, and what does it return for empty input? Answer in one sentence.';
+// A task long enough that the person is still on it a few seconds later: six files, one shell command each.
+const LONG_TASK = 'Create the files part-1.txt, part-2.txt, part-3.txt, part-4.txt, part-5.txt and part-6.txt in the project root, one file per shell command and one command at a time, each holding its own number, then tell me it is done.';
 const GOAL = 'Add a slugify(text) function in src/slug.js (ES module, named export) with tests in test/slug.test.js, and a "slugify" section in README.md documenting it. The bar: node --test passes and slugify handles accents, spaces, punctuation and empty input. Split the work between people, get the function reviewed against the bar, and tell me when it is all done.';
 const HIRE_TO_FIRST_MESSAGE_MS = 8000;
-const KEY_HOPS = ['post_received', 'deliver', 'ack_start', 'ack_first_delta', 'assign', 'spawn', 'push', 'system_init', 'event_message_start', 'first_delta', 'first_text'];
+const KEY_HOPS = ['post_received', 'ack_start', 'sorted', 'triaged', 'deliver', 'ack_first_delta', 'assign', 'spawn', 'push', 'system_init', 'event_message_start', 'first_delta', 'first_text'];
 
 const p50 = (xs) => [...xs].sort((a, b) => a - b)[Math.floor((xs.length - 1) / 2)];
 
@@ -65,6 +69,22 @@ export default async (s) => {
       const t0 = performance.timeOrigin + performance.now();
       window.office.send({ type: 'post', to: id, clientId, as: 'request', text });
       setTimeout(() => finish('timeout'), 60000);
+    });
+  })()`);
+
+  // The same for a word said to someone who is busy (a steer): the first bubble is the first one that carries the marker the person
+  // was asked to repeat, so the words they were already writing do not count.
+  await s.eval(`(() => {
+    window.__firstMarked = (id, text, clientId, urgency, marker) => new Promise((resolve) => {
+      let done = false;
+      const finish = (kind) => { if (done) return; done = true; unsub(); resolve({ start: t0, end: performance.timeOrigin + performance.now(), kind }); };
+      const unsub = __office.store.subscribe((st) => {
+        if (st.streams[id]?.text.includes(marker)) finish('stream');
+        else if (st.mail.tail.some((m) => m.from === id && m.kind === 'say' && m.text.includes(marker))) finish('say');
+      });
+      const t0 = performance.timeOrigin + performance.now();
+      window.office.send({ type: 'post', to: id, clientId, as: 'say', text, urgency });
+      setTimeout(() => finish('timeout'), 90000);
     });
   })()`);
 
@@ -120,7 +140,31 @@ export default async (s) => {
     await s.sleep(HIRE_TO_FIRST_MESSAGE_MS);
     poGoal.push(await trial(`PO goal cold ${i}`, pia, `pia-goal-${i}`, GOAL, false));
   }
+  // A typed question is sorted before it is posted (the sort and the first words come from one call).
+  const questions = [];
+  for (let i = 1; i <= TRIALS; i++) questions.push(await trial(`employee question ${i}`, eli, `eli-q-${i}`, QUESTION));
+  // A word to someone in the middle of a task. This path goes to the running session, not to the acknowledger.
+  const busyTrial = async (style, i) => {
+    const clientId = `busy-${style}-${i}`;
+    await s.eval(`window.office.send({ type: 'post', to: ${JSON.stringify(eli)}, clientId: 'busy-task-${style}-${i}', as: 'request', text: ${JSON.stringify(LONG_TASK)} })`);
+    await s.waitFor(`${company}.employees.find((e) => e.id === ${JSON.stringify(eli)}).status.kind === 'working'`, 60000);
+    await s.sleep(5000);
+    const status = await s.eval(`${company}.employees.find((e) => e.id === ${JSON.stringify(eli)}).status.kind`);
+    const marker = `MARK-${style}-${i}`;
+    const r = await s.eval(`window.__firstMarked(${JSON.stringify(eli)}, ${JSON.stringify(`Quick word from the boss: in your very next message, write the exact token ${marker} and one short sentence on where you are. Then carry on.`)}, ${JSON.stringify(clientId)}, ${JSON.stringify(style)}, ${JSON.stringify(marker)})`);
+    const ms = Math.round(r.end - r.start);
+    console.log(`busy ${style} ${i}: ${ms} ms to the first ${r.kind} carrying the marker (the person was ${status} when the word was sent)`);
+    await idle(eli);
+    return { ms, kind: r.kind, status };
+  };
+  const busyNext = [];
+  const busyNow = [];
+  for (let i = 1; i <= BUSY_TRIALS; i++) busyNext.push(await busyTrial('next', i));
+  for (let i = 1; i <= BUSY_TRIALS; i++) busyNow.push(await busyTrial('now', i));
   report('PO goal cold', poGoal);
+  report('employee question', questions);
+  report('busy employee, word at the next step (the default)', busyNext);
+  report('busy employee, word at once', busyNow);
   report('employee cold', employeeCold);
   report('employee warm', employee);
   report('PO cold', poCold);
