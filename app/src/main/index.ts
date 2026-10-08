@@ -5,6 +5,7 @@ import { configureCursorStore } from './office/adapters/cursor.ts';
 import { detectHarnesses, setCodexRoot } from './office/adapters/index.ts';
 import { startOfficeMcp } from './office/mcp.ts';
 import { MemoryStore } from './office/memory.ts';
+import { githubAuthor, runGh } from './office/pull-request.ts';
 import { TaskBoardService } from './office/task-board.ts';
 import { startUpdater } from './updater.ts';
 import { prepareVoice, startVoice } from './voice.ts';
@@ -89,6 +90,7 @@ else {
       window: () => win,
       services: {
         mcp,
+        signer: () => githubAuthor(runGh, userData),
         memory: MemoryStore.open(join(userData, 'memory')),
         taskBoards: new TaskBoardService({ openUrl: (url) => shell.openExternal(url), credentialsFile: join(userData, 'task-board-credentials.json'), credentialsCodec }),
         openUrl: (url) => shell.openExternal(url),

@@ -128,7 +128,9 @@ export default async (s, { launch }) => {
     const t0 = Date.now();
     while (onOrigin(one.git.branch, 'notes.txt') === undefined && Date.now() - t0 < 30_000) await s.sleep(500);
     assert(onOrigin(one.git.branch, 'notes.txt')?.trim() === 'hello from the task branch', 'the employee\'s file is a commit on the task branch on origin');
-    assert(git(bare, 'log', '--format=%an', one.git.branch).split('\n').includes('Ana'), 'authored by the employee');
+    const signers = [...new Set(git(bare, 'log', '--format=%an <%ae>', `main..${one.git.branch}`).split('\n').filter(Boolean))];
+    assert(signers.join() === 'Fake Owner <owner@fake.example>', `every commit on the branch is signed by the account gh is signed in to (${signers.join(', ')})`);
+    assert(git(bare, 'log', '--format=%(trailers:key=Co-authored-by,valueonly)', one.git.branch).includes('Ana <ana@office.local>'), 'and credits the employee who did the work');
     assert(ownerUntouched() && !existsSync(join(repo, 'notes.txt')), 'the owner\'s checked-out branch, folder and origin\'s main are untouched');
     const settled = ledger().find((e) => e.t === 'post' && e.msg.kind === 'reply' && e.msg.requestId === one.runs[0]);
     assert(settled && create.at < settled.msg.at, `the pull request opened ${Math.round((settled.msg.at - create.at) / 1000)} s before the employee's run settled`);
@@ -164,8 +166,9 @@ export default async (s, { launch }) => {
     const t1 = Date.now();
     while ((onOrigin(two.git.branch, 'a.txt') === undefined || onOrigin(two.git.branch, 'b.txt') === undefined) && Date.now() - t1 < 30_000) await s.sleep(500);
     assert(onOrigin(two.git.branch, 'a.txt')?.trim() === 'from ana' && onOrigin(two.git.branch, 'b.txt')?.trim() === 'from bruno', 'both pieces are on the same task branch on origin');
-    const authors = git(bare, 'log', '--format=%an', two.git.branch).split('\n');
-    assert(authors.includes('Ana') && authors.includes('Bruno'), 'each piece is authored by the person who did it');
+    const credits = git(bare, 'log', '--format=%(trailers:key=Co-authored-by,valueonly)', two.git.branch);
+    const twoSigners = [...new Set(git(bare, 'log', '--format=%an', `main..${two.git.branch}`).split('\n').filter(Boolean))];
+    assert(credits.includes('Ana <ana@office.local>') && credits.includes('Bruno <bruno@office.local>') && twoSigners.join() === 'Fake Owner', 'the account signs every commit and each piece credits the person who did it');
     assert(onOrigin(two.git.branch, 'notes.txt') === undefined && onOrigin(one.git.branch, 'a.txt') === undefined, 'neither task carries the other\'s files');
     const delegated = ledger().filter((e) => e.t === 'post' && e.msg.kind === 'request' && e.msg.rootId === two.runs[0] && e.msg.id !== two.runs[0]).map((e) => e.msg.to);
     assert(delegated.includes(who('Ana')) && delegated.includes(who('Bruno')), 'the pieces really went through the PO to both employees');

@@ -14,6 +14,8 @@ export type FakeGhState = { mode: 'ok' | 'logged-out' | 'no-github-remote'; next
 
 const here = fileURLToPath(import.meta.url);
 
+export const FAKE_ACCOUNT = { user: { login: 'fake-owner', id: 4242, name: 'Fake Owner' }, emails: [{ email: 'owner@fake.example', primary: true, verified: true }] };
+
 // ───────────────────────────── the test half ─────────────────────────────
 
 export function installFakeGh(dir: string) {
@@ -129,6 +131,9 @@ function run(args: string[], stateFile: string) {
     writeSync(1, `${url}\n`);
     return;
   }
+  // The account gh is signed in to, which signs the office's commits.
+  if (group === 'api' && verb === 'user') return void writeSync(1, `${JSON.stringify(FAKE_ACCOUNT.user)}\n`);
+  if (group === 'api' && verb === 'user/emails') return void writeSync(1, `${JSON.stringify(FAKE_ACCOUNT.emails)}\n`);
   fail(`fake gh does not know: gh ${args.join(' ')}`);
 }
 

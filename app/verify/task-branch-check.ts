@@ -7,7 +7,8 @@ import { tmpdir } from 'node:os';
 import { delimiter, join } from 'node:path';
 import type { BlockId, EmployeeId } from '../src/shared/protocol.ts';
 import { newTask, prBody, prIsOpen, runRequest, taskBranchName, taskKey, withGitNote, withPr, type Board, type BoardId, type Task, type TaskId, type TaskPr } from '../src/shared/tasks.ts';
-import { ensurePr, readPr, whyNot, type Gh, type GhRun } from '../src/main/office/pull-request.ts';
+import { ensurePr, githubAuthor, readPr, whyNot, type Gh, type GhRun } from '../src/main/office/pull-request.ts';
+import { setCommitAuthor } from '../src/main/office/workspace.ts';
 import { check, finish, sleep, until } from './check.ts';
 import { installFakeGh } from './fake-gh.ts';
 
@@ -103,6 +104,17 @@ console.log('\n# the gh wrapper');
   failWith = { ok: false, out: '', err: 'pull request create failed: GraphQL: No commits between main and x' };
   const refused = await ensurePr(gh, dir, spec);
   check(refused.kind === 'none' && /No commits between main and x/.test(refused.note), 'anything else is GitHub\'s own sentence');
+
+  const account = (user: GhRun, emails: GhRun): Gh => async (_cwd, args) => (args.join(' ') === 'api user' ? user : args.join(' ') === 'api user/emails' ? emails : { ok: false, out: '', err: 'unexpected' });
+  const me = { ok: true, out: JSON.stringify({ login: 'felipe', id: 42, name: 'Felipe Rico' }), err: '' };
+  const emails = { ok: true, out: JSON.stringify([{ email: 'old@x.com', primary: false, verified: true }, { email: 'felipe@x.com', primary: true, verified: true }]), err: '' };
+  check(JSON.stringify(await githubAuthor(account(me, emails), dir)) === '{"name":"Felipe Rico","email":"felipe@x.com"}', 'the connected account signs with its name and its primary verified email');
+  const noScope = { ok: false, out: '', err: 'HTTP 404: Not Found (https://api.github.com/user/emails)' };
+  check(JSON.stringify(await githubAuthor(account(me, noScope), dir)) === '{"name":"Felipe Rico","email":"42+felipe@users.noreply.github.com"}', 'when gh may not read emails it signs with the account\'s noreply address');
+  const unverified = { ok: true, out: JSON.stringify([{ email: 'felipe@x.com', primary: true, verified: false }]), err: '' };
+  check((await githubAuthor(account({ ...me, out: JSON.stringify({ login: 'felipe', id: 42, name: null }) }, unverified), dir))?.email === '42+felipe@users.noreply.github.com' && (await githubAuthor(account({ ...me, out: JSON.stringify({ login: 'felipe', id: 42, name: null }) }, unverified), dir))?.name === 'felipe', 'an unverified primary email is not used, and an account with no name signs as its login');
+  check((await githubAuthor(account({ ok: false, out: '', err: 'To get started with GitHub CLI, please run:  gh auth login' }, emails), dir)) === null, 'a signed-out gh gives no account, so the repo\'s own identity signs');
+  check((await githubAuthor(account({ ok: false, out: '', err: 'spawn gh ENOENT', missing: true }, emails), dir)) === null, 'and so does a machine without gh');
 }
 
 console.log('\n# the office, with real git, a bare origin and a fake gh');
@@ -188,7 +200,8 @@ console.log('\n# the office, with real git, a bare origin and a fake gh');
   }
   const harnesses = { 'claude-code': { kind: 'ready' as const, version: 'fake' }, codex: { kind: 'missing' as const }, hermes: { kind: 'missing' as const }, cursor: { kind: 'missing' as const } };
   const errors: string[] = [];
-  const open = (file: string) => new Office(file, harnesses, { building() {}, rejected() {}, changed() {}, said() {}, log() {}, error: (m) => void errors.push(m) }, { mcp, memory, acker, taskBoards: new Provider() });
+  const OWNER = { name: 'The Owner', email: '7+owner@users.noreply.github.com' };
+  const open = (file: string) => new Office(file, harnesses, { building() {}, rejected() {}, changed() {}, said() {}, log() {}, error: (m) => void errors.push(m) }, { mcp, memory, acker, taskBoards: new Provider(), signer: async () => OWNER });
 
   const { repo, bare } = makeRepo(true);
   const local = makeRepo(false).repo;
@@ -196,6 +209,8 @@ console.log('\n# the office, with real git, a bare origin and a fake gh');
   mkdirSync(folder);
   const file = join(dir, 'company.json');
   let office = open(file);
+  // gh answers who is signed in a moment after the office opens; commits before that are the repo's own identity's.
+  await sleep(20);
   office.handle({ type: 'create_block', cwd: repo });
   office.handle({ type: 'create_block', cwd: local });
   office.handle({ type: 'create_block', cwd: folder });
@@ -233,7 +248,9 @@ console.log('\n# the office, with real git, a bare origin and a fake gh');
   await finishTurn(live('Ana'), 'docs written');
   check(theTask('Write the docs').stage === 'review' && theTask('Write the docs').lastOutcome?.outcome === 'done', 'her turn ends and the task moves to review');
   check(await until(() => onOrigin(bare, docs.git!.branch, 'docs.md') === 'Short and plain', 15000), 'her finished work is a commit on the task branch on origin');
-  check(git(bare, 'log', '--format=%an', docs.git!.branch).split('\n').includes('Ana'), 'with her as the author');
+  const signedBy = git(bare, 'log', '--format=%an <%ae>', `main..${docs.git!.branch}`);
+  check(signedBy.split('\n').every((a) => a === `${OWNER.name} <${OWNER.email}>`), 'every commit on the branch is the connected account\'s, so CI that checks the author accepts it', JSON.stringify(signedBy));
+  check(git(bare, 'log', '--format=%(trailers:key=Co-authored-by,valueonly)', docs.git!.branch).includes('Ana <ana@office.local>'), 'and the work is credited to her in a Co-authored-by trailer');
   check(!existsSync(join(repo, 'docs.md')) && ownerUntouched() && git(bare, 'rev-parse', 'refs/heads/main') === ownerHead, 'nothing reached the owner\'s branch, here or on origin');
   check(prCalls('create').length === 1, 'and there is still one pull request');
   check(await until(() => theTask('Write the docs').git?.pr?.state === 'open', 15000) && !fake.prs()[0]!.isDraft, 'a task in review takes its draft pull request out of draft', JSON.stringify([theTask('Write the docs').git, fake.prs()[0]]));
@@ -260,8 +277,8 @@ console.log('\n# the office, with real git, a bare origin and a fake gh');
   check(await until(() => !!theTask('Ship the report').git?.pr, 15000) && prCalls('create').length === 2 && fake.prs().map((p) => p.number).join() === '1,2', 'each task has exactly one pull request');
   check(await until(() => theTask('Ship the report').git?.pr?.state === 'open', 15000) && !fake.prs()[1]!.isDraft, 'the PO\'s task in review is ready for review on GitHub too');
   check(ownerUntouched() && !existsSync(join(repo, 'part-one.txt')), 'the owner\'s branch is still untouched');
-  const bothAuthors = git(bare, 'log', '--format=%an', report.git!.branch).split('\n');
-  check(bothAuthors.includes('Ana') && bothAuthors.includes('Bruno'), 'the commits are authored by the people who did the pieces');
+  const credited = git(bare, 'log', '--format=%(trailers:key=Co-authored-by,valueonly)', report.git!.branch);
+  check(credited.includes('Ana <ana@office.local>') && credited.includes('Bruno <bruno@office.local>') && git(bare, 'log', '--format=%an', `main..${report.git!.branch}`).split('\n').filter(Boolean).every((a) => a === OWNER.name), 'the account signs every commit and each piece credits the person who did it');
 
   console.log('\n## the same work twice, and a restart');
   const created2 = prCalls('create').length;
