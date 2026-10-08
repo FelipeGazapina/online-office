@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { PROVIDERS, type Employee } from '../../../shared/protocol.ts';
 import { routeText, toggleCardMic } from '../talk.ts';
-import { set, useStore, waitingQueue } from '../store.ts';
+import { set, setSetting, useStore, waitingQueue } from '../store.ts';
+import { setVoicesMuted } from '../audio.ts';
 import { chipLine, chipOf, type ChipAction } from '../voice/chip.ts';
 import { micLevel } from '../voice/mic.ts';
 import { fmtWait, useNow } from './hooks.ts';
@@ -39,7 +40,8 @@ function Meter() {
 function VoiceChip({ name }: { name: string }) {
   const voice = useStore((s) => s.voice);
   const mode = useStore((s) => s.mic);
-  const chip = chipOf(voice, mode);
+  const micMuted = useStore((s) => s.micMuted);
+  const chip = chipOf(voice, mode, micMuted);
   const action = chip.action && CHIP_ACTIONS[chip.action];
   return (
     <div className={`talk-badge ${chip.tone} oo:rounded-full oo:border oo:border-hud-border oo:bg-hud-card oo:px-3 oo:py-1 oo:text-xs oo:text-hud-text oo:shadow-lg oo:transition-colors oo:duration-150`}>
@@ -63,7 +65,8 @@ function QuestionCard({ e }: { e: Employee }) {
   const company = useStore((s) => s.company);
   const voice = useStore((s) => s.voice);
   const mode = useStore((s) => s.mic);
-  const chip = chipOf(voice, mode);
+  const micMuted = useStore((s) => s.micMuted);
+  const chip = chipOf(voice, mode, micMuted);
   const [text, setText] = useState('');
   if (e.status.kind !== 'blocked_on_owner') return null;
   const q = e.status.question;
@@ -176,6 +179,24 @@ function ChatBar({ target }: { target: Employee | undefined }) {
   );
 }
 
+// Two switches for working by chat only: the owner's microphone, and the employees' voices. Both stay set across restarts.
+function MuteControls() {
+  const micMuted = useStore((s) => s.micMuted);
+  const voicesMuted = useStore((s) => s.voicesMuted);
+  const pill = (muted: boolean) =>
+    `mute-btn ${muted ? 'muted' : ''} oo:rounded-full oo:border oo:border-hud-border oo:px-3 oo:py-1 oo:text-xs oo:shadow-lg oo:transition-colors oo:duration-150 oo:focus-visible:outline-2 oo:focus-visible:outline-brand oo:focus-visible:outline-offset-2 ${muted ? 'oo:bg-hud-warm oo:text-hud-surface' : 'oo:bg-hud-card oo:text-hud-text oo:hover:bg-hud-surface'}`;
+  return (
+    <div className="mute-controls oo:flex oo:gap-2" role="group" aria-label="Voice">
+      <button type="button" className={pill(micMuted)} aria-pressed={micMuted} data-testid="mute-mic" title={micMuted ? 'Your mic is off. Click to talk again' : 'Turn your mic off and type instead'} onClick={() => setSetting('micMuted', !micMuted)}>
+        {micMuted ? 'Mic muted' : 'Mic on'}
+      </button>
+      <button type="button" className={pill(voicesMuted)} aria-pressed={voicesMuted} data-testid="mute-voices" title={voicesMuted ? 'Employees only write. Click to hear them again' : 'Stop employees speaking out loud; read them in the chat'} onClick={() => setVoicesMuted(!voicesMuted)}>
+        {voicesMuted ? 'Voices muted' : 'Voices on'}
+      </button>
+    </div>
+  );
+}
+
 export function Bottom() {
   // Field by field: a whole-store subscription here would redraw the bar on every streamed token.
   const meetingDoor = useStore((s) => s.meetingDoor);
@@ -190,6 +211,7 @@ export function Bottom() {
 
   return (
     <div className="bottom" data-hud-resize-target="bottom-talk">
+      <MuteControls />
       {talking && <VoiceChip name={talking.name} />}
       {s.meetingDoor === 'open' && asker && s.cardMinimized && asker.status.kind === 'blocked_on_owner' && (
         <button className="qmini" onClick={() => set({ cardMinimized: false })}>

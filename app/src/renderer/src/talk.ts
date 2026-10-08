@@ -228,7 +228,8 @@ export function reconcile() {
 }
 
 function apply() {
-  if (visibilityMuted) {
+  // A muted owner is never heard: the capture closes, as when the window is hidden, and opens again on unmute.
+  if (visibilityMuted || get().micMuted) {
     if (micState.kind !== 'closed') closeMic();
     syncVad(false);
     return;

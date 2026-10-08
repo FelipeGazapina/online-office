@@ -4,6 +4,7 @@ import type { VoiceQuality } from '../../../shared/voice.ts';
 import { send, set, setSetting, useStore, waitingQueue, type CameraMode, type Lang, type MicMode } from '../store.ts';
 import { fmtWait, tailPath, useNow } from './hooks.ts';
 import { UpdateSetting } from './UpdateControl.tsx';
+import { setVoicesMuted } from '../audio.ts';
 import { resetHudLayout } from './ResizableHud.tsx';
 import { openBoard } from './tasks/actions.ts';
 import { ProviderConnections } from './tasks/Providers.tsx';
@@ -192,6 +193,24 @@ export function SettingsPanel() {
           ['push', 'Hold V'],
         ]}
         onChange={(v) => setSetting('mic', v)}
+      />
+      <label>My mic</label>
+      <Seg<'on' | 'muted'>
+        value={s.micMuted ? 'muted' : 'on'}
+        options={[
+          ['on', 'On'],
+          ['muted', 'Muted'],
+        ]}
+        onChange={(v) => setSetting('micMuted', v === 'muted')}
+      />
+      <label>Employees' voices</label>
+      <Seg<'on' | 'muted'>
+        value={s.voicesMuted ? 'muted' : 'on'}
+        options={[
+          ['on', 'On'],
+          ['muted', 'Muted'],
+        ]}
+        onChange={(v) => setVoicesMuted(v === 'muted')}
       />
       <label>Language</label>
       <Seg<Lang>

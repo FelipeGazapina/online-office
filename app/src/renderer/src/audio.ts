@@ -1,6 +1,6 @@
 import type { Employee } from '../../shared/protocol.ts';
 import { hash } from './util.ts';
-import { get, LANGS, set } from './store.ts';
+import { get, LANGS, set, setSetting } from './store.ts';
 import { runtime } from './runtime.ts';
 import { gate } from './voice/gate.ts';
 
@@ -67,7 +67,7 @@ function pickVoice(id: string): SpeechSynthesisVoice | undefined {
 const utterances = new Set<SpeechSynthesisUtterance>();
 
 export function speak(employeeId: string, text: string, opts: { cancel?: boolean } = {}) {
-  if (!('speechSynthesis' in window)) return;
+  if (!('speechSynthesis' in window) || get().voicesMuted) return;
   if (opts.cancel) speechSynthesis.cancel();
   const u = new SpeechSynthesisUtterance(text);
   const v = pickVoice(employeeId);
@@ -89,6 +89,12 @@ export function speak(employeeId: string, text: string, opts: { cancel?: boolean
 // Pressing V is the owner interrupting: whoever is talking stops.
 export function cancelSpeech() {
   if ('speechSynthesis' in window) speechSynthesis.cancel();
+}
+
+// Muting the employees silences whoever is talking now as well; what they say still shows in the chat and their bubbles.
+export function setVoicesMuted(muted: boolean) {
+  setSetting('voicesMuted', muted);
+  if (muted) cancelSpeech();
 }
 
 export function isAudible(employee: Employee) {

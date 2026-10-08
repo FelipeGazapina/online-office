@@ -85,4 +85,10 @@ check(denyDuringDownload.action === 'open_mic_settings', 'a download that needs 
 const accesses: MicAccess[] = [{ kind: 'granted' }, { kind: 'needs_prompt' }, { kind: 'denied' }, { kind: 'silent' }];
 check(accesses.every((access) => chipOf(state({ engine: ready, access }), 'push').text.length > 0), 'every mic access state has a line');
 
+const mutedOpen = chipOf(state({ capture: { kind: 'open' } as VoiceState['capture'] }), 'proximity', true);
+check(mutedOpen.text === 'Your mic is muted. Type in the chat' && mutedOpen.tone === 'idle' && !mutedOpen.meter, 'a muted mic says so, with no meter', chipLine(mutedOpen));
+const mutedDenied = chipOf(state({ access: { kind: 'denied' } }), 'push', true);
+check(mutedDenied.text === mutedOpen.text && !mutedDenied.action, 'muted wins over a mic problem the owner is not using the mic for', chipLine(mutedDenied));
+check(chipOf(state({ capture: { kind: 'open' } as VoiceState['capture'] }), 'proximity').text !== mutedOpen.text, 'unmuted, the chip is the usual one');
+
 finish();
