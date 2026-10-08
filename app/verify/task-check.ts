@@ -429,6 +429,7 @@ console.log('\n# a task worked by the PO and a delegate');
   check(JSON.stringify(reloaded.tasks.view(x.now()).taskTime) === JSON.stringify(after.taskTime) && reloaded.tasks.view(x.now()).tasks[0]!.stage === 'review', 'time and stage survive a restart: both come from the files');
 
   x.tasks.assign(made.id, ANA);
+  x.sync();
   const second = view().tasks[0]!;
   check(second.stage === 'doing' && second.assignees.length === 2 && second.runs.length === 2, 'adding a second person posts another run and puts it back to doing');
   x.w.room.turnEnded(ANA, 'blocked: no access', false);
@@ -514,7 +515,7 @@ console.log('\n# the activity of a task, and the owner answering its questions')
   const answerRun = x.w.room.state.messages.get(after.runs[1]!)!;
   check(after.runs.length === 2 && answerRun.kind === 'request' && answerRun.from === 'owner' && answerRun.to === ANA && answerRun.rootId === root && answerRun.parentId === root, 'the answer is a new run for the one who stopped, in the same chain', JSON.stringify(answerRun));
   check(answerRun.kind === 'request' && /CSV, please\./.test(answerRun.text) && /CSV or JSON\?/.test(answerRun.text) && /Add the export/.test(answerRun.text), 'it carries the answer, what they said, and the task');
-  check(after.stage === 'doing' && after.history!.at(-1)!.kind === 'stage' && (after.history!.at(-1) as { by: string }).by === 'owner', 'the task is back in doing, moved by the owner');
+  check(after.stage === 'doing' && after.history!.at(-1)!.kind === 'stage' && (after.history!.at(-1) as { by: string }).by === 'mailroom', 'the task is back in doing, moved by the office when Ana picked the answer up');
   check(live().questions.length === 0 && live().people.find((p) => p.employeeId === ANA)?.state === 'working', 'the question closed and Ana resumed');
   x.tasks.answer(made.id, qid, 'CSV, please.', noAsks);
   x.tasks.answer(made.id, qid, 'CSV, please.', noAsks);
@@ -532,9 +533,10 @@ console.log('\n# the activity of a task, and the owner answering its questions')
   const log = x.tasks.activityOf(made.id, noAsks)!;
   check(x.tasks.activityOf('gone' as TaskId, noAsks) === undefined, 'the log of a task that does not exist is nothing, not an error');
   const tags = log.entries.map((e) => (e.kind === 'stage' ? `stage:${e.by}:${e.to}` : e.kind === 'reply' ? `reply:${e.outcome}` : e.kind === 'request' ? `request:${e.answers ? 'answer' : 'run'}` : e.kind));
-  check(tags.join() === 'created,request:run,started,stage:owner:doing,reply:blocked,stage:mailroom:todo,request:answer,started,stage:owner:doing,reply:done,stage:mailroom:review', 'the log reads: asked, picked up, blocked, answered, resumed, done, each stage move with who made it', tags.join());
+  check(tags.join() === 'created,request:run,started,stage:mailroom:doing,reply:blocked,stage:mailroom:todo,request:answer,started,stage:mailroom:doing,reply:done,stage:mailroom:review', 'the log reads: asked, picked up, blocked, answered, resumed, done, each stage move with who made it', tags.join());
   const moved = log.entries.filter((e) => e.kind === 'stage' && e.by === 'mailroom');
-  check(moved.every((e) => e.kind === 'stage' && !!e.cause && x.w.room.state.messages.get(e.cause as MessageId)?.kind === 'reply'), 'a move the office made names the reply that caused it');
+  const causeKind = (e: (typeof moved)[number]) => (e.kind === 'stage' && e.cause ? x.w.room.state.messages.get(e.cause as MessageId)?.kind : undefined);
+  check(moved.every((e) => e.kind === 'stage' && causeKind(e) === (e.to === 'doing' ? 'request' : 'reply')), 'a move the office made names what caused it: the request picked up for doing, the reply for anything else');
 
   // The crash window: the answer is in the ledger and the task file never heard of it.
   const file = JSON.parse(readFileSync(x.file, 'utf8')) as { tasks: { id: string; runs: string[] }[] };
@@ -583,6 +585,40 @@ console.log('\n# a question put to a teammate is answered where the asker will r
   check(/not waiting/.test((() => { try { x.tasks.answer(made.id, 'q9' as MessageId, 'x', ask); return ''; } catch (e2) { return e2 instanceof Error ? e2.message : ''; } })()), 'Tasks.answer takes only mail questions: the office answers the ones asked in person');
 }
 
+console.log('\n# a task waiting in someone\'s queue');
+{
+  const x = taskWorld();
+  const quick = x.tasks.boardsOf(B1).find((b) => b.kind === 'quick')!;
+  const view = (id: TaskId) => x.tasks.view(x.now()).tasks.find((y) => y.id === id)!;
+  const stages = (id: TaskId) => (view(id).history ?? []).flatMap((h) => (h.kind === 'stage' ? [`${h.by}:${h.to}`] : []));
+  const first = x.tasks.createTask(quick.id, 'First job');
+  const later = x.tasks.createTask(quick.id, 'Second job');
+  x.tasks.assign(first.id, ANA);
+  x.sync();
+  check(view(first.id).stage === 'doing', 'a task given to someone free starts at once and goes to doing');
+  x.advance(1_000);
+  x.tasks.assign(later.id, ANA);
+  x.sync();
+  const queuedRun = view(later.id).runs[0]!;
+  check(x.w.room.state.life.get(queuedRun)?.s === 'queued', 'a second task for her while she works waits in her queue');
+  check(view(later.id).stage === 'todo' && view(later.id).assignees[0] === ANA && stages(later.id).length === 0, 'and its card stays in todo, assigned to her, with no stage move recorded');
+  const reloaded = taskWorld(x.file, x.w.persisted);
+  check(reloaded.tasks.view(x.now()).tasks.find((y) => y.id === later.id)!.stage === 'todo', 'it is still in todo after a restart while it waits');
+  x.advance(30_000);
+  x.w.room.reply(ANA, view(first.id).runs[0]!, { outcome: 'done', text: 'First done.', artifact: ['a.ts'] });
+  x.w.room.turnEnded(ANA, 'done', true);
+  x.sync();
+  check(view(first.id).stage === 'review', 'her first task settles to review');
+  check(x.w.room.state.life.get(queuedRun)?.s === 'delivered', 'the mailroom hands her the queued request next');
+  const moved = view(later.id).history!.at(-1)!;
+  check(view(later.id).stage === 'doing' && moved.kind === 'stage' && moved.from === 'todo' && moved.by === 'mailroom' && moved.cause === queuedRun && moved.at === x.now(), 'the moment she starts it, the office moves its card from todo to doing, citing her run', JSON.stringify(moved));
+  x.tasks.updateTask(later.id, { stage: 'todo' });
+  x.sync();
+  x.advance(1_000);
+  x.sync();
+  check(view(later.id).stage === 'todo', 'the owner can put it back in todo while she works, and the start does not move it again');
+}
+
 console.log('\n# a teammate moves the card');
 {
   const x = taskWorld();
@@ -596,7 +632,7 @@ console.log('\n# a teammate moves the card');
   x.sync();
   const root = view(csv.id).runs[0]!;
 
-  check(verdict(x.tasks.moveByAgent(BRUNO, 'review', 'looks done to me', csv.id)) === 'not_on_task' && view(csv.id).stage === 'doing' && stages(csv.id).join() === 'owner:doing', 'someone who is not on the task cannot move it, and nothing is recorded');
+  check(verdict(x.tasks.moveByAgent(BRUNO, 'review', 'looks done to me', csv.id)) === 'not_on_task' && view(csv.id).stage === 'doing' && stages(csv.id).join() === 'mailroom:doing', 'someone who is not on the task cannot move it, and nothing is recorded');
   check(verdict(x.tasks.moveByAgent(e('zed'), 'review', 'x', 'Write the export')) === 'unknown_task', 'a task of another block cannot even be named');
   check(verdict(x.tasks.moveByAgent(ANA, 'review', 'x', 'Not a task')) === 'unknown_task' && verdict(x.tasks.moveByAgent(ANA, 'review', 'x', 'zz')) === 'unknown_task', 'a name or an id that matches nothing is refused');
 
@@ -611,20 +647,20 @@ console.log('\n# a teammate moves the card');
   x.w.room.reply(ANA, root, { outcome: 'done', text: 'Export written.', artifact: ['export.ts'] });
   x.w.room.turnEnded(ANA, 'done', true);
   x.sync();
-  check(stages(csv.id).join() === 'owner:doing,ana:review' && view(csv.id).lastOutcome?.outcome === 'done', 'the run settling afterwards adds no second move from the office, and the outcome is still taken in');
+  check(stages(csv.id).join() === 'mailroom:doing,ana:review' && view(csv.id).lastOutcome?.outcome === 'done', 'the run settling afterwards adds no second move from the office, and the outcome is still taken in');
   check(verdict(x.tasks.moveByAgent(ANA, 'doing', 'Back on it.', csv.id)) === 'not_resumed' && view(csv.id).stage === 'review', 'someone holding none of its requests cannot take it back to doing');
   check(verdict(x.tasks.moveByAgent(ANA, 'done', 'Shipped.', csv.id)) === 'moved' && view(csv.id).stage === 'done', 'review goes to done when nothing is open');
   check(verdict(x.tasks.moveByAgent(ANA, 'review', 'x', csv.id)) === 'not_allowed' && view(csv.id).stage === 'done', 'done does not go back to review: only to doing');
 
   const log = x.tasks.activityOf(csv.id, noInputs)!.entries.filter((l) => l.kind === 'stage');
-  check(log.map((l) => (l.kind === 'stage' ? `${l.by}:${l.to}:${l.reason ?? ''}` : '')).join('|') === 'owner:doing:|ana:review:The export is written and tested.|ana:done:Shipped.', 'the activity log carries each move with who and why', JSON.stringify(log));
+  check(log.map((l) => (l.kind === 'stage' ? `${l.by}:${l.to}:${l.reason ?? ''}` : '')).join('|') === 'mailroom:doing:|ana:review:The export is written and tested.|ana:done:Shipped.', 'the activity log carries each move with who and why', JSON.stringify(log));
   const reloaded = taskWorld(x.file, x.w.persisted);
   check(JSON.stringify(reloaded.tasks.view(x.now()).tasks.find((y) => y.id === csv.id)!.history) === JSON.stringify(view(csv.id).history), 'the moves and their reasons survive a restart');
 
   // Resuming: a second run puts her back to work, and the card follows her.
   x.tasks.assign(csv.id, ANA);
   x.sync();
-  check(view(csv.id).stage === 'doing' && stages(csv.id).at(-1) === 'owner:doing', 'the owner giving the task to her again puts it in doing');
+  check(view(csv.id).stage === 'doing' && stages(csv.id).at(-1) === 'mailroom:doing', 'the owner giving the task to her again puts it in doing once she picks it up');
   x.tasks.moveByAgent(ANA, 'review', 'Second pass ready.', csv.id);
   check(verdict(x.tasks.moveByAgent(ANA, 'doing', 'More to do.', csv.id)) === 'moved' && view(csv.id).stage === 'doing', 'while she holds a request of it she takes it from review back to doing');
   x.w.room.reply(ANA, view(csv.id).runs[1]!, { outcome: 'done', text: 'Export written again.', artifact: ['export.ts'] });
@@ -801,6 +837,7 @@ console.log('\n# a task made with its assignee and priority');
   check(JSON.stringify(JSON.parse(readFileSync(x.file, 'utf8')).tasks.find((y: Task) => y.id === handed.id).runs) === JSON.stringify(mine.runs), 'the run is on disk with the task');
 
   const po = x.tasks.createTask(quick.id, 'Plan the quarter', { assignee: PO, stage: 'review' });
+  x.sync();
   check(view().tasks.find((y) => y.id === po.id)!.stage === 'doing', 'an assignee wins over the column: handing a task over starts it');
 
   const before = view().tasks.length;
@@ -916,7 +953,7 @@ console.log('\n# CronoSpark hours go out only when the owner sends them');
   await x.tasks.sendHours(target.id);
   check(x.provider.calls.length === 3, 'and then it is sent for good');
   const history = taskOf(target.id).history ?? [];
-  check(history.filter((h) => h.kind === 'stage').map((h) => `${h.by}:${h.to}`).join() === 'owner:doing,mailroom:review,owner:done,owner:doing,mailroom:review', 'the task\'s history says who moved each stage', JSON.stringify(history));
+  check(history.filter((h) => h.kind === 'stage').map((h) => `${h.by}:${h.to}`).join() === 'mailroom:doing,mailroom:review,owner:done,mailroom:doing,mailroom:review', 'the task\'s history says who moved each stage: the office moves it to doing when someone picks it up', JSON.stringify(history));
   const sends = history.filter((h): h is Extract<typeof h, { kind: 'hours' }> => h.kind === 'hours');
   check(sends.length === 4 && sends.filter((h) => h.error).length === 1 && /CronoSpark is down/.test(sends.find((h) => h.error)?.error ?? '') && sends.filter((h) => !h.error).length === 3, 'every hours send is on the history, and the one that failed says why', JSON.stringify(sends));
 

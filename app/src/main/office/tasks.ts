@@ -134,6 +134,10 @@ export class Tasks {
   private readonly publishAgain = new Set<TaskId>();
   private prRound: Promise<void> | undefined;
   private readonly existed: boolean;
+  // Requests the mailroom has handed to their person. A task waits in its column while its run sits in a queue, and the office
+  // moves it to doing once, when the run is delivered: `begun` holds the runs that already moved their task.
+  private readonly delivered = new Set<MessageId>();
+  private readonly begun = new Set<MessageId>();
 
   constructor(file: string, host: TasksHost, ledger: readonly LedgerEntry[]) {
     this.file = file;
@@ -143,6 +147,8 @@ export class Tasks {
     const stored = read(file);
     this.existed = !!stored;
     if (stored) ({ boards: this.boards, tasks: this.tasks, people: this.people } = stored);
+    for (const entry of ledger) if (entry.t === 'deliver') for (const id of entry.ids) this.delivered.add(id);
+    for (const t of this.tasks) for (const run of t.runs) if (this.delivered.has(run)) this.begun.add(run);
   }
 
   // Run once the mailroom is open. Brings the stored state in line with the company: boards for every block (the old
@@ -170,6 +176,8 @@ export class Tasks {
       this.tasks = this.tasks.map((t) => (t === task ? this.withRun(t, id, who as EmployeeId, 'mailroom') : t));
       changed = true;
     }
+    // A relinked run may already have been picked up.
+    if (changed) this.onMail();
     if (changed || !this.existed) this.save();
   }
 
@@ -228,6 +236,8 @@ export class Tasks {
     this.tasks = [];
     this.people = {};
     this.sync.clear();
+    this.delivered.clear();
+    this.begun.clear();
     this.log = emptyTurnLog();
     this.activity = emptyActivity();
     this.save();
@@ -237,6 +247,7 @@ export class Tasks {
 
   // Every ledger entry, in order, as the mailroom writes it.
   observe(entry: LedgerEntry) {
+    if (entry.t === 'deliver') for (const id of entry.ids) this.delivered.add(id);
     foldTurn(this.log, entry);
     foldActivity(this.activity, entry);
   }
@@ -245,8 +256,15 @@ export class Tasks {
   onMail() {
     const mail = this.host.mail().state;
     let moved = false;
-    this.tasks = this.tasks.map((t) => {
-      if (!t.runs.length) return t;
+    this.tasks = this.tasks.map((t0) => {
+      if (!t0.runs.length) return t0;
+      let t = t0;
+      for (const run of t0.runs) {
+        if (this.begun.has(run) || !(this.delivered.has(run) || mail.life.get(run)?.s === 'running')) continue;
+        this.begun.add(run);
+        moved = true;
+        t = restage({ ...t, updatedAt: this.host.now() }, 'doing', 'mailroom', this.host.now(), run);
+      }
       const outcome = outcomeFromRuns(t, (run) => runStateOf(mail, run));
       if (!outcome) return t;
       moved = true;
@@ -420,20 +438,22 @@ export class Tasks {
     const posted = mail.post({ from: 'owner', to: employeeId, blockId: board.blockId, key: runKey(task.id, employeeId, theirs.length), body: { kind: 'request', intent: 'work', title, text } });
     if (!posted.ok) throw new OfficeError(posted.detail);
     this.replace(this.withRun(this.task(task.id), posted.id, employeeId, 'owner'));
+    // Someone free got the request as it was posted, before the task knew the run: it moves to doing now.
+    this.onMail();
     void this.publish(task.id);
   }
 
-  // The task with `who` taking the run that starts at `root`, and in doing: what assigning means. `by` is who moved it.
-  private withRun(task: Task, root: MessageId, who: EmployeeId, by: StageBy, cause?: MessageId): Task {
-    const now = this.host.now();
+  // The task with `who` taking the run that starts at `root`. It stays in its column while the run waits in `who`'s queue:
+  // onMail moves it to doing when the run is delivered. `by` is who gave it.
+  private withRun(task: Task, root: MessageId, who: EmployeeId, by: StageBy): Task {
     const taken = {
       ...task,
       runs: task.runs.includes(root) ? task.runs : [...task.runs, root],
       assignees: task.assignees.includes(who) ? task.assignees : [...task.assignees, who],
-      updatedAt: now,
+      updatedAt: this.host.now(),
     };
     if (by === 'owner') delete taken.stagePinned;
-    return restage(taken, 'doing', by, now, cause);
+    return taken;
   }
 
   // ── questions ──
@@ -459,7 +479,8 @@ export class Tasks {
       const text = `The owner answers: ${answer}\n\nYou stopped on "${asked.title}" and told them:\n${quote(said)}\n\nCarry on with the task now.\n\n${runRequest(task, board).text}`;
       const posted = mail.post({ from: 'owner', to: question.asker, blockId: board.blockId, parentId: asked.rootId, key: answerKey(task.id, question.asker, id), body: { kind: 'request', intent: 'work', title: asked.title, text } });
       if (!posted.ok) throw new OfficeError(posted.detail);
-      this.replace(this.withRun(task, posted.id, question.asker, 'owner', id));
+      this.replace(this.withRun(task, posted.id, question.asker, 'owner'));
+      this.onMail();
       return;
     }
     const nudge = question.how === 'blocked'
