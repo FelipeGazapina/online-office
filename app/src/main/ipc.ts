@@ -337,6 +337,12 @@ export function startOffice({ dataFile, harnesses, window, services }: Options) 
   ipcMain.on(IPC.portalOpenTerminal, (e) => {
     if (trusted(e)) void shell.openPath('/System/Applications/Utilities/Terminal.app');
   });
+  // Only GitHub pages, so a renderer that went wrong cannot open arbitrary URLs or apps. A test run logs the URL instead.
+  ipcMain.on(IPC.portalOpenUrl, (e, url: unknown) => {
+    if (!trusted(e) || typeof url !== 'string' || !url.startsWith('https://github.com/')) return;
+    if (process.env.OFFICE_TEST_RUN) console.log(`[portal] open ${url}`);
+    else void shell.openExternal(url);
+  });
   ipcMain.on(IPC.portalOpenSlack, (e) => {
     if (!trusted(e)) return;
     if (process.platform === 'darwin') {
