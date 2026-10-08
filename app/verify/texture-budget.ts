@@ -58,7 +58,7 @@ for (const f of files) {
 
 type Canvas = { file: string; sites: number; name: string; w: number; h: number; count: number; mips?: boolean; kept?: boolean };
 // `count` is how many the reference office holds at once. `mips: false` is a texture with no mip chain; `kept: false` is a canvas whose
-// pixels are released after the upload (the 2D backing store is gone; the GPU copy stays).
+// pixels are released after the upload (the 2D backing store is gone; the GPU copy stays), which every useCanvasTexture caller does.
 const CANVASES: Canvas[] = [
   { file: 'scene/textures.ts', sites: 1, name: 'useCanvasTexture (the sizes of its callers are below)', w: 0, h: 0, count: 0 },
   { file: 'scene/textures.ts', sites: 1, name: 'monitor code screen', w: 64, h: 64, count: 1 },
@@ -69,23 +69,23 @@ const CANVASES: Canvas[] = [
   { file: 'scene/textures.ts', sites: 1, name: 'blob shadow', w: 64, h: 64, count: 1 },
   { file: 'scene/textures.ts', sites: 1, name: 'lamp pool', w: 128, h: 128, count: 1 },
   { file: 'scene/textures.ts', sites: 1, name: 'wall contact shade', w: 8, h: 64, count: 1 },
-  { file: 'scene/LobbyMaterials.tsx', sites: 1, name: 'lobby brick', w: 1024, h: 512, count: 1 },
-  { file: 'scene/LobbyMaterials.tsx', sites: 1, name: 'lobby terrazzo', w: 1024, h: 512, count: 1 },
-  { file: 'scene/LobbyMaterials.tsx', sites: 1, name: 'lobby rug', w: 1024, h: 640, count: 1 },
-  { file: 'scene/Exterior.tsx', sites: 1, name: 'exterior road lines', w: 1024, h: 512, count: 1 },
+  { file: 'scene/LobbyMaterials.tsx', sites: 1, name: 'lobby brick', w: 1024, h: 512, count: 1, kept: false },
+  { file: 'scene/LobbyMaterials.tsx', sites: 1, name: 'lobby terrazzo', w: 1024, h: 512, count: 1, kept: false },
+  { file: 'scene/LobbyMaterials.tsx', sites: 1, name: 'lobby rug', w: 1024, h: 640, count: 1, kept: false },
+  { file: 'scene/Exterior.tsx', sites: 1, name: 'exterior road lines', w: 1024, h: 512, count: 1, kept: false },
   { file: 'scene/LobbyVoid.tsx', sites: 1, name: 'lobby void sky', w: 64, h: 256, count: 1 },
   { file: 'scene/people/faces.ts', sites: 1, name: 'face atlas (6 cells of 256)', w: 1536, h: 256, count: 1 },
   { file: 'scene/building/shadows.ts', sites: 1, name: 'shadow atlas', w: 1024, h: 1024, count: 1, mips: false },
-  { file: 'scene/BlockView.tsx', sites: 1, name: 'team sign', w: 1024, h: 320, count: OFFICE.blocks },
-  { file: 'scene/BlockView.tsx', sites: 1, name: 'daily sign', w: 420, h: 180, count: OFFICE.blocks },
+  { file: 'scene/BlockView.tsx', sites: 1, name: 'team sign', w: 1024, h: 320, count: OFFICE.blocks, kept: false },
+  { file: 'scene/BlockView.tsx', sites: 1, name: 'daily sign', w: 420, h: 180, count: OFFICE.blocks, kept: false },
   // A team shows exactly one of these four boards, so they are one row; the largest of them sets the size.
-  { file: 'scene/BlockView.tsx', sites: 3, name: 'team whiteboard (diagram / GitHub / Linear)', w: 1536, h: 840, count: OFFICE.blocks },
-  { file: 'scene/TaskBoardWall.tsx', sites: 1, name: 'team task board wall', w: 1536, h: 840, count: 0 },
-  { file: 'scene/Office.tsx', sites: 1, name: 'expand site dirt', w: 512, h: 400, count: 1 },
-  { file: 'scene/Office.tsx', sites: 1, name: 'expand site board', w: 512, h: 200, count: 1 },
-  { file: 'scene/Office.tsx', sites: 1, name: 'facility floor sign', w: 900, h: 220, count: OFFICE.facilitySigns },
-  { file: 'scene/Office.tsx', sites: 1, name: 'company sign', w: 1024, h: 256, count: 1 },
-  { file: 'scene/Furniture.tsx', sites: 1, name: 'desk nameplate', w: 256, h: 96, count: OFFICE.desks },
+  { file: 'scene/BlockView.tsx', sites: 3, name: 'team whiteboard (diagram / GitHub / Linear)', w: 1536, h: 840, count: OFFICE.blocks, kept: false },
+  { file: 'scene/TaskBoardWall.tsx', sites: 1, name: 'team task board wall', w: 1536, h: 840, count: 0, kept: false },
+  { file: 'scene/Office.tsx', sites: 1, name: 'expand site dirt', w: 512, h: 400, count: 1, kept: false },
+  { file: 'scene/Office.tsx', sites: 1, name: 'expand site board', w: 512, h: 200, count: 1, kept: false },
+  { file: 'scene/Office.tsx', sites: 1, name: 'facility floor sign', w: 900, h: 220, count: OFFICE.facilitySigns, kept: false },
+  { file: 'scene/Office.tsx', sites: 1, name: 'company sign', w: 1024, h: 256, count: 1, kept: false },
+  { file: 'scene/Furniture.tsx', sites: 1, name: 'desk nameplate', w: 256, h: 96, count: OFFICE.desks, kept: false },
   // The terminal atlas is priced by its own unit; its sites are listed so the scan stays exact.
   { file: 'scene/terminalAtlas.ts', sites: 2, name: 'terminal atlas (not counted here)', w: 0, h: 0, count: 0 },
 ];

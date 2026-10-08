@@ -3,14 +3,15 @@
 // and the sofa, the bookshelf, the armchair, a plant, the lamp and the small things of a dressed table close up.
 // Writes <OFFICE_SHOT_PHASE>-<name>.png (before or after) at 1440x900 to OFFICE_SHOTS_DIR.
 // Run: pnpm build:verify && OFFICE_SHOT_PHASE=after OFFICE_SHOTS_DIR=<dir> OFFICE_OUT_DIR=out/verify OFFICE_CDP_PORT=9343 node verify/cdp.mjs verify/shots-textures.mjs
-import { readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { floorItems, parseBuilding, seatPose } from '../src/shared/space/index.ts';
+import { applyOps, floorItems, ITEM_DEFS, parseBuilding, seatPose } from '../src/shared/space/index.ts';
 import { assert, scratch } from './lib.mjs';
 import { acceptedDressing } from './tabletop-dressing.mjs';
 import { drive } from './tabletop-drive.mjs';
 
 const { dataDir, repo } = scratch();
+mkdirSync(join(repo, 'b'));
 const PHASE = process.env.OFFICE_SHOT_PHASE ?? 'after';
 const SHOTS = process.env.OFFICE_SHOTS_DIR ?? '/tmp/office-shots';
 writeFileSync(join(dataDir, 'company.json'), readFileSync(new URL('./fixtures/company-no-building.json', import.meta.url), 'utf8').replaceAll('__REPO__', repo));
@@ -38,14 +39,37 @@ export default async function (s) {
   // The same dressed office the tabletop pictures use: laptops, a vase and frames on the meeting table, books on the shelf.
   for (let i = 0; i < 50 && !disk().building; i++) await s.sleep(200);
   const saved = parseBuilding(disk().building, () => {});
-  const { ok, building: dressed } = acceptedDressing(saved, ctxOf(disk()));
-  await s.eval(`window.office.send({ type: 'build', ops: ${JSON.stringify([{ t: 'items', story: 0, put: ok, del: [] }])} })`);
-  await d.waitBuilding(`b.stories[0].items.filter((i) => i.on !== undefined).length === ${ok.length}`, 'the dressing did not arrive');
+  const ctx = ctxOf(disk());
+  const { ok, building: dressed0 } = acceptedDressing(saved, ctx);
+  // The small baked props the dressing leaves out (frame, clock, desk lamp, succulent) stand on the meeting table too, so each is photographed.
+  let dressed = dressed0;
+  const host = floorItems(dressed.stories[0]).find((i) => i.id === 'meeting_table:00');
+  const rect = ITEM_DEFS[host.def].surface.rect;
+  const more = [];
+  for (const def of ['picture_frame', 'desk_clock', 'lamp_desk', 'plant_small']) {
+    const want = ITEM_DEFS[def].top;
+    let spot = null;
+    for (let v = rect.v1 - want.d; v >= rect.v0 && !spot; v--) {
+      for (let u = rect.u0; u <= rect.u1 - want.w && !spot; u++) {
+        const item = { id: `${host.id}~extra-${def}`, def, on: host.id, u, v, rot: 0 };
+        const r = applyOps(dressed, [{ t: 'items', story: 0, put: [item], del: [] }], ctx);
+        if (r.ok) {
+          spot = item;
+          dressed = r.building;
+        }
+      }
+    }
+    if (spot) more.push(spot);
+  }
+  console.log(`extra props placed: ${more.map((m) => m.def).join(', ')}`);
+  const all = [...ok, ...more];
+  await s.eval(`window.office.send({ type: 'build', ops: ${JSON.stringify([{ t: 'items', story: 0, put: all, del: [] }])} })`);
+  await d.waitBuilding(`b.stories[0].items.filter((i) => i.on !== undefined).length === ${all.length}`, 'the dressing did not arrive');
   await s.sleep(800);
 
   const first = (def) => s.eval(`__office.instances(${JSON.stringify(def)})[0] ?? null`);
   const found = {};
-  for (const def of ['sofa', 'bookshelf', 'armchair', 'plant', 'plant_large', 'lamp', 'laptop', 'vase', 'picture_frame', 'desk_clock', 'lamp_desk', 'plant_small', 'bench_desk']) found[def] = await first(def);
+  for (const def of ['sofa', 'bookshelf', 'armchair', 'plant', 'plant_large', 'laptop', 'vase', 'picture_frame', 'desk_clock', 'lamp_desk', 'plant_small', 'bench_desk']) found[def] = await first(def);
   console.log('instances found:', JSON.stringify(Object.fromEntries(Object.entries(found).map(([k, v]) => [k, v && { x: v.x, y: v.y, z: v.z, yaw: v.yaw }]))));
   assert(found.sofa && found.bookshelf, 'the office has a sofa and a bookshelf to photograph');
 
@@ -66,6 +90,27 @@ export default async function (s) {
     const want = Math.atan2(aimY - 1.6, dist);
     await s.drag({ x: 700, y: 400 }, { x: 700, y: 400 + Math.round((cam.pitch - want) / LOOK_SPEED) }, 6);
     await s.sleep(500);
+  };
+
+  // A standing place `dist` m from a small thing, where nothing pushes the owner away and the middle of the view lands on it.
+  const aimAt = async (p, aimY, dists = [0.75, 1.0, 1.3]) => {
+    for (const dist of dists) {
+      for (let k = 0; k < 16; k++) {
+        const a = (k / 16) * 2 * Math.PI;
+        const x = p.x + Math.sin(a) * dist;
+        const z = p.z + Math.cos(a) * dist;
+        await s.eval(`__office.teleport(${x}, ${z}, ${Math.atan2(p.x - x, p.z - z)}); __office.step(0.25)`);
+        const at = await s.eval('__office.state().owner');
+        if (Math.hypot(at.x - x, at.z - z) > 0.04) continue;
+        const cam = await s.eval('window.__officeCamera');
+        const want = Math.atan2(aimY - 1.6, dist);
+        await s.drag({ x: 700, y: 400 }, { x: 700, y: 400 + Math.round((cam.pitch - want) / LOOK_SPEED) }, 6);
+        await s.sleep(450);
+        const hit = await s.eval('__office.pick(720, 450)');
+        if (hit?.point && Math.hypot(hit.point.x - p.x, hit.point.z - p.z) < 0.45) return { dist, a: +a.toFixed(2) };
+      }
+    }
+    return null;
   };
 
   // Build mode at the nearest zoom, centred on a thing.
@@ -106,10 +151,12 @@ export default async function (s) {
     await look(found.plant_large ?? found.plant, { dist: 1.3, aimY: 0.8 });
     await shot('fp-plant');
   }
-  for (const [def, name, dist, aimY] of [['vase', 'fp-vase', 0.7, 0.85], ['laptop', 'fp-laptop', 0.8, 0.85], ['picture_frame', 'fp-frame', 0.7, 0.85], ['desk_clock', 'fp-clock', 0.6, 0.8], ['lamp_desk', 'fp-desklamp', 0.8, 0.9]]) {
-    if (!found[def]) continue;
-    await look(found[def], { dist, aimY });
-    await shot(name);
+  for (const [def, name] of [['vase', 'fp-vase'], ['laptop', 'fp-laptop'], ['picture_frame', 'fp-frame'], ['desk_clock', 'fp-clock'], ['lamp_desk', 'fp-desklamp'], ['plant_small', 'fp-succulent']]) {
+    const p = await first(def);
+    if (!p) continue;
+    const stood = await aimAt(p, p.y + 0.08);
+    console.log(`${name}: ${stood ? `stood ${stood.dist} m away at ${stood.a} rad` : 'no free place with the thing in the middle'}`);
+    if (stood) await shot(name);
   }
   // the floor and a wall a metre away, which is as close as the surface maps get
   const at = await s.eval('__office.state().owner');

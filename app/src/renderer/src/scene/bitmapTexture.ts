@@ -1,13 +1,18 @@
 import { NoColorSpace, SRGBColorSpace, Texture } from 'three';
 
-/** A packaged page loads from file://, where fetch refuses file URLs but XMLHttpRequest reads them. */
+/**
+ * A packaged page loads from file://, where fetch refuses file URLs but XMLHttpRequest reads them. A file under the bundler's inline
+ * limit (4 KiB; a small map after a shrink) arrives as a base64 data URL, which XMLHttpRequest refuses here and is decoded by hand.
+ */
 export const readFile = (url: string) =>
   new Promise<ArrayBuffer>((resolve, reject) => {
+    const data = /^data:[^,]*;base64,(.*)$/s.exec(url);
+    if (data) return resolve(Uint8Array.from(atob(data[1]), (c) => c.charCodeAt(0)).buffer);
     const x = new XMLHttpRequest();
     x.open('GET', url);
     x.responseType = 'arraybuffer';
     x.onload = () => (x.response ? resolve(x.response as ArrayBuffer) : reject(new Error(`Empty file ${url}`)));
-    x.onerror = () => reject(new Error(`Could not read ${url}`));
+    x.onerror = () => reject(new Error(`Could not read ${url.slice(0, 80)}`));
     x.send();
   });
 
