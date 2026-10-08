@@ -632,10 +632,29 @@ export class Office {
   handle(msg: ClientMessage): void {
     switch (msg.type) {
       case 'hire': {
-        const { type: _, taskId, ...request } = msg;
+        const { type: _, taskId, count = 1, ...request } = msg;
+        if (count > 1) {
+          if (request.name?.trim()) throw new OfficeError('A name fits one hire. Leave it empty to hire several at once.');
+          if (request.deskId) throw new OfficeError('A desk fits one hire. Leave it empty to hire several at once.');
+          if (taskId) throw new OfficeError('A task fits one hire. Leave it empty to hire several at once.');
+        }
         if (taskId) this.tasks.assertOfBlock(taskId, msg.blockId);
-        const hired = this.hire(request);
-        if (taskId) this.tasks.assign(taskId, hired.id);
+        const cap = headcountCap(this.company.level);
+        if (!request.bypassLimit && this.company.employees.length + count > cap) {
+          throw new OfficeError(
+            this.company.employees.length >= cap
+              ? `Headcount cap reached (${cap} at level ${this.company.level}). Earn XP to grow the company.`
+              : `Only ${cap - this.company.employees.length} seat(s) left at level ${this.company.level}, not ${count}.`,
+          );
+        }
+        const hired: Employee[] = [];
+        try {
+          for (let i = 0; i < count; i++) hired.push(this.hire(request));
+        } catch (err) {
+          for (const e of hired.reverse()) this.fire(e.id);
+          throw err;
+        }
+        if (taskId) this.tasks.assign(taskId, hired[0]!.id);
         return;
       }
       case 'fire':

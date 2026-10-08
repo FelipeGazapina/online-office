@@ -250,6 +250,27 @@ capOffice.handle({ type: 'hire', provider: 'claude-code', blockId: capBlock, nam
 check(capRefused && capOffice.snapshot().company.employees.length === 4 && capOffice.snapshot().company.employees.at(-1)?.role === 'orchestrator', 'the normal level cap remains enforced while configuration can add an orchestrator beyond it');
 capOffice.shutdown();
 
+const batchOffice = new Office(join(dir, 'batch-company.json'), { 'claude-code': { kind: 'ready', version: 'fake' }, codex: { kind: 'missing' }, hermes: { kind: 'missing' }, cursor: { kind: 'missing' } }, { ...noBuild, changed() {}, said() {}, log() {} }, { mcp, memory, acker });
+batchOffice.handle({ type: 'create_block', cwd: repo });
+const batchBlock = batchOffice.snapshot().company.blocks[0]!.id;
+const batchRefusal = (msg: Parameters<Office['handle']>[0]) => {
+  try {
+    batchOffice.handle(msg);
+  } catch (error) {
+    return error instanceof OfficeError ? error.message : String(error);
+  }
+  return '';
+};
+const tooMany = batchRefusal({ type: 'hire', provider: 'claude-code', blockId: batchBlock, count: 4 });
+check(/Only 3 seat\(s\) left/.test(tooMany) && batchOffice.snapshot().company.employees.length === 0, 'a batch larger than the free seats is refused whole, with nobody hired');
+const namedBatch = batchRefusal({ type: 'hire', provider: 'claude-code', blockId: batchBlock, count: 2, name: 'Zed' });
+check(/A name fits one hire/.test(namedBatch) && batchOffice.snapshot().company.employees.length === 0, 'a name with a batch is refused');
+const before = fakes.length;
+batchOffice.handle({ type: 'hire', provider: 'claude-code', blockId: batchBlock, count: 3 });
+const batch = batchOffice.snapshot().company.employees;
+check(batch.length === 3 && new Set(batch.map((e) => e.name)).size === 3 && new Set(batch.map((e) => e.seat)).size === 3 && fakes.length - before === 3, 'one hire with a count seats that many people with distinct names, desks and sessions');
+batchOffice.shutdown();
+
 console.log('\n# owner questions');
 post(office, ana, 'Refactor billing');
 fa.host.setActivity('Running npm test');

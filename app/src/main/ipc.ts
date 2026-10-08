@@ -1,6 +1,7 @@
 import { app, dialog, globalShortcut, ipcMain, shell, type BrowserWindow, type IpcMainEvent, type IpcMainInvokeEvent } from 'electron';
 import { z } from 'zod';
 import {
+  DESKS_PER_BLOCK,
   IPC,
   type BlockId,
   type ClientMessage,
@@ -105,6 +106,7 @@ const clientMessage = z.discriminatedUnion('type', [
     bypassLimit: z.boolean().optional(),
     deskId: itemIdSchema.optional(),
     taskId: taskId.optional(),
+    count: z.number().int().min(1).max(DESKS_PER_BLOCK).optional(),
   }),
   z.object({ type: z.literal('fire'), employeeId }),
   z.object({ type: z.literal('create_block'), cwd: z.string().min(1), name: z.string().min(1).optional(), githubRepo: z.string().url().optional() }),

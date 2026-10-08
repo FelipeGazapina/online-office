@@ -261,8 +261,9 @@ export type InterruptStyle = 'next' | 'now';
 
 export type ClientMessage =
   // `deskId` is the desk the new hire sits at, when it is free and of the right kind. `taskId` assigns them that task
-  // the moment they are hired, exactly as `assign_task` would.
-  | { type: 'hire'; provider: Provider; blockId: BlockId; name?: string; model?: ModelId; role?: EmployeeRole; bypassLimit?: boolean; deskId?: ItemId; taskId?: TaskId }
+  // the moment they are hired, exactly as `assign_task` would. `count` seats that many people in one go; a name, a desk
+  // or a task fits one hire, so those stay unset when `count` is more than one.
+  | { type: 'hire'; provider: Provider; blockId: BlockId; name?: string; model?: ModelId; role?: EmployeeRole; bypassLimit?: boolean; deskId?: ItemId; taskId?: TaskId; count?: number }
   | { type: 'fire'; employeeId: EmployeeId }
   | { type: 'create_block'; cwd: string; name?: string; githubRepo?: string }
   | { type: 'update_block'; blockId: BlockId; name?: string; cwd?: string; githubRepo?: string }
