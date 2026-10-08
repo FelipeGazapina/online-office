@@ -31,7 +31,9 @@ export async function launch({ env = {}, width = 1280, height = 800, exe, exclus
   // Set by Electron-based hosts (editors, agent shells). With it the binary runs as plain Node and never opens a window.
   const { ELECTRON_RUN_AS_NODE: _, ...inherited } = process.env;
   const entry = process.env.OFFICE_OUT_DIR ? join(resolve(APP_DIR, process.env.OFFICE_OUT_DIR), 'main', 'index.js') : '.';
-  const proc = spawn(exe ?? electron, [...(exe ? [] : [entry]), `--remote-debugging-port=${PORT}`], {
+  // A scenario that must look inside the main process names a port in its env: the Node inspector listens there (verify/inspector.mjs).
+  const inspect = env.OFFICE_INSPECT_PORT ? [`--inspect=127.0.0.1:${env.OFFICE_INSPECT_PORT}`] : [];
+  const proc = spawn(exe ?? electron, [...(exe ? [] : [entry]), `--remote-debugging-port=${PORT}`, ...inspect], {
     cwd: APP_DIR,
     // OFFICE_TEST_RUN keeps the window hidden and out of the Dock. A scenario can set it to '' to watch a run by eye.
     env: { ...inherited, OFFICE_TEST_RUN: '1', ...env },
@@ -105,6 +107,7 @@ export async function launch({ env = {}, width = 1280, height = 800, exe, exclus
     sleep,
     // The Electron main process. Everything the app runs is below it.
     pid: proc.pid,
+    port: PORT,
     logs,
     mainLogs,
     async eval(expression) {

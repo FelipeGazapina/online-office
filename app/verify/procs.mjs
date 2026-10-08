@@ -10,7 +10,11 @@ import { fileURLToPath } from 'node:url';
 const HERE = dirname(fileURLToPath(import.meta.url));
 const MIB = 1024 * 1024;
 
-export const CLASSES = ['main', 'renderer', 'gpu', 'utility', 'other', 'agents'];
+// `agents` are the claude, codex and hermes processes of the employees' own sessions and everything they start (the only class the
+// bar leaves out). `ackers` are the two spare claude processes the Acknowledger keeps for acknowledgements and triage (main/office/ack.ts):
+// agent CLIs, but the app's own, so they count in the app's figure.
+export const CLASSES = ['main', 'renderer', 'gpu', 'utility', 'other', 'ackers', 'agents'];
+export const COUNTED = ['main', 'renderer', 'gpu', 'utility', 'other', 'ackers'];
 
 // Every process: pid, parent pid and the command line.
 export function processTable() {
@@ -59,23 +63,27 @@ const exeName = (command) => {
   const head = command.split(/ --?[a-z]/i)[0];
   return head.slice(head.lastIndexOf('/') + 1).trim().split(/\s+/)[0] ?? '';
 };
-// An agent CLI the app runs for an employee: Claude Code's native binary, codex, hermes.
+// An agent CLI the app runs: Claude Code's native binary, codex, hermes.
 const isAgentRoot = (command) => /claude-agent-sdk/.test(command) || /^(claude|codex|hermes)(\.exe)?$/.test(exeName(command));
+// The Acknowledger's one-shot calls run a single turn with no tools and keep no session (see OneShot in ack.ts); an employee's
+// session never does, because it needs its tools and resumes its session.
+const isAckerRoot = (command) => isAgentRoot(command) && /--max-turns 1(\s|$)/.test(command) && /--no-session-persistence/.test(command);
 
 // Where each process of the tree belongs. Anything at or below an agent CLI is the agent's, even a git or a node it started.
 export function classify(table, root) {
   const tree = treeOf(table, root);
   const byPid = new Map(tree.map((p) => [p.pid, p]));
   const agentic = new Map();
+  // 'ackers', 'agents' or null for a process: the nearest agent CLI above it (or itself) decides.
   const underAgent = (p) => {
-    if (p.pid === root) return false;
-    if (!agentic.has(p.pid)) agentic.set(p.pid, isAgentRoot(p.command) || (byPid.has(p.ppid) && underAgent(byPid.get(p.ppid))));
+    if (p.pid === root) return null;
+    if (!agentic.has(p.pid)) agentic.set(p.pid, isAckerRoot(p.command) ? 'ackers' : isAgentRoot(p.command) ? 'agents' : (byPid.has(p.ppid) ? underAgent(byPid.get(p.ppid)) : null));
     return agentic.get(p.pid);
   };
   return tree.map((p) => {
     let cls;
     if (p.pid === root) cls = 'main';
-    else if (underAgent(p)) cls = 'agents';
+    else if (underAgent(p)) cls = underAgent(p);
     else if (/--type=renderer/.test(p.command)) cls = 'renderer';
     else if (/--type=gpu-process/.test(p.command)) cls = 'gpu';
     else if (/--type=utility|crashpad/.test(p.command)) cls = 'utility';

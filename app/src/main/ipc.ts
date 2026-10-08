@@ -19,6 +19,7 @@ import { PRIORITIES, type BoardId, type BoardSpec, type Priority, type TaskId, t
 import type { BuildOp, Item, ItemId, WallSeg } from '../shared/space/types.ts';
 import type { ConvoKey, MessageId } from '../shared/mail.ts';
 import { Office, type OfficeServices } from './office/company.ts';
+import { ramProbe, ramSnapshot } from './office/ram-probe.ts';
 import { OfficeError } from './office/error.ts';
 
 // The one place untrusted input becomes a ClientMessage. Ids are opaque strings to the renderer.
@@ -216,6 +217,11 @@ export function startOffice({ dataFile, harnesses, window, services }: Options) 
     },
     services,
   );
+
+  // The RAM harness (verify/e2e-ram.mjs) reads these over the Node inspector, which only a test driver turns on. Not reachable from the page.
+  if (process.env.OFFICE_TEST_RUN !== undefined || process.env.OFFICE_DEBUG) {
+    Object.assign(globalThis, { __officeRam: () => ramProbe({ office }), __officeRamSnapshot: ramSnapshot });
+  }
 
   // Anything that is not our own window (a frame that navigated away, a webview) gets nothing.
   const trusted = (e: IpcMainEvent | IpcMainInvokeEvent) => e.sender === window()?.webContents;
