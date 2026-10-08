@@ -15,6 +15,7 @@ import { DeskAim } from './DeskAim.tsx';
 import { setPickView } from './pickView.ts';
 import { Staged } from './Staged.tsx';
 import { loadProps } from './props.ts';
+import { repaintCanvasTextures } from './textures.ts';
 import { warmFirstDraw } from './warmup.ts';
 import { WalkMarker } from './WalkMarker.tsx';
 
@@ -27,12 +28,17 @@ function PickView() {
   return null;
 }
 
-// A bitmap texture frees its decoded image once the GPU has it (bitmapTexture.ts), so a lost GL context needs the files read again.
+// A bitmap texture and a canvas texture free their pixels once the GPU has them (bitmapTexture.ts, textures.ts), so a lost GL context
+// needs the files read and the canvases drawn again.
 function RestoreTextures() {
   const { gl } = useThree();
   useEffect(() => {
-    gl.domElement.addEventListener('webglcontextlost', reloadBitmapTextures);
-    return () => gl.domElement.removeEventListener('webglcontextlost', reloadBitmapTextures);
+    const again = () => {
+      reloadBitmapTextures();
+      repaintCanvasTextures();
+    };
+    gl.domElement.addEventListener('webglcontextlost', again);
+    return () => gl.domElement.removeEventListener('webglcontextlost', again);
   }, [gl]);
   return null;
 }

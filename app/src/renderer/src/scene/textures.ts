@@ -4,7 +4,16 @@ import { CanvasTexture, NearestFilter, RepeatWrapping, SRGBColorSpace } from 'th
 export const FONT_DISPLAY = '"Bricolage Grotesque", "Avenir Next", ui-rounded, system-ui, sans-serif';
 export const FONT_BODY = '"Instrument Sans", "Avenir Next", system-ui, sans-serif';
 
+const repaints = new Set<() => void>();
+
+/** The GL context was lost: the GPU copies are gone, and the canvases let go of their pixels after the upload, so every one draws again. */
+export function repaintCanvasTextures() {
+  for (const paint of repaints) paint();
+}
+
 // A texture drawn with 2D canvas, redrawn when deps change and once web fonts finish loading.
+// three copies the canvas to the GPU on the next draw and then calls `onUpdate`; the canvas drops its pixels there (a 1536 x 840 board
+// is 5 MiB beside its GPU copy) and takes them back, blank, the next time it is drawn on.
 export function useCanvasTexture(w: number, h: number, draw: (g: CanvasRenderingContext2D) => void, deps: unknown[]) {
   const tex = useMemo(() => {
     const c = document.createElement('canvas');
@@ -13,17 +22,29 @@ export function useCanvasTexture(w: number, h: number, draw: (g: CanvasRendering
     const t = new CanvasTexture(c);
     t.colorSpace = SRGBColorSpace;
     t.anisotropy = 8;
+    t.onUpdate = () => {
+      c.width = 0;
+      c.height = 0;
+    };
     return t;
   }, [w, h]);
   useEffect(() => {
-    const g = (tex.image as HTMLCanvasElement).getContext('2d')!;
+    const c = tex.image as HTMLCanvasElement;
     const paint = () => {
-      g.clearRect(0, 0, w, h);
-      draw(g);
+      // Setting the size clears the canvas, and brings back the pixels that `onUpdate` dropped.
+      c.width = w;
+      c.height = h;
+      draw(c.getContext('2d')!);
       tex.needsUpdate = true;
     };
+    let live = true;
+    repaints.add(paint);
     paint();
-    void document.fonts.ready.then(paint);
+    void document.fonts.ready.then(() => live && paint());
+    return () => {
+      live = false;
+      repaints.delete(paint);
+    };
   }, [tex, ...deps]);
   useEffect(() => () => tex.dispose(), [tex]);
   return tex;
