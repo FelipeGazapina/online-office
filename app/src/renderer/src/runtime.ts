@@ -45,7 +45,12 @@ export const runtime = {
     // The employee the owner chose to walk to. Their chat opens when the owner reaches them, unless a key or another
     // walk replaces the choice first.
     approach: null as EmployeeId | null,
+    // True once the walk to `approach` has reached them. Only then does their chat open.
+    approachArrived: false,
   },
+  // The employee whose chat proximity would open on the last step. The drawer opens when this changes to someone, so
+  // closing it with Esc while standing there does not bring it back.
+  chatOpenable: null as EmployeeId | null,
   // Direction the owner last travelled. The queue trails this, not the body yaw,
   // so turning to look at the first asker does not swing the whole line around.
   queueYaw: Math.PI,

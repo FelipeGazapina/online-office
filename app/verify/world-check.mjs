@@ -34,6 +34,9 @@ function reset(building = legacy.building, people = [person('ann', 'Ann', annSea
   owner.vel.set(0, 0, 0);
   owner.speed = 0;
   owner.intent = KEYS_INTENT;
+  owner.approach = null;
+  owner.approachArrived = false;
+  runtime.chatOpenable = null;
   set({ building, story: 0, company: { name: 'Test', level: 3, xp: 0, blocks: [block], employees: people }, talkingTo: null, askerId: null, meetingDoor: 'open' });
   step(0.1);
 }
@@ -162,6 +165,8 @@ const stand = (p, yaw) => {
   owner.vel.set(0, 0, 0);
   owner.intent = KEYS_INTENT;
   owner.approach = null;
+  owner.approachArrived = false;
+  runtime.chatOpenable = null;
   runtime.view.yaw = yaw;
   owner.yaw = yaw;
 };
@@ -195,7 +200,16 @@ check(passed.talking && passed.opened === null, 'iso: walking past a seated empl
 drawerCase('iso');
 walkTo({ kind: 'employee', employeeId: 'ann' });
 check(owner.approach === 'ann', 'iso: walking to an employee remembers that the owner chose to go to her');
-walkOut();
+const early = { frames: 0, inRange: 0, drawer: null };
+for (let i = 0; i < 60 * 30 && walking(); i++) {
+  stepSim(1 / 30);
+  if (!walking()) break;
+  early.frames++;
+  if (get().talkingTo === 'ann') early.inRange++;
+  early.drawer ??= get().selectedId;
+}
+check(early.inRange > 0 && early.drawer === null, `iso: while the walk to her lasts her chat stays shut, even on the ${early.inRange} of ${early.frames} walking frames she is already in range`, `drawer ${early.drawer} while walking`);
+check(!walking() && get().selectedId === 'ann', 'iso: the frame the walk ends, her chat opens', `walking ${walking()}, drawer ${get().selectedId}`);
 step(0.5);
 check(get().selectedId === 'ann' && owner.approach === null, 'iso: on arrival her chat opens and the approach is spent', `drawer ${get().selectedId}, approach ${owner.approach}`);
 

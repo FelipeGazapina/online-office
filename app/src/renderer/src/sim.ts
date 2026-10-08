@@ -55,11 +55,6 @@ const SEATED_DRIFT = 0.05;
 const dist2 = (a: Vec2, b: Vec2) => Math.hypot(a.x - b.x, a.z - b.z);
 // In first person someone is in view within this angle of where the owner looks.
 export const IN_VIEW_HALF_ANGLE = Math.PI / 4;
-// Set when a walk to `owner.approach` reached them, so the chat can open once they are the one in range.
-let approachArrived = false;
-// The employee whose chat proximity would open on the last step. The drawer opens when this changes to someone, so
-// closing it with Esc while standing there does not bring it back.
-let openable: EmployeeId | null = null;
 
 export function inView(id: EmployeeId | null): boolean {
   const av = id ? runtime.avatars.get(id) : undefined;
@@ -215,7 +210,7 @@ export function walkTo(goal: WalkGoal) {
   if (walk) {
     runtime.owner.intent = walk;
     runtime.owner.approach = goal.kind === 'employee' ? goal.employeeId : null;
-    approachArrived = false;
+    runtime.owner.approachArrived = false;
   }
   else toast(door === 'closed' ? 'The meeting room door is closed.' : 'There is no way there.', 'warn');
 }
@@ -253,7 +248,7 @@ function walkVelocity(world: World): Vec2 | null {
   if (intent.kind !== 'walk') return null;
   const aim = nextAim(owner, intent.trip, ARRIVE);
   if (!aim) {
-    if (intent.goal.kind === 'employee' && intent.goal.employeeId === owner.approach) approachArrived = true;
+    if (intent.goal.kind === 'employee' && intent.goal.employeeId === owner.approach) owner.approachArrived = true;
     owner.intent = KEYS_INTENT;
     return null;
   }
@@ -340,7 +335,7 @@ function stepOwner(dt: number, world: World, talkingTo: EmployeeId | null) {
   }
   // The choice to go to someone lasts while walking to them and once there. Any other end of that walk drops it: a key
   // held here, a key tapped between two frames (input.ts), or the person going away.
-  if (owner.approach && owner.intent.kind !== 'walk' && !approachArrived) owner.approach = null;
+  if (owner.approach && owner.intent.kind !== 'walk' && !owner.approachArrived) owner.approach = null;
 
   const want = walkVelocity(world) ?? (owner.climb ? finishClimb(owner.climb) : keyVelocity());
   const a = ease(dt, 12);
@@ -575,11 +570,12 @@ export function stepSim(rawDt: number) {
   // Proximity opens the chat only in first person and only for someone in view, on the step they become so. In the
   // overview it opens only for the person the owner chose to walk to, once they are the one in range.
   const nowOpenable = state.camera === 'first' && talkingTo && inView(talkingTo) ? talkingTo : null;
-  let open = nowOpenable !== openable ? nowOpenable : null;
-  openable = nowOpenable;
-  if (talkingTo && talkingTo === runtime.owner.approach) {
+  let open = nowOpenable !== runtime.chatOpenable ? nowOpenable : null;
+  runtime.chatOpenable = nowOpenable;
+  if (talkingTo && talkingTo === runtime.owner.approach && runtime.owner.approachArrived) {
     open = talkingTo;
     runtime.owner.approach = null;
+    runtime.owner.approachArrived = false;
   }
 
   const nearbyChanged = nearbyIds.length !== state.nearbyIds.length || nearbyIds.some((id, i) => id !== state.nearbyIds[i]);

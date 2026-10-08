@@ -256,6 +256,9 @@ export function installDebug() {
       runtime.owner.pos.set(x, runtime.owner.pos.y, z);
       runtime.owner.yaw = yaw;
       runtime.owner.intent = KEYS_INTENT;
+      runtime.owner.approach = null;
+      runtime.owner.approachArrived = false;
+      runtime.chatOpenable = null;
       runtime.queueYaw = yaw;
       runtime.view.yaw = yaw;
     },
