@@ -51,6 +51,7 @@ function HireModal() {
   );
   const [blockId, setBlockId] = useState<BlockId | ''>(dropped?.blockId ?? company?.blocks[0]?.id ?? '');
   const [name, setName] = useState('');
+  const [count, setCount] = useState(1);
   const [role, setRole] = useState<'employee' | 'orchestrator'>(dropped?.role ?? 'employee');
   const [model, setModel] = useState<ModelId | ''>('');
   const [loggingIn, setLoggingIn] = useState(false);
@@ -83,6 +84,8 @@ function HireModal() {
   const ready = harnesses[provider].kind === 'ready';
   const needsLogin = harnesses[provider].kind === 'needs_login';
   const unlimited = bypassLimit || !Number.isFinite(headcountCap(company.level));
+  const room = unlimited ? DESKS_PER_BLOCK : Math.max(0, Math.min(headcountCap(company.level) - company.employees.length, blockId ? DESKS_PER_BLOCK - used(blockId) : 0));
+  const many = dropped ? 1 : Math.max(1, Math.min(count, Math.max(room, 1)));
   const droppedBlock = dropped && company.blocks.find((b) => b.id === dropped.blockId);
 
   return (
@@ -168,11 +171,22 @@ function HireModal() {
           </select>
         </label>
       )}
+      {!dropped && (
+        <label className="field">
+          <span>How many</span>
+          <input type="number" min={1} max={Math.max(room, 1)} value={many} onChange={(e) => setCount(Number(e.target.value) || 1)} />
+        </label>
+      )}
       <label className="field">
         <span>
           Name <span className="muted">optional</span>
         </span>
-        <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Leave empty for a fresh name" />
+        <input
+          value={many > 1 ? '' : name}
+          onChange={(e) => setName(e.target.value)}
+          disabled={many > 1}
+          placeholder={many > 1 ? 'Each new hire gets a fresh name' : 'Leave empty for a fresh name'}
+        />
       </label>
       <div className="actions">
         <button className="btn ghost" onClick={leave}>
@@ -202,14 +216,14 @@ function HireModal() {
                 blockId,
                 role,
                 ...(bypassLimit && { bypassLimit: true }),
-                ...(name.trim() && { name: name.trim() }),
+                ...(many > 1 ? { count: many } : name.trim() && { name: name.trim() }),
                 ...(model && { model }),
                 ...(dropped && { deskId: dropped.deskId, taskId: dropped.taskId }),
               });
               close();
             }}
           >
-            Hire
+            {many > 1 ? `Hire ${many}` : 'Hire'}
           </button>
         )}
       </div>
