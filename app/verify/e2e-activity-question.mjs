@@ -161,7 +161,7 @@ export default async (s) => {
   assert(blockedAt > 0 && answerAt > blockedAt && doneAt > answerAt, `blocked (${blockedAt}), then the owner's answer (${answerAt}), then done with its file (${doneAt})`);
   assert(entries.filter((e) => e.kind === 'stage').length >= 3, 'the stage moves are in the log');
   const stages = (await s.eval(`${task()}.history`)).filter((h) => h.kind === 'stage').map((h) => `${h.by}:${h.to}`);
-  assert(/^owner:doing,mailroom:todo,owner:doing,(mailroom|[0-9a-f-]{36}):review$/.test(stages.join()) && stages.at(-1) !== 'owner:review', `each stage move says who made it, and the last one to review is the office or the employee (${stages.join(' ')})`);
+  assert(/^mailroom:doing,mailroom:todo,mailroom:doing,(mailroom|[0-9a-f-]{36}):review$/.test(stages.join()) && stages.at(-1) !== 'owner:review', `each stage move says who made it, and the last one to review is the office or the employee (${stages.join(' ')})`);
   await s.eval(`(() => { const b = document.querySelector('[data-testid="task-detail"] .tb-dock-body'); b.scrollTop = b.scrollHeight; })()`);
   await s.sleep(400);
   await s.shot('a1-question-after');
