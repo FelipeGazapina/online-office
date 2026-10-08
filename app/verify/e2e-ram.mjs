@@ -396,8 +396,8 @@ async function takeShots(s, people, log) {
       await s.waitFor(`!!document.querySelector('.term-frame.ready')`, 5000).catch(() => {});
       await s.sleep(800);
       await take('3-terminal-zoom');
-      // F leaves. Escape on a working employee's terminal would interrupt their step.
-      await s.press('KeyF', 'f');
+      // The Leave button. F would type into the prompt, and Escape on a working employee's terminal interrupts their step.
+      await s.clickOn('.term-leave');
       await s.waitFor(`__officeMonitor.getState().open === null`, 4000).catch(() => log('the terminal did not close'));
       await s.sleep(1500);
     } else log('the monitor offered no F prompt, so no terminal shot');
