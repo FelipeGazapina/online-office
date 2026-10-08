@@ -13,6 +13,7 @@ import { renders } from './hud/chat/renders.ts';
 import { KEYS_INTENT, runtime } from './runtime.ts';
 import { modelOf, PROP_DEFS } from './scene/building/models.ts';
 import { propOf } from './scene/props.ts';
+import { memoryReport } from './ramProbe.ts';
 import { floorBase, tripTo, worldFor } from './world.ts';
 import { stepSim, tripEnd, walkTo } from './sim.ts';
 import { get, sendTap, set, setSetting, useStore } from './store.ts';
@@ -306,6 +307,8 @@ export function installDebug() {
       sendTap.fn = fn;
     },
     measureFrames,
+    // Test-only: where graphics memory sits (textures, render targets, geometry, canvas), for verify/e2e-ram.mjs.
+    memory: memoryReport,
     setCamera: () => setSetting('camera', 'iso'),
     apply: applyServerMessage,
     store: useStore,

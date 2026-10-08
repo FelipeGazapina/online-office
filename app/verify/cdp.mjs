@@ -5,11 +5,17 @@
 // A scenario exports `env` (variables for the app) and a default async function that receives the driver.
 // Its second argument is `{ launch }`, so a scenario can quit the app and start it again on the same OFFICE_DATA_DIR.
 // Every instance started this way is closed when the scenario ends, whether it passed or not.
+// Every launch waits for the machine-wide run lock (run-lock.mjs) and holds it until the apps have quit, so two runs never overlap
+// and a memory or frame figure is never taken beside another app of ours. It cannot be turned off.
+// A scenario may also export `viewport` ({ width, height, scale }), `prepare` (an async function run once the lock is held and before the
+// app starts, for work that must be in place at startup such as a data folder) and `exclusive` (true: also wait until no other
+// Online Office app is running, lock or not).
 import { spawn } from 'node:child_process';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
-import { dirname, join, resolve } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { acquire, release } from './run-lock.mjs';
 
 const APP_DIR = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 // Two worktrees running end-to-end tests at once need different ports, or each driver talks to the other's app.
@@ -18,13 +24,16 @@ export const OUT = '/tmp/office-shots';
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const launched = [];
 
-export async function launch({ env = {}, width = 1280, height = 800, exe } = {}) {
+export async function launch({ env = {}, width = 1280, height = 800, scale = 1, exe, exclusive = false } = {}) {
+  await acquire(process.argv[2] ? basename(process.argv[2]) : basename(process.argv[1] ?? 'cdp'), { exclusive });
   mkdirSync(OUT, { recursive: true });
   const electron = createRequire(import.meta.url)('electron');
   // Set by Electron-based hosts (editors, agent shells). With it the binary runs as plain Node and never opens a window.
   const { ELECTRON_RUN_AS_NODE: _, ...inherited } = process.env;
   const entry = process.env.OFFICE_OUT_DIR ? join(resolve(APP_DIR, process.env.OFFICE_OUT_DIR), 'main', 'index.js') : '.';
-  const proc = spawn(exe ?? electron, [...(exe ? [] : [entry]), `--remote-debugging-port=${PORT}`], {
+  // A scenario that must look inside the main process names a port in its env: the Node inspector listens there (verify/inspector.mjs).
+  const inspect = env.OFFICE_INSPECT_PORT ? [`--inspect=127.0.0.1:${env.OFFICE_INSPECT_PORT}`] : [];
+  const proc = spawn(exe ?? electron, [...(exe ? [] : [entry]), `--remote-debugging-port=${PORT}`, ...inspect], {
     cwd: APP_DIR,
     // OFFICE_TEST_RUN keeps the window hidden and out of the Dock. A scenario can set it to '' to watch a run by eye.
     env: { ...inherited, OFFICE_TEST_RUN: '1', ...env },
@@ -51,7 +60,13 @@ export async function launch({ env = {}, width = 1280, height = 800, exe } = {})
     await sleep(200);
   }
   const page = targets.find((t) => t.type === 'page' && t.url.startsWith('file:'));
-  if (!page) throw new Error(`Electron did not open a window. Main process said:\n${mainLogs.join('\n')}`);
+  if (!page) {
+    // Nothing owns this app yet, so nothing else would ever close it.
+    try {
+      process.kill(-proc.pid, 'SIGKILL');
+    } catch {}
+    throw new Error(`Electron did not open a window. Main process said:\n${mainLogs.join('\n')}`);
+  }
 
   const ws = new WebSocket(page.webSocketDebuggerUrl);
   await new Promise((r) => (ws.onopen = r));
@@ -86,10 +101,19 @@ export async function launch({ env = {}, width = 1280, height = 800, exe } = {})
     });
   await call('Runtime.enable');
   await call('Page.enable');
-  await call('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false });
+  // 1 keeps every shot and measurement independent of the display. 'native' keeps the display's own pixel ratio (2 on a Retina screen),
+  // which is what the owner's window draws at, for a run whose memory has to be the owner's.
+  const dsf = scale === 'native' ? (await call('Runtime.evaluate', { expression: 'window.devicePixelRatio', returnByValue: true })).result.value : scale;
+  await call('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: dsf, mobile: false });
 
   const api = {
     sleep,
+    // The Electron main process. Everything the app runs is below it.
+    pid: proc.pid,
+    port: PORT,
+    // A raw DevTools call on the page, for what the driver has no helper for (Page.bringToFront, heap usage).
+    cdp: call,
+    deviceScaleFactor: dsf,
     logs,
     mainLogs,
     async eval(expression) {
@@ -99,7 +123,7 @@ export async function launch({ env = {}, width = 1280, height = 800, exe } = {})
     },
     // Shrinks or grows the page the way a window resize would, so a scenario can test layout at a new size.
     async resize(width, height) {
-      await call('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false });
+      await call('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: dsf, mobile: false });
     },
     async shot(name) {
       const r = await call('Page.captureScreenshot', { format: 'png' });
@@ -173,15 +197,34 @@ export async function launch({ env = {}, width = 1280, height = 800, exe } = {})
       // SIGTERM lets Electron run will-quit, which stops the Claude sessions. If it hangs, take the group down.
       if (!exited) process.kill(-proc.pid, 'SIGKILL');
     },
+    // For a signal: no waiting, the whole process group goes.
+    killNow() {
+      try {
+        process.kill(-proc.pid, 'SIGKILL');
+      } catch {}
+    },
   };
   launched.push(api);
   return api;
 }
 
+// A signal still takes the apps down before the process leaves, and leaving releases the run lock.
+for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP']) {
+  process.once(sig, () => {
+    for (const app of launched) app.killNow();
+    process.exit(130);
+  });
+}
+
 const [, , scenario] = process.argv;
 if (scenario) {
   const mod = await import(pathToFileURL(resolve(scenario)).href);
-  const s = await launch({ env: mod.env });
+  await acquire(basename(scenario), { exclusive: !!mod.exclusive });
+  await mod.prepare?.();
+  const s = await launch({ env: mod.env, exclusive: !!mod.exclusive, ...mod.viewport }).catch((e) => {
+    release();
+    throw e;
+  });
   let failed = false;
   try {
     await s.waitFor('!!window.__office && !!window.office');
@@ -196,6 +239,7 @@ if (scenario) {
     const main = s.mainLogs.join('\n').trim();
     console.log('main process output:', main ? '\n  ' + main.replace(/\n/g, '\n  ') : '(empty)');
     for (const app of launched) await app.close();
+    release();
   }
   process.exit(failed ? 1 : 0);
 }
