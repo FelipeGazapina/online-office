@@ -1,6 +1,7 @@
 import { join } from 'node:path';
 import { app, BrowserWindow, desktopCapturer, safeStorage, screen, session, shell, type WebContents } from 'electron';
 import { startOffice } from './ipc.ts';
+import { configureCursorStore } from './office/adapters/cursor.ts';
 import { detectHarnesses, setCodexRoot } from './office/adapters/index.ts';
 import { startOfficeMcp } from './office/mcp.ts';
 import { MemoryStore } from './office/memory.ts';
@@ -77,6 +78,7 @@ else {
 
     // The MCP server has to be listening before the first session is built, and memory lives beside company.json.
     const userData = app.getPath('userData');
+    await configureCursorStore(join(userData, 'cursor-agents')).catch((err) => console.error(err));
     const mcp = await startOfficeMcp();
     const credentialsCodec = safeStorage.isEncryptionAvailable()
       ? { encode: (value: string) => safeStorage.encryptString(value).toString('base64'), decode: (value: string) => safeStorage.decryptString(Buffer.from(value, 'base64')) }
@@ -85,7 +87,12 @@ else {
       dataFile: join(userData, 'company.json'),
       harnesses: await harnesses,
       window: () => win,
-      services: { mcp, memory: MemoryStore.open(join(userData, 'memory')), taskBoards: new TaskBoardService({ openUrl: (url) => shell.openExternal(url), credentialsFile: join(userData, 'task-board-credentials.json'), credentialsCodec }) },
+      services: {
+        mcp,
+        memory: MemoryStore.open(join(userData, 'memory')),
+        taskBoards: new TaskBoardService({ openUrl: (url) => shell.openExternal(url), credentialsFile: join(userData, 'task-board-credentials.json'), credentialsCodec }),
+        openUrl: (url) => shell.openExternal(url),
+      },
     });
     const voice = startVoice({ window: () => win, userData });
     startUpdater({ window: () => win });

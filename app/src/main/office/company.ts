@@ -38,6 +38,7 @@ import {
   type Subagent,
   type TaskBoardSource,
 } from '../../shared/protocol.ts';
+import { loginCursor } from './adapters/cursor.ts';
 import type { ActivityEntry, LiveInputs, TaskLive } from '../../shared/activity.ts';
 import { TerminalBuffer, type TermEvent, type TerminalPush } from '../../shared/terminal.ts';
 import type { LegacySources, TaskId } from '../../shared/tasks.ts';
@@ -94,7 +95,14 @@ export type OfficeEvents = {
 type Acker = Pick<Acknowledger, 'warm' | 'ack' | 'stop'> & Partial<Pick<Acknowledger, 'triage'>>;
 
 // The things every session leans on, started before the first employee so a session can connect the moment it is built.
-export type OfficeServices = { mcp: OfficeMcp; memory: MemoryStore; taskBoards?: TaskBoardService; acker?: Acker; gh?: Gh };
+export type OfficeServices = {
+  mcp: OfficeMcp;
+  memory: MemoryStore;
+  taskBoards?: TaskBoardService;
+  acker?: Acker;
+  gh?: Gh;
+  openUrl?: (url: string) => void | Promise<void>;
+};
 
 // How often the pull requests of tasks are asked about while one is open. A script that waits for a merge shortens it.
 const PR_POLL_MS = Number(process.env.OFFICE_PR_POLL_MS) || 3 * 60_000;
@@ -325,7 +333,7 @@ export class Office {
   private inbox = new Inbox({ headChanged: (id, head, left) => this.onHeadChanged(id, head, left) });
   private resumes = new Map<EmployeeId, Resume>();
   // What each harness offered the last time the owner asked. It is about this machine, not the company, so a reset keeps it.
-  private catalogs: Record<Provider, ModelCatalog> = { 'claude-code': { kind: 'unknown' }, codex: { kind: 'unknown' }, hermes: { kind: 'unknown' } };
+  private catalogs: Record<Provider, ModelCatalog> = Object.fromEntries((Object.keys(PROVIDERS) as Provider[]).map((provider) => [provider, { kind: 'unknown' }])) as Record<Provider, ModelCatalog>;
   private readonly dataFile: string;
   private readonly harnesses: Record<Provider, HarnessStatus>;
   private readonly events: OfficeEvents;
@@ -343,6 +351,7 @@ export class Office {
   private terminals = new Map<EmployeeId, TerminalBuffer>();
   private terminalsDirty = new Set<EmployeeId>();
   private terminalTimer: NodeJS.Timeout | undefined;
+  private cursorLogin?: Promise<void>;
 
   constructor(dataFile: string, harnesses: Record<Provider, HarnessStatus>, events: OfficeEvents, services: OfficeServices) {
     this.dataFile = dataFile;
@@ -688,6 +697,8 @@ export class Office {
         return this.setMeetingDoor(msg.state);
       case 'load_models':
         return this.loadModels(msg.provider);
+      case 'login_cursor':
+        return void this.loginWithCursor();
       case 'set_model':
         return this.setModel(msg.employeeId, msg.model);
       case 'set_permissions':
@@ -1133,9 +1144,13 @@ export class Office {
     const harness = this.harnesses[provider];
     if (harness.kind !== 'ready') {
       const { label } = PROVIDERS[provider];
-      throw new OfficeError(
-        harness.kind === 'missing' ? `${label} is not installed on this machine.` : `${label} is installed but not connected to the office yet.`,
-      );
+      const why =
+        harness.kind === 'missing'
+          ? `${label} is not installed on this machine.`
+          : harness.kind === 'needs_login'
+            ? `Log in with ${label} to hire someone.`
+            : `${label} is installed but not connected to the office yet.`;
+      throw new OfficeError(why);
     }
     const cap = headcountCap(company.level);
     if (!bypassLimit && company.employees.length >= cap) {
@@ -1329,6 +1344,23 @@ export class Office {
     if (!rule) return this.events.log(e.id, `No rule can stand for that command, so it was allowed only this once: ${short(question.detail, 120)}`, Date.now());
     if (e.permissions.alwaysAllow.some((r) => sameRule(r, rule))) return;
     this.changePermissions(e, { alwaysAllow: [...e.permissions.alwaysAllow, rule] }, `Always allow: ${ruleLabel(rule)}`);
+  }
+
+  private loginWithCursor() {
+    if (this.cursorLogin) return;
+    const open = this.services.openUrl;
+    this.cursorLogin = loginCursor((url) => {
+      if (!open) throw new Error('This office cannot open a browser.');
+      return open(url);
+    })
+      .then((status) => {
+        this.harnesses.cursor = status;
+        this.events.changed();
+      })
+      .catch((err: unknown) => this.events.error?.(err instanceof Error ? err.message : String(err)))
+      .finally(() => {
+        this.cursorLogin = undefined;
+      });
   }
 
   private loadModels(provider: Provider) {

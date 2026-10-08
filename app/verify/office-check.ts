@@ -78,7 +78,7 @@ const finishTurn = async (fake: { host: SessionHost }, text = 'done') => {
 };
 const office = new Office(
   join(dir, 'company.json'),
-  { 'claude-code': { kind: 'ready', version: 'fake' }, codex: { kind: 'missing' }, hermes: { kind: 'missing' } },
+  { 'claude-code': { kind: 'ready', version: 'fake' }, codex: { kind: 'missing' }, hermes: { kind: 'missing' }, cursor: { kind: 'missing' } },
   { ...noBuild, changed() {}, said() {}, log: (_id, line) => void logs.push(line), error: (m) => void errors.push(m) },
   { mcp, memory, acker },
 );
@@ -236,7 +236,7 @@ check(/^http:\/\/127\.0\.0\.1:\d+\/mcp\/[0-9a-f]{64}$/.test(fa.host.mcp.url) && 
 check(fa.host.memoryDigest() === '', 'the digest is empty before any note is saved');
 check(fa.host.rules() === '' && fb.host.rules() === '', 'no rules are in scope until F2 reads the rule files');
 
-const capOffice = new Office(join(dir, 'cap-company.json'), { 'claude-code': { kind: 'ready', version: 'fake' }, codex: { kind: 'missing' }, hermes: { kind: 'missing' } }, { ...noBuild, changed() {}, said() {}, log() {} }, { mcp, memory, acker });
+const capOffice = new Office(join(dir, 'cap-company.json'), { 'claude-code': { kind: 'ready', version: 'fake' }, codex: { kind: 'missing' }, hermes: { kind: 'missing' }, cursor: { kind: 'missing' } }, { ...noBuild, changed() {}, said() {}, log() {} }, { mcp, memory, acker });
 capOffice.handle({ type: 'create_block', cwd: repo });
 const capBlock = capOffice.snapshot().company.blocks[0]!.id;
 for (const name of ['Fay', 'Gus', 'Hana']) capOffice.handle({ type: 'hire', provider: 'claude-code', blockId: capBlock, name });
@@ -349,7 +349,7 @@ check(fa.host.memoryDigest().includes('About you\n- Ana likes short plans') && !
 await client.close().catch(() => undefined);
 
 console.log('\n# an old company.json');
-const statuses: Record<Provider, HarnessStatus> = { 'claude-code': { kind: 'ready', version: 'fake' }, codex: { kind: 'missing' }, hermes: { kind: 'missing' } };
+const statuses: Record<Provider, HarnessStatus> = { 'claude-code': { kind: 'ready', version: 'fake' }, codex: { kind: 'missing' }, hermes: { kind: 'missing' }, cursor: { kind: 'missing' } };
 const quiet = { ...noBuild, changed() {}, said() {}, log() {} };
 const fixture = readFileSync(new URL('./fixtures/company-v1.json', import.meta.url), 'utf8').replaceAll('__REPO__', repo);
 const stored = (file: string) => JSON.parse(readFileSync(file, 'utf8')) as Company;
@@ -514,7 +514,7 @@ await promptly(rmAgain);
 
 console.log('\n# model lists');
 const catalogOf = (provider: Provider) => lab.snapshot().catalogs[provider];
-check((['claude-code', 'codex', 'hermes'] as const).every((p) => catalogOf(p).kind === 'unknown'), 'no catalog is known until someone asks');
+check((['claude-code', 'codex', 'hermes', 'cursor'] as const).every((p) => catalogOf(p).kind === 'unknown'), 'no catalog is known until someone asks');
 const changesBefore = labChanges;
 lab.handle({ type: 'load_models', provider: 'claude-code' });
 check(catalogOf('claude-code').kind === 'loading' && listCalls === 1 && labChanges > changesBefore, 'load_models marks the catalog loading, asks the harness and tells the window');
@@ -655,7 +655,7 @@ console.log('\n# the mailroom, end to end with scripted employees');
 {
   process.env.OFFICE_START_LEVEL = '5';
   const history: Message[][] = [];
-  const mailOffice = new Office(join(dir, 'mail-company.json'), { 'claude-code': { kind: 'ready', version: 'fake' }, codex: { kind: 'missing' }, hermes: { kind: 'missing' } }, { ...noBuild, changed() {}, said() {}, log() {}, history: (_c, messages) => void history.push(messages) }, { mcp, memory, acker });
+  const mailOffice = new Office(join(dir, 'mail-company.json'), { 'claude-code': { kind: 'ready', version: 'fake' }, codex: { kind: 'missing' }, hermes: { kind: 'missing' }, cursor: { kind: 'missing' } }, { ...noBuild, changed() {}, said() {}, log() {}, history: (_c, messages) => void history.push(messages) }, { mcp, memory, acker });
   process.env.OFFICE_START_LEVEL = '3';
   mailOffice.handle({ type: 'create_block', cwd: repo });
   const mb = mailOffice.snapshot().company.blocks[0]!.id;
@@ -722,7 +722,7 @@ console.log('\n# the mailroom, end to end with scripted employees');
 
   const fileLines = readFileSync(join(dir, 'mail-company.mail.jsonl'), 'utf8').trim().split('\n').length;
   mailOffice.shutdown();
-  const reopened = new Office(join(dir, 'mail-company.json'), { 'claude-code': { kind: 'ready', version: 'fake' }, codex: { kind: 'missing' }, hermes: { kind: 'missing' } }, { ...noBuild, changed() {}, said() {}, log() {} }, { mcp, memory, acker });
+  const reopened = new Office(join(dir, 'mail-company.json'), { 'claude-code': { kind: 'ready', version: 'fake' }, codex: { kind: 'missing' }, hermes: { kind: 'missing' }, cursor: { kind: 'missing' } }, { ...noBuild, changed() {}, said() {}, log() {} }, { mcp, memory, acker });
   check(fileLines > 5 && reopened.snapshot().mail.tail.some((m) => m.kind === 'reply' && m.to === 'owner') && reopened.snapshot().mail.open.length === 0, 'the thread survives a restart');
   reopened.shutdown();
   for (const c of [asPo, asAnna, asBenj]) await c.c.close().catch(() => undefined);
@@ -735,7 +735,7 @@ console.log('\n# the owner\'s words: a question or a work order');
   const asked: string[] = [];
   const desk = { warm() {}, ack: () => undefined, stop() {}, triage: (text: string): Triage => (asked.push(text), answers.get(text)) };
   const trouble: string[] = [];
-  const statuses = { 'claude-code': { kind: 'ready' as const, version: 'fake' }, codex: { kind: 'missing' as const }, hermes: { kind: 'missing' as const } };
+  const statuses = { 'claude-code': { kind: 'ready' as const, version: 'fake' }, codex: { kind: 'missing' as const }, hermes: { kind: 'missing' as const }, cursor: { kind: 'missing' as const } };
   const o = new Office(join(dir, 'ask-company.json'), statuses, { ...noBuild, changed() {}, said() {}, log() {}, error: (m) => void trouble.push(m) }, { mcp, memory, acker: desk });
   o.handle({ type: 'create_block', cwd: repo });
   const block = o.snapshot().company.blocks[0]!.id;
@@ -806,7 +806,7 @@ console.log('\n# the terminals');
 {
   const pushes: { id: string; push: TerminalPush }[] = [];
   process.env.OFFICE_START_LEVEL = '5';
-  const termOffice = new Office(join(dir, 'term-company.json'), { 'claude-code': { kind: 'ready', version: 'fake' }, codex: { kind: 'missing' }, hermes: { kind: 'missing' } }, { ...noBuild, changed() {}, said() {}, log() {}, terminal: (id, push) => void pushes.push({ id, push }) }, { mcp, memory, acker });
+  const termOffice = new Office(join(dir, 'term-company.json'), { 'claude-code': { kind: 'ready', version: 'fake' }, codex: { kind: 'missing' }, hermes: { kind: 'missing' }, cursor: { kind: 'missing' } }, { ...noBuild, changed() {}, said() {}, log() {}, terminal: (id, push) => void pushes.push({ id, push }) }, { mcp, memory, acker });
   process.env.OFFICE_START_LEVEL = '3';
   termOffice.handle({ type: 'create_block', cwd: repo });
   const tb = termOffice.snapshot().company.blocks[0]!.id;

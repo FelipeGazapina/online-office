@@ -1170,6 +1170,9 @@ h3 {
 .prov-card.ready .prov-note {
   color: var(--moss);
 }
+.prov-card.needs_login .prov-note {
+  color: var(--ink-soft);
+}
 .prov-card.missing .prov-note,
 .prov-card.not_wired .prov-note {
   color: var(--muted);

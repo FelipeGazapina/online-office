@@ -186,7 +186,7 @@ console.log('\n# the office, with real git, a bare origin and a fake gh');
       return { cards: [], errors: [] };
     }
   }
-  const harnesses = { 'claude-code': { kind: 'ready' as const, version: 'fake' }, codex: { kind: 'missing' as const }, hermes: { kind: 'missing' as const } };
+  const harnesses = { 'claude-code': { kind: 'ready' as const, version: 'fake' }, codex: { kind: 'missing' as const }, hermes: { kind: 'missing' as const }, cursor: { kind: 'missing' as const } };
   const errors: string[] = [];
   const open = (file: string) => new Office(file, harnesses, { building() {}, rejected() {}, changed() {}, said() {}, log() {}, error: (m) => void errors.push(m) }, { mcp, memory, acker, taskBoards: new Provider() });
 

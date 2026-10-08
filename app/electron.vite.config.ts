@@ -29,8 +29,8 @@ export default defineConfig({
   main: {
     define: { __CLAUDE_SDK_VERSION__: JSON.stringify(sdk.version) },
     build: {
-      // The SDK spawns a platform binary that it finds next to itself in node_modules, so it cannot be bundled.
-      externalizeDeps: { include: ['@anthropic-ai/claude-agent-sdk'] },
+      // These SDKs load native binaries and lazy chunks from node_modules, so they cannot be bundled.
+      externalizeDeps: { include: ['@anthropic-ai/claude-agent-sdk', '@cursor/sdk'] },
     },
   },
   preload: {

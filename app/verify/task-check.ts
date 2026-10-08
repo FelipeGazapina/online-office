@@ -1179,7 +1179,7 @@ console.log('\n# the office, with a scripted harness');
     }
   }
   const provider = new Provider();
-  const harnesses = { 'claude-code': { kind: 'ready' as const, version: 'fake' }, codex: { kind: 'missing' as const }, hermes: { kind: 'missing' as const } };
+  const harnesses = { 'claude-code': { kind: 'ready' as const, version: 'fake' }, codex: { kind: 'missing' as const }, hermes: { kind: 'missing' as const }, cursor: { kind: 'missing' as const } };
   const errors: string[] = [];
   const open = (file: string) => new Office(file, harnesses, { building() {}, rejected() {}, changed() {}, said() {}, log() {}, error: (msg) => void errors.push(msg) }, { mcp, memory, acker, taskBoards: provider });
   const file = join(dir, 'company.json');

@@ -2,6 +2,7 @@ import { execFile } from 'node:child_process';
 import type { HarnessStatus, ModelId, Provider } from '../../../shared/protocol.ts';
 import { claudeCodeExecutable, createClaudeSession, listClaudeModels } from './claude.ts';
 import { codexDefaultModel, createCodexSession, listCodexModels, setCodexRoot } from './codex.ts';
+import { createCursorSession, cursorDefaultModel, cursorStatus, detectCursor, listCursorModels } from './cursor.ts';
 import { createHermesSession, hermesDefaultModel, listHermesModels } from './hermes.ts';
 import { providerLaunch, type ProviderBinary } from './launch.ts';
 import type { Harness } from './types.ts';
@@ -36,17 +37,21 @@ export const HARNESSES: Record<Provider, Harness> = {
   },
   codex: { detect: () => cliVersion('codex'), defaultModel: codexDefaultModel, listModels: listCodexModels, session: createCodexSession },
   hermes: { detect: () => cliVersion('hermes'), defaultModel: hermesDefaultModel, listModels: listHermesModels, session: createHermesSession },
+  cursor: { detect: detectCursor, status: cursorStatus, defaultModel: cursorDefaultModel, listModels: listCursorModels, session: createCursorSession },
 };
 
 export { setCodexRoot };
 
 async function status(p: Provider): Promise<HarnessStatus> {
+  const custom = HARNESSES[p].status;
+  if (custom) return custom();
   const version = await HARNESSES[p].detect();
   if (version === null) return { kind: 'missing' };
   return HARNESSES[p].session ? { kind: 'ready', version } : { kind: 'not_wired' };
 }
 
 export async function detectHarnesses(): Promise<Record<Provider, HarnessStatus>> {
-  const [claude, codex, hermes] = await Promise.all([status('claude-code'), status('codex'), status('hermes')]);
-  return { 'claude-code': claude, codex, hermes };
+  const providers = Object.keys(HARNESSES) as Provider[];
+  const found = await Promise.all(providers.map(async (provider) => [provider, await status(provider)] as const));
+  return Object.fromEntries(found) as Record<Provider, HarnessStatus>;
 }

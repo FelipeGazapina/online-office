@@ -10,6 +10,7 @@
   "dependencies": {
     "@agentclientprotocol/sdk": "^1.5.1",
     "@anthropic-ai/claude-agent-sdk": "^0.3.284",
+    "@cursor/sdk": "^1.0.36",
     "@modelcontextprotocol/sdk": "^1.30.1",
     "@react-three/drei": "^10.7.9",
     "@react-three/fiber": "^9.8.1",
@@ -52,13 +53,22 @@
     "appId": "com.gazapina.onlineoffice",
     "productName": "Online Office",
     "asar": true,
-    "files": ["out/**/*", "package.json"],
+    "files": [
+      "out/**/*",
+      "package.json"
+    ],
     "afterSign": "scripts/after-sign.cjs",
     "mac": {
       "category": "public.app-category.productivity",
       "target": [
-        { "target": "dmg", "arch": "arm64" },
-        { "target": "zip", "arch": "arm64" }
+        {
+          "target": "dmg",
+          "arch": "arm64"
+        },
+        {
+          "target": "zip",
+          "arch": "arm64"
+        }
       ],
       "artifactName": "Online-Office-${version}-${arch}.${ext}",
       "identity": "-",
@@ -68,10 +78,16 @@
         "NSUserNotificationUsageDescription": "Online Office uses notifications to let you know when an employee needs your attention."
       }
     },
-    "win": { "target": ["nsis"] },
+    "win": {
+      "target": [
+        "nsis"
+      ]
+    },
     "linux": {
       "category": "Office",
-      "target": ["AppImage"]
+      "target": [
+        "AppImage"
+      ]
     },
     "publish": {
       "provider": "github",

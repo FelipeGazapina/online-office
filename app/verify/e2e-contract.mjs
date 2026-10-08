@@ -49,7 +49,7 @@ export default async (s) => {
   assert(migrated.employees.length === 2 && migrated.employees.every((e) => e.model === HAIKU && e.permissions.mode === 'inherit' && e.permissions.alwaysAllow.length === 0 && e.subagents.length === 0), `the app started on the old company.json and every employee got the model from OFFICE_CLAUDE_MODEL and the inherit mode`);
   assert(JSON.stringify(migrated.settings) === JSON.stringify({ seats: { total: 4, perBlock: 3 }, defaultModels: {}, defaultPermissions: 'inherit' }), 'the company got its settings, seats at the ceiling of level 3');
   assert(migrated.employees[0].sessionId === OLD_SESSION && migrated.blocks[0].whiteboard.title === 'Billing flow', 'and kept what the old file held');
-  assert(JSON.stringify(await s.eval('__office.store.getState().catalogs')) === JSON.stringify({ 'claude-code': { kind: 'unknown' }, codex: { kind: 'unknown' }, hermes: { kind: 'unknown' } }), 'the snapshot carries a catalog for every harness, none asked for yet');
+  assert(JSON.stringify(await s.eval('__office.store.getState().catalogs')) === JSON.stringify({ 'claude-code': { kind: 'unknown' }, codex: { kind: 'unknown' }, hermes: { kind: 'unknown' }, cursor: { kind: 'unknown' } }), 'the snapshot carries a catalog for every harness, none asked for yet');
   assert(storedEmployee('Ben').model === HAIKU && !readFileSync(join(dataDir, 'company.json'), 'utf8').includes('subagents'), 'the migrated file was written back, without subagents');
 
   const blockId = migrated.blocks[0].id;

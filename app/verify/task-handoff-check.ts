@@ -785,7 +785,7 @@ console.log('\n# the tools, through the real office');
       };
     },
   };
-  const harnesses = { 'claude-code': { kind: 'ready' as const, version: 'fake' }, codex: { kind: 'missing' as const }, hermes: { kind: 'missing' as const } };
+  const harnesses = { 'claude-code': { kind: 'ready' as const, version: 'fake' }, codex: { kind: 'missing' as const }, hermes: { kind: 'missing' as const }, cursor: { kind: 'missing' as const } };
   const office = new Office(join(dir, 'office', 'company.json'), harnesses, { building() {}, rejected() {}, changed() {}, said() {}, log() {}, error() {} }, { mcp, memory, acker });
   office.handle({ type: 'create_block', cwd: repo });
   const blockId = office.snapshot().company.blocks[0]!.id;

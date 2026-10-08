@@ -24,7 +24,7 @@ HARNESSES['claude-code'] = {
   detect: async () => 'fake',
   session: () => ({ assign() {}, interject() {}, setModel() {}, permissionsChanged() {}, rulesChanged() {}, stop() {} }),
 };
-const statuses: Record<Provider, HarnessStatus> = { 'claude-code': { kind: 'ready', version: 'fake' }, codex: { kind: 'missing' }, hermes: { kind: 'missing' } };
+const statuses: Record<Provider, HarnessStatus> = { 'claude-code': { kind: 'ready', version: 'fake' }, codex: { kind: 'missing' }, hermes: { kind: 'missing' }, cursor: { kind: 'missing' } };
 
 let rejected: readonly Violation[] = [];
 let pushed: Building | undefined;

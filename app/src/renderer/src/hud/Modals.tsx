@@ -3,8 +3,8 @@ import {
   DESKS_PER_BLOCK,
   headcountCap,
   PROVIDERS,
+  harnessNote,
   type BlockId,
-  type HarnessStatus,
   type ModelId,
   type Provider,
 } from '../../../shared/protocol.ts';
@@ -37,17 +37,6 @@ function Modal({ kind, title, children }: { kind: string; title: string; childre
 const PROVIDER_LIST = Object.keys(PROVIDERS) as Provider[];
 const EMPTY_BLOCKS: NonNullable<ReturnType<typeof useStore.getState>['company']>['blocks'] = [];
 
-function harnessNote(h: HarnessStatus): string {
-  switch (h.kind) {
-    case 'ready':
-      return `Ready · v${h.version}`;
-    case 'missing':
-      return 'Not installed on this machine';
-    case 'not_wired':
-      return 'Installed, but the office cannot drive it yet';
-  }
-}
-
 // A desk's name for the owner: bench desks count from 1 in the order they were put down.
 const deskName = (id: string, role: 'employee' | 'orchestrator') => (role === 'orchestrator' ? 'PO desk' : `Desk ${Number(id.slice(id.lastIndexOf(':') + 1)) + 1}`);
 
@@ -57,20 +46,34 @@ function HireModal() {
   const dropped = useStore((s) => (s.modal?.kind === 'hire' ? s.modal.for : undefined));
   const droppedTask = useStore((s) => s.tasks.find((t) => t.id === dropped?.taskId));
   const harnesses = useStore((s) => s.harnesses);
-  const [provider, setProvider] = useState<Provider>(() => PROVIDER_LIST.find((p) => harnesses?.[p].kind === 'ready') ?? 'claude-code');
+  const [provider, setProvider] = useState<Provider>(
+    () => PROVIDER_LIST.find((p) => harnesses?.[p].kind === 'ready') ?? PROVIDER_LIST.find((p) => harnesses?.[p].kind === 'needs_login') ?? 'claude-code',
+  );
   const [blockId, setBlockId] = useState<BlockId | ''>(dropped?.blockId ?? company?.blocks[0]?.id ?? '');
   const [name, setName] = useState('');
   const [role, setRole] = useState<'employee' | 'orchestrator'>(dropped?.role ?? 'employee');
   const [model, setModel] = useState<ModelId | ''>('');
+  const [loggingIn, setLoggingIn] = useState(false);
+  const [loginToast, setLoginToast] = useState(0);
   const catalogs = useStore((s) => s.catalogs);
+  const toasts = useStore((s) => s.toasts);
   const catalog = catalogs?.[provider];
+  const harnessKind = harnesses?.[provider]?.kind;
 
-  // Model discovery can start the provider CLI, so do it only for the provider
+  // Model discovery can start the provider, so do it only for a ready card
   // the owner is looking at and reuse a catalog that is already in the snapshot.
   useEffect(() => {
-    if (!catalog || catalog.kind === 'unknown' || catalog.kind === 'error') send({ type: 'load_models', provider });
+    if (harnessKind !== 'ready') return;
+    const current = useStore.getState().catalogs?.[provider];
+    if (!current || current.kind === 'unknown' || current.kind === 'error') send({ type: 'load_models', provider });
     setModel('');
-  }, [provider]);
+  }, [provider, harnessKind]);
+
+  useEffect(() => {
+    if (!loggingIn) return;
+    if (harnesses?.cursor.kind === 'ready') setLoggingIn(false);
+    else if (toasts.some((toast) => toast.tone === 'warn' && toast.id > loginToast)) setLoggingIn(false);
+  }, [loggingIn, harnesses, toasts, loginToast]);
 
   useEffect(() => {
     if (catalog?.kind === 'ready' && !model) setModel(catalog.defaultModel);
@@ -78,6 +81,7 @@ function HireModal() {
   if (!company || !harnesses) return null;
   const used = (id: BlockId) => company.employees.filter((e) => e.blockId === id).length;
   const ready = harnesses[provider].kind === 'ready';
+  const needsLogin = harnesses[provider].kind === 'needs_login';
   const unlimited = bypassLimit || !Number.isFinite(headcountCap(company.level));
   const droppedBlock = dropped && company.blocks.find((b) => b.id === dropped.blockId);
 
@@ -106,7 +110,7 @@ function HireModal() {
               key={p}
               type="button"
               className={`prov-card ${provider === p ? 'on' : ''} ${h.kind}`}
-              disabled={h.kind !== 'ready'}
+              disabled={h.kind === 'missing' || h.kind === 'not_wired'}
               onClick={() => setProvider(p)}
             >
               <i style={{ background: PROVIDERS[p].color }} />
@@ -137,7 +141,9 @@ function HireModal() {
       )}
       <label className="field">
         <span>Model</span>
-        {catalog?.kind === 'ready' ? (
+        {needsLogin ? (
+          <span className="muted">Log in to see models</span>
+        ) : catalog?.kind === 'ready' ? (
           <select value={model} onChange={(e) => setModel(e.target.value as ModelId)} disabled={catalog.models.length === 0}>
             {catalog.models.map((option) => (
               <option key={option.id} value={option.id}>
@@ -172,26 +178,40 @@ function HireModal() {
         <button className="btn ghost" onClick={leave}>
           Cancel
         </button>
-        <button
-          className="btn primary"
-          disabled={!blockId || !ready}
-          onClick={() => {
-            if (!blockId) return;
-            send({
-              type: 'hire',
-              provider,
-              blockId,
-              role,
-              ...(bypassLimit && { bypassLimit: true }),
-              ...(name.trim() && { name: name.trim() }),
-              ...(model && { model }),
-              ...(dropped && { deskId: dropped.deskId, taskId: dropped.taskId }),
-            });
-            close();
-          }}
-        >
-          Hire
-        </button>
+        {needsLogin ? (
+          <button
+            className="btn primary"
+            disabled={loggingIn}
+            onClick={() => {
+              setLoginToast(toasts.reduce((max, toast) => Math.max(max, toast.id), 0));
+              setLoggingIn(true);
+              send({ type: 'login_cursor' });
+            }}
+          >
+            {loggingIn ? 'Waiting for Cursor…' : `Log in with ${PROVIDERS[provider].label}`}
+          </button>
+        ) : (
+          <button
+            className="btn primary"
+            disabled={!blockId || !ready}
+            onClick={() => {
+              if (!blockId) return;
+              send({
+                type: 'hire',
+                provider,
+                blockId,
+                role,
+                ...(bypassLimit && { bypassLimit: true }),
+                ...(name.trim() && { name: name.trim() }),
+                ...(model && { model }),
+                ...(dropped && { deskId: dropped.deskId, taskId: dropped.taskId }),
+              });
+              close();
+            }}
+          >
+            Hire
+          </button>
+        )}
       </div>
     </Modal>
   );

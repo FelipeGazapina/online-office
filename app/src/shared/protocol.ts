@@ -14,7 +14,7 @@ export type EmployeeId = string & { readonly __brand: 'EmployeeId' };
 export type BlockId = string & { readonly __brand: 'BlockId' };
 export type QuestionId = string & { readonly __brand: 'QuestionId' };
 
-export type Provider = 'claude-code' | 'codex' | 'hermes';
+export type Provider = 'claude-code' | 'codex' | 'hermes' | 'cursor';
 export type EmployeeRole = 'employee' | 'orchestrator';
 
 // The owner meeting room is session-scoped. Main owns this value and sends it in every snapshot.
@@ -24,11 +24,27 @@ export const PROVIDERS: Record<Provider, { label: string; color: string }> = {
   'claude-code': { label: 'Claude Code', color: '#d97757' },
   codex: { label: 'ChatGPT (Codex)', color: '#10a37f' },
   hermes: { label: 'Hermes', color: '#7c5cff' },
+  cursor: { label: 'Cursor', color: '#1a1a1a' },
 };
 
 // Whether an employee of this provider can be hired on this machine right now.
 // `not_wired` means the CLI is installed but the office has no adapter for it yet.
-export type HarnessStatus = { kind: 'ready'; version: string } | { kind: 'missing' } | { kind: 'not_wired' };
+// `needs_login` means the SDK is here and the owner still has to sign in.
+export type HarnessStatus = { kind: 'ready'; version: string } | { kind: 'missing' } | { kind: 'not_wired' } | { kind: 'needs_login'; version: string };
+
+// The hire card's one line under the provider name. Ready and needs_login are clickable. The other two are disabled.
+export function harnessNote(h: HarnessStatus): string {
+  switch (h.kind) {
+    case 'ready':
+      return `Ready · v${h.version}`;
+    case 'needs_login':
+      return 'Log in with Cursor to hire';
+    case 'missing':
+      return 'Not installed on this machine';
+    case 'not_wired':
+      return 'Installed, but the office cannot drive it yet';
+  }
+}
 
 // A model id in the harness's own words, as its own model list gives it.
 export type ModelId = string & { readonly __brand: 'ModelId' };
@@ -289,6 +305,8 @@ export type ClientMessage =
   | { type: 'meeting_door'; state: MeetingDoor }
   // Asks a harness for its model list. The answer arrives as that provider's catalog in the next snapshots.
   | { type: 'load_models'; provider: Provider }
+  // Opens the Cursor login page. The card flips to ready on the next snapshot.
+  | { type: 'login_cursor' }
   | { type: 'set_model'; employeeId: EmployeeId; model: ModelId }
   | { type: 'set_permissions'; employeeId: EmployeeId; mode: PermissionMode }
   | { type: 'remove_allow_rule'; employeeId: EmployeeId; rule: AllowRule }
