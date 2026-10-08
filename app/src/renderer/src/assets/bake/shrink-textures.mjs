@@ -11,10 +11,15 @@ import { join, relative } from 'node:path';
 
 // Scale per axis of each map. A key is matched against the file path under assets/ (models/sofa-diff.jpg, textures/wood/nor.jpg),
 // the first match wins, and a file nothing matches keeps its size.
-//   Colour maps stay as sharp as the closest camera needs. Normal and ARM maps (ambient occlusion in red, roughness in green) hold
-//   slow gradients plus fine relief that lighting only shows at a grazing angle, so a half-size map costs a quarter of the bytes
-//   and is not told apart at the closest view.
+//   Colour maps stay as sharp as the closest camera needs. Normal and ARM maps (ambient occlusion in red, roughness in green) hold slow
+//   gradients plus fine relief that lighting shows only as a sheen, so a half-size map costs a quarter of the bytes. verify/shots-textures.mjs
+//   at the nearest zoom and from a person's eye, then verify/texture-diff.mjs, decided where that holds:
+//   - the floors, walls and rug, the sofa, the plants and the six small props: no difference an eye finds at twice the size (PSNR 45 to 58 dB);
+//   - the desk, the armchair and the bookshelf keep full-size normal and ARM maps: halved, the leather's highlight changed shape and the
+//     desktop's sheen went smooth in a view from a chair (PSNR 33 to 42 dB, speckle beyond the tolerance along the highlights).
+//   The lamp hangs over the desks and was not photographed, so it keeps its maps too.
 export const SCALES = [
+  [/^models\/(desk|armchair|bookshelf|lamp)-(nor|arm)\.jpg$/, 1],
   [/^models\/(desk_clock|vase|picture_frame|desk_lamp|laptop|plant_succulent)-/, 0.5],
   [/[-/](nor|arm)\.jpg$/, 0.5],
 ];

@@ -113,13 +113,18 @@ export default async function (s) {
     return null;
   };
 
-  // Build mode at the nearest zoom, looking at a thing. Build mode looks at where the owner stood when it was entered and keeps looking
-  // there, so the owner stands at the thing for that moment and then goes far away, out of the picture. The walls and furniture move the
-  // owner the same way each run, so a second run frames the same picture; panning by key would not.
+  // Build mode at the nearest zoom, looking at a thing. Build mode looks at where the owner stands when it is entered and keeps looking
+  // there, so in one task the owner is put on the thing, build mode is entered, and the owner is put far away, out of the picture. No
+  // step of the simulation runs in between to push the owner off the furniture, so the thing is in the middle of the view to the
+  // centimetre and a second run frames the same picture; panning by key would not.
   const build = async (p) => {
-    await s.eval(`__office.teleport(${p.x}, ${p.z}); __office.step(0.5)`);
-    await d.enterBuild();
-    await s.eval(`__office.teleport(${p.x + 40}, ${p.z + 40})`);
+    await s.eval(`(() => {
+      __office.teleport(${p.x}, ${p.z});
+      document.querySelector('[data-testid="build-enter"]').click();
+      __office.teleport(${p.x + 40}, ${p.z + 40});
+    })()`);
+    await s.waitFor(`!!${store}.build`, 4000);
+    await s.sleep(500);
     await d.zoomTo(5);
     await d.park();
     await d.still();
