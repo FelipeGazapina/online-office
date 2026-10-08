@@ -1168,6 +1168,9 @@ h3 {
 .prov-card.ready .prov-note {
   color: var(--moss);
 }
+.prov-card.needs_login .prov-note {
+  color: var(--ink-soft);
+}
 .prov-card.missing .prov-note,
 .prov-card.not_wired .prov-note {
   color: var(--muted);
@@ -1530,6 +1533,12 @@ h3 {
 }
 .b-name .reveal {
   margin-left: auto;
+}
+.b-name .remove {
+  color: var(--tomato);
+}
+.b-name .remove.armed {
+  text-decoration: underline;
 }
 .first-run {
   margin-top: 10px;

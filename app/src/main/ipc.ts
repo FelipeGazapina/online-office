@@ -21,7 +21,7 @@ const employeeId = z.string().min(1).transform((s) => s as EmployeeId);
 const blockId = z.string().min(1).transform((s) => s as BlockId);
 const questionId = z.string().min(1).transform((s) => s as QuestionId);
 const modelId = z.string().min(1).transform((s) => s as ModelId);
-const provider = z.enum(['claude-code', 'codex', 'hermes']);
+const provider = z.enum(['claude-code', 'codex', 'hermes', 'cursor']);
 const meetingDoor = z.enum(['open', 'closed']) satisfies z.ZodType<MeetingDoor>;
 const permissionMode = z.enum(['inherit', 'ask', 'auto', 'yolo']);
 const allowRule = z.discriminatedUnion('kind', [
@@ -45,6 +45,7 @@ const clientMessage = z.discriminatedUnion('type', [
     cwd: z.string().min(1).optional(),
     githubRepo: z.string().url().optional(),
   }),
+  z.object({ type: z.literal('remove_block'), blockId }),
   z.object({ type: z.literal('configure_task_board'), blockId, config: taskBoardConfig }),
   z.object({ type: z.literal('configure_linear_board'), blockId, url: z.string().url().max(1000) }),
   z.object({ type: z.literal('refresh_task_board'), blockId }),
@@ -56,6 +57,7 @@ const clientMessage = z.discriminatedUnion('type', [
   z.object({ type: z.literal('interject'), employeeId, text: z.string().min(1), style: z.enum(['next', 'now']) }),
   z.object({ type: z.literal('meeting_door'), state: meetingDoor }),
   z.object({ type: z.literal('load_models'), provider }),
+  z.object({ type: z.literal('login_cursor') }),
   z.object({ type: z.literal('set_model'), employeeId, model: modelId }),
   z.object({ type: z.literal('set_permissions'), employeeId, mode: permissionMode }),
   z.object({ type: z.literal('remove_allow_rule'), employeeId, rule: allowRule }),
@@ -97,6 +99,7 @@ export function startOffice({ dataFile, harnesses, window, services }: Options) 
       },
       said: (employeeId, text) => emit({ type: 'said', employeeId, text }),
       log: (employeeId, line, at) => emit({ type: 'log', employeeId, line, at }),
+      failed: (message) => emit({ type: 'error', message }),
     },
     services,
   );

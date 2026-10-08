@@ -1,6 +1,7 @@
 import type {
   Employee,
   EmployeeStatus,
+  HarnessStatus,
   InterruptStyle,
   ModelCatalog,
   ModelId,
@@ -99,6 +100,8 @@ export type SessionFactory = (host: SessionHost) => EmployeeSession;
 export type Harness = {
   // Resolves to the harness version, or null when it is not installed.
   detect(): Promise<string | null>;
+  // Hire-card status when version alone is not enough. Cursor uses this so a logged-out SDK is `needs_login`.
+  status?(): Promise<HarnessStatus>;
   // The model a new employee starts on when the owner picks none, in the harness's own words. A function so the
   // environment is read when someone is hired, not when the module loads.
   defaultModel(): ModelId;

@@ -58,7 +58,7 @@ HARNESSES['claude-code'] = {
 const logs: string[] = [];
 const office = new Office(
   join(dir, 'company.json'),
-  { 'claude-code': { kind: 'ready', version: 'fake' }, codex: { kind: 'missing' }, hermes: { kind: 'missing' } },
+  { 'claude-code': { kind: 'ready', version: 'fake' }, codex: { kind: 'missing' }, hermes: { kind: 'missing' }, cursor: { kind: 'missing' } },
   { changed() {}, said() {}, log: (_id, line) => void logs.push(line) },
   { mcp, memory },
 );
@@ -216,7 +216,7 @@ check(/^http:\/\/127\.0\.0\.1:\d+\/mcp\/[0-9a-f]{64}$/.test(fa.host.mcp.url) && 
 check(fa.host.memoryDigest() === '', 'the digest is empty before any note is saved');
 check(fa.host.rules() === '' && fb.host.rules() === '', 'no rules are in scope until F2 reads the rule files');
 
-const capOffice = new Office(join(dir, 'cap-company.json'), { 'claude-code': { kind: 'ready', version: 'fake' }, codex: { kind: 'missing' }, hermes: { kind: 'missing' } }, { changed() {}, said() {}, log() {} }, { mcp, memory });
+const capOffice = new Office(join(dir, 'cap-company.json'), { 'claude-code': { kind: 'ready', version: 'fake' }, codex: { kind: 'missing' }, hermes: { kind: 'missing' }, cursor: { kind: 'missing' } }, { changed() {}, said() {}, log() {} }, { mcp, memory });
 capOffice.handle({ type: 'create_block', cwd: repo });
 const capBlock = capOffice.snapshot().company.blocks[0]!.id;
 for (const name of ['Fay', 'Gus', 'Hana']) capOffice.handle({ type: 'hire', provider: 'claude-code', blockId: capBlock, name });
@@ -328,7 +328,7 @@ check(fa.host.memoryDigest().includes('About you\n- Ana likes short plans') && !
 await client.close().catch(() => undefined);
 
 console.log('\n# an old company.json');
-const statuses: Record<Provider, HarnessStatus> = { 'claude-code': { kind: 'ready', version: 'fake' }, codex: { kind: 'missing' }, hermes: { kind: 'missing' } };
+const statuses: Record<Provider, HarnessStatus> = { 'claude-code': { kind: 'ready', version: 'fake' }, codex: { kind: 'missing' }, hermes: { kind: 'missing' }, cursor: { kind: 'missing' } };
 const quiet = { changed() {}, said() {}, log() {} };
 const fixture = readFileSync(new URL('./fixtures/company-v1.json', import.meta.url), 'utf8').replaceAll('__REPO__', repo);
 const stored = (file: string) => JSON.parse(readFileSync(file, 'utf8')) as Company;
@@ -492,7 +492,7 @@ await promptly(rmAgain);
 
 console.log('\n# model lists');
 const catalogOf = (provider: Provider) => lab.snapshot().catalogs[provider];
-check((['claude-code', 'codex', 'hermes'] as const).every((p) => catalogOf(p).kind === 'unknown'), 'no catalog is known until someone asks');
+check((['claude-code', 'codex', 'hermes', 'cursor'] as const).every((p) => catalogOf(p).kind === 'unknown'), 'no catalog is known until someone asks');
 const changesBefore = labChanges;
 lab.handle({ type: 'load_models', provider: 'claude-code' });
 check(catalogOf('claude-code').kind === 'loading' && listCalls === 1 && labChanges > changesBefore, 'load_models marks the catalog loading, asks the harness and tells the window');
@@ -607,6 +607,20 @@ const assignRefused = refusal({ type: 'assign', employeeId: dora, task: 'ship it
 check(assignRefused.includes(deleted) && fd.assigned.length === 0, `a task for a block whose folder is gone names the folder and never reaches the harness (${assignRefused})`);
 const interjectRefused = refusal({ type: 'interject', employeeId: dora, text: 'hello?', style: 'next' });
 check(interjectRefused.includes(deleted) && fd.interjected.length === 0, `talking to that employee is refused the same way (${interjectRefused})`);
+
+console.log('\n# remove a block');
+const goneBlock = company().blocks.at(-1)!.id;
+mkdirSync(join(memRoot, 'employees', dora), { recursive: true });
+writeFileSync(join(memRoot, 'employees', dora, 'folder-moved.md'), 'note');
+const doraAsks = fd.host.ask({ kind: 'ask', text: 'Where did my folder go?' });
+office.handle({ type: 'remove_block', blockId: goneBlock });
+check(!company().blocks.some((b) => b.id === goneBlock) && !company().employees.some((e) => e.id === dora), 'the block and everyone in it are gone');
+check((await doraAsks) === '' && fd.stopped, "removing the block releases its employee's question and stops the session");
+check(company().employees.some((e) => e.name === 'Cara') && !fc.stopped, 'other blocks keep their people');
+check(await until(() => existsSync(join(memRoot, 'alumni', dora, 'folder-moved.md')) && !existsSync(join(memRoot, 'employees', dora))), "the removed block's employee notes moved to alumni/");
+check(existsSync(repo), 'the folder of the remaining block is untouched');
+check(!JSON.parse(readFileSync(join(dir, 'company.json'), 'utf8')).blocks.some((b: { id: string }) => b.id === goneBlock), 'the removal is saved');
+check(refusal({ type: 'remove_block', blockId: goneBlock }).includes('No such block'), 'removing it twice is refused');
 
 office.shutdown();
 check(fc.stopped, 'shutdown stops the sessions');

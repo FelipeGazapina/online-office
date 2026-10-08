@@ -36,6 +36,7 @@ import {
   type TaskBoardState,
   type TaskProvider,
 } from '../../shared/protocol.ts';
+import { loginCursor } from './adapters/cursor.ts';
 import { HARNESSES } from './adapters/index.ts';
 import type { EmployeeSession, SessionHost } from './adapters/types.ts';
 import { logger } from './debug.ts';
@@ -64,10 +65,16 @@ export type OfficeEvents = {
   changed(): void;
   said(employeeId: EmployeeId, text: string): void;
   log(employeeId: EmployeeId, line: string, at: number): void;
+  failed?(message: string): void;
 };
 
 // The things every session leans on, started before the first employee so a session can connect the moment it is built.
-export type OfficeServices = { mcp: OfficeMcp; memory: MemoryStore; taskBoards?: TaskBoardService };
+export type OfficeServices = {
+  mcp: OfficeMcp;
+  memory: MemoryStore;
+  taskBoards?: TaskBoardService;
+  openUrl?: (url: string) => void | Promise<void>;
+};
 
 // Where a blocked employee goes when the last question is answered. The adapter keeps reporting while the card is up
 // (a subagent finishes, the turn ends), and those reports land here so the card stays put.
@@ -201,12 +208,13 @@ export class Office {
   private inbox = new Inbox({ headChanged: (id, head, left) => this.onHeadChanged(id, head, left) });
   private resumes = new Map<EmployeeId, Resume>();
   // What each harness offered the last time the owner asked. It is about this machine, not the company, so a reset keeps it.
-  private catalogs: Record<Provider, ModelCatalog> = { 'claude-code': { kind: 'unknown' }, codex: { kind: 'unknown' }, hermes: { kind: 'unknown' } };
+  private catalogs: Record<Provider, ModelCatalog> = Object.fromEntries((Object.keys(PROVIDERS) as Provider[]).map((provider) => [provider, { kind: 'unknown' }])) as Record<Provider, ModelCatalog>;
   private readonly dataFile: string;
   private readonly harnesses: Record<Provider, HarnessStatus>;
   private readonly events: OfficeEvents;
   private readonly services: OfficeServices & { taskBoards: TaskBoardService };
   private readonly taskBoards = new Map<BlockId, TaskBoardState>();
+  private cursorLogin?: Promise<void>;
 
   constructor(dataFile: string, harnesses: Record<Provider, HarnessStatus>, events: OfficeEvents, services: OfficeServices) {
     this.dataFile = dataFile;
@@ -253,6 +261,8 @@ export class Office {
         return this.createBlock(msg.cwd, msg.name, msg.githubRepo);
       case 'update_block':
         return this.updateBlock(msg.blockId, msg.name, msg.cwd, msg.githubRepo);
+      case 'remove_block':
+        return this.removeBlock(msg.blockId);
       case 'configure_task_board':
         return this.configureTaskBoard(msg.blockId, msg.config);
       case 'configure_linear_board':
@@ -284,6 +294,8 @@ export class Office {
         return this.setMeetingDoor(msg.state);
       case 'load_models':
         return this.loadModels(msg.provider);
+      case 'login_cursor':
+        return void this.loginWithCursor();
       case 'set_model':
         return this.setModel(msg.employeeId, msg.model);
       case 'set_permissions':
@@ -343,6 +355,7 @@ export class Office {
     this.taskBoards.set(blockId, { kind: 'loading', cards: previous?.cards ?? [], ...(previous && 'lastFetchedAt' in previous && previous.lastFetchedAt ? { lastFetchedAt: previous.lastFetchedAt } : {}) });
     this.events.changed();
     const result = await this.services.taskBoards.fetchSources(block.taskBoard?.sources ?? []);
+    if (!this.company.blocks.includes(block)) return;
     const now = Date.now();
     this.taskBoards.set(blockId, result.errors.length && !result.cards.length
       ? { kind: 'error', cards: result.cards, message: result.errors.join(' ') }
@@ -527,9 +540,13 @@ export class Office {
     const harness = this.harnesses[provider];
     if (harness.kind !== 'ready') {
       const { label } = PROVIDERS[provider];
-      throw new OfficeError(
-        harness.kind === 'missing' ? `${label} is not installed on this machine.` : `${label} is installed but not connected to the office yet.`,
-      );
+      const why =
+        harness.kind === 'missing'
+          ? `${label} is not installed on this machine.`
+          : harness.kind === 'needs_login'
+            ? `Log in with ${label} to hire someone.`
+            : `${label} is installed but not connected to the office yet.`;
+      throw new OfficeError(why);
     }
     const cap = headcountCap(company.level);
     if (!bypassLimit && company.employees.length >= cap) {
@@ -569,12 +586,23 @@ export class Office {
   }
 
   private fire(id: EmployeeId) {
-    const e = this.employee(id);
+    this.dismiss(this.employee(id));
+    this.commit();
+  }
+
+  private dismiss(e: Employee) {
     this.stopSession(e.id);
     this.company.employees = this.company.employees.filter((x) => x.id !== e.id);
-    this.commit();
     // Their own notes go to alumni/. The block's notes stay for whoever works there next.
     this.services.memory.archive(e.id).catch((err) => console.error(`Could not archive ${e.name}'s notes:`, err));
+  }
+
+  private removeBlock(blockId: BlockId) {
+    const block = this.block(blockId);
+    for (const e of this.company.employees.filter((x) => x.blockId === blockId)) this.dismiss(e);
+    this.company.blocks = this.company.blocks.filter((b) => b !== block);
+    this.taskBoards.delete(blockId);
+    this.commit();
   }
 
   private createBlock(dir: string, name?: string, githubRepo?: string) {
@@ -667,6 +695,23 @@ export class Office {
     if (!rule) return this.events.log(e.id, `No rule can stand for that command, so it was allowed only this once: ${short(question.detail, 120)}`, Date.now());
     if (e.permissions.alwaysAllow.some((r) => sameRule(r, rule))) return;
     this.changePermissions(e, { alwaysAllow: [...e.permissions.alwaysAllow, rule] }, `Always allow: ${ruleLabel(rule)}`);
+  }
+
+  private loginWithCursor() {
+    if (this.cursorLogin) return;
+    const open = this.services.openUrl;
+    this.cursorLogin = loginCursor((url) => {
+      if (!open) throw new Error('This office cannot open a browser.');
+      return open(url);
+    })
+      .then((status) => {
+        this.harnesses.cursor = status;
+        this.events.changed();
+      })
+      .catch((err: unknown) => this.events.failed?.(err instanceof Error ? err.message : String(err)))
+      .finally(() => {
+        this.cursorLogin = undefined;
+      });
   }
 
   private loadModels(provider: Provider) {
