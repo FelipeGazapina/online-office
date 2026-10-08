@@ -15,7 +15,7 @@ export function repaintCanvasTextures() {
 // three copies the canvas to the GPU on the next draw and then calls `onUpdate`; the canvas drops its pixels there (a 1536 x 840 board
 // is 5 MiB beside its GPU copy) and takes them back, blank, the next time it is drawn on.
 export function useCanvasTexture(w: number, h: number, draw: (g: CanvasRenderingContext2D) => void, deps: unknown[]) {
-  const tex = useMemo(() => {
+  const { tex, c } = useMemo(() => {
     const c = document.createElement('canvas');
     c.width = w;
     c.height = h;
@@ -25,15 +25,17 @@ export function useCanvasTexture(w: number, h: number, draw: (g: CanvasRendering
     t.onUpdate = () => {
       c.width = 0;
       c.height = 0;
+      // What is left says how big the texture is (the memory probe reads it) and nothing more.
+      t.image = { width: w, height: h } as HTMLCanvasElement;
     };
-    return t;
+    return { tex: t, c };
   }, [w, h]);
   useEffect(() => {
-    const c = tex.image as HTMLCanvasElement;
     const paint = () => {
       // Setting the size clears the canvas, and brings back the pixels that `onUpdate` dropped.
       c.width = w;
       c.height = h;
+      tex.image = c;
       draw(c.getContext('2d')!);
       tex.needsUpdate = true;
     };

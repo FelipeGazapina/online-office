@@ -23,7 +23,7 @@ const decode = (url: string, flipY: boolean) =>
 /** Decodes the file again and hands it to the texture, which uploads it on the next draw. */
 const give = (texture: Texture, url: string, flipY: boolean) =>
   decode(url, flipY).then((bitmap) => {
-    (texture.image as ImageBitmap | null)?.close();
+    (texture.image as Partial<ImageBitmap> | null)?.close?.();
     texture.image = bitmap;
     texture.needsUpdate = true;
     return texture;
@@ -44,9 +44,10 @@ export function bitmapTexture(url: string, { srgb, flipY }: { srgb: boolean; fli
   // An ImageBitmap ignores UNPACK_FLIP_Y_WEBGL, so the orientation is fixed when the bitmap is made.
   texture.flipY = false;
   texture.onUpdate = () => {
-    const bitmap = texture.image as ImageBitmap | null;
-    texture.image = null;
-    bitmap?.close();
+    const bitmap = texture.image as ImageBitmap;
+    // What is left says how big the map is (the memory probe reads it) and nothing more.
+    texture.image = { width: bitmap.width, height: bitmap.height };
+    bitmap.close();
   };
   sources.set(texture, { url, flipY });
   decoding.push(give(texture, url, flipY));
