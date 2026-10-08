@@ -5,7 +5,7 @@ const src = '../src/renderer/src/';
 const space = await import('../src/shared/space/index.ts');
 const { get, set } = await import(`${src}store.ts`);
 const { KEYS_INTENT, runtime } = await import(`${src}runtime.ts`);
-const { stepSim, walkTo } = await import(`${src}sim.ts`);
+const { IN_VIEW_HALF_ANGLE, stepSim, walkTo } = await import(`${src}sim.ts`);
 const { openAt, worldFor } = await import(`${src}world.ts`);
 const { LISTEN_RADIUS } = await import(`${src}audio.ts`);
 const { check, finish } = await import('./check.ts');
@@ -121,7 +121,7 @@ const ops = [
   { t: 'stories', count: 2 },
   space.paintRect(1, rect, space.PAINT.woodDark),
   { t: 'walls', story: 1, put: space.rectWalls(rect, 2).map((w) => (w.d === 'e' && w.z === 8 && w.x === 1 ? { ...w, open: 'door' } : w)), del: [] },
-  { t: 'items', story: 0, put: [{ id: 'stairs:00', def: 'stairs', x: -2, z: 4, rot: 0 }], del: [] },
+  { t: 'items', story: 0, put: [{ id: 'stairs:00', def: 'stairs', x: -4, z: 4, rot: 0 }], del: [] },
 ];
 const built = space.applyOps(legacy.building, ops, ctx);
 check(built.ok, 'the stairs and the second story are a legal build', built.ok ? '' : JSON.stringify(built.violations));
@@ -141,5 +141,142 @@ check(get().story === 1, 'the scene is told the owner is on story 1');
 walkTo({ kind: 'point', at: { x: -3, z: 1 }, floor: 0 });
 walkOut();
 check(owner.floor === 0 && Math.abs(owner.pos.y) < 0.01, 'and walks back down to story 0');
+
+console.log('# the chat drawer near an employee');
+// A straight stretch of open floor that passes within `near` m of `at` and runs 3 m on each side of that closest point.
+function passBy(at, near) {
+  const w = worldFor(get().building, 'open');
+  for (let k = 0; k < 32; k++) {
+    const yaw = (2 * Math.PI * k) / 32;
+    const f = { x: Math.sin(yaw), z: Math.cos(yaw) };
+    for (const side of [1, -1]) {
+      const mid = { x: at.x - f.z * near * side, z: at.z + f.x * near * side };
+      const pts = Array.from({ length: 61 }, (_, i) => ({ x: mid.x + f.x * (i / 10 - 3), z: mid.z + f.z * (i / 10 - 3) }));
+      if (pts.every((p) => openAt(w, 0, p.x, p.z))) return { from: pts[0], to: pts[60], yaw };
+    }
+  }
+  return null;
+}
+const stand = (p, yaw) => {
+  owner.pos.set(p.x, 0, p.z);
+  owner.vel.set(0, 0, 0);
+  owner.intent = KEYS_INTENT;
+  owner.approach = null;
+  runtime.view.yaw = yaw;
+  owner.yaw = yaw;
+};
+const drawerCase = (camera) => {
+  reset();
+  set({ camera, selectedId: null, talkingTo: null });
+  step(0.1);
+};
+const walkPast = (route) => {
+  const seen = { talking: false, opened: null };
+  stand(route.from, route.yaw);
+  step(0.1);
+  runtime.keys.add('KeyW');
+  for (let i = 0; i < 4 * 30 && dist(owner.pos, route.from) < 5.6; i++) {
+    stepSim(1 / 30);
+    seen.talking ||= get().talkingTo === 'ann';
+    seen.opened ??= get().selectedId;
+  }
+  runtime.keys.clear();
+  step(0.5);
+  return seen;
+};
+
+drawerCase('iso');
+const annAt = { x: runtime.avatars.get('ann').pos.x, z: runtime.avatars.get('ann').pos.z };
+const route = passBy(annAt, 1.1);
+check(route !== null, `there is a straight stretch of open floor passing 1.1 m from Ann (${route ? fmt(route.from) + ' to ' + fmt(route.to) : 'none'})`);
+const passed = walkPast(route);
+check(passed.talking && passed.opened === null, 'iso: walking past a seated employee within 1.5 m makes her the one the owner talks to, but never opens her chat', `talking ${passed.talking}, drawer ${passed.opened}`);
+
+drawerCase('iso');
+walkTo({ kind: 'employee', employeeId: 'ann' });
+check(owner.approach === 'ann', 'iso: walking to an employee remembers that the owner chose to go to her');
+walkOut();
+step(0.5);
+check(get().selectedId === 'ann' && owner.approach === null, 'iso: on arrival her chat opens and the approach is spent', `drawer ${get().selectedId}, approach ${owner.approach}`);
+
+drawerCase('iso');
+walkTo({ kind: 'employee', employeeId: 'ann' });
+step(0.5);
+runtime.keys.add('KeyS');
+stepSim(1 / 30);
+runtime.keys.clear();
+check(owner.approach === null, 'iso: a steering key during the walk to her drops the approach');
+const back = passBy(annAt, 1.1);
+walkPast(back);
+check(get().selectedId === null, 'iso: so a later pass within range does not open her chat', `drawer ${get().selectedId}`);
+
+drawerCase('iso');
+walkTo({ kind: 'employee', employeeId: 'ann' });
+step(0.3);
+owner.intent = KEYS_INTENT;
+step(0.2);
+check(owner.approach === null, 'iso: a walk to her dropped between two frames, as a tapped key does in input.ts, drops the approach too');
+
+drawerCase('iso');
+walkTo({ kind: 'employee', employeeId: 'ann' });
+step(0.5);
+walkTo({ kind: 'point', at: { x: 5, z: 4.2 }, floor: 0 });
+check(owner.approach === null, 'iso: a walk to a point replaces the approach');
+
+drawerCase('iso');
+stand(route.from, route.yaw);
+step(0.2);
+set({ selectedId: 'ann' });
+const nearAnn = passBy(annAt, 1.0);
+stand({ x: (nearAnn.from.x + nearAnn.to.x) / 2, z: (nearAnn.from.z + nearAnn.to.z) / 2 }, nearAnn.yaw);
+step(1);
+check(get().talkingTo === 'ann' && get().selectedId === 'ann', 'iso: Open chat still opens the drawer and the sim leaves it open while the owner is in range', `talking ${get().talkingTo}, drawer ${get().selectedId}`);
+
+// First person: in view means within PI/4 of where the owner looks.
+const beside = { x: (route.from.x + route.to.x) / 2, z: (route.from.z + route.to.z) / 2 };
+const toward = Math.atan2(annAt.x - beside.x, annAt.z - beside.z);
+drawerCase('first');
+stand(beside, toward + Math.PI);
+step(1);
+check(get().talkingTo === 'ann' && get().selectedId === null, 'first: in range but facing away, the owner talks to her and no chat opens', `talking ${get().talkingTo}, drawer ${get().selectedId}`);
+runtime.view.yaw = toward + IN_VIEW_HALF_ANGLE + 0.15;
+step(0.2);
+check(get().selectedId === null, 'first: just outside PI/4 of the look direction, still no chat');
+runtime.view.yaw = toward + IN_VIEW_HALF_ANGLE - 0.15;
+step(0.2);
+check(get().selectedId === 'ann', 'first: turning to face her while in range opens her chat', `drawer ${get().selectedId}`);
+
+set({ selectedId: null });
+step(2);
+runtime.view.yaw = toward;
+step(1);
+check(get().selectedId === null, 'after Esc closes it, standing in range and in view does not reopen it', `drawer ${get().selectedId}`);
+
+drawerCase('first');
+// Open floor straight toward her, from 3 m out to 1 m short of her.
+const approachLine = (() => {
+  const w = worldFor(get().building, 'open');
+  for (let k = 0; k < 32; k++) {
+    const yaw = (2 * Math.PI * k) / 32;
+    const from = { x: annAt.x - Math.sin(yaw) * 3, z: annAt.z - Math.cos(yaw) * 3 };
+    const pts = Array.from({ length: 21 }, (_, i) => ({ x: from.x + Math.sin(yaw) * i * 0.1, z: from.z + Math.cos(yaw) * i * 0.1 }));
+    if (pts.every((p) => openAt(w, 0, p.x, p.z))) return { from, yaw };
+  }
+  return null;
+})();
+check(approachLine !== null, `there is open floor to walk straight up to her${approachLine ? ' from ' + fmt(approachLine.from) : ''}`);
+const facing = approachLine.yaw;
+stand(approachLine.from, facing);
+step(0.2);
+check(get().talkingTo === null, 'first: 3 m out she is not in range yet');
+runtime.keys.add('KeyW');
+for (let i = 0; i < 3 * 30 && get().talkingTo !== 'ann'; i++) stepSim(1 / 30);
+runtime.keys.clear();
+step(0.3);
+check(get().talkingTo === 'ann' && get().selectedId === 'ann', 'first: walking up to her while facing her opens her chat', `talking ${get().talkingTo}, drawer ${get().selectedId}`);
+stand(approachLine.from, facing);
+step(0.5);
+check(get().talkingTo === null && get().selectedId === null, 'leaving range closes a chat that proximity opened, as before', `talking ${get().talkingTo}, drawer ${get().selectedId}`);
+set({ camera: 'iso' });
 
 finish();

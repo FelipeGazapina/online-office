@@ -14,7 +14,7 @@ import { KEYS_INTENT, runtime } from './runtime.ts';
 import { modelOf, PROP_DEFS } from './scene/building/models.ts';
 import { propOf } from './scene/props.ts';
 import { floorBase, tripTo, worldFor } from './world.ts';
-import { stepSim, tripEnd, walkTo } from './sim.ts';
+import { inView, stepSim, tripEnd, walkTo } from './sim.ts';
 import { get, sendTap, set, setSetting, useStore } from './store.ts';
 
 const intentState = () => {
@@ -264,7 +264,7 @@ export function installDebug() {
       else runtime.keys.delete(code);
     },
     state: () => ({
-      owner: { x: runtime.owner.pos.x, y: runtime.owner.pos.y, z: runtime.owner.pos.z, floor: runtime.owner.floor, yaw: runtime.owner.yaw },
+      owner: { x: runtime.owner.pos.x, y: runtime.owner.pos.y, z: runtime.owner.pos.z, floor: runtime.owner.floor, yaw: runtime.owner.yaw, approach: runtime.owner.approach, inView: inView(get().talkingTo) },
       avatars: [...runtime.avatars.values()].map((a) => ({ id: a.id, x: +a.pos.x.toFixed(2), z: +a.pos.z.toFixed(2), floor: a.floor, seated: a.seated, speed: +a.speed.toFixed(2) })),
       talkingTo: get().talkingTo,
       askerId: get().askerId,
