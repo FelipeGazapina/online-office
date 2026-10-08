@@ -65,6 +65,8 @@ function sayEntry(e: ActivityEntry): string {
       return `${at} restart: ${e.requeued.map((r) => `${name(r.who)}'s "${short(r.title, 40)}"`).join(', ')} back in the queue`;
     case 'stage':
       return `${at} stage ${e.from} to ${e.to} by ${e.by === 'mailroom' ? 'the office' : e.by}`;
+    case 'assign':
+      return `${at} ${name(e.by)} gave it to ${name(e.employeeId)}`;
     case 'hours':
       return `${at} ${e.hours} h for ${name(e.employeeId)} on ${e.date}${e.error ? ` failed: ${e.error}` : ' sent'}`;
     case 'handoff':

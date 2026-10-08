@@ -88,6 +88,8 @@ Give the block's PO (the employee with the PO badge) one goal and it leads the r
 
 You can also give a task straight to any employee. It settles between the two of you and the PO is not involved.
 
+A task with nobody assigned goes to the block's PO by itself. This happens when the task is created, when a provider sync brings it in, when the block hires a PO, and when the app starts. The PO gives the work to a teammate with a request, and that teammate becomes the task's assignee. `assignTask` is the explicit way to assign a teammate or to move the task to someone else. The PO splits the work into pieces as usual. A block without a PO keeps the task unassigned. Your own assignment wins, because the office never reroutes a task that already has an assignee.
+
 `verify/e2e-company.mjs` runs this with real Claude agents on a scratch git repo (fixture in `verify/fixtures/company-project`) and checks the ledger, the repo and the chat. Employees run in yolo mode in that script because nobody is at the keyboard.
 
 ## The office MCP server
@@ -106,6 +108,7 @@ You can also give a task straight to any employee. It settles between the two of
 | `remember` | `scope` (`me` or `block`), `title`, `body` | Saves a note, or updates the note with the same title. |
 | `recall` | `query?`, `scope?` | Returns up to 5 matching notes, or lists every title when `query` is empty. |
 | `forget` | `scope`, `id` | Deletes a note. |
+| `assignTask` | `task` (title or id), `to` (a teammate's name), `reason?` | PO only. Assigns the task to that teammate through the same flow as an assignment on the board. |
 
 Claude Code aborts an HTTP MCP call that sends no response or progress for 5 minutes. Setting `MCP_TOOL_TIMEOUT` alone does not lift that limit. The Claude adapter sets a per-server `timeout` of one day, which does. It also sets `CLAUDE_CODE_MCP_AUTO_BACKGROUND_MS=0`, because a shell that exports `CLAUDE_AUTO_BACKGROUND_TASKS` makes Claude background any call that runs past 2 minutes. `verify/claude-timeout-probe.ts` shows both behaviors against a real session.
 
@@ -188,6 +191,7 @@ node verify/voice-logic-check.ts
 node verify/mcp-check.ts
 node verify/office-check.ts
 node verify/claude-check.ts
+node verify/task-check.ts
 node verify/e2e-update.mjs
 node verify/cdp.mjs verify/e2e-real.mjs
 node verify/cdp.mjs verify/e2e-nav.mjs
@@ -197,6 +201,7 @@ node verify/cdp.mjs verify/e2e-contract.mjs
 node verify/cdp.mjs verify/e2e-memory.mjs
 node verify/cdp.mjs verify/e2e-queue.mjs
 node verify/cdp.mjs verify/e2e-long-wait.mjs
+node verify/cdp.mjs verify/e2e-po-assign.mjs
 node verify/cdp.mjs verify/e2e-voice.mjs
 ```
 
@@ -209,6 +214,7 @@ node verify/cdp.mjs verify/e2e-voice.mjs
 - `verify/mcp-check.ts` needs no model. It starts the MCP server, the inbox, and the memory store in a scratch folder, and drives them with an MCP client. It checks the Origin, Host, and token rules, `ask_owner` waiting, cancelling, and queueing, and the memory limits, secret refusal, block visibility, firing, and the digest size. It exits 1 on any failed check.
 - `verify/office-check.ts` needs no model or Electron either. It runs the real `Office` with a scripted stand-in for a harness and checks what you would see: the cards, their order, where an employee goes back to after an answer or a cancel, and what firing and resetting do to sessions and notes. It also migrates `verify/fixtures/company-v1.json`, tables how a card becomes an Always-allow rule and what a rule covers, and checks each message in the table above, subagents, and that nothing ephemeral reaches the file.
 - `verify/claude-check.ts` needs no model or network. It runs the real Claude adapter against a scripted stand-in for the Agent SDK's `query()`. It checks what the adapter starts the SDK with, the permission card bodies, how it delivers a model switch and a rule change, and how it reports subagents. The foreground, background and interrupted subagent streams follow what a real Haiku session sent with SDK 0.3.283. The nested one follows the SDK's documented shapes.
+- `verify/task-check.ts` needs no model or Electron. It checks the task rules, the Tasks store on a real mailroom, and the real Office on a scripted harness. An unassigned task reaches the block's PO when it is created, when a provider sync brings it in, when the block hires a PO, and when the office starts. Routing twice posts nothing new, and a task with an assignee, a done task, or a block without a PO is left alone. Delegation assigns. When the PO hands a routed task to a teammate with a work request, or a gauntlet's builder request, the office adds that teammate to the task's assignees with a history entry and starts no new owner run. Help requests, critics, messages, and requests outside a task add nobody. `assignTask` gives a task to a teammate by name. It refuses an unknown task, a task of another block, a done task, an unknown teammate, a teammate of another block, the PO itself, and a caller who is not the PO. Each refusal comes back as text and changes nothing.
 - `verify/e2e-update.mjs` needs no model. Run it by itself, not through `cdp.mjs`. It packages two versions of the app with this repo's build config under a test identity (`com.gazapina.onlineoffice.e2e`, `Online Office E2E`), installs the older one into a scratch folder, and serves the newer one from a local feed. It launches the installed app and drives the update button through CDP. A feed with a wrong sha512 must end in "Update failed. Check again". After the real feed comes back, checking again must reach the update, and one more click must download it, quit the app, and relaunch the bundle at the same path as the newer version, still signed and pinned to its bundle identifier. It packages twice, so it needs Apple Silicon, about 4 GB free and about three minutes, and it stops before the first build if less than 4 GB is free. It removes its builds, the updater and Squirrel caches, and the test profile on success and on failure. The relaunched app does not get the test environment, so its window opens for a moment until the script closes it.
 - `verify/e2e-real.mjs` launches the built app against a scratch data folder and a scratch git repo, then does everything through the UI. It creates a block through the stubbed picker, hires a Claude Code employee, and gives it a task by typing. The employee walks over to ask, the script answers on the card, and then checks the file the agent wrote. It also checks the main log for `ask_owner` arriving over HTTP. A second task covers a shell permission card. A third makes the employee use its `Agent` tool once, and checks that the subagent shows on the employee while it runs, for as long as it runs, and is gone after, and that `company.json` never holds it. A whiteboard diagram closes the run. Screenshots land in `/tmp/office-shots`.
 - `verify/e2e-nav.mjs` uses real mouse and key events only. In the Overview it clicks the floor across a desk and checks the owner arrives, drags to turn the view without walking, and cancels a walk with a key. It clicks an employee's avatar and name tag for the menu, closes it with Esc and with a click elsewhere, walks to the employee with "Go to", and opens the chat, sends a message and waits for the real reply. Screenshots of the marker, the menu and the chat land in `/tmp/office-shots`.
@@ -219,6 +225,7 @@ node verify/cdp.mjs verify/e2e-voice.mjs
 - `verify/e2e-queue.mjs` makes two subagents ask permission at the same moment, and checks that the second card waits behind the first.
 - `verify/e2e-voice.mjs` plays clips made with `say` into the microphone through Chromium's fake capture device (`OFFICE_TEST_AUDIO`). A real Claude employee receives the right words in English and Portuguese, by hold-V and by proximity, and the script reads them from the main process, the employee's answer and the employee's own session log. It also checks that a clip played while an employee is talking never arrives (the same clip arrives when the employee is silent), that pressing V stops an employee who is talking, Voice: Accurate, Language: Auto, a microphone that only reads zeros, and every state of the HUD chip. It prints the time from releasing V to the text. It needs whisper-cpp, the models, and Portuguese and English macOS voices.
 - `verify/e2e-long-wait.mjs` leaves the owner silent for 150 seconds before answering. Run it with `OFFICE_LONG_WAIT_S=330` to go past Claude Code's 5 minute default.
+- `verify/e2e-po-assign.mjs` runs a real Haiku PO and one employee in a scratch block. It creates a task with no assignee and checks that the office routes it to the PO. The PO then delegates the work to the employee with a request, and the test checks that the employee appears in the task's assignees.
 - `verify/e2e-startup-stalls.mjs` starts the built app cold, on an empty office or (`OFFICE_STALLS_FIXTURE=floors3`) on the 15-employee 3-story building of `e2e-perf`, lists every main-thread task over 50 ms in the first 10 s, and screenshots the settled scene. `OFFICE_STALLS_ASSERT=1` fails the run on a task over 200 ms. `verify/run-startup-stalls.mjs` repeats it into one table, and with `OFFICE_STALLS_BUILDS=out/old,out/new` alternates between two builds so a busy machine slows both alike. `verify/startup-profile.mjs` takes a CPU profile of the same start and names each busy stretch by its top frames, and `verify/startup-tasks.mjs` lists the tasks with their CPU time, which stays put when the machine is loaded and the wall time does not.
 
 `pnpm build` rewrites `out/`, which is what `pnpm start` runs. If you use the beta while the tests run, build the tests to their own folder with `pnpm build:verify` and set `OFFICE_OUT_DIR=out/verify` when you run `verify/cdp.mjs`.

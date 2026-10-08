@@ -41,10 +41,12 @@ import type { SessionHost } from '../src/main/office/adapters/types.ts';
 import { startOfficeMcp } from '../src/main/office/mcp.ts';
 import { MemoryStore } from '../src/main/office/memory.ts';
 import { TaskBoardService, type HoursCall } from '../src/main/office/task-board.ts';
-import { Tasks, type TasksHost } from '../src/main/office/tasks.ts';
+import { ROUTED_NOTE, Tasks, type TasksHost } from '../src/main/office/tasks.ts';
 import { check, finish, sleep, until } from './check.ts';
 import { startFakeCronoSpark } from './fake-cronospark.ts';
-import { ANA, B1, B2, BRUNO, PO, world } from './mail-world.ts';
+import { ANA, B1, B2, BRUNO, CLEO, PO, world } from './mail-world.ts';
+import { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 
 const e = (s: string) => s as EmployeeId;
 const m = (s: string) => s as MessageId;
@@ -356,7 +358,9 @@ class FakeProvider {
 const dir = realpathSync(mkdtempSync(join(tmpdir(), 'task-check-')));
 const T0 = new Date(2026, 9, 6, 10, 0, 0).getTime();
 
-function taskWorld(file = join(dir, `tasks-${Math.random().toString(36).slice(2)}.json`), ledger: LedgerEntry[] = []) {
+// The older checks look at tasks the way the owner left them, so the host reports nobody as a PO there and nothing is routed.
+// `routing` reports the real roles, and tasks nobody is on go to the block's PO.
+function taskWorld(file = join(dir, `tasks-${Math.random().toString(36).slice(2)}.json`), ledger: LedgerEntry[] = [], routing = false) {
   let now = T0;
   const w = world(ledger, undefined, () => now);
   const provider = new FakeProvider();
@@ -366,7 +370,7 @@ function taskWorld(file = join(dir, `tasks-${Math.random().toString(36).slice(2)
     newId: () => `id${++ids}`,
     mail: () => w.room,
     blocks: () => [B1, B2],
-    members: () => w.members.map((x) => ({ id: x.id, name: x.name, blockId: x.blockId, role: x.role })),
+    members: () => w.members.map((x) => ({ id: x.id, name: x.name, blockId: x.blockId, role: routing ? x.role : 'employee' })),
     provider,
     changed() {},
   };
@@ -1142,6 +1146,8 @@ console.log('\n# the office, with a scripted harness');
   mkdirSync(repo);
   const repo2 = join(dir, 'repo2');
   mkdirSync(repo2);
+  const repo3 = join(dir, 'repo3');
+  mkdirSync(repo3);
   const memory = MemoryStore.open(join(dir, 'memory'));
   const mcp = await startOfficeMcp();
   const acker = { warm() {}, ack: () => undefined, stop() {} };
@@ -1209,9 +1215,9 @@ console.log('\n# the office, with a scripted harness');
 
   office.handle({ type: 'create_task', boardId: quick.id, title: 'Write the docs', notes: 'Short and plain' });
   const doc = snap().tasks[0]!;
-  check(doc.title === 'Write the docs' && doc.stage === 'todo', 'create_task adds a manual task');
+  check(doc.title === 'Write the docs' && doc.assignees.join() === pia, 'create_task with nobody on it adds a manual task and routes it to the block PO');
   office.handle({ type: 'assign_task', taskId: doc.id, employeeId: pia });
-  check(poFake.assigned.length === 1 && /Write the docs/.test(poFake.assigned[0]!) && /Short and plain/.test(poFake.assigned[0]!) && snap().company.employees.find((x) => x.id === pia)!.status.kind === 'working', 'assign_task starts the PO on the task at once');
+  check(poFake.assigned.length === 1 && /Write the docs/.test(poFake.assigned[0]!) && /Short and plain/.test(poFake.assigned[0]!) && snap().company.employees.find((x) => x.id === pia)!.status.kind === 'working', 'the PO is on the task at once, and assign_task to the PO again posts nothing');
   check(snap().tasks[0]!.stage === 'doing' && snap().tasks[0]!.runs.length === 1, 'and the snapshot shows it in doing');
   await sleep(40);
   const running = snap().taskTime[doc.id]!;
@@ -1248,7 +1254,7 @@ console.log('\n# the office, with a scripted harness');
   const ben = snap().company.employees.find((x) => !idsBefore.has(x.id))!;
   check(ben.seat === wanted, 'the new hire takes the desk they were given');
   check(fakes.at(-1)!.assigned.length === 1 && /Fix the login bug/.test(fakes.at(-1)!.assigned[0]!) && ben.status.kind === 'working', 'a hire with a task starts on it without anyone telling them');
-  check(snap().tasks.find((x) => x.id === bug.id)!.assignees.includes(ben.id) && snap().tasks.find((x) => x.id === bug.id)!.runs.length === 1, 'the task records the hire as its assignee with a run');
+  check(snap().tasks.find((x) => x.id === bug.id)!.assignees.join() === [pia, ben.id].join() && snap().tasks.find((x) => x.id === bug.id)!.runs.length === 2, 'the task records the hire as its assignee with a run, after the PO it was routed to');
   check(snap().tasks.find((x) => x.id === bug.id)!.number === bug.number && bug.number > 0 && new Set(snap().tasks.map((x) => x.number)).size === snap().tasks.length, `a hire with a task keeps the task's number (#${bug.number}) and every task has its own`);
   const taken = snap().company.employees.find((x) => x.name === 'Ana')!.seat;
   office.handle({ type: 'hire', provider: 'claude-code', blockId, name: 'Cal', deskId: taken! });
@@ -1259,8 +1265,80 @@ console.log('\n# the office, with a scripted harness');
   check(/at least one board/.test(refused({ type: 'delete_board', boardId: quick.id })), 'the last board cannot be deleted through the office');
   check(/no sources/.test(refused({ type: 'update_board', boardId: quick.id, sources: [{ provider: 'linear', projectId: 'x' }] })), 'a quick board refuses sources through the office');
 
-  console.log('\n# an old company.json');
+  console.log('\n# tasks nobody is on go to the block PO, in the office');
+  office.handle({ type: 'create_block', cwd: repo3 });
+  const noPo = snap().company.blocks.find((b) => b.cwd === repo3)!.id;
+  office.handle({ type: 'hire', provider: 'claude-code', blockId: noPo, name: 'Eve' });
+  const noPoBoard = boardsOf(noPo)[0]!.id;
+  office.handle({ type: 'create_task', boardId: noPoBoard, title: 'Sort the inbox' });
+  office.handle({ type: 'create_task', boardId: noPoBoard, title: 'Label the issues' });
+  const waiting = () => snap().tasks.filter((x) => x.boardId === noPoBoard);
+  check(waiting().length === 2 && waiting().every((x) => x.assignees.length === 0 && x.stage === 'todo' && x.runs.length === 0), 'a block without a PO leaves its new tasks unassigned in todo');
+  office.handle({ type: 'create_task', boardId: noPoBoard, title: 'Already shipped', stage: 'done' });
+  office.handle({ type: 'hire', provider: 'claude-code', blockId: noPo, name: 'Otto', role: 'orchestrator' });
+  const otto = snap().company.employees.find((x) => x.name === 'Otto')!;
+  const ottoFake = fakes.at(-1)!;
+  check(waiting().filter((x) => x.title !== 'Already shipped').every((x) => x.assignees.join() === otto.id && x.runs.length === 1), 'hiring a PO into the block routes both of its unassigned tasks to them');
+  check(ottoFake.assigned.some((t) => /Sort the inbox|Label the issues/.test(t)), 'and the new PO is working on one of them, with the other queued');
+  check(waiting().find((x) => x.title === 'Already shipped')!.assignees.length === 0, 'a done task is not routed');
+  const eve = snap().company.employees.find((x) => x.name === 'Eve')!.id;
+  office.handle({ type: 'create_task', boardId: noPoBoard, title: 'Eve\'s own', assignee: eve });
+  check(waiting().find((x) => x.title === 'Eve\'s own')!.assignees.join() === eve, 'a task made with an assignee does not get the PO as well');
+
+  console.log('\n# the PO delegating a task makes the teammate an assignee, in the office');
+  check(ottoFake.assigned.every((t) => t.includes(ROUTED_NOTE)), 'the request routed to the PO says nobody is assigned yet and to give the work to a teammate');
+  const eveFake = fakes.find((f) => f.assigned.some((t) => t.includes("Eve's own")))!;
+  check(!!eveFake && eveFake.assigned.every((t) => !t.includes(ROUTED_NOTE)), "the owner's own assign to Eve does not carry that line");
+  const client = new Client({ name: 'task-check', version: '0.0.0' });
+  await client.connect(new StreamableHTTPClientTransport(new URL(ottoFake.host.mcp.url)));
+  const say = async (name: string, args: Record<string, unknown>) => (await client.callTool({ name, arguments: args })).content as { text: string }[];
+  const routedTwo = () => waiting().filter((x) => x.title === 'Sort the inbox' || x.title === 'Label the issues');
+  const runsBefore = routedTwo().map((x) => x.runs.length).join();
+  await say('request', { to: 'Eve', text: 'Which label set do we use?', intent: 'help' });
+  await say('message', { to: 'Eve', text: 'Heads up, a piece is coming.' });
+  check(routedTwo().every((x) => !x.assignees.includes(eve)), 'a help request and a message from the PO add nobody to the task');
+  await say('request', { to: 'Eve', text: 'Do the first half of this task.', title: 'First half' });
+  const joined = routedTwo().filter((x) => x.assignees.includes(eve));
+  const event = joined[0]?.history?.at(-1);
+  check(joined.length === 1 && joined[0]!.assignees.join() === [otto.id, eve].join() && event?.kind === 'assign' && event.by === otto.id && event.employeeId === eve, 'a work request from the PO under the task adds Eve to its assignees, with an assign entry by the PO', JSON.stringify(event));
+  check(routedTwo().map((x) => x.runs.length).join() === runsBefore && joined[0]!.stage === 'doing', 'and posts no run of the owner\'s and moves nothing');
+  const assignsOf = () => routedTwo().flatMap((x) => (x.history ?? []).filter((h) => h.kind === 'assign')).length;
+  const assignsBefore = assignsOf();
+  const second = await say('request', { to: 'Eve', text: 'Then do the second half.', title: 'Second half' });
+  check(JSON.parse(second[0]!.text).ok === true && assignsOf() === assignsBefore && routedTwo().filter((x) => x.assignees.includes(eve)).length === 1, 'a second work request to Eve adds nothing', second[0]?.text);
+  office.handle({ type: 'hire', provider: 'claude-code', blockId: noPo, name: 'Fin' });
+  office.handle({ type: 'hire', provider: 'claude-code', blockId: noPo, name: 'Gus' });
+  const fin = snap().company.employees.find((x) => x.name === 'Fin')!.id;
+  const gus = snap().company.employees.find((x) => x.name === 'Gus')!.id;
+  const g = await say('requestGauntlet', { piece: 'The label migration', bar: ['every issue has a label'], builder: 'Fin', critic: 'Gus', maxRounds: 2 });
+  const served = joined[0]!.id;
+  const servedNow = () => routedTwo().find((x) => x.id === served)!;
+  check(JSON.parse(g[0]!.text).ok === true && servedNow().assignees.includes(fin) && !servedNow().assignees.includes(gus), 'a gauntlet from the PO adds its builder Fin, not its critic Gus', JSON.stringify(servedNow().assignees));
+  await say('request', { to: 'Gus', text: 'Which label wins when two match?', intent: 'help' });
+  const runsNow = servedNow().runs.length;
+  const assigned = await client.callTool({ name: 'assignTask', arguments: { task: servedNow().title, to: 'Gus' } });
+  const said = (assigned.content as { text: string }[])[0]!.text;
+  check(said === `Assigned ${servedNow().title} to Gus.` && servedNow().assignees.includes(gus) && servedNow().runs.length === runsNow, 'assignTask on Gus, already in the chain through a help request, adds him without an owner run', said);
+  await client.close();
+
+  console.log('\n# the office routes at start');
   office.shutdown();
+  const stored0 = JSON.parse(readFileSync(join(dir, 'tasks.json'), 'utf8'));
+  const leftOver = { ...stored0.tasks.find((t: Task) => t.title === 'Sort the inbox'), id: 'left-over', title: 'Left over by a crash', assignees: [], runs: [], stage: 'todo', history: [] };
+  stored0.tasks.push(leftOver);
+  writeFileSync(join(dir, 'tasks.json'), JSON.stringify(stored0));
+  const restarted = open(file);
+  const leftNow = restarted.snapshot().tasks.find((t) => t.id === leftOver.id)!;
+  check(leftNow.assignees.join() === otto.id && leftNow.runs.length === 1, 'opening the office routes a task left unassigned to the block PO');
+  // A start re-delivers what was open, so the ledger grows. What must not grow is the number of messages posted.
+  const posts = () => readFileSync(file.replace(/\.json$/, '.mail.jsonl'), 'utf8').split('\n').filter((l) => l.startsWith('{"t":"post"')).length;
+  const postedBefore = posts();
+  restarted.shutdown();
+  const twice = open(file);
+  check(posts() === postedBefore && postedBefore > 0 && twice.snapshot().tasks.find((t) => t.id === leftOver.id)!.runs.length === 1, 'opening it again posts nothing new');
+  twice.shutdown();
+
+  console.log('\n# an old company.json');
   const legacyFile = join(dir, 'legacy', 'company.json');
   mkdirSync(join(dir, 'legacy'));
   const seeded = open(legacyFile);
@@ -1317,6 +1395,128 @@ console.log('\n# task numbers');
   taskWorld(legacy);
   check(readFileSync(legacy, 'utf8') === before, 'loading the migrated file again leaves it byte-identical');
   check(old.tasks.createTask(old.tasks.boardsOf(B1)[0]!.id, 'New after the migration').number === 4, 'a task made after the migration gets #4');
+}
+
+console.log('\n# tasks nobody is on go to the block PO');
+{
+  const x = taskWorld(undefined, [], true);
+  const mail = () => x.w.room.state.messages;
+  const quick = x.tasks.boardsOf(B1).find((b) => b.kind === 'quick')!;
+  const made = x.tasks.createTask(quick.id, 'Route me');
+  x.sync();
+  const routed = x.tasks.view(x.now()).tasks.find((t) => t.id === made.id)!;
+  const posted = mail().get(routed.runs[0]!);
+  check(routed.assignees.join() === PO && routed.stage === 'doing' && posted?.kind === 'request' && posted.from === 'owner' && posted.to === PO && posted.intent === 'work', 'a task made with nobody on it posts an owner request to the PO, who is its assignee, in doing');
+  const withAna = x.tasks.createTask(quick.id, 'For Ana', { assignee: ANA });
+  check(x.tasks.view(x.now()).tasks.find((t) => t.id === withAna.id)!.assignees.join() === ANA, 'a task made with an assignee does not get the PO as well');
+  const b2 = x.tasks.boardsOf(B2)[0]!;
+  const orphan = x.tasks.createTask(b2.id, 'No PO here');
+  const left = x.tasks.view(x.now()).tasks.find((t) => t.id === orphan.id)!;
+  check(left.assignees.length === 0 && left.stage === 'todo' && left.runs.length === 0, 'a block without an orchestrator leaves its task unassigned in todo');
+  const shipped = x.tasks.createTask(quick.id, 'Shipped', { stage: 'done' });
+  check(x.tasks.view(x.now()).tasks.find((t) => t.id === shipped.id)!.assignees.length === 0, 'a done task is left alone');
+  const count = mail().size;
+  x.tasks.routeUnassigned();
+  x.tasks.routeUnassigned();
+  check(mail().size === count, 'routing again posts nothing new', `${count} then ${mail().size}`);
+
+  const synced = taskWorld(undefined, [], true);
+  const sprint = synced.tasks.createBoard(B1, 'Sprint', { kind: 'feature', sources: [{ provider: 'cronospark', projectId: 'p' }] });
+  synced.provider.cards = [crono(41)];
+  await synced.tasks.refresh(sprint.id);
+  synced.sync();
+  const card = synced.tasks.view(synced.now()).tasks.find((t) => t.origin.kind === 'cronospark')!;
+  check(card.assignees.join() === PO && card.stage === 'doing' && synced.w.room.state.messages.get(card.runs[0]!)?.to === PO, 'a new card from a provider sync is routed to the PO');
+
+  console.log('\n# startup routes what is pending');
+  const before = taskWorld();
+  const quiet = before.tasks.boardsOf(B1).find((b) => b.kind === 'quick')!;
+  const pending = [before.tasks.createTask(quiet.id, 'Pending one'), before.tasks.createTask(quiet.id, 'Pending two')];
+  check(pending.every((t) => t.assignees.length === 0), 'tasks saved while nothing routed them are unassigned');
+  // What the office does at start: open the store, recover, then route.
+  const start = taskWorld(before.file, before.w.persisted, true);
+  start.tasks.routeUnassigned();
+  const now = start.tasks.view(start.now()).tasks;
+  check(pending.every((p) => now.find((t) => t.id === p.id)!.assignees.join() === PO), 'startup routes both pending tasks to the PO');
+  const ledger = start.w.persisted.length;
+  const again = taskWorld(before.file, start.w.persisted, true);
+  again.tasks.routeUnassigned();
+  check(again.w.persisted.length === ledger, 'a second start posts nothing new', `${ledger} then ${again.w.persisted.length}`);
+
+  console.log('\n# the PO assigns a teammate');
+  const y = taskWorld(undefined, [], true);
+  const yq = y.tasks.boardsOf(B1).find((b) => b.kind === 'quick')!;
+  const job = y.tasks.createTask(yq.id, 'Build the export');
+  const answer = y.tasks.assignByPo(PO, 'build the export', 'ana');
+  const assigned = y.tasks.view(y.now()).tasks.find((t) => t.id === job.id)!;
+  const toAna = assigned.runs.map((r) => y.w.room.state.messages.get(r)).find((m) => m?.to === ANA);
+  check(answer === 'Assigned Build the export to Ana.' && assigned.assignees.includes(PO) && assigned.assignees.includes(ANA) && toAna?.kind === 'request' && toAna.from === 'owner', 'assignTask from the PO posts an owner request to the teammate, and both are assignees', answer);
+  const other = y.tasks.createTask(y.tasks.boardsOf(B2)[0]!.id, 'Elsewhere');
+  const finished = y.tasks.createTask(yq.id, 'Finished', { stage: 'done' });
+  const state = () => JSON.stringify([y.tasks.view(y.now()).tasks, y.w.persisted.length]);
+  const refusals: [string, () => string, RegExp][] = [
+    ['an unknown task', () => y.tasks.assignByPo(PO, 'no such task', 'Ana'), /No task of your block/],
+    ['a task of another block', () => y.tasks.assignByPo(PO, other.id, 'Ana'), /another block/],
+    ['a done task', () => y.tasks.assignByPo(PO, finished.id, 'Ana'), /is done/],
+    ['an unknown teammate', () => y.tasks.assignByPo(PO, job.id, 'Nobody'), /Nobody on your block is called/],
+    ['a teammate of another block', () => y.tasks.assignByPo(PO, job.id, 'Zed'), /another block/],
+    ['the PO naming itself', () => y.tasks.assignByPo(PO, job.id, 'Pia'), /not to yourself/],
+    ['a caller who is not the PO', () => y.tasks.assignByPo(ANA, job.id, 'Bruno'), /Only the block PO/],
+  ];
+  for (const [what, call, says] of refusals) {
+    const was = state();
+    const said = call();
+    check(says.test(said) && state() === was, `${what} is refused as text and changes nothing`, said);
+  }
+}
+
+console.log('\n# the PO delegating a task makes the teammate an assignee');
+{
+  const x = taskWorld(undefined, [], true);
+  const quick = x.tasks.boardsOf(B1).find((b) => b.kind === 'quick')!;
+  const routed = x.tasks.createTask(quick.id, 'Ship the importer');
+  check(x.w.prompts.get(PO)!.at(-1)!.includes(ROUTED_NOTE), 'the request routed to the PO carries the line about picking a teammate');
+  const direct = x.tasks.createTask(quick.id, 'Ana does this', { assignee: ANA });
+  check(!x.w.prompts.get(ANA)!.some((p) => p.includes(ROUTED_NOTE)) && direct.assignees.join() === ANA, "the owner's direct assign is the request as before, without that line");
+  const task = () => x.tasks.view(x.now()).tasks.find((t) => t.id === routed.id)!;
+  const runs = task().runs.length;
+  const history = () => task().history ?? [];
+  const assigns = () => history().filter((h) => h.kind === 'assign');
+
+  const help = x.w.room.post({ from: PO, to: 'Bruno', body: { kind: 'request', intent: 'help', text: 'which parser?' } });
+  x.w.room.post({ from: PO, to: 'Cleo', body: { kind: 'say', text: 'a piece is coming', urgency: 'queue' } });
+  x.sync();
+  check(help.ok && task().assignees.join() === PO && assigns().length === 0, 'a help request and a message from the PO add nobody');
+
+  const work = x.w.room.post({ from: PO, to: 'Ana', key: 'parser', body: { kind: 'request', text: 'the parser' } });
+  x.sync();
+  const added = assigns().at(-1);
+  check(work.ok && task().assignees.join() === [PO, ANA].join() && added?.kind === 'assign' && added.employeeId === ANA && added.by === PO && added.cause === (work.ok ? work.id : undefined), 'a PO work request under the task adds Ana to its assignees, with an assign entry naming the PO and the request', JSON.stringify(added));
+  check(task().runs.length === runs && task().stage === 'doing', 'and posts no run of the owner\'s and moves nothing');
+
+  const historyBefore = history().length;
+  const again = x.w.room.post({ from: PO, to: 'Ana', key: 'parser', body: { kind: 'request', text: 'the parser' } });
+  x.sync();
+  check(again.ok && work.ok && again.id === work.id && history().length === historyBefore && task().assignees.join() === [PO, ANA].join(), 'the same request again adds nothing', JSON.stringify(again));
+
+  const g = x.w.room.requestGauntlet(PO, { piece: 'the importer UI', bar: ['it imports'], builder: 'Cleo', critic: 'Bruno', maxRounds: 2 });
+  x.sync();
+  check(g.ok && task().assignees.includes(CLEO) && !task().assignees.includes(BRUNO) && assigns().at(-1)?.employeeId === CLEO, 'a gauntlet adds its builder, not its critic', JSON.stringify(task().assignees));
+
+  check(task().runs.length === runs && x.w.room.state.messages.size > 0, 'none of it posted a run of the owner\'s');
+  const ownerToBruno = () => [...x.w.room.state.messages.values()].filter((m) => m.from === 'owner' && m.to === BRUNO).length;
+  const beforeBruno = ownerToBruno();
+  const answer = x.tasks.assignByPo(PO, routed.id, 'Bruno');
+  check(answer === 'Assigned Ship the importer to Bruno.' && task().assignees.includes(BRUNO) && ownerToBruno() === beforeBruno && task().runs.length === runs, 'assignTask on Bruno, already in the chain through the help request and the review, adds him without an owner run', answer);
+
+  const y = taskWorld(undefined, [], true);
+  const yq = y.tasks.boardsOf(B1).find((b) => b.kind === 'quick')!;
+  const others = y.tasks.createTask(yq.id, 'Bruno has this', { assignee: BRUNO });
+  const plain = y.w.room.post({ from: 'owner', to: 'po', blockId: B1, body: { kind: 'request', text: 'look into the logs' } });
+  y.sync();
+  const outside = y.w.room.post({ from: PO, to: 'Ana', body: { kind: 'request', text: 'grep the logs' } });
+  y.sync();
+  check(plain.ok && outside.ok && y.tasks.view(y.now()).tasks.every((t) => !t.assignees.includes(ANA)) && y.tasks.view(y.now()).tasks.find((t) => t.id === others.id)!.assignees.join() === BRUNO, 'a PO request outside any task adds nobody to any task');
 }
 
 finish();
