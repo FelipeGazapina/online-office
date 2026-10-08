@@ -2,7 +2,7 @@ import { removeItemOp } from '../../../../shared/space/buildersGesture.ts';
 import { worldRotOf } from '../../../../shared/space/index.ts';
 import { runtime } from '../../runtime.ts';
 import { get } from '../../store.ts';
-import { enterBuild, exitBuild, redo, rotate, sendOps, setLevel, setTool, stepBack, undo } from './actions.ts';
+import { enterBuild, redo, saveBuild, rotate, sendOps, setLevel, setTool, stepBack, undo } from './actions.ts';
 import { removal, askToRemove, keepBlock, removeBlock } from './removal.ts';
 import { buildView, hand, modifiers } from './state.ts';
 
@@ -45,7 +45,7 @@ export function buildKey(e: KeyboardEvent): boolean {
   }
   switch (e.code) {
     case 'KeyB':
-      if (!e.repeat) exitBuild();
+      if (!e.repeat) saveBuild();
       return taken();
     case 'Escape':
       if (s.helpOpen || s.menu) return false;

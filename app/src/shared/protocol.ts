@@ -5,6 +5,7 @@
 import type { ActivityEntry, QuestionRef, TaskLive } from './activity.ts';
 import type { TerminalPush } from './terminal.ts';
 import type { Building, BuildOp, ItemId, Violation } from './space/types.ts';
+import type { Missing } from './space/essentials.ts';
 import type { MailClientMessage, MailServerMessage, MailView } from './mail.ts';
 import type { Board, BoardId, BoardPatch, BoardSpec, BoardSync, Priority, Task, TaskId, TaskStage, TaskTime } from './tasks.ts';
 import type { VoiceApi } from './voice.ts';
@@ -303,6 +304,11 @@ export type ClientMessage =
   | { type: 'build'; ops: BuildOp[] }
   | { type: 'undo' }
   | { type: 'redo' }
+  // A build session edits a draft. Save keeps it only once nothing essential is missing; discard drops it.
+  | { type: 'build_begin' }
+  | { type: 'build_clear' }
+  | { type: 'build_save' }
+  | { type: 'build_discard' }
   // Everything the owner says to anyone, a task or a word, goes through the mailroom.
   | MailClientMessage;
 
@@ -314,6 +320,8 @@ export type Snapshot = {
   meetingDoor: MeetingDoor;
   // Changes whenever the building does. The building itself arrives on its own channel.
   buildingRev: number;
+  // A build session is open: the building shown is its draft, which is not saved yet.
+  buildDraft: boolean;
   // Every block has at least one board, in the order the owner sees them.
   boards: Board[];
   tasks: Task[];
@@ -336,6 +344,7 @@ export type ServerMessage =
   | { type: 'building'; building: Building; rev: number }
   | { type: 'activity'; taskId: TaskId; entries: ActivityEntry[]; live: TaskLive }
   | { type: 'build_rejected'; violations: readonly Violation[] }
+  | { type: 'build_incomplete'; missing: readonly Missing[] }
   // What changed on an employee's terminal (shared/terminal.ts). Throttled to a few a second per employee.
   | ({ type: 'terminal'; employeeId: EmployeeId } & TerminalPush)
   | { type: 'error'; message: string }

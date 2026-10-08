@@ -91,6 +91,7 @@ const buildOp: z.ZodType<BuildOp> = z.discriminatedUnion('t', [
     cells: z.array(z.object({ x: tile, z: tile, half: z.union([z.literal(0), z.literal(1)]), paint: z.number().int().min(0).max(255) })).max(MANY),
   }),
   z.object({ t: z.literal('items'), story: z.number().int().min(0).max(3), put: z.array(item).max(MANY), del: z.array(itemIdSchema).max(MANY) }),
+  z.object({ t: z.literal('bare'), on: z.boolean() }),
 ]);
 
 const clientMessage = z.discriminatedUnion('type', [
@@ -162,6 +163,10 @@ const clientMessage = z.discriminatedUnion('type', [
   z.object({ type: z.literal('build'), ops: z.array(buildOp).min(1).max(64) }),
   z.object({ type: z.literal('undo') }),
   z.object({ type: z.literal('redo') }),
+  z.object({ type: z.literal('build_begin') }),
+  z.object({ type: z.literal('build_clear') }),
+  z.object({ type: z.literal('build_save') }),
+  z.object({ type: z.literal('build_discard') }),
 ]);
 // Compile-time proof the schema and the contract agree in both directions.
 type Parsed = z.infer<typeof clientMessage>;
@@ -198,6 +203,7 @@ export function startOffice({ dataFile, harnesses, window, services }: Options) 
       },
       building: (building, rev) => emit({ type: 'building', building, rev }),
       rejected: (violations) => emit({ type: 'build_rejected', violations }),
+      incomplete: (missing) => emit({ type: 'build_incomplete', missing }),
       said: (employeeId, text) => emit({ type: 'said', employeeId, text }),
       log: (employeeId, line, at) => emit({ type: 'log', employeeId, line, at }),
       // Mail and live tokens are sparse and the owner is waiting on them, so they skip the coalescer.

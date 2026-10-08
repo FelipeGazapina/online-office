@@ -246,7 +246,7 @@ export default async function (s, { launch }) {
   // Every kind of piece is deleted by itself with the Delete key, and each leaves the rest as it was.
   const taken = new Set(await s.eval(`${store}.company.employees.map((e) => e.seat)`));
   const unseated = pieceBlock.find((i) => i.def === 'bench_desk' && !taken.has(i.id));
-  const kinds = [...POD, 'whiteboard', 'board_terminal', 'team_sign', 'bench_desk'];
+  const kinds = [...POD, 'team_sign', 'bench_desk', 'whiteboard', 'board_terminal'];
   const victims = kinds.map((def) => (def === 'bench_desk' ? unseated : pieceBlock.find((i) => i.def === def && (def !== 'pod_rail_side' || i.rot === 1)))).filter(Boolean);
   assert(victims.length === kinds.length, `one of each of ${kinds.length} kinds is there to delete`);
   let current = await building();
@@ -266,6 +266,17 @@ export default async function (s, { launch }) {
     assert(lost.length === 1 && lost[0].id === victim.id && allItems(next).every((i) => same(i, byId(current).get(i.id))), `Delete took the ${victim.def} and nothing else`);
     current = next;
   }
+  // A team without its whiteboard and board computer is not an office that can be saved: Save names both, and two undos
+  // bring them back.
+  const boardsOf = victims.slice(-2);
+  await s.clickOn('.bh-done');
+  await s.sleep(400);
+  const missingRows = await s.eval(`[...document.querySelectorAll('[data-testid=build-essentials] li[data-ok=false]')].map((li) => li.dataset.essential)`);
+  assert((await s.eval(`${store}.build !== null`)) && boardsOf.every((v) => missingRows.includes(`${v.blockId}:${v.def}`)), `Save stays in build mode and names the missing whiteboard and board computer (${missingRows.join(', ')})`);
+  for (let i = 0; i < 2; i++) await s.clickOn('[aria-label="Undo"]');
+  await waitBuilding(boardsOf.map((v) => `b.stories[0].items.some((i) => i.id === ${JSON.stringify(v.id)})`).join(' && '), 'two undos did not bring the whiteboard and board computer back');
+  gone.splice(-2);
+  current = await building();
   const afterPieces = current;
   await park();
 
