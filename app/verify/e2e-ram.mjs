@@ -396,7 +396,9 @@ async function takeShots(s, people, log) {
       await s.waitFor(`!!document.querySelector('.term-frame.ready')`, 5000).catch(() => {});
       await s.sleep(800);
       await take('3-terminal-zoom');
-      await s.press('Escape', 'Escape');
+      // F leaves. Escape on a working employee's terminal would interrupt their step.
+      await s.press('KeyF', 'f');
+      await s.waitFor(`__officeMonitor.getState().open === null`, 4000).catch(() => log('the terminal did not close'));
       await s.sleep(1500);
     } else log('the monitor offered no F prompt, so no terminal shot');
   } else log('nobody was seated on the ground floor, so no desk shots');
@@ -407,7 +409,6 @@ async function takeShots(s, people, log) {
   await s.waitFor(`!!${state}.build`, 4000).catch(() => {});
   await s.sleep(1500);
   await take('4-build-mode');
-  await s.press('Escape', 'Escape');
   return taken;
 }
 
