@@ -81,6 +81,15 @@ async function engineFallsAsleep(s, how, ms = 90000) {
   assert(serverProcesses().length === 0 && !existsSync(pidFile), `${how}: no whisper-server process and no pid file are left`);
   console.log(`lifecycle: ${how}: the whisper-server was gone ${quiet} ms after the last use`);
 }
+const norm = (t) =>
+  t
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/\p{M}/gu, '')
+    .replace(/[^a-z0-9 ]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+const hears = (t, words) => words.every((w) => norm(t).includes(w));
 // The settings panel lives on the office desktop now (My Mac), so a voice scenario sets them the way its buttons do: in the store.
 const SETTING = { 'Hold V': ['mic', 'push'], Proximity: ['mic', 'proximity'], English: ['lang', 'en-US'], Português: ['lang', 'pt-BR'], Auto: ['lang', 'auto'], Fast: ['voiceQuality', 'fast'], Accurate: ['voiceQuality', 'accurate'] };
 const click = async (s, label) => {
