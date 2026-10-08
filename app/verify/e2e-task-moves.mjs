@@ -144,7 +144,7 @@ export default async (s) => {
   const held = await task(pin);
   console.log('pin stage moves:', moves(held).join(' > '), '| her reply:', JSON.stringify(held.lastOutcome.text.slice(0, 200)));
   assert(held.stage === 'todo' && held.stagePinned === true, 'the card is still where the owner put it');
-  assert(moves(held).join() === 'owner:doing,owner:todo', `no move is recorded under Ana's name (${moves(held).join(' > ')})`);
+  assert(moves(held).join() === 'mailroom:doing,owner:todo', `no move is recorded under Ana's name (${moves(held).join(' > ')})`);
   assert(/pinned/.test(held.lastOutcome.text) || /put this task in todo/.test(held.lastOutcome.text), 'and her reply shows she asked and was refused');
 
   // 4. A PO delegates two pieces and finishes its task once both are in.
