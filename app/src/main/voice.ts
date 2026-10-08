@@ -18,6 +18,12 @@ const quality = z.enum(QUALITIES);
 const cacheHome = () => (process.platform === 'darwin' ? join(homedir(), 'Library/Caches') : (process.env.XDG_CACHE_HOME ?? join(homedir(), '.cache')));
 const cacheDir = () => join(cacheHome(), 'online-office', 'whisper');
 
+// A run that checks the idle stop does not wait a minute for it.
+const idleMs = () => {
+  const ms = Number(process.env.OFFICE_VOICE_IDLE_MS);
+  return Number.isFinite(ms) && ms > 0 ? ms : undefined;
+};
+
 const MIC_SETTINGS = 'x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone';
 
 // A test run never touches the real microphone: Chromium plays a WAV (or its own beep) instead, macOS is never asked,
@@ -79,6 +85,7 @@ export function startVoice({ window, userData }: Options) {
   const whisper = createWhisper({
     cacheDir: cacheDir(),
     pidFile: join(userData, 'whisper-server.pid'),
+    idleMs: idleMs(),
     onEngine(engine) {
       const win = window();
       if (win && !win.isDestroyed()) win.webContents.send(VOICE_IPC.engineChanged, engine);
@@ -108,6 +115,7 @@ export function startVoice({ window, userData }: Options) {
     const parsed = quality.safeParse(raw);
     if (parsed.success) void whisper.use(parsed.data);
   });
+  listen(VOICE_IPC.wake, () => void whisper.wake());
   listen(VOICE_IPC.recheck, () => void whisper.recheck());
   listen(VOICE_IPC.micSettings, () => {
     // A test that clicks the button must not open System Settings on the owner's screen.

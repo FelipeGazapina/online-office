@@ -85,9 +85,10 @@ function refreshPhase() {
   patchVoice({ phase });
 }
 
+// An engine that is asleep starts when the owner speaks, so it can serve too.
 const engineCanServe = () => {
   const { engine } = get().voice;
-  return engine.kind === 'ready' || engine.kind === 'starting';
+  return engine.kind === 'ready' || engine.kind === 'starting' || engine.kind === 'asleep';
 };
 
 async function transcribeAndRoute(u: Utterance) {
@@ -113,6 +114,8 @@ function counted(work: () => Promise<void>) {
 const vadEvents: VadEvents = {
   speechStart() {
     speaking = true;
+    // The engine only runs while the owner talks, and it loads while they finish the sentence.
+    window.office.voice.wake();
     refreshPhase();
   },
   misfire() {
@@ -269,6 +272,8 @@ export function setPtt(held: boolean) {
   if (held) {
     // Barge-in: an employee who is talking stops the moment the owner reaches for the key.
     cancelSpeech();
+    // The engine loads while the key is held, so the words are ready soon after it is let go.
+    window.office.voice.wake();
     pttFrom = micState.kind === 'open' ? Math.max(0, micState.capture.ring.written - PTT_PRE_ROLL_SAMPLES) : 0;
   } else {
     releasePtt();

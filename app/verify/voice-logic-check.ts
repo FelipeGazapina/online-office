@@ -71,6 +71,11 @@ check(chip({ access: { kind: 'needs_prompt' } }).text.includes('macOS dialog'), 
 check(chip({ engine: { kind: 'downloading', file: 'f', received: 37_400_000, total: 100_000_000 } }).text === 'Downloading the voice model 37%', 'a download shows its percent');
 check(chip({ engine: { kind: 'downloading', file: 'f', received: 0, total: 0 } }).text.endsWith('0%'), 'an unknown size does not divide by zero');
 check(chip({ engine: { kind: 'starting' } }).tone === 'busy', 'a starting engine says the model is loading');
+check(chip({ engine: { kind: 'starting' } }).text === 'Loading the voice model', 'and says so while the owner is doing nothing');
+check(chip({ engine: { kind: 'starting' }, phase: 'listening' }).text === 'Listening', 'but the engine loads while the owner talks, and the chip keeps saying Listening');
+check(chip({ engine: { kind: 'starting' }, phase: 'transcribing' }).text === 'Transcribing', 'and Transcribing while the words wait for it');
+check(chip({ engine: { kind: 'asleep' } }, 'push').text === 'Hold V to talk' && chip({ engine: { kind: 'asleep' } }, 'proximity').text.startsWith('Just talk'), 'a sleeping engine looks like a ready one, because the next word wakes it');
+check(chip({ engine: { kind: 'asleep' } }).tone === 'idle' && chip({ engine: { kind: 'asleep' } }).meter, 'with no warning and the level meter on');
 check(chip({ capture: { kind: 'opening' } }).text === 'Mic starting', 'a microphone that is opening says so');
 check(chip({ capture: { kind: 'failed', message: 'Requested device not found' } }).text.includes('Requested device not found'), 'a microphone that cannot open says why');
 check(chip({ phase: 'listening' }).text === 'Listening' && chip({ phase: 'listening' }).tone === 'live', 'speech shows Listening');
