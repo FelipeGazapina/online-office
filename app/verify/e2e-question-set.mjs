@@ -1,4 +1,4 @@
-// The fixed 30 owner messages of verify/owner-messages.ts (set A, or B with OFFICE_QUESTION_SET=B) through the real app, as
+// The fixed 30 owner messages of verify/owner-messages.ts (set A, or B or C with OFFICE_QUESTION_SET=B|C) through the real app, as
 // shipped: the post, the triage with its 2.5 s leash, the mailroom and a real Claude employee on a scratch git repo. A question
 // is let run and must settle. A work order is cancelled as soon as the ledger shows how it was posted, so the 15 orders do not
 // run, and what is checked is the intent the ledger recorded and that nothing settled done without a file.
@@ -9,7 +9,7 @@ import { loadavg, tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { HAIKU, assert, company } from './lib.mjs';
-import { SET_A, SET_B } from './owner-messages.ts';
+import { SET_A, SET_B, SET_C } from './owner-messages.ts';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const dataDir = mkdtempSync(join(tmpdir(), 'w7-set-data-'));
@@ -26,7 +26,7 @@ export const env = {
   OFFICE_CLAUDE_MODEL: process.env.OFFICE_CLAUDE_MODEL ?? HAIKU,
 };
 
-const SET = process.env.OFFICE_QUESTION_SET === 'B' ? SET_B : SET_A;
+const SET = { A: SET_A, B: SET_B, C: SET_C }[process.env.OFFICE_QUESTION_SET ?? 'A'];
 const CALM_LOAD = 10;
 const WAIT_MS = 150_000;
 

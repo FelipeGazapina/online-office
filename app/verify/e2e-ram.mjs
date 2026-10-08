@@ -24,7 +24,7 @@ import { delimiter, join } from 'node:path';
 import { TerminalBuffer } from '../src/shared/terminal.ts';
 import { installFakeGh } from './fake-gh.ts';
 import { linearWorld, startFakeLinear, TOKEN } from './fake-linear.ts';
-import { rampEnd, startSampler, summarize } from './footprint-sampler.mjs';
+import { rampEnd, startAckerCensus, startSampler, summarize } from './footprint-sampler.mjs';
 import { summarize as summarizeHeap } from './heap-summary.mjs';
 import { connect, targets } from './inspector.mjs';
 import { HAIKU, sceneReady } from './lib.mjs';
@@ -59,6 +59,7 @@ export async function prepare() {
   Object.assign(env, {
     OFFICE_DATA_DIR: office.dataDir,
     OFFICE_TEST_RUN: '',
+    OFFICE_TRACE: '1',
     OFFICE_CLAUDE_MODEL: HAIKU,
     OFFICE_INSPECT_PORT: String(INSPECT_PORT),
     OFFICE_TASK_BOARD_FIXTURE: '',
@@ -179,6 +180,7 @@ export default async function (s) {
     t0: startedAt,
     extra: () => ({ people: { ...live } }),
   });
+  const census = startAckerCensus({ rootPid: s.pid, t0: startedAt });
   const assign = async (person, index) => {
     const round = rounds.get(person.id) ?? 0;
     rounds.set(person.id, round + 1);
@@ -251,6 +253,9 @@ export default async function (s) {
     await s.sleep(2000);
   }
   await sampler.stop();
+  const ackers = census.stop();
+  // The hops main traced (deliver, ack_start, ...) in epoch ms, so the census can be read against what the office was doing.
+  writeFileSync(join(OUT, 'trace.log'), `${s.mainLogs.join('\n').split('\n').filter((l) => l.startsWith('[trace]')).join('\n')}\n`);
   const samples = sampler.samples;
   log(`window over: ${samples.length} samples, ${assigned} tasks handed out`);
 
@@ -300,6 +305,14 @@ export default async function (s) {
     otherApps: apps.filter((o) => o.kind !== 'test'),
     office: { ...office, plan: office.plan.map((p) => ({ story: p.story, deskId: p.deskId })) },
     summary,
+    ackers: {
+      ...ackers,
+      // From the 10 s samples, the figures the bar quotes: processes alive and their memory at each sample.
+      samplesMaxProcesses: Math.max(0, ...ok.map((x) => x.classes.ackers.n)),
+      samplesMeanProcesses: r2(mean(ok.map((x) => x.classes.ackers.n))),
+      peakMiB: r1(Math.max(0, ...ok.map((x) => x.classes.ackers.mib))),
+      meanMiB: r1(mean(ok.map((x) => x.classes.ackers.mib))),
+    },
     classTotals: { counted: 'main + renderer + gpu + utility + other + ackers', agents: 'the employees own claude/codex/hermes processes and their descendants' },
     working: { perSample: working, min: Math.min(...working), mean: r1(mean(working)), rampMin: ramp === null ? null : +ramp.toFixed(2), meanAfterRamp: steady.length ? r1(mean(steady)) : null, tasksHandedOut: assigned, reinjected: live.reinjected },
     frames: frameResult,

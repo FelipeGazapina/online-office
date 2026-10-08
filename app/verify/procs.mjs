@@ -67,7 +67,7 @@ const exeName = (command) => {
 const isAgentRoot = (command) => /claude-agent-sdk/.test(command) || /^(claude|codex|hermes)(\.exe)?$/.test(exeName(command));
 // The Acknowledger's one-shot calls run a single turn with no tools and keep no session (see OneShot in ack.ts); an employee's
 // session never does, because it needs its tools and resumes its session.
-const isAckerRoot = (command) => isAgentRoot(command) && /--max-turns 1(\s|$)/.test(command) && /--no-session-persistence/.test(command);
+export const isAckerRoot = (command) => isAgentRoot(command) && /--max-turns 1(\s|$)/.test(command) && /--no-session-persistence/.test(command);
 
 // Where each process of the tree belongs. Anything at or below an agent CLI is the agent's, even a git or a node it started.
 export function classify(table, root) {

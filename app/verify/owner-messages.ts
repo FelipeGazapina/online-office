@@ -78,3 +78,33 @@ export const SET_B: readonly Labeled[] = [
   w('Turn the retry delay into a config option.'),
   w('pls fix teh login bug'),
 ];
+
+// Set C, written after the acknowledger's call began to carry the sort word and before that version was run on it: 12 questions,
+// 12 work orders, none of them copied from A or B. It is the hold-out for the merged call.
+export const SET_C: readonly Labeled[] = [
+  q('What does the retry helper do when the server returns a 503?'),
+  q('Where do we read the feature flags from?'),
+  q('How long does the full test suite take to run?'),
+  q('Is the cache invalidated when a user logs out?'),
+  q('Can you explain why the build fails on Node 18?'),
+  q('Which of the open branches touches the billing module?'),
+  q('Any news on the migration?'),
+  q('Quanto tempo falta para terminar a tela de login?'),
+  q('Are we using the v2 or the v3 API client in the checkout flow?'),
+  q('Give me a quick summary of what changed in the last release.'),
+  q('Why is the settings screen slow to open?'),
+  q('Do the integration tests cover the refund path?'),
+
+  w('Could you tidy the imports in src/server.ts?'),
+  w('How about splitting the parser into two files?'),
+  w('The date format on the invoice is wrong, fix it.'),
+  w('Please make the login button blue.'),
+  w('I need a script that exports users to CSV.'),
+  w('Can we get a dark mode toggle in the header?'),
+  w('Add error handling to the upload route and tell me what you changed.'),
+  w('Escreva testes para o módulo de pagamentos.'),
+  w('What if we cached the user lookups? Try it and measure.'),
+  w('Update the README so it mentions the new CLI flags, then explain what you added.'),
+  w('Make sure the build passes on Node 18 again.'),
+  w('The retry helper should wait longer between attempts. Change it.'),
+];
