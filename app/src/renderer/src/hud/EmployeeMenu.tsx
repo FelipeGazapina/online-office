@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { Employee } from '../../../shared/protocol.ts';
 import { walkTo } from '../sim.ts';
-import { get, set, useStore } from '../store.ts';
+import { get, openChat, set, useStore } from '../store.ts';
 
 const MARGIN = 8;
 
@@ -48,7 +48,7 @@ function Menu({ employee, x, y }: { employee: Employee; x: number; y: number }) 
       <button
         onClick={() => {
           if (get().selectedId === employee.id) document.getElementById('drawer-input')?.focus();
-          set({ selectedId: employee.id, chatFocus: true, menu: null, chatSub: null, chatToPo: false, chatDetails: false });
+          openChat(employee.id, { menu: null, chatSub: null, chatToPo: false, chatDetails: false });
         }}
       >
         Open chat

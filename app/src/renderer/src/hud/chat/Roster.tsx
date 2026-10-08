@@ -1,7 +1,7 @@
 import { memo } from 'react';
 import type { Employee } from '../../../../shared/protocol.ts';
 import type { ActorView, Message, RequestView } from '../../../../shared/mail.ts';
-import { set, useStore } from '../../store.ts';
+import { openChat, useStore } from '../../store.ts';
 import { avatarColor, clock, isPo, liveState, nameOf, textOf } from './model.ts';
 import { countRender } from './renders.ts';
 
@@ -15,7 +15,7 @@ const Row = memo(function Row({ employee, employees, actor, open, last, active }
   const queued = actor?.queued ?? 0;
   const preview = last ? `${last.from === employee.id ? '' : `${nameOf(employees, last.from)}: `}${textOf(last)}` : 'No messages yet';
   return (
-    <button className={`cp-person ${active ? 'on' : ''}`} data-emp={employee.id} aria-current={active} onClick={() => set({ selectedId: employee.id, chatSub: null, chatDetails: false })}>
+    <button className={`cp-person ${active ? 'on' : ''}`} data-emp={employee.id} aria-current={active} onClick={() => openChat(employee.id, { chatSub: null, chatDetails: false })}>
       <i className={`cp-av ${live.kind}`} style={{ background: avatarColor(employee.id) }} aria-hidden>{employee.name[0]}</i>
       <span className="cp-person-main">
         <span className="cp-person-top">
