@@ -4,6 +4,7 @@ import { EmployeeMenu } from './hud/EmployeeMenu.tsx';
 import { Modals } from './hud/Modals.tsx';
 import { ComputerPrompt, HelpOverlay, Toasts, WaitingMeter } from './hud/Panels.tsx';
 import { Bottom } from './hud/Talk.tsx';
+import { MonitorPrompt, TerminalPanel } from './hud/terminal/TerminalPanel.tsx';
 import { UpdateChip } from './hud/UpdateControl.tsx';
 import { ComputerMenu, MacPortal } from './hud/MacPortal.tsx';
 import { CameraToggle } from './hud/CameraToggle.tsx';
@@ -40,6 +41,8 @@ export function App() {
       {portalMode && <MacPortal />}
       <ResizableHud itemKey="toasts"><Toasts /></ResizableHud>
       <ResizableHud itemKey="computer-prompt"><ComputerPrompt /></ResizableHud>
+      <MonitorPrompt />
+      <TerminalPanel />
       <ResizableHud itemKey="drawer"><Drawer /></ResizableHud>
       <ModalsHud />
       <ResizableHud itemKey="employee-menu"><EmployeeMenu /></ResizableHud>

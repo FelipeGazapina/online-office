@@ -7,6 +7,8 @@ import { get, useStore } from '../store.ts';
 import { stepSim } from '../sim.ts';
 import { crowd } from './people/crowd.ts';
 import { buildView } from '../hud/build/state.ts';
+import { useMonitor } from '../computer.ts';
+import { monitorPoses, zoomFrame } from './monitorPose.ts';
 import { STORY_H } from '../../../shared/space/index.ts';
 
 const ISO_PITCH = 0.58;
@@ -16,12 +18,20 @@ const FOV_FIRST = 65;
 const FP_PITCH = -0.05;
 // The live camera opens at a Sims-like mid zoom: the owner's room and its neighbors fill the frame. The wheel still zooms out to the whole plan.
 const ISO_START = 27;
+// How far above the floor the overview looks, and the nearest and farthest it may sit from that point. The nearest is where the camera
+// still clears the top of a wall (STORY_H), so a close view never has a standing wall in front of the lens or a curb cutting through it.
+const FOCUS_LIFT = 0.6;
+export const ISO_NEAR = Math.ceil((STORY_H - FOCUS_LIFT) / Math.sin(ISO_PITCH));
+const ISO_FAR = 48;
+const ISO_FAR_BUILD = 90;
 const EYE = 1.6;
 // A new owner who steps into first person at the spawn faces east, down the lobby to the lounge, not at the wall behind the camera's overview heading.
 const SPAWN_LOOK = Math.PI / 2;
 const SPAWN_REACH = 0.3;
 // Seconds the camera takes to fly between the overview and the owner's eyes.
 const FLIGHT = 0.8;
+// Seconds the camera takes to fly into a monitor and back.
+const ZOOM_TIME = 0.55;
 const MAX_DT = 1 / 20;
 const LOOK_SPEED = 0.0024;
 const DRAG_PX = 6;
@@ -35,13 +45,14 @@ export function SimDriver() { useFrame((_, dt) => stepSim(dt), -2); return null;
 // Anything on screen that wants the cursor: the mouse must be free for it.
 const uiOpen = () => {
   const s = get();
-  return Boolean(s.modal || s.menu || s.helpOpen || s.computerMenu || s.portalMode || s.selectedId);
+  return Boolean(s.modal || s.menu || s.helpOpen || s.computerMenu || s.portalMode || s.selectedId || useMonitor.getState().open);
 };
 
 export function CameraRig() {
   const { gl } = useThree();
   const mode = useStore((s) => s.camera);
   const ui = useStore(() => uiOpen());
+  const monitor = useMonitor((s) => s.open);
   const focus = useRef(new Vector3());
   const snap = useRef(true);
   const placed = useRef(false);
@@ -50,7 +61,9 @@ export function CameraRig() {
   const isoBefore = useRef<number | null>(null);
   const drag = useRef<{ x: number; y: number; ox: number; oy: number; far: boolean } | null>(null);
   const locked = useRef(false);
-  const scratch = useRef({ iso: new Vector3(), isoPos: new Vector3(), isoLook: new Vector3(), eye: new Vector3(), eyeLook: new Vector3(), look: new Vector3(), want: new Vector3() });
+  // How far the camera has flown into the monitor of the open terminal (1) and the pose it flew to, kept while it flies back.
+  const zoom = useRef({ t: 0, id: null as string | null });
+  const scratch = useRef({ zoomPos: new Vector3(), zoomLook: new Vector3(), iso: new Vector3(), isoPos: new Vector3(), isoLook: new Vector3(), eye: new Vector3(), eyeLook: new Vector3(), look: new Vector3(), want: new Vector3() });
 
   useEffect(() => { runtime.view.isoDist = ISO_START; }, []);
 
@@ -75,8 +88,8 @@ export function CameraRig() {
   }, [gl, mode]);
 
   useEffect(() => {
-    if (ui && document.pointerLockElement === gl.domElement) document.exitPointerLock();
-  }, [gl, ui]);
+    if ((ui || monitor) && document.pointerLockElement === gl.domElement) document.exitPointerLock();
+  }, [gl, ui, monitor]);
 
   useEffect(() => {
     const el = gl.domElement;
@@ -119,7 +132,7 @@ export function CameraRig() {
       if (d.far && (!get().build || (e.buttons & 6) !== 0)) view.isoYawTarget -= dx * 0.006;
     };
     const up = () => { drag.current = null; };
-    const wheel = (e: WheelEvent) => { if (get().camera === 'iso') runtime.view.isoDist = clamp(runtime.view.isoDist + e.deltaY * 0.03, 8, get().build ? 90 : 48); };
+    const wheel = (e: WheelEvent) => { if (get().camera === 'iso') runtime.view.isoDist = clamp(runtime.view.isoDist + e.deltaY * 0.03, ISO_NEAR, get().build ? ISO_FAR_BUILD : ISO_FAR); };
     const blur = () => { if (document.pointerLockElement === el) document.exitPointerLock(); };
     el.addEventListener('pointerdown', down);
     el.addEventListener('click', blockClick, true);
@@ -178,9 +191,9 @@ export function CameraRig() {
         buildView.x = clamp(buildView.x, lot.x0 - 4, lot.x0 + lot.w + 4);
         buildView.z = clamp(buildView.z, lot.z0 - 4, lot.z0 + lot.h + 4);
       }
-      iso.set(buildView.x, build.level * STORY_H + 0.6, buildView.z);
+      iso.set(buildView.x, build.level * STORY_H + FOCUS_LIFT, buildView.z);
     } else {
-      iso.set(owner.pos.x, owner.pos.y + 0.6, owner.pos.z);
+      iso.set(owner.pos.x, owner.pos.y + FOCUS_LIFT, owner.pos.z);
     }
     focus.current.lerp(iso, ease(dt, snap.current ? 100 : 5));
     const fx = Math.sin(view.yaw), fz = Math.cos(view.yaw), c = Math.cos(ISO_PITCH);
@@ -197,8 +210,24 @@ export function CameraRig() {
     cam.position.lerpVectors(isoPos, eye, t);
     look.lerpVectors(isoLook, eyeLook, t);
     snap.current = false;
+    let fov = FOV_ISO + (FOV_FIRST - FOV_ISO) * t;
+    // Zoomed into a monitor: the camera flies to a spot in front of the screen and looks at its middle.
+    const wanted = useMonitor.getState().open;
+    const z = zoom.current;
+    if (wanted) z.id = wanted;
+    z.t = clamp(z.t + (wanted ? dt : -dt) / ZOOM_TIME, 0, 1);
+    const pose = z.id ? monitorPoses.get(z.id) : undefined;
+    if (z.t > 0 && pose) {
+      const { zoomPos, zoomLook } = scratch.current;
+      const frame = zoomFrame(pose, state.size.width / state.size.height);
+      zoomPos.copy(pose.normal).multiplyScalar(frame.dist).add(pose.center);
+      zoomLook.copy(pose.center);
+      const k = smooth(z.t);
+      cam.position.lerp(zoomPos, k);
+      look.lerp(zoomLook, k);
+      fov += (frame.fov - fov) * k;
+    } else if (z.t === 0) z.id = null;
     cam.lookAt(look);
-    const fov = FOV_ISO + (FOV_FIRST - FOV_ISO) * t;
     if (Math.abs(cam.fov - fov) > 0.001 || cam.near !== 0.1) { cam.fov = fov; cam.near = 0.1; cam.updateProjectionMatrix(); }
     // Read by verify/e2e-camera.mjs. ownerVisible asks the scene graph itself whether the owner's body would be drawn.
     const ownerVisible = () => {
@@ -211,7 +240,7 @@ export function CameraRig() {
       }
       return false;
     };
-    (window as unknown as { __officeCamera: unknown }).__officeCamera = { ownerVisible, x: cam.position.x, y: cam.position.y, z: cam.position.z, fov: cam.fov, blend: view.blend, yaw: view.yaw, pitch: view.fpPitch, locked: locked.current };
+    (window as unknown as { __officeCamera: unknown }).__officeCamera = { ownerVisible, dist: view.isoDist, near: ISO_NEAR, x: cam.position.x, y: cam.position.y, z: cam.position.z, fov: cam.fov, blend: view.blend, yaw: view.yaw, pitch: view.fpPitch, locked: locked.current };
   }, -1);
   return null;
 }

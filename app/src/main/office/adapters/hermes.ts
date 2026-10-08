@@ -59,9 +59,15 @@ type Link = {
 type Turn = {
   // False while the process is still starting. What the boss says then goes out with the first prompt.
   prompted: boolean;
-  // What the boss said when he cut the turn short: the turn that follows it.
+  // What the boss said when he cut the turn short: the turn that follows it, and what the terminal echoes of it.
   followUp?: string;
+  followShown?: string;
+  // The owner pressed Esc on the terminal: the turn ends with nothing after it.
+  ownerStop?: boolean;
 };
+
+// A turn to run: the prompt, and what the terminal echoes of it.
+type Next = { text: string; shown: string };
 
 // The two answers that arrive as JSON without a type: Hermes puts `models` in `session/new`, and answers `session/load` of
 // a conversation it does not have with an empty object instead of an error.
@@ -132,6 +138,31 @@ function describeTool(name: string, update: { content?: readonly acp.ToolCallCon
   }
 }
 
+// A Hermes tool on the terminal, in the name Claude Code gives the same thing.
+export function termTool(name: string, call: { content?: readonly acp.ToolCallContent[] | null; locations?: readonly { path: string }[] | null; title?: string | null }, cwd: string): { name: string; input: Record<string, unknown> } {
+  const rest = (call.title ?? '').split(': ').slice(1).join(': ');
+  switch (name) {
+    case 'terminal':
+      return { name: 'Bash', input: { command: textOf(call.content).replace(/^\$ /, '') || rest } };
+    case 'read_file':
+      return { name: 'Read', input: { file_path: pathOf(call, cwd) } };
+    case 'write_file':
+    case 'patch':
+      return { name: 'Patch', input: { paths: [pathOf(call, cwd)] } };
+    case 'search_files':
+      return { name: 'Grep', input: { pattern: rest } };
+    case 'web_search':
+    case 'web_extract':
+      return { name: 'WebSearch', input: { query: rest } };
+    case 'delegate_task':
+      return { name: 'Task', input: { description: rest } };
+    case 'todo':
+      return { name: 'TodoWrite', input: { todos: [] } };
+    default:
+      return { name: call.title?.split(': ')[0] ?? name, input: {} };
+  }
+}
+
 // What the card shows next to Allow / Deny. The office matches Always allow rules against `tool` and `detail`, so a shell
 // command goes out as SHELL_TOOL with the bare command, and any other tool under its own name.
 export function permissionBody(params: acp.RequestPermissionRequest, cwd: string): QuestionBody {
@@ -184,6 +215,8 @@ export class HermesSession implements EmployeeSession {
   private notices: string[] = [];
   private steers: string[] = [];
   private delegateCalls = new Set<string>();
+  // Messages Hermes sent with no id of their own, so each still gets a place on the terminal.
+  private messages = 0;
   private subagents = new Set<string>();
   private watchers = new Set<NodeJS.Timeout>();
 
@@ -198,9 +231,17 @@ export class HermesSession implements EmployeeSession {
     this.policy = host.permissions;
   }
 
-  assign(task: string) {
+  assign(task: string, title?: string, shown?: string) {
     this.beginTask(task);
-    void this.runTurns(task);
+    void this.runTurns({ text: task, shown: shown ?? title ?? task });
+  }
+
+  // Esc on the terminal: Hermes stops the turn where it is and kills the command it was running. The turn ends as cancelled.
+  interrupt() {
+    const { turn, link } = this;
+    if (!turn?.prompted || !link) return;
+    turn.ownerStop = true;
+    void link.agent.notify(acp.methods.agent.session.cancel, { sessionId: link.sessionId });
   }
 
   interject(text: string, style: InterruptStyle) {
@@ -209,28 +250,30 @@ export class HermesSession implements EmployeeSession {
     this.host.log(`Boss said: ${text}`);
     if (kind === 'idle' || kind === 'error') {
       this.beginTask(short(text, 80));
-      void this.runTurns(framed);
+      void this.runTurns({ text: framed, shown: text });
     } else if (style === 'now') {
-      this.interruptThenRun(framed);
+      this.interruptThenRun(framed, text);
     } else {
-      this.steer(framed);
+      this.steer(framed, text);
     }
   }
 
   // The turn stops where it is: Hermes kills the command it was running and answers `cancelled`. The instruction then goes
   // as the next turn, and Hermes carries the stopped request into it.
-  private interruptThenRun(text: string) {
+  private interruptThenRun(text: string, shown: string) {
     const { turn, link } = this;
-    if (!turn?.prompted || !link) return this.steer(text);
+    if (!turn?.prompted || !link) return this.steer(text, shown);
     turn.followUp = text;
+    turn.followShown = shown;
     void link.agent.notify(acp.methods.agent.session.cancel, { sessionId: link.sessionId });
   }
 
   // A prompt sent during a turn is not a new turn: Hermes says it took it and the model reads it at its next step.
-  private steer(text: string) {
+  private steer(text: string, shown?: string) {
     const { turn, link } = this;
     if (!turn?.prompted || !link) return void this.steers.push(text);
     this.steering++;
+    if (shown !== undefined) this.host.terminal({ k: 'prompt', text: shown });
     link.agent
       .request(acp.methods.agent.session.prompt, { sessionId: link.sessionId, prompt: [{ type: 'text', text }] })
       .then(
@@ -292,13 +335,13 @@ export class HermesSession implements EmployeeSession {
   }
 
   // Turns run one after another. A turn the boss cuts short hands over to the next while the desk stays busy.
-  private async runTurns(first: string) {
-    let next: string | undefined = first;
+  private async runTurns(first: Next) {
+    let next: Next | undefined = first;
     while (next !== undefined && !this.stopped) next = await this.oneTurn(next);
     this.turn = undefined;
   }
 
-  private async oneTurn(text: string): Promise<string | undefined> {
+  private async oneTurn({ text, shown }: Next): Promise<Next | undefined> {
     const turn: Turn = { prompted: false };
     this.turn = turn;
     let link: Link | undefined;
@@ -309,6 +352,8 @@ export class HermesSession implements EmployeeSession {
       const prompt = this.compose(link, text);
       if (this.stopped) return undefined;
       turn.prompted = true;
+      this.host.terminal({ k: 'banner', title: 'Hermes', model: this.host.model, cwd: this.host.block.cwd });
+      this.host.terminal({ k: 'prompt', text: shown });
       const res = await link.agent.request(acp.methods.agent.session.prompt, { sessionId: link.sessionId, prompt: [{ type: 'text', text: prompt }] });
       return this.turnEnded(turn, res);
     } catch (e) {
@@ -321,10 +366,15 @@ export class HermesSession implements EmployeeSession {
   }
 
   // Hermes reports a rate limit or a bad model as an ordinary `end_turn` whose message is the error, and with no usage.
-  private turnEnded(turn: Turn, res: { stopReason: string; usage?: unknown }): string | undefined {
+  private turnEnded(turn: Turn, res: { stopReason: string; usage?: unknown }): Next | undefined {
     if (res.stopReason === 'cancelled') {
       this.closeMessage();
-      if (turn.followUp !== undefined) return turn.followUp;
+      this.host.terminal({ k: 'end', how: 'interrupted' });
+      if (turn.followUp !== undefined) return { text: turn.followUp, shown: turn.followShown ?? turn.followUp };
+      if (turn.ownerStop) {
+        this.host.taskInterrupted();
+        return undefined;
+      }
       this.host.setActivity('Stopped');
       this.host.setStatus({ kind: 'idle' });
       return undefined;
@@ -342,6 +392,7 @@ export class HermesSession implements EmployeeSession {
     }
     const text = (this.open?.text ?? '').trim();
     this.closeMessage();
+    this.host.terminal({ k: 'end', how: 'done', ms: Date.now() - this.startedAt });
     this.host.taskCompleted();
     this.host.setActivity(short(text, 120) || 'Finished the task');
     this.host.setStatus({ kind: 'idle' });
@@ -477,6 +528,7 @@ export class HermesSession implements EmployeeSession {
 
   private reportError(text: string) {
     debug('error:', text);
+    this.host.terminal({ k: 'end', how: 'error', message: text });
     this.host.setStatus({ kind: 'error', message: text });
     this.host.setActivity(`Something went wrong: ${short(text, 80)}`);
     this.host.log(`Error: ${text}`);
@@ -505,11 +557,13 @@ export class HermesSession implements EmployeeSession {
     if (this.open && id !== this.open.id) this.closeMessage();
     this.open ??= { id, text: '' };
     this.open.text += text;
+    this.host.terminal({ k: 'text', id: `hermes:${this.open.id ?? this.messages}`, text: this.open.text });
   }
 
   // The employee is done with what they were saying: a tool call is next, or another message, or the turn is over.
   private closeMessage() {
     const said = this.open?.text.trim();
+    if (this.open && !this.open.id) this.messages++;
     this.open = undefined;
     if (!said) return;
     this.host.said(said);
@@ -521,6 +575,7 @@ export class HermesSession implements EmployeeSession {
     const name = toolName(call.title);
     // A tool call after the turn ended is the next turn starting on its own.
     if (this.host.employee.status.kind === 'idle') this.host.setStatus({ kind: 'working', task: this.task, startedAt: this.startedAt });
+    this.host.terminal({ k: 'tool', id: call.toolCallId, ...termTool(name, call, this.host.block.cwd) });
     const line = describeTool(name, call, this.host.block.cwd);
     this.host.setActivity(line);
     // The office logs the question itself.
@@ -529,6 +584,9 @@ export class HermesSession implements EmployeeSession {
   }
 
   private onToolUpdate(update: acp.ToolCallUpdate) {
+    if (update.status === 'completed' || update.status === 'failed') {
+      this.host.terminal({ k: 'result', id: update.toolCallId, ok: update.status === 'completed', text: textOf(update.content) });
+    }
     if (!this.delegateCalls.delete(update.toolCallId) || update.status !== 'completed') return;
     let started: z.infer<typeof dispatch> | undefined;
     try {

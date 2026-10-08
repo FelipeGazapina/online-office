@@ -1,13 +1,14 @@
 import { ITEM_DEFS, YAW, footprint, layerOf } from './catalog.ts';
-import { defOf, hasFloorAt, inLotTile, itemRect, sameLot, stairsInfo, tileIndex, wkey } from './geom.ts';
-import type { Building, FloorGeometry, FloorRender, ItemId, Lot, Room, Story, WallDir, WallRef, WallSeg } from './types.ts';
+import { defOf, floorItems, hasFloorAt, inLotTile, isTop, itemRect, sameLot, stairsInfo, tileIndex, wkey } from './geom.ts';
+import { drawKey, poseIn, topsClash } from './surface.ts';
+import type { Building, FloorGeometry, FloorRender, Item, ItemId, Lot, Room, Story, TopItem, WallDir, WallRef, WallSeg } from './types.ts';
 
 
 /** Tiles that open on this story because the story below carries stairs. */
 export function holesOf(lot: Lot, below: Story | undefined): Uint8Array {
   const hole = new Uint8Array(lot.w * lot.h);
   if (!below) return hole;
-  for (const item of below.items) {
+  for (const item of floorItems(below)) {
     const def = defOf(item);
     if (!def?.stairs) continue;
     const info = stairsInfo(item, def);
@@ -68,7 +69,7 @@ function buildFloor(b: Building, index: number, hole: Uint8Array): FloorGeometry
   const seenPair = new Set<string>();
   story.items.forEach((item, n) => {
     const def = defOf(item);
-    if (!def) return;
+    if (!def || isTop(item)) return;
     const grid = layerOf(def) === 'floor' ? floorOcc : occ;
     const r = itemRect(item, def);
     for (let cz = Math.max(r.z0, lot.z0 * 2); cz < Math.min(r.z1, (lot.z0 + lot.h) * 2); cz++) {
@@ -88,6 +89,26 @@ function buildFloor(b: Building, index: number, hole: Uint8Array): FloorGeometry
       }
     }
   });
+
+  // Items that stand on a host are checked against each other on the host's own top, never against the floor.
+  const tops = new Map<ItemId, number[]>();
+  story.items.forEach((item, n) => {
+    if (isTop(item)) (tops.get(item.on) ?? tops.set(item.on, []).get(item.on)!).push(n);
+  });
+  for (const list of tops.values()) {
+    const placed = list.map((n) => {
+      const item = story.items[n] as TopItem;
+      const def = defOf(item);
+      return def && { item, def };
+    });
+    for (let i = 0; i < list.length; i++) {
+      for (let j = i + 1; j < list.length; j++) {
+        const a = placed[i];
+        const c = placed[j];
+        if (a && c && topsClash(a.item, a.def, c.item, c.def)) overlaps.push([a.item.id, c.item.id]);
+      }
+    }
+  }
 
   const roomOf = new Uint16Array(lot.w * lot.h * 2);
   const rooms: Room[] = [];
@@ -153,7 +174,7 @@ function buildFloor(b: Building, index: number, hole: Uint8Array): FloorGeometry
   const roomItems = new Map<number, ItemId[]>();
   for (const item of story.items) {
     const def = defOf(item);
-    if (!def) continue;
+    if (!def || isTop(item)) continue;
     const r = itemRect(item, def);
     const node = nodeAtPoint((r.x0 + r.x1) / 4, (r.z0 + r.z1) / 4);
     const room = node < 0 ? 0 : roomOf[node];
@@ -180,6 +201,7 @@ function buildFloor(b: Building, index: number, hole: Uint8Array): FloorGeometry
     hole,
     occ,
     floorOcc,
+    tops,
     overlaps,
     wallAt,
     roomOf,
@@ -274,12 +296,20 @@ function buildRender(b: Building, index: number, hole: Uint8Array, wallAt: Reado
   }
 
   const groups = new Map<string, { m: number[]; ids: ItemId[] }>();
+  const byId = new Map<string, Item>(story.items.map((i) => [i.id, i]));
   for (const item of story.items) {
     const def = ITEM_DEFS[item.def];
     if (!def) continue;
-    const f = footprint(def, item.rot);
-    const g = groups.get(item.def) ?? groups.set(item.def, { m: [], ids: [] }).get(item.def)!;
-    g.m.push((item.x + f.w / 2) * 0.5, 0, (item.z + f.d / 2) * 0.5, YAW[item.rot], item.tint ?? -1);
+    const key = isTop(item) ? drawKey(item, def) : item.def;
+    const g = groups.get(key) ?? groups.set(key, { m: [], ids: [] }).get(key)!;
+    if (isTop(item)) {
+      const pose = poseIn(byId, item);
+      if (!pose) continue;
+      g.m.push(pose.x, pose.y, pose.z, pose.yaw, item.tint ?? -1);
+    } else {
+      const f = footprint(def, item.rot);
+      g.m.push((item.x + f.w / 2) * 0.5, 0, (item.z + f.d / 2) * 0.5, YAW[item.rot], item.tint ?? -1);
+    }
     g.ids.push(item.id);
   }
   const items = new Map<string, { matrices: Float32Array; ids: readonly ItemId[] }>();
@@ -288,7 +318,7 @@ function buildRender(b: Building, index: number, hole: Uint8Array, wallAt: Reado
   const rails: number[] = [];
   const below = b.stories[index - 1];
   if (below) {
-    for (const item of below.items) {
+    for (const item of floorItems(below)) {
       const def = defOf(item);
       if (!def?.stairs) continue;
       const info = stairsInfo(item, def);

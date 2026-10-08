@@ -2,6 +2,8 @@
 // Main is the source of truth for *logical* state. The renderer derives every avatar pose from it:
 // an employee whose status is `blocked_on_owner` walks to the owner; everyone else walks back to their desk.
 
+import type { ActivityEntry, QuestionRef, TaskLive } from './activity.ts';
+import type { TerminalPush } from './terminal.ts';
 import type { Building, BuildOp, ItemId, Violation } from './space/types.ts';
 import type { Missing } from './space/essentials.ts';
 import type { MailClientMessage, MailServerMessage, MailView } from './mail.ts';
@@ -273,6 +275,11 @@ export type ClientMessage =
   | { type: 'delete_task'; taskId: TaskId }
   // `employeeId` is the block's PO or any employee of the block. Posts one root request to them, so they start at once.
   | { type: 'assign_task'; taskId: TaskId; employeeId: EmployeeId }
+  // Asks for everything that happened on a task. The answer arrives as an `activity` message, and the renderer asks again
+  // whenever the mailroom or the task changed under an open task.
+  | { type: 'load_activity'; taskId: TaskId }
+  // The owner's answer to a question the board shows: a blocked reply, a help request, or an employee waiting on them.
+  | { type: 'answer_question'; taskId: TaskId; ref: QuestionRef; text: string }
   // Sends the time a CronoSpark task has worked and not sent yet: closed time only, one hours entry per person and day, and the
   // same time never twice. This is the only way hours leave the app.
   | { type: 'send_hours'; taskId: TaskId }
@@ -287,6 +294,11 @@ export type ClientMessage =
   | { type: 'remove_allow_rule'; employeeId: EmployeeId; rule: AllowRule }
   // Stops the employee's session and starts another with no memory of the conversation. Notes, model and rules stay.
   | { type: 'fresh_session'; employeeId: EmployeeId }
+  // Esc on an employee's terminal: the step that is running stops and the turn ends, with nothing sent after it. Ignored
+  // for someone who is not working. The owner's words to a terminal take the same paths as the chat: `post` and `answer`.
+  | { type: 'interrupt'; employeeId: EmployeeId }
+  // Asks for everything every terminal holds. The answer arrives as one `terminal` message per employee, and after it only changes do.
+  | { type: 'load_terminal' }
   | { type: 'reset_company' }
   // Edits to the building. Main applies them all or none and answers a refusal with `build_rejected`.
   | { type: 'build'; ops: BuildOp[] }
@@ -318,6 +330,8 @@ export type Snapshot = {
   // Time worked per task with at least one run, derived from the mailroom's ledger. A person in `running` keeps counting
   // after `at`, at `share` of wall time.
   taskTime: Record<TaskId, TaskTime>;
+  // What each person on a task with runs is doing, and the questions waiting on the owner. Derived from the ledger.
+  taskLive: Record<TaskId, TaskLive>;
   taskConnections: Record<TaskProvider, TaskConnectionState>;
   linearPeople: LinearPeople;
   mail: MailView;
@@ -328,8 +342,11 @@ export type ServerMessage =
   | { type: 'said'; employeeId: EmployeeId; text: string }
   | { type: 'log'; employeeId: EmployeeId; line: string; at: number }
   | { type: 'building'; building: Building; rev: number }
+  | { type: 'activity'; taskId: TaskId; entries: ActivityEntry[]; live: TaskLive }
   | { type: 'build_rejected'; violations: readonly Violation[] }
   | { type: 'build_incomplete'; missing: readonly Missing[] }
+  // What changed on an employee's terminal (shared/terminal.ts). Throttled to a few a second per employee.
+  | ({ type: 'terminal'; employeeId: EmployeeId } & TerminalPush)
   | { type: 'error'; message: string }
   | MailServerMessage;
 

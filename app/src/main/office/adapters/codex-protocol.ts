@@ -67,9 +67,9 @@ const change = z.object({ path: str, kind: z.object({ type: str, move_path: str.
 
 const knownItem = z.discriminatedUnion('type', [
   z.object({ type: z.literal('agentMessage'), id: str, text: str }),
-  z.object({ type: z.literal('commandExecution'), id: str, command: str }),
+  z.object({ type: z.literal('commandExecution'), id: str, command: str, aggregatedOutput: str.nullish(), exitCode: z.number().nullish() }),
   z.object({ type: z.literal('fileChange'), id: str, changes: z.array(change) }),
-  z.object({ type: z.literal('mcpToolCall'), id: str, server: str, tool: str }),
+  z.object({ type: z.literal('mcpToolCall'), id: str, server: str, tool: str, arguments: z.unknown().optional(), error: z.unknown().optional() }),
   z.object({ type: z.literal('subAgentActivity'), kind: z.enum(['started', 'interacted', 'interrupted', 'completed']), agentThreadId: str, agentPath: str }),
   z.object({ type: z.literal('webSearch') }),
 ]);

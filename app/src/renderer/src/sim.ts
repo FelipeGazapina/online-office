@@ -198,6 +198,17 @@ export function walkTo(goal: WalkGoal) {
   else toast(door === 'closed' ? 'The meeting room door is closed.' : 'There is no way there.', 'warn');
 }
 
+// A click on a staircase goes to its other end: up from the floor below it, down from any floor above. False when the
+// stairs lead nowhere yet, so the click walks to the spot like any other piece.
+export function takeStairs(itemId: StairLink['itemId']): boolean {
+  const world = worldFor(get().building, get().meetingDoor);
+  const link = world?.links.find((l) => l.itemId === itemId);
+  if (!link) return false;
+  const end = runtime.owner.floor > link.from.floor ? link.from : link.to;
+  walkTo({ kind: 'point', at: end.at, floor: end.floor });
+  return true;
+}
+
 // A walk is planned again when the office has changed under it. A walk to someone also follows them: it is planned
 // again when they have moved too far from where it ends, and dropped when they are gone.
 function keepUp(walk: Walk, world: World): OwnerIntent {

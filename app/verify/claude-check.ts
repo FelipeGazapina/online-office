@@ -1,10 +1,12 @@
 // No model, no network. The real Claude adapter against a scripted stand-in for the Agent SDK's query(): what the
 // adapter starts the SDK with, what it sends it, and what it tells the office about what comes back.
 // Run from app/: node verify/claude-check.ts   Exits 1 on any failed check.
+import { readFileSync } from 'node:fs';
 import type { CanUseTool, Options, SDKMessage, SDKUserMessage } from '@anthropic-ai/claude-agent-sdk';
 import { ClaudeSession, PushQueue, partialText, type ClaudeRun } from '../src/main/office/adapters/claude.ts';
 import type { SessionHost } from '../src/main/office/adapters/types.ts';
 import type { BlockId, Employee, EmployeeId, ModelId, PermissionPolicy, QuestionBody, Subagent } from '../src/shared/protocol.ts';
+import { rowText, screenOf, TerminalBuffer, type TermEvent } from '../src/shared/terminal.ts';
 import { check, finish, sleep, until } from './check.ts';
 
 // One per SDK process the adapter starts. `out` is what the SDK streams back.
@@ -19,6 +21,7 @@ const run: ClaudeRun = ({ prompt, options }) => {
   return {
     [Symbol.asyncIterator]: () => p.out[Symbol.asyncIterator](),
     interrupt: async () => void p.calls.push('interrupt'),
+    stopTask: async (id) => void p.calls.push(`stopTask ${id}`),
     setModel: async (model) => {
       p.calls.push(`setModel ${model}`);
       if (model === 'refused') throw new Error("Model 'refused' not found");
@@ -30,7 +33,7 @@ const run: ClaudeRun = ({ prompt, options }) => {
 
 // Only the fields the adapter reads, in the shape the SDK sends them.
 const sdk = (m: unknown) => m as SDKMessage;
-const init = (sessionId: string) => sdk({ type: 'system', subtype: 'init', session_id: sessionId, model: 'm', tools: [], skills: [], plugins: [], mcp_servers: [] });
+const init = (sessionId: string) => sdk({ type: 'system', subtype: 'init', session_id: sessionId, model: 'm', cwd: '/work/repo', claude_code_version: '2.1.0', tools: [], skills: [], plugins: [], mcp_servers: [] });
 
 function scripted(model = 'm1', policy: PermissionPolicy = { mode: 'inherit', alwaysAllow: [] }) {
   const employee: Employee = {
@@ -53,6 +56,8 @@ function scripted(model = 'm1', policy: PermissionPolicy = { mode: 'inherit', al
   const finished: string[] = [];
   const completed: (string | undefined)[] = [];
   const streamed: string[] = [];
+  const terminal: TermEvent[] = [];
+  const interrupted: number[] = [];
   let answer = 'Allow';
   let rules = '';
   const host: SessionHost = {
@@ -78,8 +83,10 @@ function scripted(model = 'm1', policy: PermissionPolicy = { mode: 'inherit', al
     streamed: (delta, done) => void streamed.push(done ? '<done>' : delta),
     subagentStarted: (subagent) => void started.push(subagent),
     subagentFinished: (id) => void finished.push(id),
+    terminal: (event) => void terminal.push(event),
+    taskInterrupted: () => void interrupted.push(Date.now()),
   };
-  return { employee, host, asked, said, logs, started, finished, completed, streamed, answers: (text: string) => void (answer = text), setRules: (text: string) => void (rules = text), session: new ClaudeSession(host, run) };
+  return { employee, host, terminal, interrupted, asked, said, logs, started, finished, completed, streamed, answers: (text: string) => void (answer = text), setRules: (text: string) => void (rules = text), session: new ClaudeSession(host, run) };
 }
 const canUse = (p: Process) => async (name: string, input: Record<string, unknown>) => {
   const decision = await p.options.canUseTool!(name, input, { signal: new AbortController().signal, toolUseID: 'toolu_x' } as Parameters<CanUseTool>[2]);
@@ -267,6 +274,69 @@ cutProc.out.close();
 await until(() => cut.streamed.at(-1) === '<done>');
 check(cut.streamed.join('') === 'Half a sen<done>', `a bubble the process died in the middle of is closed (${cut.streamed.join('|')})`);
 live.session.stop();
+
+console.log('\n# the terminal, from a recorded session');
+// A real haiku session through the SDK (read, edit, write, two shell commands), kept as it came, with its paths made /work/repo.
+const recorded = JSON.parse(readFileSync(new URL('./fixtures/claude-session.json', import.meta.url), 'utf8')) as SDKMessage[];
+const rec = scripted();
+rec.session.assign('<office wrapping> Read notes.txt and fix it', 'Fix notes', 'Read notes.txt and fix it');
+const recProc = processes.at(-1)!;
+for (const m of recorded) recProc.out.push(m);
+await until(() => rec.completed.length === 1);
+const kinds = rec.terminal.map((e) => (e.k === 'tool' ? `tool:${e.name}` : e.k === 'result' ? `result:${e.ok}` : e.k === 'end' ? `end:${e.how}` : e.k));
+check(kinds[0] === 'prompt' && rec.terminal[0]!.k === 'prompt' && rec.terminal[0]!.text === 'Read notes.txt and fix it', 'the first thing on the terminal is the prompt the owner wrote, not the text the office wrapped it in');
+check(rec.terminal[1]!.k === 'banner' && rec.terminal[1]!.title.startsWith('Claude Code v') && rec.terminal[1]!.cwd === '/work/repo', 'the session header names the harness version, the model and the folder');
+const calls = kinds.filter((k) => k.startsWith('tool:')).join(' ');
+check(calls === 'tool:Read tool:Edit tool:Write tool:Bash tool:Bash', `each tool call reaches the terminal once, in order (${calls})`);
+check(kinds.filter((k) => k.startsWith('result:')).length === 5 && kinds.at(-1) === 'end:done', 'each result reaches it, and the turn ends done');
+check(rec.terminal.some((e) => e.k === 'thinking' && e.secs === undefined) && rec.terminal.some((e) => e.k === 'thinking' && e.secs !== undefined), 'thinking opens and closes with its time');
+const folded = new TerminalBuffer('/work/repo', 'Claude Code', 'haiku');
+for (const e of rec.terminal) folded.apply(e);
+const screen = screenOf({ blocks: folded.all(), live: folded.live, status: { kind: 'idle' }, now: 0, cols: 80, rows: 60 }).map(rowText);
+const has = (text: string) => screen.some((r) => r.includes(text));
+check(has('❯ Read notes.txt and fix it') && has('● Read(notes.txt)') && has('⎿  Read 5 lines'), 'the screen shows the prompt, the read and how many lines it read');
+check(has('● Update(notes.txt)') && has('Updated notes.txt with 1 addition and 1 removal') && screen.some((r) => /2 - line two/.test(r)) && screen.some((r) => /2 \+ line 2/.test(r)), 'an edit shows its summary and the diff with line numbers');
+check(has('● Write(hello.txt)') && has('Wrote 1 line to hello.txt') && has('● Bash(ls)') && has('hello.txt') && has('● Bash(grep -rn line notes.txt)'), 'a write and two shell commands show their calls and what came back');
+const box = screen.findLastIndex((r) => r.startsWith('❯ '));
+check(has('All tasks completed') && box > 0 && screen[box - 1]!.startsWith('─') && screen[box + 1]!.startsWith('─'), 'the assistant text is there, and the prompt box sits under it');
+if (process.env.SHOW) console.log(screen.join('\n'));
+
+console.log('\n# the owner presses Esc');
+const esc = scripted();
+esc.session.assign('a long job', 'Long job', 'a long job');
+const escProc = processes.at(-1)!;
+await feed(escProc, init('sess-esc'), assistant([{ type: 'tool_use', id: 'slow', name: 'Bash', input: { command: 'sleep 99' } }]));
+await feed(escProc, sdk({ type: 'system', subtype: 'task_started', task_id: 'bash-1', tool_use_id: 'slow', is_backgrounded: false, task_type: 'local_bash' }));
+esc.session.interrupt();
+check(escProc.calls.slice(-2).join() === 'stopTask bash-1,interrupt' && esc.interrupted.length === 0 && esc.completed.length === 0, `Esc stops the command that is running and interrupts the SDK turn, and the turn is not over until the SDK says so (${escProc.calls.slice(-2).join()})`);
+await feed(escProc, sdk({ type: 'result', subtype: 'error_during_execution', is_error: false, terminal_reason: 'aborted_tools', errors: [] }));
+check(esc.interrupted.length === 1 && esc.completed.length === 0 && esc.employee.status.kind === 'working', 'the aborted turn ends as interrupted: the office is told once and nobody is told it finished');
+const endAt = esc.terminal.findLastIndex((e) => e.k === 'end');
+check(esc.terminal[endAt]!.k === 'end' && (esc.terminal[endAt] as { how: string }).how === 'interrupted', 'the terminal shows the interruption');
+const folded2 = new TerminalBuffer('/work/repo');
+for (const e of esc.terminal) folded2.apply(e);
+const after = screenOf({ blocks: folded2.all(), live: folded2.live, status: { kind: 'idle' }, now: 0, cols: 80, rows: 30 }).map(rowText);
+check(after.some((r) => r.includes('Interrupted')) && after.some((r) => r.includes('● Bash(sleep 99)')), 'and the step that was running is on the screen with the interruption under it');
+await feed(escProc, sdk({ type: 'system', subtype: 'task_started', task_id: 'bash-late', tool_use_id: 'slow', is_backgrounded: true, task_type: 'local_bash' }));
+check(escProc.calls.at(-1) === 'stopTask bash-late', 'a command that only starts after Esc is stopped as it starts');
+esc.session.assign('next job', 'Next', 'next job');
+await feed(escProc, init('sess-esc2'), sdk({ type: 'system', subtype: 'task_started', task_id: 'bash-next', is_backgrounded: true, task_type: 'local_bash' }), turnEnd());
+check(escProc.calls.at(-1) !== 'stopTask bash-next', 'a command of the next turn is left alone');
+check(esc.completed.length === 1 && esc.interrupted.length === 1, 'the next turn is an ordinary one: it completes, and the interruption is not counted again');
+console.log('\n# the owner says something now');
+const now = scripted();
+now.session.assign('first job', 'First', 'first job');
+const nowProc = processes.at(-1)!;
+await feed(nowProc, init('sess-now'), assistant([{ type: 'tool_use', id: 'slow2', name: 'Bash', input: { command: 'make' } }]));
+now.session.interject('stop that, do this instead', 'now');
+await until(() => nowProc.sent.length === 2);
+const order = now.terminal.filter((e) => ['prompt', 'end'].includes(e.k)).map((e) => (e.k === 'end' ? `end:${e.how}` : `prompt:${(e as { text: string }).text}`));
+check(order.join('|') === 'prompt:first job|end:interrupted|prompt:stop that, do this instead', `a message that cuts in is on the terminal after the step it cut short (${order.join('|')})`);
+check(now.interrupted.length === 0, 'and the office is not told the turn ended, because another follows');
+now.session.stop();
+
+esc.session.stop();
+rec.session.stop();
 
 ana.session.stop();
 idle.session.stop();

@@ -5,7 +5,7 @@ import { mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } fro
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { EmployeeId, HarnessStatus, Provider } from '../src/shared/protocol.ts';
-import { ITEM_DEFS, deriveFloors, type Building, type Item, type ItemId, type Violation } from '../src/shared/space/index.ts';
+import { ITEM_DEFS, deriveFloors, isFloor, type Building, type Item, type ItemId, type Violation } from '../src/shared/space/index.ts';
 import { HARNESSES } from '../src/main/office/adapters/index.ts';
 import { Office } from '../src/main/office/company.ts';
 import { startOfficeMcp } from '../src/main/office/mcp.ts';
@@ -95,7 +95,8 @@ check(pushed === o.buildingState().building, 'the new building is pushed to the 
 const rev1 = o.snapshot().buildingRev;
 const cleo = emps().find((e) => e.name === 'Cleo')!;
 const occupied = cleo.seat!;
-const desk = itemOf(occupied)!;
+const desk = itemOf(occupied);
+if (!desk || !isFloor(desk)) throw new Error('the occupied seat is not a floor item');
 o.handle({ type: 'build', ops: [{ t: 'items', story: 0, put: [{ ...desk, x: -400 }], del: [] }] });
 check(rejected.length > 0 && o.snapshot().buildingRev === rev1, 'an illegal build is rejected with violations and changes nothing');
 rejected = [];

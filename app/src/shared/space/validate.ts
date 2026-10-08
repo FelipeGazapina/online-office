@@ -1,19 +1,22 @@
-import { ITEM_DEFS, PAINT_COUNT, layerOf, rotateLocal } from './catalog.ts';
+import { ITEM_DEFS, PAINT_COUNT, layerOf, placementOf, rotateLocal } from './catalog.ts';
 import { deriveFloors } from './derive.ts';
-import { defOf, hasFloorAt, inLotTile, itemRect, stairsInfo, tileIndex, wkey, type CellRect } from './geom.ts';
+import { defOf, floorItems, hasFloorAt, inLotTile, isFloor, isTop, itemRect, sameItem, stairsInfo, tileIndex, wkey, type CellRect } from './geom.ts';
 import { route } from './nav.ts';
+import { levelOf, MAX_LVL, supportViolation, topsClash, topViolation } from './surface.ts';
 import { itemInLot, wallInLot, applyAll } from './story.ts';
 import type {
   Applied,
   Building,
   BuildOp,
   FloorGeometry,
+  FloorItem,
   FloorPos,
   Item,
   ItemDef,
   ItemId,
   SpaceContext,
   Story,
+  TopItem,
   Violation,
   Vec2,
 } from './types.ts';
@@ -43,10 +46,11 @@ export function findItem(story: Story, id: ItemId): Item | undefined {
   return undefined;
 }
 
-export function locateItem(b: Building, id: ItemId): { story: number; item: Item } | null {
+/** The floor item with this id and its story. What stands on something else is placed by its host, and is not found here. */
+export function locateItem(b: Building, id: ItemId): { story: number; item: FloorItem } | null {
   for (let s = 0; s < b.stories.length; s++) {
     const item = findItem(b.stories[s], id);
-    if (item) return { story: s, item };
+    if (item && isFloor(item)) return { story: s, item };
   }
   return null;
 }
@@ -94,12 +98,13 @@ function wallCrosses(g: FloorGeometry, r: CellRect): boolean {
 }
 
 /** Rules that need only the floor the item stands on. Overlap is separate because it needs the other items. */
-function itemViolations(g: FloorGeometry, item: Item, def: ItemDef): Violation[] {
+function itemViolations(g: FloorGeometry, item: FloorItem, def: ItemDef): Violation[] {
   const story = g.index;
   const r = itemRect(item, def);
   const at = center(r);
   if (!itemInLot(g.lot, item)) return [{ kind: 'out_of_lot', story, at, ids: [item.id] }];
   const out: Violation[] = [];
+  if (placementOf(def) === 'surface') out.push({ kind: 'needs_surface', story, at, ids: [item.id] });
   let noFloor = false;
   let onHole = false;
   for (let tz = Math.floor(r.z0 / 2); tz <= Math.ceil(r.z1 / 2) - 1; tz++) {
@@ -146,7 +151,7 @@ export function entryOf(b: Building): FloorPos | null {
   return null;
 }
 
-function seatExit(item: Item, def: ItemDef): Vec2 | null {
+function seatExit(item: FloorItem, def: ItemDef): Vec2 | null {
   if (!def.seat) return null;
   const o = rotateLocal(def, item.rot, def.seat.exit);
   return { x: (item.x + o.x) * 0.5, z: (item.z + o.z) * 0.5 };
@@ -177,8 +182,13 @@ export function validate(b: Building, ctx: SpaceContext): readonly Violation[] {
     }
     for (const item of story.items) {
       const def = defOf(item);
-      if (!def) {
+      if (!def || (def.group && isTop(item))) {
         out.push({ kind: 'unknown_item', story: s, ids: [item.id] });
+        continue;
+      }
+      if (isTop(item)) {
+        const kind = topViolation(item, def, findItem(story, item.on)) ?? supportViolation(item, def, (g.tops.get(item.on) ?? []).map((n) => story.items[n]));
+        if (kind) out.push({ kind, story: s, ids: [item.id] });
         continue;
       }
       out.push(...itemViolations(g, item, def));
@@ -191,7 +201,7 @@ export function validate(b: Building, ctx: SpaceContext): readonly Violation[] {
   return dedupe(out);
 }
 
-function stairsViolations(b: Building, s: number, item: Item, def: ItemDef): Violation[] {
+function stairsViolations(b: Building, s: number, item: FloorItem, def: ItemDef): Violation[] {
   const info = stairsInfo(item, def);
   const at = { x: info.top.x, z: info.top.z };
   if (!info.aligned) return [{ kind: 'stairs_misaligned', story: s, ids: [item.id] }];
@@ -207,7 +217,7 @@ function reachability(b: Building, ctx: SpaceContext, floors: readonly FloorGeom
   const reached = new Set<number>([0]);
   for (let s = 0; s + 1 < b.stories.length; s++) {
     if (!reached.has(s)) continue;
-    const links = b.stories[s].items.some((i) => {
+    const links = floorItems(b.stories[s]).some((i) => {
       const d = defOf(i);
       return d?.stairs && stairsInfo(i, d).aligned && stairsViolations(b, s, i, d).length === 0;
     });
@@ -256,8 +266,6 @@ function fastEligible(b: Building, ops: readonly BuildOp[]): boolean {
   return true;
 }
 
-const sameItem = (a: Item, b: Item) => a.def === b.def && a.x === b.x && a.z === b.z && a.rot === b.rot && a.blockId === b.blockId && a.tint === b.tint;
-
 /** Rule check for item-only edits against the cached geometry of `b`. */
 export function fastViolations(b: Building, ops: readonly BuildOp[]): Violation[] {
   const floors = deriveFloors(b);
@@ -271,16 +279,29 @@ export function fastViolations(b: Building, ops: readonly BuildOp[]): Violation[
   const out: Violation[] = [];
   for (const [s, m] of finals) {
     const g = floors[s];
-    const added: { item: Item; def: ItemDef; rect: CellRect }[] = [];
+    const added: { item: FloorItem; def: ItemDef; rect: CellRect }[] = [];
+    const addedTops: { item: TopItem; def: ItemDef }[] = [];
     for (const [id, item] of m) {
       if (!item) continue;
       const def = ITEM_DEFS[item.def];
-      if (!def) {
+      if (!def || (def.group && isTop(item))) {
         out.push({ kind: 'unknown_item', story: s, ids: [id] });
         continue;
       }
       const old = findItem(b.stories[s], id);
       if (old && sameItem(old, item)) continue;
+      if (isTop(item)) {
+        const host = m.has(item.on) ? (m.get(item.on) ?? undefined) : findItem(b.stories[s], item.on);
+        const kind = topViolation(item, def, host);
+        if (kind) out.push({ kind, story: s, ids: [id] });
+        for (const n of g.tops.get(item.on) ?? []) {
+          const other = g.story.items[n] as TopItem;
+          if (m.has(other.id)) continue;
+          if (ITEM_DEFS[other.def] && topsClash(item, def, other, ITEM_DEFS[other.def])) out.push({ kind: 'overlap', story: s, ids: [other.id, id] });
+        }
+        addedTops.push({ item, def });
+        continue;
+      }
       out.push(...itemViolations(g, item, def));
       if (!itemInLot(g.lot, item)) continue;
       const rect = itemRect(item, def);
@@ -305,6 +326,36 @@ export function fastViolations(b: Building, ops: readonly BuildOp[]): Violation[
         const a = added[i].rect;
         const c = added[j].rect;
         if (a.x0 < c.x1 && c.x0 < a.x1 && a.z0 < c.z1 && c.z0 < a.z1) out.push({ kind: 'overlap', story: s, ids: [added[i].item.id, added[j].item.id] });
+      }
+    }
+    for (let i = 0; i < addedTops.length; i++) {
+      for (let j = i + 1; j < addedTops.length; j++) {
+        if (addedTops[i].item.on !== addedTops[j].item.on) continue;
+        if (topsClash(addedTops[i].item, addedTops[i].def, addedTops[j].item, addedTops[j].def)) {
+          out.push({ kind: 'overlap', story: s, ids: [addedTops[i].item.id, addedTops[j].item.id] });
+        }
+      }
+    }
+    // A stack stays whole: what is put or left on a host rests on something that is still there. What a deleted thing carried falls with
+    // it (the story does the same), so only what stood before and has lost its support through a move counts.
+    const hosts = new Set<ItemId>(addedTops.map((t) => t.item.on));
+    for (const [id] of m) {
+      const old = findItem(b.stories[s], id);
+      if (old && isTop(old)) hosts.add(old.on);
+    }
+    for (const host of hosts) {
+      const before = (g.tops.get(host) ?? []).map((n) => g.story.items[n]);
+      let kept: Item[] = before.filter((i) => m.get(i.id) !== null);
+      for (let pass = 0; pass <= MAX_LVL; pass++) {
+        const falling = kept.filter((i) => isTop(i) && levelOf(i) > 0 && ITEM_DEFS[i.def] && supportViolation(i, ITEM_DEFS[i.def], kept) !== null && supportViolation(i, ITEM_DEFS[i.def], before) === null);
+        if (!falling.length) break;
+        kept = kept.filter((i) => !falling.includes(i));
+      }
+      const now: Item[] = [...kept.filter((i) => !m.has(i.id)), ...[...m.values()].filter((i): i is Item => !!i && isTop(i) && i.on === host)];
+      for (const item of now) {
+        const def = ITEM_DEFS[item.def];
+        if (!def || !isTop(item) || levelOf(item) === 0 || supportViolation(item, def, now) === null) continue;
+        if (m.has(item.id) || supportViolation(item, def, before) === null) out.push({ kind: 'unsupported', story: s, ids: [item.id] });
       }
     }
   }

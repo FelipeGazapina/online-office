@@ -3,19 +3,25 @@
 // through the same `items` op and rules as a single piece, so overlap, lot, wall and desk checks need no second path.
 import { footprint, ITEM_DEFS } from './catalog.ts';
 import { itemAt } from './buildersGesture.ts';
-import { defOf, itemRect, type CellRect } from './geom.ts';
-import type { BlockId, BuildOp, Item, Rot, Story, Vec2 } from './types.ts';
+import { defOf, floorItems, itemRect, type CellRect } from './geom.ts';
+import type { BlockId, BuildOp, FloorItem, Item, Rot, Story, TopItem, Vec2 } from './types.ts';
 import { CELL } from './types.ts';
 
 /** Where a block ends up: turned `quarter` quarter turns clockwise (the way `rot` grows), its bounding box starting at cell `origin`. */
 export type BlockPose = { quarter: Rot; origin: Vec2 };
 
-export function blockItems(story: Story, blockId: BlockId): Item[] {
-  return story.items.filter((i) => i.blockId === blockId && ITEM_DEFS[i.def]);
+export function blockItems(story: Story, blockId: BlockId): FloorItem[] {
+  return floorItems(story).filter((i) => i.blockId === blockId && ITEM_DEFS[i.def]);
+}
+
+/** What stands on the items of `hosts`. It rides on its host's frame, so a block that turns or shifts carries it with no edit; only a block that changes floors has to put it down again. */
+export function topsOn(story: Story, hosts: readonly Item[]): TopItem[] {
+  const ids = new Set(hosts.map((h) => h.id));
+  return story.items.filter((i): i is TopItem => i.on !== undefined && ids.has(i.on));
 }
 
 /** The cells a set of items covers together, or null for an empty set. */
-export function cellBounds(items: readonly Item[]): CellRect | null {
+export function cellBounds(items: readonly FloorItem[]): CellRect | null {
   let box: CellRect | null = null;
   for (const item of items) {
     const def = defOf(item);
@@ -27,7 +33,7 @@ export function cellBounds(items: readonly Item[]): CellRect | null {
 }
 
 // One quarter turn inside the bounding box: the map `rotateLocal` applies to the points of one piece, applied to every piece.
-function turnOnce(items: readonly Item[]): Item[] {
+function turnOnce(items: readonly FloorItem[]): FloorItem[] {
   const box = cellBounds(items);
   if (!box) return [...items];
   const depth = box.z1 - box.z0;
@@ -37,14 +43,14 @@ function turnOnce(items: readonly Item[]): Item[] {
   });
 }
 
-export function turnBlock(items: readonly Item[], quarter: Rot): Item[] {
+export function turnBlock(items: readonly FloorItem[], quarter: Rot): FloorItem[] {
   let out = [...items];
   for (let k = 0; k < quarter; k++) out = turnOnce(out);
   return out;
 }
 
 /** The items after the pose: turned, then moved so their bounding box starts at `pose.origin`. */
-export function placeBlock(items: readonly Item[], pose: BlockPose): Item[] {
+export function placeBlock(items: readonly FloorItem[], pose: BlockPose): FloorItem[] {
   const turned = turnBlock(items, pose.quarter);
   const box = cellBounds(turned);
   if (!box) return turned;
@@ -54,13 +60,13 @@ export function placeBlock(items: readonly Item[], pose: BlockPose): Item[] {
 }
 
 /** The pose that puts the turned block's middle on `center` (in cells), rounded to whole cells. */
-export function blockPose(items: readonly Item[], quarter: Rot, center: Vec2): BlockPose {
+export function blockPose(items: readonly FloorItem[], quarter: Rot, center: Vec2): BlockPose {
   const box = cellBounds(turnBlock(items, quarter));
   if (!box) return { quarter, origin: { x: Math.round(center.x), z: Math.round(center.z) } };
   return { quarter, origin: { x: Math.round(center.x - (box.x1 - box.x0) / 2), z: Math.round(center.z - (box.z1 - box.z0) / 2) } };
 }
 
-const sameSpot = (a: Item, b: Item) => a.x === b.x && a.z === b.z && a.rot === b.rot;
+const sameSpot = (a: FloorItem, b: FloorItem) => a.x === b.x && a.z === b.z && a.rot === b.rot;
 
 /**
  * The ops that put every item of the block that changes into its new place, none when the pose changes nothing. With `toStory`
@@ -76,7 +82,7 @@ export function moveBlockOps(story: Story, storyIndex: number, blockId: BlockId,
   if (!items.length) return [];
   return [
     { t: 'items', story: storyIndex, put: [], del: items.map((i) => i.id) },
-    { t: 'items', story: toStory, put: placed, del: [] },
+    { t: 'items', story: toStory, put: [...placed, ...topsOn(story, items)], del: [] },
   ];
 }
 
@@ -86,8 +92,8 @@ export function blockAt(story: Story, p: Vec2): BlockId | null {
   if (under?.blockId) return under.blockId;
   const cx = p.x / CELL;
   const cz = p.z / CELL;
-  const byBlock = new Map<BlockId, Item[]>();
-  for (const item of story.items) if (item.blockId && ITEM_DEFS[item.def]) (byBlock.get(item.blockId) ?? byBlock.set(item.blockId, []).get(item.blockId)!).push(item);
+  const byBlock = new Map<BlockId, FloorItem[]>();
+  for (const item of floorItems(story)) if (item.blockId && ITEM_DEFS[item.def]) (byBlock.get(item.blockId) ?? byBlock.set(item.blockId, []).get(item.blockId)!).push(item);
   let best: BlockId | null = null;
   let bestArea = Infinity;
   for (const [id, items] of byBlock) {

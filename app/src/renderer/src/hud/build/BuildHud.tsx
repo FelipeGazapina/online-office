@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { Company } from '../../../../shared/protocol.ts';
-import { ITEM_DEFS, missingEssentials, type Missing } from '../../../../shared/space/index.ts';
+import { ITEM_DEFS, missingEssentials, placementOf, type Missing } from '../../../../shared/space/index.ts';
 import { get, useStore, type BuildTool } from '../../store.ts';
-import { addFloor, canTurn, chooseEntry, clearBuild, discardBuild, enterBuild, isActive, saveBuild, patchBuild, peek, redo, rotate, selectTab, setLevel, setTool, undo } from './actions.ts';
-import { footprintText, TABS, visibleEntries, type Entry } from './catalog.ts';
+import { addFloor, canTurn, chooseEntry, clearBuild, discardBuild, enterBuild, isActive, saveBuild, patchBuild, peek, redo, rotate, selectTab, setLevel, setTool, stepBack, undo } from './actions.ts';
+import { ENTRIES, footprintText, TABS, visibleEntries, type Entry } from './catalog.ts';
 import { BlockIcon, BuildIcon, FillIcon, FloorIcon, PieceIcon, Redo, Search, TabIcon, ToolIcon, Turn, Undo, WALL_MODES, WallsIcon } from './icons.tsx';
 import { consequences, keepBlock, removal, removeBlock } from './removal.ts';
 import { spaceContext } from './state.ts';
@@ -228,6 +228,54 @@ function TeamPick() {
   );
 }
 
+const CANCELS: ReadonlySet<BuildTool['kind']> = new Set(['item', 'wall', 'room', 'floor', 'wallpaint', 'opening']);
+
+// What the tool in hand needs the owner to know, and the way out of it: the keys, the team it is for, the turn button and Cancel.
+function Hints({ tool, compact = false }: { tool: BuildTool; compact?: boolean }) {
+  // A piece picked up from the floor says what Esc does in words; a tool or a small thing in hand has the Cancel button, which says it as plainly.
+  const carrying = tool.kind === 'item' && !!tool.carry;
+  const cancel = CANCELS.has(tool.kind) && (compact || !carrying);
+  const hint = HINTS[tool.kind](tool).filter(([k]) => !(cancel && k === 'Esc'));
+  return (
+    <>
+      {hint.map(([k, v, danger]) => (
+        <span key={k}><kbd className={danger ? 'danger' : undefined}>{k}</kbd> {v}</span>
+      ))}
+      <TeamPick />
+      {(tool.kind === 'floor' || tool.kind === 'wallpaint') && <FillToggle />}
+      {canTurn(tool) && (
+        <button type="button" className="bh-turn" data-testid="rotate-handle" onClick={() => rotate(1)} title="Turn it a quarter (. key)" aria-label="Turn it">
+          <Turn /> Turn
+        </button>
+      )}
+      {cancel && (
+        <button type="button" className="bh-cancel" data-testid="cancel-tool" onClick={stepBack} title="Put it down (Esc)">
+          Cancel <kbd>Esc</kbd>
+        </button>
+      )}
+    </>
+  );
+}
+
+// A small thing in hand is for a desk, a table or a shelf, which sit anywhere on screen. The catalog folds down to this bar, so the top
+// the owner points at is never under a panel; the pointer over the bar brings the catalog back above it.
+function Held({ tool, thumb }: { tool: Extract<BuildTool, { kind: 'item' }>; thumb: string | undefined }) {
+  const name = ENTRIES.find((e) => e.kind === 'item' && e.def === tool.def)?.name ?? tool.def;
+  return (
+    <div className="bh-held" data-testid="held-bar">
+      <span className="bh-held-item">
+        {thumb && <img src={thumb} alt="" draggable={false} />}
+        <b>{name}</b>
+        <small>{footprintText(tool.def)}</small>
+      </span>
+      <span className="bh-held-hints bh-hint-row">
+        <Hints tool={tool} compact />
+      </span>
+      <span className="bh-held-more">Catalog <i aria-hidden="true">▴</i></span>
+    </div>
+  );
+}
+
 function Dock() {
   const tab = useStore((s) => s.build?.tab ?? 'desks');
   const search = useStore((s) => s.build?.search ?? '');
@@ -236,22 +284,15 @@ function Dock() {
   const thumbs = useThumbs();
   const entries = visibleEntries(tab as never, search, searching);
   const listing = searching || !!search.trim();
-  const hint = HINTS[tool.kind](tool);
   const input = useRef<HTMLInputElement>(null);
+  const held = tool.kind === 'item' && !!ITEM_DEFS[tool.def] && placementOf(ITEM_DEFS[tool.def]) !== 'floor' ? tool : null;
   return (
-    <div className="bh-dock" data-testid="build-catalog">
-      <div className="bh-hint" aria-live="polite">
-        {hint.map(([k, v, danger]) => (
-          <span key={k}><kbd className={danger ? 'danger' : undefined}>{k}</kbd> {v}</span>
-        ))}
-        <TeamPick />
-        {(tool.kind === 'floor' || tool.kind === 'wallpaint') && <FillToggle />}
-        {canTurn(tool) && (
-          <button type="button" className="bh-turn" data-testid="rotate-handle" onClick={() => rotate(1)} title="Turn it a quarter (. key)" aria-label="Turn it">
-            <Turn /> Turn
-          </button>
-        )}
-      </div>
+    <div className={`bh-dock${held ? ' held' : ''}`} data-testid="build-catalog">
+      {!held && (
+        <div className="bh-hint" aria-live="polite">
+          <Hints tool={tool} />
+        </div>
+      )}
       <div className="bh-panel">
         <div className="bh-head">
           <label className="bh-search">
@@ -276,6 +317,7 @@ function Dock() {
           )}
         </div>
       </div>
+      {held && <Held tool={held} thumb={thumbs.get(held.def)} />}
     </div>
   );
 }

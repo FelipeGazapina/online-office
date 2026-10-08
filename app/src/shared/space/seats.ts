@@ -1,11 +1,11 @@
 import { ITEM_DEFS, YAW, footprint, rotateLocal } from './catalog.ts';
 import { deriveFloors } from './derive.ts';
-import { defOf, itemRect, tileOfCell } from './geom.ts';
+import { defOf, floorItems, itemRect, tileOfCell } from './geom.ts';
 import { itemId } from './kit.ts';
 import { fastViolations, locateItem } from './validate.ts';
-import type { Building, BlockId, BuildOp, EmployeeId, Item, ItemId, Rot, SeatPose, SpaceContext, Vec2 } from './types.ts';
+import type { Building, BlockId, BuildOp, EmployeeId, FloorItem, ItemId, Rot, SeatPose, SpaceContext, Vec2 } from './types.ts';
 
-const toMeters = (item: Item, p: Vec2): Vec2 => ({ x: (item.x + p.x) * 0.5, z: (item.z + p.z) * 0.5 });
+const toMeters = (item: FloorItem, p: Vec2): Vec2 => ({ x: (item.x + p.x) * 0.5, z: (item.z + p.z) * 0.5 });
 
 /** Where a seat's desk, chair and standing spot are, in meters, and the way the sitter faces. Throws for an item that is not a desk. */
 export function seatPose(b: Building, id: ItemId): SeatPose {
@@ -24,9 +24,9 @@ export function seatPose(b: Building, id: ItemId): SeatPose {
 }
 
 /** The owner's desk, or the desk `seats` gives an employee. */
-export function deskOf(b: Building, seats: ReadonlyMap<EmployeeId, ItemId>, who: EmployeeId | 'owner'): Item | null {
+export function deskOf(b: Building, seats: ReadonlyMap<EmployeeId, ItemId>, who: EmployeeId | 'owner'): FloorItem | null {
   if (who === 'owner') {
-    for (const s of b.stories) for (const i of s.items) if (ITEM_DEFS[i.def]?.kind === 'owner_desk') return i;
+    for (const s of b.stories) for (const i of floorItems(s)) if (ITEM_DEFS[i.def]?.kind === 'owner_desk') return i;
     return null;
   }
   const id = seats.get(who);
@@ -36,10 +36,10 @@ export function deskOf(b: Building, seats: ReadonlyMap<EmployeeId, ItemId>, who:
 const kindFor = (orchestrator: boolean) => (orchestrator ? 'po_desk' : 'bench_desk');
 
 /** The team's first unclaimed desk of the right kind: its PO desk for an orchestrator, a bench desk for anyone else. Null when none is free. */
-export function freeDesk(b: Building, seats: ReadonlyMap<EmployeeId, ItemId>, blockId: BlockId, orchestrator: boolean): Item | null {
+export function freeDesk(b: Building, seats: ReadonlyMap<EmployeeId, ItemId>, blockId: BlockId, orchestrator: boolean): FloorItem | null {
   const taken = new Set(seats.values());
   for (const s of b.stories) {
-    for (const i of s.items) {
+    for (const i of floorItems(s)) {
       if (i.blockId === blockId && ITEM_DEFS[i.def]?.kind === kindFor(orchestrator) && !taken.has(i.id)) return i;
     }
   }
@@ -55,7 +55,7 @@ export function placeDesk(b: Building, blockId: BlockId, orchestrator: boolean, 
   let sz = 0;
   let n = 0;
   b.stories.forEach((st, s) => {
-    for (const i of st.items) {
+    for (const i of floorItems(st)) {
       if (i.blockId !== blockId) continue;
       const d = defOf(i);
       if (!d) continue;
@@ -86,7 +86,7 @@ export function placeDesk(b: Building, blockId: BlockId, orchestrator: boolean, 
         if (Math.max(Math.abs(dx), Math.abs(dz)) !== r) continue;
         for (const rot of [0, 2, 1, 3] as Rot[]) {
           const f = footprint(def, rot);
-          const item: Item = { id, def: kind, x: ax + dx - Math.floor(f.w / 2), z: az + dz - Math.floor(f.d / 2), rot, blockId };
+          const item: FloorItem = { id, def: kind, x: ax + dx - Math.floor(f.w / 2), z: az + dz - Math.floor(f.d / 2), rot, blockId };
           const op: BuildOp = { t: 'items', story, put: [item], del: [] };
           if (fastViolations(b, [op]).length) continue;
           const chair = rotateLocal(def, rot, def.seat!.chair);

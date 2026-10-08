@@ -2,13 +2,15 @@
 // call per story however many of it there are. A model sits on the floor with its origin at the middle of the item's
 // footprint and faces +z at rot 0, the way the space module's seats do.
 import { BufferGeometry, IcosahedronGeometry, PlaneGeometry } from 'three';
-import { ITEM_DEFS, STORY_H } from '../../../../shared/space/index.ts';
+import { composeVignette, ITEM_DEFS, liftOf, lookOf, STORY_H, TOP_UNIT, topRect, YAW, type ItemId } from '../../../../shared/space/index.ts';
 import type { PropName } from '../props.ts';
 import { FURNITURE } from './furniture.ts';
 import { POD_DYNAMIC } from './pod.ts';
+import { TABLETOP_MODELS } from './tabletop.ts';
+import { computerOf, screensOf } from './computer.ts';
 import { at, bbox, blob, box, cyl, merge, paint } from './parts.ts';
 
-export { blob, box, cyl, merge, paint };
+export { blob, box, cyl, merge, paint, screensOf, computerOf };
 
 const WOOD = '#efe0c6';
 const DARK = '#3a3f4e';
@@ -16,42 +18,14 @@ const PANEL = '#e2d1b3';
 // White parts take the instance color, so a team's chairs come out in the team's color.
 const TINT: [number, number, number] = [1, 1, 1];
 
-// With `body` false only what sits on the desk is built: the textured desk prop supplies the top, legs and drawers.
-function desk(po: boolean, body = true) {
-  const parts = body ? [bbox(1.46, 0.06, 0.94, 0, 0.72, 0, WOOD, 0.025), bbox(1.3, 0.4, 0.03, 0, 0.5, 0.4, PANEL, 0.01)] : [];
-  parts.push(
-    box(0.5, 0.025, 0.16, 0, 0.755, -0.12, '#2b2e38'),
-    cyl(0.05, 0.045, 0.1, 0.58, 0.8, -0.12, '#fbf6ec', 12),
-    // A low, slim monitor: its top stays under a seated sitter's eyes, so faces read across the desk.
-    box(0.06, 0.1, 0.06, 0, 0.8, 0.2, '#2b2e38'),
-    bbox(0.7, 0.38, 0.04, 0, 0.98, 0.2, '#1c1f27', 0.015),
-  );
-  if (body) parts.push(...[-1, 1].flatMap((sx) => [-1, 1].map((sz) => box(0.06, 0.7, 0.06, sx * 0.67, 0.35, sz * 0.42, DARK))));
-  parts.push(
-    box(0.3, 0.02, 0.1, 0.34, 0.76, -0.3, '#fbf6ec'),
-    box(0.3, 0.021, 0.025, 0.34, 0.765, -0.3, po ? '#d97757' : '#3a3f4e'),
-    box(0.16, 0.025, 0.2, 0.58, 0.76, -0.02, '#f4f0e6'),
-    cyl(0.07, 0.09, 0.02, -0.62, 0.77, 0.3, '#2b2e38', 10),
-    box(0.02, 0.24, 0.02, -0.62, 0.9, 0.3, '#2b2e38'),
-    box(0.14, 0.05, 0.1, -0.62, 1.03, 0.27, '#f2b84b'),
-  );
-  if (po) parts.push(box(0.32, 0.02, 0.12, -0.5, 0.76, -0.22, '#d97757'));
-  // Desk life: a mug with a handle and coffee, a mouse on a pad, loose papers, sticky notes, a cable run and a small plant.
-  parts.push(
-    cyl(0.04, 0.04, 0.012, 0.58, 0.855, -0.12, '#4a2f20', 10),
-    box(0.03, 0.05, 0.015, 0.63, 0.82, -0.12, '#fbf6ec'),
-    box(0.2, 0.006, 0.18, 0.36, 0.76, -0.12, '#2b2e38'),
-    box(0.055, 0.025, 0.09, 0.36, 0.775, -0.12, '#e8e6e0'),
-    box(0.22, 0.012, 0.3, -0.42, 0.77, -0.2, '#f7f4ec'),
-    box(0.2, 0.012, 0.28, -0.4, 0.782, -0.16, '#e3ecf5'),
-    box(0.07, 0.07, 0.006, -0.3, 1.1, 0.172, '#f7d94c'),
-    box(0.06, 0.06, 0.006, -0.22, 1.04, 0.172, '#f29bb5'),
-    box(0.02, 0.02, 0.42, 0.1, 0.74, 0.42, '#1c1f27'),
-    box(0.02, 0.62, 0.02, 0.1, 0.4, 0.62, '#1c1f27'),
-    cyl(0.05, 0.04, 0.07, -0.58, 0.8, 0.0, '#c9a77c', 8),
-    blob(0.07, -0.58, 0.88, 0.0, '#5f9f6c'),
-  );
-  return merge(parts);
+// With `body` false only what sits on the desk is built: the textured desk prop supplies the top, legs and drawers, and what is left is the
+// computer in one of its setups (`computer.ts`). The rest of a desk's clutter, the mug, lamp, plant and papers, are small items the owner
+// places: `ITEM_DEFS.bench_desk.surface.blocked` is exactly the computer.
+function desk(po: boolean, body = true, setup = 0) {
+  const computer = computerOf(po, setup);
+  if (!body) return computer;
+  const parts = [bbox(1.46, 0.06, 0.94, 0, 0.72, 0, WOOD, 0.025), bbox(1.3, 0.4, 0.03, 0, 0.5, 0.4, PANEL, 0.01), ...[-1, 1].flatMap((sx) => [-1, 1].map((sz) => box(0.06, 0.7, 0.06, sx * 0.67, 0.35, sz * 0.42, DARK)))];
+  return merge([...parts, computer]);
 }
 
 export function chairModel(): BufferGeometry {
@@ -96,7 +70,28 @@ function stairs(): BufferGeometry {
   return g;
 }
 
-function build(def: string): BufferGeometry {
+// A vignette drawn as one model: each member's own model, turned and set where it would stand, so the ghost and the catalog card show the set as it will land.
+function groupModel(id: string, look: number): BufferGeometry {
+  const def = ITEM_DEFS[id];
+  const members = composeVignette(def, 'group' as ItemId, { rot: 0, u: 0, v: 0 }, look, (member, n) => `${member}~${n}` as ItemId);
+  const { w, d } = def.top!;
+  return merge(
+    members.map((m) => {
+      const mdef = ITEM_DEFS[m.def];
+      const r = topRect(m, mdef);
+      const lift = liftOf(m, mdef, members);
+      return modelOf(m.def, lookOf(m, mdef))
+        .clone()
+        .rotateY(YAW[m.rot] + ((m.ang ?? 0) * Math.PI) / 180)
+        .translate(((r.u0 + r.u1) / 2 - w / 2) * TOP_UNIT, lift, ((r.v0 + r.v1) / 2 - d / 2) * TOP_UNIT);
+    }),
+  );
+}
+
+function build(def: string, look: number): BufferGeometry {
+  if (ITEM_DEFS[def]?.group) return groupModel(def, look);
+  const small = TABLETOP_MODELS[def];
+  if (small) return small(look);
   switch (def) {
     case 'bench_desk':
       return desk(false);
@@ -143,7 +138,7 @@ function build(def: string): BufferGeometry {
 }
 
 /** Defs drawn from a baked prop model; a def whose entry has `onTop` keeps its procedural desk-top clutter on top of the model. */
-export const PROP_DEFS: Readonly<Record<string, { prop: PropName; onTop?: (def: string) => BufferGeometry }>> = {
+export const PROP_DEFS: Readonly<Record<string, { prop: PropName; onTop?: (def: string, setup: number) => BufferGeometry }>> = {
   sofa: { prop: 'sofa' },
   armchair: { prop: 'armchair' },
   bookshelf: { prop: 'bookshelf' },
@@ -152,22 +147,30 @@ export const PROP_DEFS: Readonly<Record<string, { prop: PropName; onTop?: (def: 
   plant_fern: { prop: 'plant_syngonium' },
   plant_small: { prop: 'plant_succulent' },
   plant_cactus: { prop: 'plant_succulent' },
-  bench_desk: { prop: 'desk', onTop: () => desk(false, false) },
-  po_desk: { prop: 'desk', onTop: () => desk(true, false) },
+  lamp_desk: { prop: 'desk_lamp' },
+  laptop: { prop: 'laptop' },
+  picture_frame: { prop: 'picture_frame' },
+  vase: { prop: 'vase' },
+  desk_clock: { prop: 'desk_clock' },
+  bench_desk: { prop: 'desk', onTop: (_, setup) => desk(false, false, setup) },
+  po_desk: { prop: 'desk', onTop: (_, setup) => desk(true, false, setup) },
 };
 const onTopCache = new Map<string, BufferGeometry>();
-export const onTopOf = (def: string): BufferGeometry | undefined => {
+export const onTopOf = (def: string, setup = 0): BufferGeometry | undefined => {
   const make = PROP_DEFS[def]?.onTop;
   if (!make) return undefined;
-  let g = onTopCache.get(def);
-  if (!g) onTopCache.set(def, (g = make(def)));
+  const key = `${def}#${setup}`;
+  let g = onTopCache.get(key);
+  if (!g) onTopCache.set(key, (g = make(def, setup)));
   return g;
 };
 
 const cache = new Map<string, BufferGeometry>();
-export function modelOf(def: string): BufferGeometry {
-  let g = cache.get(def);
-  if (!g) cache.set(def, (g = build(def)));
+/** The model of a def in one of its looks (a colour or a style: same footprint and height). Look 0 is the def's first. */
+export function modelOf(def: string, look = 0): BufferGeometry {
+  const key = look ? `${def}#${look}` : def;
+  let g = cache.get(key);
+  if (!g) cache.set(key, (g = build(def, look)));
   return g;
 }
 
@@ -176,10 +179,3 @@ export const DYNAMIC: ReadonlySet<string> = new Set(['owner_desk', 'board_termin
 
 /** Instance color of a def when its item has no tint. */
 export const DEFAULT_TINT: Readonly<Record<string, number>> = { chair: 0x5c7892 };
-
-export const screenGeometry = (): BufferGeometry => {
-  const g = new PlaneGeometry(0.62, 0.31);
-  g.rotateY(Math.PI);
-  g.translate(0, 0.98, 0.2 - 0.022);
-  return g;
-};

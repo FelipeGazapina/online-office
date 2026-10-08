@@ -25,6 +25,7 @@ import { OfficeError } from './office/error.ts';
 const employeeId = z.string().min(1).transform((s) => s as EmployeeId);
 const blockId = z.string().min(1).transform((s) => s as BlockId);
 const questionId = z.string().min(1).transform((s) => s as QuestionId);
+const messageId = z.string().min(1).transform((s) => s as MessageId);
 const modelId = z.string().min(1).transform((s) => s as ModelId);
 const provider = z.enum(['claude-code', 'codex', 'hermes']);
 const meetingDoor = z.enum(['open', 'closed']) satisfies z.ZodType<MeetingDoor>;
@@ -67,15 +68,17 @@ const wallDir = z.enum(['e', 's', 'sd', 'nd']);
 const wallRef = z.object({ x: tile, z: tile, d: wallDir });
 const wallSeg: z.ZodType<WallSeg> = z.object({ x: tile, z: tile, d: wallDir, style: z.number().int().min(0).max(255), open: z.enum(['door', 'window', 'arch']).optional() });
 const itemIdSchema = z.string().min(1).max(200).transform((s) => s as ItemId);
-const item: z.ZodType<Item> = z.object({
+const itemBase = {
   id: itemIdSchema,
   def: z.string().min(1).max(60),
-  x: tile,
-  z: tile,
   rot,
   blockId: z.string().min(1).optional(),
   tint: z.number().int().min(0).max(0xffffff).optional(),
-});
+};
+const unit = z.number().int().min(-1024).max(1024);
+// A small thing on a surface also says how it looks, how many degrees it stands off square, and how many things it is stacked above the top.
+const onTop = { look: z.number().int().min(0).max(63).optional(), ang: z.number().int().min(-180).max(180).optional(), lvl: z.number().int().min(0).max(3).optional() };
+const item: z.ZodType<Item> = z.union([z.object({ ...itemBase, x: tile, z: tile }), z.object({ ...itemBase, on: itemIdSchema, u: unit, v: unit, ...onTop })]);
 const lot = z.object({ x0: tile, z0: tile, w: z.number().int().min(1).max(64), h: z.number().int().min(1).max(64) });
 const MANY = 4096;
 const buildOp: z.ZodType<BuildOp> = z.discriminatedUnion('t', [
@@ -123,6 +126,16 @@ const clientMessage = z.discriminatedUnion('type', [
   z.object({ type: z.literal('delete_task'), taskId }),
   z.object({ type: z.literal('assign_task'), taskId, employeeId }),
   z.object({ type: z.literal('send_hours'), taskId }),
+  z.object({ type: z.literal('load_activity'), taskId }),
+  z.object({
+    type: z.literal('answer_question'),
+    taskId,
+    ref: z.discriminatedUnion('kind', [
+      z.object({ kind: z.literal('mail'), id: messageId }),
+      z.object({ kind: z.literal('ask'), employeeId, id: questionId }),
+    ]),
+    text: z.string().min(1).max(20_000),
+  }),
   z.object({ type: z.literal('connect_task_provider'), provider: taskProvider }),
   z.object({ type: z.literal('load_linear_people') }),
   z.object({ type: z.literal('configure_task_provider'), provider: z.literal('cronospark'), apiKey: z.string().max(2000), userId: z.string().max(200) }),
@@ -144,6 +157,8 @@ const clientMessage = z.discriminatedUnion('type', [
   z.object({ type: z.literal('set_permissions'), employeeId, mode: permissionMode }),
   z.object({ type: z.literal('remove_allow_rule'), employeeId, rule: allowRule }),
   z.object({ type: z.literal('fresh_session'), employeeId }),
+  z.object({ type: z.literal('interrupt'), employeeId }),
+  z.object({ type: z.literal('load_terminal') }),
   z.object({ type: z.literal('reset_company') }),
   z.object({ type: z.literal('build'), ops: z.array(buildOp).min(1).max(64) }),
   z.object({ type: z.literal('undo') }),
@@ -195,6 +210,8 @@ export function startOffice({ dataFile, harnesses, window, services }: Options) 
       mail: (view) => emit({ type: 'mail', view }),
       stream: (employeeId, replyingTo, delta, done) => emit({ type: 'stream', employeeId, replyingTo, delta, ...(done ? { done } : {}) }),
       history: (convo, messages, hasMore) => emit({ type: 'history', convo, messages, hasMore }),
+      activity: (taskId, entries, live) => emit({ type: 'activity', taskId, entries, live }),
+      terminal: (employeeId, push) => emit({ type: 'terminal', employeeId, ...push }),
       error: (message) => emit({ type: 'error', message }),
     },
     services,
