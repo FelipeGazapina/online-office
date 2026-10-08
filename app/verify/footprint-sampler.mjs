@@ -47,7 +47,7 @@ export function summarize(all, { fromMin, toMin, rampMin = 2 }) {
   return {
     peakMiB: top ? top.countedMiB : null,
     peakAtMin: top ? +top.tMin.toFixed(2) : null,
-    // The same after the first `rampMin` minutes, when the fifteen tasks have started and their acknowledgements are done.
+    // The same after the ramp (`rampMin`: the first sample at which everybody was working), when the tasks have started and their acknowledgements are done.
     peakAfterRampMiB: (() => {
       const after = samples.filter((s) => s.tMin >= rampMin);
       return after.length ? Math.max(...after.map((s) => s.countedMiB)) : null;
@@ -92,4 +92,11 @@ export function startSampler({ rootPid, everyMs = 10_000, extra = () => ({}), t0
       await inFlight;
     },
   };
+}
+
+// The ramp ends at the first sample with at least `people - 1` working: main starts the tasks one after the other, each start is a few
+// seconds of git work, and the page only hears of a person working when main gets to send the snapshot. Null if it never did.
+export function rampEnd(samples, people) {
+  const at = samples.find((s) => !s.error && (s.people?.working ?? 0) >= people - 1);
+  return at ? at.tMin : null;
 }

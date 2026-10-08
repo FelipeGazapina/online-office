@@ -20,7 +20,7 @@ import { delimiter, join } from 'node:path';
 import { TerminalBuffer } from '../src/shared/terminal.ts';
 import { installFakeGh } from './fake-gh.ts';
 import { linearWorld, startFakeLinear, TOKEN } from './fake-linear.ts';
-import { startSampler, summarize } from './footprint-sampler.mjs';
+import { rampEnd, startSampler, summarize } from './footprint-sampler.mjs';
 import { summarize as summarizeHeap } from './heap-summary.mjs';
 import { connect, targets } from './inspector.mjs';
 import { HAIKU, sceneReady } from './lib.mjs';
@@ -269,16 +269,19 @@ export default async function (s) {
   page.close();
 
   // ---- Result
-  const summary = summarize(samples, { fromMin: MINUTES / 2, toMin: MINUTES });
+  const ramp = rampEnd(samples, EMPLOYEES);
+  const summary = summarize(samples, { fromMin: MINUTES / 2, toMin: MINUTES, rampMin: ramp ?? 2 });
   const ok = samples.filter((x) => !x.error);
   const working = ok.map((x) => x.people?.working ?? 0);
   const overlap = [...new Map(ok.flatMap((x) => x.others).map((o) => [o.pid, o])).values()];
   const reasons = [];
   if (overlap.length) reasons.push(`another Online Office app was running: ${overlap.map((o) => `pid ${o.pid} ${o.command}`).join('; ')}`);
-  // The first two minutes are the ramp: main starts the fifteen tasks one after the other (about 4 s each, in git work), and each start is
-  // acknowledged by a claude process of its own. After it everybody has a task running and the next one waiting.
-  const steady = working.filter((_, i) => ok[i].tMin >= 2);
-  if (steady.length && mean(steady) < EMPLOYEES - 0.5) reasons.push(`only ${mean(steady).toFixed(1)} of ${EMPLOYEES} people were working on average after the first two minutes`);
+  // The ramp is the time main takes to start the fifteen tasks one after the other (git work, a few seconds each) and the page to hear of
+  // it. After it everybody has a task running and the next one waiting; one person between tasks now and then is the handoff.
+  const steady = working.filter((_, i) => ramp !== null && ok[i].tMin >= ramp);
+  if (ramp === null) reasons.push(`never ${EMPLOYEES - 1} people working at once`);
+  else if (ramp > MINUTES * 0.5) reasons.push(`the ramp took ${ramp.toFixed(1)} min of ${MINUTES}`);
+  else if (steady.length && mean(steady) < EMPLOYEES - 0.5) reasons.push(`only ${mean(steady).toFixed(1)} of ${EMPLOYEES} people were working on average after the ramp`);
   if (!ok.length || ok.length < MINUTES * 5) reasons.push(`only ${ok.length} samples`);
   const sha = execFileSync('git', ['rev-parse', '--short', 'HEAD'], { cwd: new URL('..', import.meta.url).pathname, encoding: 'utf8' }).trim();
   const peakRow = ok.find((x) => x.countedMiB === summary.peakMiB) ?? ok[0];
@@ -291,7 +294,7 @@ export default async function (s) {
     office: { ...office, plan: office.plan.map((p) => ({ story: p.story, deskId: p.deskId })) },
     summary,
     classTotals: { counted: 'main + renderer + gpu + utility + other + ackers', agents: 'the employees own claude/codex/hermes processes and their descendants' },
-    working: { perSample: working, min: Math.min(...working), mean: r1(mean(working)), meanAfterTwoMinutes: steady.length ? r1(mean(steady)) : null, tasksHandedOut: assigned, reinjected: live.reinjected },
+    working: { perSample: working, min: Math.min(...working), mean: r1(mean(working)), rampMin: ramp === null ? null : +ramp.toFixed(2), meanAfterRamp: steady.length ? r1(mean(steady)) : null, tasksHandedOut: assigned, reinjected: live.reinjected },
     frames: frameResult,
     breakdown,
     heap,

@@ -18,14 +18,14 @@ add('mode / sha', (r) => `${r.meta.mode} ${r.meta.sha}`);
 add('valid', (r) => (r.valid ? 'yes' : 'NO'));
 add('peak MiB (counted)', (r) => f1(r.summary.peakMiB));
 add('  at minute', (r) => f1(r.summary.peakAtMin));
-add('peak after minute 2', (r) => f1(r.summary.peakAfterRampMiB));
+add('ramp ends at min / peak after it', (r) => `${r.working.rampMin ?? '-'} / ${f1(r.summary.peakAfterRampMiB)}`);
 for (const c of ['main', 'renderer', 'gpu', 'utility', 'other', 'ackers']) add(`  ${c} at peak`, (r) => f1(r.summary.atPeak[c]));
 add('agents at peak (not counted)', (r) => f1(r.summary.atPeak.agents));
 for (const c of ['main', 'renderer', 'gpu', 'utility', 'other', 'ackers', 'agents']) add(`class peak ${c}`, (r) => f1(r.summary.classPeak[c]));
 add('counted, mean of 2nd half', (r) => f1(second(r, (s) => s.countedMiB)));
 for (const c of ['main', 'renderer', 'gpu', 'other', 'ackers']) add(`  ${c}, mean of 2nd half`, (r) => f1(second(r, (s) => s.classes[c])));
 add('slope MiB/min (2nd half)', (r) => f1(r.summary.slopeMiBPerMin));
-add('working min / mean', (r) => `${r.working.min} / ${r.working.mean}`);
+add('working mean after ramp', (r) => String(r.working.meanAfterRamp ?? r.working.meanAfterTwoMinutes ?? r.working.mean));
 add('fps / slow %', (r) => (r.frames ? `${r.frames.fpsAvg} / ${r.frames.slowPct}` : '-'));
 add('max swap MiB / pressure', (r) => `${f1(r.summary.maxSwapUsedMiB)} / ${r.summary.maxPressureLevel}`);
 
