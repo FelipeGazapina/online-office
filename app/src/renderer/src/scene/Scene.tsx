@@ -1,5 +1,6 @@
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import { Suspense, use, useCallback, useEffect, useRef, useState } from 'react';
+import { reloadBitmapTextures } from './bitmapTexture.ts';
 import { setLabelLayer } from './labelLayer.ts';
 import { useStore } from '../store.ts';
 import { BuildingLayer } from './building/BuildingLayer.tsx';
@@ -26,6 +27,16 @@ function PickView() {
   return null;
 }
 
+// A bitmap texture frees its decoded image once the GPU has it (bitmapTexture.ts), so a lost GL context needs the files read again.
+function RestoreTextures() {
+  const { gl } = useThree();
+  useEffect(() => {
+    gl.domElement.addEventListener('webglcontextlost', reloadBitmapTextures);
+    return () => gl.domElement.removeEventListener('webglcontextlost', reloadBitmapTextures);
+  }, [gl]);
+  return null;
+}
+
 // The render loop waits for this: the first draw would otherwise block the main thread while the GPU links the programs and
 // takes the textures. It mounts once the company and the building have arrived, so the scene it compiles is the whole office.
 function FirstDraw({ onReady }: { onReady: () => void }) {
@@ -47,6 +58,7 @@ function World({ onReady }: { onReady: () => void }) {
   return (
     <>
       <PickView />
+      <RestoreTextures />
       <SimDriver />
       <CameraRig />
       <Staged>
