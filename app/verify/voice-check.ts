@@ -114,7 +114,8 @@ await section('cleaning transcripts', async () => {
   check(cleanTranscript('(clicking) (beeping)') === '', 'parenthesised sound tags are not speech');
   check(cleanTranscript('[Music]\n♪ ♪') === '', 'music is not speech');
   check(cleanTranscript('.') === '', 'a lone period is not speech');
-  check(cleanTranscript('(laughs) Use  Postgres,\nnot SQLite.') === 'Use Postgres, not SQLite.', 'a tag before speech is dropped and the speech is kept');
+  // "Postgres" becomes "PostgreSQL" in correctTechnicalTerms, so the kept words are compared after that.
+check(cleanTranscript('(laughs) Use  Postgres,\nnot SQLite.') === 'Use PostgreSQL, not SQLite.', 'a tag before speech is dropped and the speech is kept');
 });
 
 await section('the worklet', async () => {
@@ -166,6 +167,8 @@ await section('the asset protocol', async () => {
 await section('the real service on the fast model', async () => {
   const { service, events, pidFile } = newService('fast');
   await service.use('fast');
+  check(service.engine().kind === 'asleep' && everythingUnderScratch().length === 0 && !existsSync(pidFile), `use('fast') only puts the model on disk, and no server runs (${JSON.stringify(service.engine())})`);
+  await service.wake();
   const engine = service.engine();
   check(engine.kind === 'ready' && engine.model === 'ggml-small-q5_1.bin', `the engine is ready on small-q5_1 (${JSON.stringify(engine)})`);
   check(!events.some((e) => e.kind === 'error' || e.kind === 'missing_binary'), `it never reported an error on the way (${events.map((e) => e.kind)})`);
@@ -190,7 +193,8 @@ await section('the real service on the fast model', async () => {
 
   const pidBefore = readFileSync(pidFile, 'utf8');
   await service.use('fast');
-  check(readFileSync(pidFile, 'utf8') === pidBefore, 'asking for the model it already runs does not restart the server');
+  await service.wake();
+  check(readFileSync(pidFile, 'utf8') === pidBefore, 'asking for the model it already runs, or waking it again, does not restart the server');
 
   await service.stop();
   check(everythingUnderScratch().length === 0, 'after stop() no whisper-server, and no supervisor around it, is left');
@@ -201,6 +205,7 @@ await section('the real service on the fast model', async () => {
 await section('switching between fast and accurate', async () => {
   const { service } = newService('switch');
   await service.use('fast');
+  await service.wake();
   await service.use('accurate');
   const engine = service.engine();
   check(engine.kind === 'ready' && engine.model === 'ggml-large-v3-turbo-q5_0.bin', `accurate runs turbo-q5_0 (${JSON.stringify(engine)})`);
@@ -222,6 +227,7 @@ await section('requests wait their turn', async () => {
   process.env.FAKE_WHISPER_LOG = log;
   const { service } = newService('queue', { locate: async () => join(appDir, 'verify/fake-whisper-server.mjs') });
   await service.use('fast');
+  await service.wake();
   check(service.engine().kind === 'ready', 'the service starts against a stand-in server that logs concurrency');
   const t0 = Date.now();
   const texts = await Promise.all([1, 2, 3, 4].map(() => service.transcribe(bytesOf(en), 'en')));
@@ -242,7 +248,8 @@ await section('quitting right after stop()', async () => {
     `import { createWhisper } from ${JSON.stringify(join(appDir, 'src/main/voice/whisper.ts'))};
 const [, , cacheDir, pidFile, mode] = process.argv;
 const service = createWhisper({ cacheDir, pidFile, locate: async () => ${JSON.stringify(fake)} });
-const started = service.use('fast');
+await service.use('fast');
+const started = service.wake();
 if (mode === 'ready') await started;
 else await new Promise((resolve) => setTimeout(resolve, 700));
 void service.stop();
@@ -268,6 +275,7 @@ import { bytesOf, readWav } from ${JSON.stringify(join(appDir, 'verify/wav.ts'))
 const [, , cacheDir, pidFile, shell, clip] = process.argv;
 const service = createWhisper({ cacheDir, pidFile, shell });
 await service.use('fast');
+await service.wake();
 console.log('up ' + (await service.transcribe(bytesOf(readWav(clip)), 'en')));
 setInterval(() => {}, 1000);
 `,
@@ -304,6 +312,7 @@ setInterval(() => {}, 1000);
   const { service } = newService('dash', { shell: '/bin/dash' });
   if (existsSync('/bin/dash')) {
     await service.use('fast');
+    await service.wake();
     check(service.engine().kind === 'ready', 'the service starts under dash');
     check(hears(await service.transcribe(bytesOf(en), 'en'), ['diagram', 'billing']), 'and transcribes under dash');
     await service.stop();
@@ -319,7 +328,8 @@ await section('a missing binary and checking again', async () => {
   check(await service.transcribe(bytesOf(en), 'en').then(() => false, (e: Error) => e.message.includes('not installed')), 'a request says whisper-server is not installed');
   path = binary;
   await service.recheck();
-  check(service.engine().kind === 'ready', `Check again finds it and the engine becomes ready (${events.map((e) => e.kind)})`);
+  await service.wake();
+  check(service.engine().kind === 'ready', `Check again finds it and the next talk makes the engine ready (${events.map((e) => e.kind)})`);
   await service.stop();
 });
 
@@ -365,6 +375,8 @@ await section('downloading a model that is missing', async () => {
   const fresh = join(dir, 'dl-fresh');
   const first = newService('dl-fresh', { cacheDir: fresh, models });
   await first.service.use('fast');
+  check(first.service.engine().kind === 'asleep', `the model downloads at launch and the engine then sleeps (${JSON.stringify(first.service.engine())})`);
+  await first.service.wake();
   const downloads = first.events.filter((e): e is Extract<VoiceEngine, { kind: 'downloading' }> => e.kind === 'downloading' && e.file === 'fast.bin');
   check(downloads.length >= 2, `the engine reported downloading with progress (${downloads.length} reports)`);
   check(downloads.every((d) => d.total === model.length) && downloads.every((d, i) => i === 0 || d.received >= downloads[i - 1]!.received), 'each report names the file, the full size, and never goes backwards');
@@ -412,6 +424,7 @@ await section('downloading a model that is missing', async () => {
   await offlineStart.service.stop();
   const cached = newService('cached', { cacheDir: cache, models: { ...MODELS }, locate: async () => join(appDir, 'verify/fake-whisper-server.mjs') });
   await cached.service.use('fast');
+  await cached.service.wake();
   check(cached.service.engine().kind === 'ready', 'models already in the cache start without any network access');
   await cached.service.stop();
 });
@@ -426,6 +439,7 @@ await section('a server that survived a crash', async () => {
 
   const { service } = newService('crash', { pidFile });
   await service.use('fast');
+  await service.wake();
   check(await until(() => !serversUnderScratch().includes(orphan.pid!), 5000), 'the next launch kills it');
   check(service.engine().kind === 'ready' && serversUnderScratch().length === 1, 'and starts its own, so one whisper-server runs');
   check(readFileSync(pidFile, 'utf8') !== JSON.stringify({ pid: orphan.pid }) && existsSync(pidFile), 'the pid file now names the new server');
@@ -437,6 +451,7 @@ await section('a server that survived a crash', async () => {
   writeFileSync(pidFile, JSON.stringify({ pid: bystander.pid }));
   const careful = newService('careful', { pidFile });
   await careful.service.use('fast');
+  await careful.service.wake();
   check(bystander.exitCode === null && bystander.signalCode === null, 'a pid file whose pid now belongs to another program is left alone');
   await careful.service.stop();
   bystander.kill('SIGKILL');

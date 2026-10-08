@@ -11,6 +11,9 @@ const port = Number(flag('--port'));
 const prefix = flag('--request-path') ?? '';
 const delay = Number(process.env.FAKE_WHISPER_DELAY_MS ?? 200);
 const startDelay = Number(process.env.FAKE_WHISPER_START_MS ?? 0);
+// A server that takes its time to end after SIGTERM, so a check can send a request while the old one is dying.
+const dieAfter = Number(process.env.FAKE_WHISPER_DIE_MS ?? 0);
+if (dieAfter) process.on('SIGTERM', () => setTimeout(() => process.exit(0), dieAfter));
 const log = process.env.FAKE_WHISPER_LOG;
 let running = 0;
 

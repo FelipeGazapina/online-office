@@ -40,7 +40,8 @@ export function chipOf({ engine, access, capture, phase }: VoiceState, mode: 'pr
     const percent = engine.total > 0 ? Math.floor((engine.received / engine.total) * 100) : 0;
     return { tone: 'busy', text: `Downloading the voice model ${percent}%`, meter: false };
   }
-  if (engine.kind === 'starting') return { tone: 'busy', text: 'Loading the voice model', meter: false };
+  // The engine starts when the owner begins to talk, and the HUD keeps saying what the owner is doing while it loads.
+  if (engine.kind === 'starting' && phase === 'idle') return { tone: 'busy', text: 'Loading the voice model', meter: false };
   if (capture.kind !== 'open') return { tone: 'idle', text: 'Mic starting', meter: false };
   switch (phase) {
     case 'listening':

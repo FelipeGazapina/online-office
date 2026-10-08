@@ -14,6 +14,7 @@ export const voiceApi: VoiceApi = {
     return () => void ipcRenderer.removeListener(VOICE_IPC.engineChanged, listener);
   },
   useQuality: (quality) => ipcRenderer.send(VOICE_IPC.useQuality, quality),
+  wake: () => ipcRenderer.send(VOICE_IPC.wake),
   recheck: () => ipcRenderer.send(VOICE_IPC.recheck),
   transcribe: (pcm, language) =>
     ipcRenderer.invoke(VOICE_IPC.transcribe, { pcm: new Uint8Array(pcm.buffer, pcm.byteOffset, pcm.byteLength), language }).catch(unwrap),

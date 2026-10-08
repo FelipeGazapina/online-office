@@ -11,6 +11,9 @@
 //   OFFICE_RAM_UNIT, OFFICE_RAM_ROUND   the first two columns of the ram.tsv line
 //   OFFICE_RAM_KEEP_HEAP=1   keep the .heapsnapshot files (hundreds of MB); the summaries are always kept
 //   OFFICE_RAM_SCALE=1       force the device pixel ratio (default: the display's own)
+//   OFFICE_RAM_VOICE=1       also talk once, at 30% of the run: the voice engine is woken the way holding V wakes it, and the run checks that
+//                            a whisper-server appears, how much it holds, and that it is gone again after the idle period (20 s here)
+// Whatever the mode, every poll of the main loop looks for a whisper-server in the app's tree, so a run says whether voice stayed off.
 // The run is invalid, and says so, when another test or dev build of Online Office (Electron from a worktree, or any app holding a DevTools
 // port) was running at any sample, or fewer than 15 people were working after the ramp. The owner's installed app does not invalidate it:
 // it is not in the tree, so not in the sum; each sample lists it under `others` with its kind. The result JSON is written either way.
@@ -25,6 +28,7 @@ import { TerminalBuffer } from '../src/shared/terminal.ts';
 import { installFakeGh } from './fake-gh.ts';
 import { linearWorld, startFakeLinear, TOKEN } from './fake-linear.ts';
 import { rampEnd, startAckerCensus, startSampler, summarize } from './footprint-sampler.mjs';
+import { footprints, processTable, treeOf } from './procs.mjs';
 import { summarize as summarizeHeap } from './heap-summary.mjs';
 import { connect, targets } from './inspector.mjs';
 import { HAIKU, sceneReady } from './lib.mjs';
@@ -32,6 +36,7 @@ import { prepareOffice, workFor } from './ram-office.mjs';
 
 const MINUTES = Number(process.env.OFFICE_RAM_MINUTES ?? 10);
 const FAKE = process.env.OFFICE_RAM_AGENTS === 'fake';
+const VOICE = process.env.OFFICE_RAM_VOICE === '1';
 const CDP_PORT = Number(process.env.OFFICE_CDP_PORT ?? 9333);
 const INSPECT_PORT = CDP_PORT + 100;
 const EMPLOYEES = 15;
@@ -67,6 +72,7 @@ export async function prepare() {
     LINEAR_MCP_TOKEN: TOKEN,
     PATH: `${gh.bin}${delimiter}${process.env.PATH}`,
     ...(FAKE ? { OFFICE_NO_AGENTS: '1', OFFICE_ACK: '0' } : {}),
+    ...(VOICE ? { OFFICE_VOICE_IDLE_MS: '20000' } : {}),
   });
   console.log(`[ram] scratch office in ${OUT}; ${MINUTES} min, ${FAKE ? 'fake terminal feed' : 'real haiku agents'}; ledger kept ${office.ledger.kept} of ${office.ledger.total} entries`);
 }
@@ -98,6 +104,12 @@ function terminalFeed(ids) {
       return out;
     },
   };
+}
+
+// The whisper-server in the app's tree (not the shell that supervises it), with what it holds, or null.
+function whisperNow(rootPid) {
+  const server = treeOf(processTable(), rootPid).find((p) => /whisper-server/.test(p.command) && !/^\/bin\/(sh|dash) /.test(p.command));
+  return server ? { pid: server.pid, mib: footprints([server.pid]).get(server.pid)?.mib ?? null } : null;
 }
 
 export const diagnose = async (s) => {
@@ -204,6 +216,28 @@ export default async function (s) {
     feedUntil = Date.now() + 9_800;
   };
 
+  // Voice: every poll says whether a whisper-server ran. With OFFICE_RAM_VOICE one talk is scripted and followed.
+  const voice = { polls: 0, withServer: 0, maxMiB: 0, wakeAtSec: null, upAfterSec: null, upMiB: null, goneAfterSec: null, serverBeforeWake: 0 };
+  const voiceWakeAt = MINUTES * 0.3 * 60_000;
+  const pollVoice = async (elapsed) => {
+    const w = whisperNow(s.pid);
+    voice.polls++;
+    if (w) {
+      voice.withServer++;
+      voice.maxMiB = Math.max(voice.maxMiB, w.mib ?? 0);
+      if (voice.wakeAtSec === null) voice.serverBeforeWake++;
+      else if (voice.upAfterSec === null) {
+        voice.upAfterSec = r1(elapsed / 1000 - voice.wakeAtSec);
+        voice.upMiB = w.mib;
+      }
+    } else if (voice.upAfterSec !== null && voice.goneAfterSec === null) voice.goneAfterSec = r1(elapsed / 1000 - voice.wakeAtSec);
+    if (VOICE && voice.wakeAtSec === null && elapsed >= voiceWakeAt) {
+      voice.wakeAtSec = r1(elapsed / 1000);
+      await s.eval('window.office.voice.wake()');
+      log(`talked: woke the voice engine at ${voice.wakeAtSec} s`);
+    }
+  };
+
   const frameAt = MINUTES * 0.8 * 60_000;
   const breakdownAt = MINUTES * 0.9 * 60_000;
   let frames;
@@ -221,6 +255,7 @@ export default async function (s) {
       }
       if (Date.now() >= feedUntil) await pushFeed();
     }
+    await pollVoice(elapsed);
     const now = await readPeople();
     if (!FAKE) {
       for (const e of now) {
@@ -293,6 +328,11 @@ export default async function (s) {
   else if (ramp > MINUTES * 0.5) reasons.push(`the ramp took ${ramp.toFixed(1)} min of ${MINUTES}`);
   else if (steady.length && mean(steady) < EMPLOYEES - 0.5) reasons.push(`only ${mean(steady).toFixed(1)} of ${EMPLOYEES} people were working on average after the ramp`);
   if (!ok.length || ok.length < MINUTES * 5) reasons.push(`only ${ok.length} samples`);
+  if (VOICE) {
+    if (voice.serverBeforeWake) reasons.push(`a whisper-server ran in ${voice.serverBeforeWake} polls before anyone talked`);
+    if (voice.upAfterSec === null) reasons.push('talking did not start a whisper-server');
+    else if (voice.goneAfterSec === null) reasons.push('the whisper-server was still there at the end of the run, after the idle period');
+  } else if (voice.withServer) reasons.push(`a whisper-server ran in ${voice.withServer} of ${voice.polls} polls although nobody talked`);
   const sha = execFileSync('git', ['rev-parse', '--short', 'HEAD'], { cwd: new URL('..', import.meta.url).pathname, encoding: 'utf8' }).trim();
   const peakRow = ok.find((x) => x.countedMiB === summary.peakMiB) ?? ok[0];
   const other = r1(peakRow.classes.utility.mib + peakRow.classes.other.mib + peakRow.classes.ackers.mib);
@@ -316,6 +356,7 @@ export default async function (s) {
     classTotals: { counted: 'main + renderer + gpu + utility + other + ackers', agents: 'the employees own claude/codex/hermes processes and their descendants' },
     working: { perSample: working, min: Math.min(...working), mean: r1(mean(working)), rampMin: ramp === null ? null : +ramp.toFixed(2), meanAfterRamp: steady.length ? r1(mean(steady)) : null, tasksHandedOut: assigned, reinjected: live.reinjected },
     frames: frameResult,
+    voice,
     breakdown,
     heap,
     shots,
@@ -328,6 +369,7 @@ export default async function (s) {
   console.log(`RAM peak ${summary.peakMiB} MiB (limit 2048) at minute ${summary.peakAtMin}; slope ${summary.slopeMiBPerMin} MiB/min over minutes ${summary.slopeWindowMin.join(' to ')}; agents peak ${summary.maxAgentsMiB} MiB`);
   console.log(`per class at the peak: ${JSON.stringify(summary.atPeak)}; per class peak: ${JSON.stringify(summary.classPeak)}`);
   console.log(`working: min ${result.working.min} mean ${result.working.mean} of ${EMPLOYEES}; frames: ${frameResult ? `${frameResult.fpsAvg} fps, ${frameResult.slowPct}% slow` : 'not timed'}`);
+  console.log(`voice: whisper-server in ${voice.withServer} of ${voice.polls} polls${VOICE ? `; woken at ${voice.wakeAtSec} s, up ${voice.upAfterSec} s later holding ${voice.upMiB} MiB (peak ${voice.maxMiB}), gone ${voice.goneAfterSec} s after the wake` : ''}`);
   console.log(`TSV\t${tsv}`);
   if (!result.valid) throw new Error(`the run is INVALID: ${reasons.join(' | ')}`);
 }
