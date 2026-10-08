@@ -2,7 +2,7 @@ import { createAcknowledger, type Acknowledger } from './ack.ts';
 import { isPlainOrder, type OwnerIntent } from './owner-intent.ts';
 import { boardPage } from './board.ts';
 import { folderArtifacts } from './mail-artifacts.ts';
-import { commitsAhead, createWorkspace, hold, integrate, isGitRepo, removeWorkspace, syncWorkspace, workspaceArtifacts } from './workspace.ts';
+import { commitsAhead, createWorkspace, setCommitAuthor, type CommitAuthor, hold, integrate, isGitRepo, removeWorkspace, syncWorkspace, workspaceArtifacts } from './workspace.ts';
 import { runGh, type Gh } from './pull-request.ts';
 import { randomUUID } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
@@ -95,6 +95,7 @@ export type OfficeEvents = {
 type Acker = Pick<Acknowledger, 'warm' | 'ack' | 'stop'> & Partial<Pick<Acknowledger, 'triage'>>;
 
 // The things every session leans on, started before the first employee so a session can connect the moment it is built.
+// `signer` names the account the office's commits are made as. The app asks gh for the account it is signed in to; checks leave it out.
 export type OfficeServices = {
   mcp: OfficeMcp;
   memory: MemoryStore;
@@ -102,10 +103,12 @@ export type OfficeServices = {
   acker?: Acker;
   gh?: Gh;
   openUrl?: (url: string) => void | Promise<void>;
+  signer?: () => Promise<CommitAuthor | null>;
 };
 
 // How often the pull requests of tasks are asked about while one is open. A script that waits for a merge shortens it.
 const PR_POLL_MS = Number(process.env.OFFICE_PR_POLL_MS) || 3 * 60_000;
+const SIGNER_POLL_MS = 10 * 60_000;
 
 // Where a blocked employee goes when the last question is answered. The adapter keeps reporting while the card is up
 // (a subagent finishes, the turn ends), and those reports land here so the card stays put.
@@ -343,6 +346,8 @@ export class Office {
   private mail!: Mailroom;
   private readonly acker: Acker;
   private readonly prTimer: NodeJS.Timeout;
+  // gh can be signed in to another account while the app runs, so who signs the office's commits is asked again now and then.
+  private readonly signerTimer: NodeJS.Timeout | undefined;
   // Owner posts that wait for a triage answer, and the end of the line they keep their order in.
   private ownerPosts = { waiting: 0, tail: Promise.resolve(), closed: false };
   // The last thing each employee said in the turn they are on. It is the reply when the harness gives no final text.
@@ -408,6 +413,13 @@ export class Office {
       if (this.tasks.watchingPrs()) void this.tasks.refreshPrs();
     }, PR_POLL_MS);
     this.prTimer.unref();
+    const signer = this.services.signer;
+    if (signer) {
+      const ask = () => void signer().then(setCommitAuthor, () => setCommitAuthor(null));
+      ask();
+      this.signerTimer = setInterval(ask, SIGNER_POLL_MS);
+      this.signerTimer.unref();
+    }
     // Sessions exist now, so whatever a crash left half delivered can go out again, and a handoff whose people left while the app was
     // closed can tell the ones who are still here.
     if (!frozen) {
@@ -608,6 +620,7 @@ export class Office {
 
   shutdown() {
     clearInterval(this.prTimer);
+    clearInterval(this.signerTimer);
     clearTimeout(this.terminalTimer);
     this.ownerPosts.closed = true;
     for (const id of [...this.sessions.keys()]) this.stopSession(id);

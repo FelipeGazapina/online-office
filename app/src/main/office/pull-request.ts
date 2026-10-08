@@ -6,6 +6,7 @@
 import { spawn } from 'node:child_process';
 import { delimiter } from 'node:path';
 import type { PrState, TaskPr } from '../../shared/tasks.ts';
+import type { CommitAuthor } from './workspace.ts';
 
 export type GhRun = { ok: boolean; out: string; err: string; missing?: boolean };
 export type Gh = (cwd: string, args: string[]) => Promise<GhRun>;
@@ -30,6 +31,32 @@ export const runGh: Gh = (cwd, args) =>
       done({ ok: code === 0, out: out.trim(), err: err.trim() });
     });
   });
+
+// The account gh is signed in to, as git names a commit's author: its primary verified email, or the account's noreply
+// address when gh may not read emails. GitHub, and CI that trusts it, ties either one to the account. Null when gh is
+// missing or signed out.
+export async function githubAuthor(gh: Gh, cwd: string): Promise<CommitAuthor | null> {
+  const user = await gh(cwd, ['api', 'user']);
+  if (!user.ok) return null;
+  let me: { login?: unknown; id?: unknown; name?: unknown };
+  try {
+    me = JSON.parse(user.out);
+  } catch {
+    return null;
+  }
+  if (typeof me.login !== 'string' || typeof me.id !== 'number') return null;
+  const listed = await gh(cwd, ['api', 'user/emails']);
+  let email: string | undefined;
+  try {
+    const all = listed.ok ? (JSON.parse(listed.out) as { email?: unknown; primary?: unknown; verified?: unknown }[]) : [];
+    const primary = all.find((e) => e.primary === true && e.verified === true);
+    if (typeof primary?.email === 'string') email = primary.email;
+  } catch {
+    email = undefined;
+  }
+  const name = typeof me.name === 'string' && me.name.trim() ? me.name.trim() : me.login;
+  return { name, email: email ?? `${me.id}+${me.login}@users.noreply.github.com` };
+}
 
 export type PrResult = { kind: 'pr'; pr: TaskPr } | { kind: 'none'; note: string };
 

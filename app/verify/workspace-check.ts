@@ -7,7 +7,7 @@ import { join } from 'node:path';
 import type { BlockId, EmployeeId } from '../src/shared/protocol.ts';
 import { Mailroom, type Member } from '../src/main/office/mail.ts';
 import { folderArtifacts } from '../src/main/office/mail-artifacts.ts';
-import { changedInWorkspace, commitsAhead, createTaskWorkspace, createWorkspace, defaultBase, integrate, isGitRepo, pushBranch, removeTaskWorkspace, removeWorkspace, syncWorkspace, workspaceArtifacts, type Base, type Workspace } from '../src/main/office/workspace.ts';
+import { changedInWorkspace, commitsAhead, createTaskWorkspace, createWorkspace, defaultBase, integrate, isGitRepo, pushBranch, removeTaskWorkspace, removeWorkspace, setCommitAuthor, syncWorkspace, workspaceArtifacts, type Base, type Workspace } from '../src/main/office/workspace.ts';
 import { check, finish } from './check.ts';
 
 const root = realpathSync(mkdtempSync(join(tmpdir(), 'ws-check-')));
@@ -19,6 +19,7 @@ const write = (dir: string, file: string, text: string) => {
   mkdirSync(join(dir, file, '..'), { recursive: true });
   writeFileSync(join(dir, file), text);
 };
+const SIGNER = { name: 'The Owner', email: '12+owner@users.noreply.github.com' };
 let seq = 0;
 const repo = (): string => {
   const dir = join(root, `block${++seq}`);
@@ -72,8 +73,12 @@ const text = (dir: string, file: string) => readFileSync(join(dir, file), 'utf8'
   write(bruno.path, 'bruno.txt', 'bruno only\n');
   check(changedInWorkspace(block, ana).sort().join() === 'ana.txt,shared.txt', 'artifacts are Ana\'s own files, not Bruno\'s concurrent edits');
   check(changedInWorkspace(block, bruno).sort().join() === 'bruno.txt,shared.txt', 'and Bruno\'s are his');
+  setCommitAuthor(SIGNER);
   const first = integrate(block, ana, 'Ana', 'Ana edits shared');
-  check(first.kind === 'merged' && text(block, 'shared.txt').includes('ANA') && git(block, 'log', '-1', '--format=%an', ana.branch) === 'Ana', 'the first integration merges, authored by the employee');
+  check(first.kind === 'merged' && text(block, 'shared.txt').includes('ANA'), 'the first integration merges');
+  check(git(block, 'log', '-1', '--format=%an <%ae>|%cn <%ce>', ana.branch) === 'The Owner <12+owner@users.noreply.github.com>|The Owner <12+owner@users.noreply.github.com>', 'Ana\'s commit is authored and committed by the connected GitHub account', git(block, 'log', '-1', '--format=%an <%ae>|%cn <%ce>', ana.branch));
+  check(git(block, 'log', '-1', '--format=%(trailers:key=Co-authored-by,valueonly)', ana.branch) === 'Ana <ana@office.local>', 'and credits Ana in a Co-authored-by trailer');
+  check(git(block, 'log', '-1', '--format=%an|%(trailers:key=Co-authored-by,valueonly)') === 'The Owner|Ana <ana@office.local>', 'the merge into the block is the account\'s too, crediting Ana');
   check(/Merge office\/ana/.test(log(block)), 'the block log shows the employee merge');
   const second = integrate(block, bruno, 'Bruno', 'Bruno edits shared');
   check(second.kind === 'conflict' && second.paths.join() === 'shared.txt', 'the second integration reports the conflict instead of overwriting', JSON.stringify(second));
@@ -213,7 +218,8 @@ const bare = (): { origin: string; block: string } => {
   const second = integrate(task.path, bruno, 'Bruno', 'Bruno\'s piece');
   check(first.kind === 'merged' && second.kind === 'merged' && existsSync(join(task.path, 'ana.txt')) && existsSync(join(task.path, 'bruno.txt')), 'both pieces land on the same task branch');
   check(git(block, 'rev-parse', 'HEAD') === ownerHead && git(block, 'rev-parse', '--abbrev-ref', 'HEAD') === 'main' && !existsSync(join(block, 'ana.txt')) && git(block, 'status', '--porcelain') === '', 'the owner\'s checked-out branch is untouched');
-  check(git(task.path, 'log', '--format=%an', '-n', '6', '--no-merges').includes('Ana') && /Merge office\/ana/.test(log(task.path)), 'the task log shows the employees\' commits and merges');
+  check(git(task.path, 'log', '--format=%(trailers:key=Co-authored-by,valueonly)', '-n', '6', '--no-merges').includes('Ana') && /Merge office\/ana/.test(log(task.path)), 'the task log shows the employees\' commits and merges');
+  check(git(task.path, 'log', '--format=%an', `${base.ref}..HEAD`).split('\n').every((a) => a === 'The Owner'), 'every commit on the task branch is the connected account\'s, the Start commit included', git(task.path, 'log', '--format=%an', `${base.ref}..HEAD`));
   check((await pushBranch(task.path, task.branch)).kind === 'pushed' && git(origin, 'show', `${task.branch}:ana.txt`) === 'ana piece' && git(origin, 'show', `${task.branch}:bruno.txt`) === 'bruno piece', 'origin has both pieces on the task branch and nothing on main');
   check(git(origin, 'rev-parse', 'refs/heads/main') === ownerHead, 'origin\'s main did not move');
   check(integrate(task.path, ana, 'Ana', 'again').kind === 'already', 'rerunning an integration into the task changes nothing');
@@ -354,6 +360,28 @@ const bare = (): { origin: string; block: string } => {
   check(text(block, 'shared.txt').includes('ANA') && !text(block, 'shared.txt').includes('BRUNO'), 'the block was not overwritten');
   const team = room.team('ana' as EmployeeId);
   check(team.find((t) => t.name === 'Bruno')?.branch === 'office/bruno' && team.find((t) => t.name === 'Bruno')?.ahead === 1, 'the team view lists each person\'s branch and commits ahead of the block', JSON.stringify(team));
+}
+
+// who signs without a connected account
+{
+  setCommitAuthor(null);
+  const block = repo();
+  git(block, 'config', 'user.name', 'Repo Person');
+  git(block, 'config', 'user.email', 'person@example.com');
+  const ana = hire(block, 'Ana');
+  write(ana.path, 'mine.txt', 'mine\n');
+  integrate(block, ana, 'Ana', 'Ana without a signer');
+  check(git(block, 'log', '-1', '--format=%an <%ae>|%(trailers:key=Co-authored-by,valueonly)', ana.branch) === 'Repo Person <person@example.com>|Ana <ana@office.local>', 'with gh signed out the repo\'s own git identity signs, and Ana is still credited', git(block, 'log', '-1', '--format=%an <%ae>|%(trailers:key=Co-authored-by,valueonly)', ana.branch));
+
+  const bare = repo();
+  const env = { GIT_CONFIG_GLOBAL: process.env.GIT_CONFIG_GLOBAL, GIT_CONFIG_NOSYSTEM: process.env.GIT_CONFIG_NOSYSTEM };
+  process.env.GIT_CONFIG_GLOBAL = '/dev/null';
+  process.env.GIT_CONFIG_NOSYSTEM = '1';
+  const bruno = hire(bare, 'Bruno');
+  write(bruno.path, 'his.txt', 'his\n');
+  const landed = integrate(bare, bruno, 'Bruno', 'Bruno with no identity anywhere');
+  for (const [k, v] of Object.entries(env)) if (v === undefined) delete process.env[k]; else process.env[k] = v;
+  check(landed.kind === 'merged' && git(bare, 'log', '-1', '--format=%an <%ae>|%(trailers:key=Co-authored-by,valueonly)', bruno.branch) === 'Bruno <bruno@office.local>|', 'and a machine with no git identity at all still commits, as the employee');
 }
 
 finish();

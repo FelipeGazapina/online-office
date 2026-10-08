@@ -20,9 +20,34 @@ export type Integration =
 
 type Out = { ok: boolean; out: string; err: string };
 
+export type CommitAuthor = { name: string; email: string };
+
+// Who signs the commits the office makes: the GitHub account gh is signed in to, set by the office. CI that checks a
+// commit's author against the repo's people (Vercel does) refuses anyone else, so the employee who did the work is
+// credited in a Co-authored-by trailer instead. Without it the repo's own git identity signs, and only a repo with none
+// falls back to the employee's name.
+let signer: CommitAuthor | null = null;
+export const setCommitAuthor = (author: CommitAuthor | null): void => {
+  signer = author;
+};
+
+const OFFICE_NAME = 'Online Office';
+const employeeEmail = (name: string) => `${slug(name)}@office.local`;
+const hasGitIdentity = (cwd: string) => spawnSync('git', ['config', 'user.email'], { cwd, encoding: 'utf8' }).stdout?.trim() !== '';
+
+// The -c flags and the message for a commit or merge made on `doer`'s behalf.
+const signed = (cwd: string, args: string[], doer?: string): string[] => {
+  if (!doer) return args;
+  const author = signer ?? (hasGitIdentity(cwd) ? null : { name: doer, email: employeeEmail(doer) });
+  const who = [...(author ? ['-c', `user.name=${author.name}`, '-c', `user.email=${author.email}`] : []), '-c', 'commit.gpgsign=false'];
+  const credited = author?.name !== doer && doer !== OFFICE_NAME;
+  const m = args.indexOf('-m');
+  if (!credited || m < 0) return [...who, ...args];
+  return [...who, ...args.slice(0, m + 1), `${args[m + 1]}\n\nCo-authored-by: ${doer} <${employeeEmail(doer)}>`, ...args.slice(m + 2)];
+};
+
 const run = (cwd: string, args: string[], identity?: string, raw = false): Out => {
-  const who = identity ? ['-c', `user.name=${identity}`, '-c', `user.email=${slug(identity)}@office.local`, '-c', 'commit.gpgsign=false'] : [];
-  const r = spawnSync('git', [...who, ...args], { cwd, encoding: 'utf8', timeout: 60_000, maxBuffer: 64 * 1024 * 1024 });
+  const r = spawnSync('git', signed(cwd, args, identity), { cwd, encoding: 'utf8', timeout: 60_000, maxBuffer: 64 * 1024 * 1024 });
   return { ok: r.status === 0, out: raw ? (r.stdout ?? '') : (r.stdout ?? '').trim(), err: (r.stderr ?? r.error?.message ?? '').trim() };
 };
 
@@ -232,7 +257,7 @@ export const createTaskWorkspace = (blockCwd: string, path: string, task: TaskBr
   }
   const ws = { path, branch };
   // GitHub does not open a pull request for a branch that has nothing the base lacks.
-  if (!(Number(run(path, ['rev-list', '--count', `${base.ref}..HEAD`]).out) > 0)) run(path, ['commit', '--allow-empty', '--no-verify', '-m', `Start: ${task.title}`], 'Online Office');
+  if (!(Number(run(path, ['rev-list', '--count', `${base.ref}..HEAD`]).out) > 0)) run(path, ['commit', '--allow-empty', '--no-verify', '-m', `Start: ${task.title}`], OFFICE_NAME);
   return ws;
 };
 
@@ -248,8 +273,7 @@ export type Pushed = { kind: 'pushed' } | { kind: 'no-remote' } | { kind: 'faile
 // Never waits on git in the main process: network time belongs to the event loop. A prompt for credentials is refused, not waited on.
 const runAsync = (cwd: string, args: string[], timeoutMs: number, identity?: string): Promise<Out> =>
   new Promise((done) => {
-    const who = identity ? ['-c', `user.name=${identity}`, '-c', `user.email=${slug(identity)}@office.local`, '-c', 'commit.gpgsign=false'] : [];
-    const child = spawn('git', [...who, ...args], { cwd, env: { ...process.env, GIT_TERMINAL_PROMPT: '0' }, stdio: ['ignore', 'pipe', 'pipe'] });
+    const child = spawn('git', signed(cwd, args, identity), { cwd, env: { ...process.env, GIT_TERMINAL_PROMPT: '0' }, stdio: ['ignore', 'pipe', 'pipe'] });
     let out = '';
     let err = '';
     const timer = setTimeout(() => child.kill('SIGKILL'), timeoutMs);
@@ -267,7 +291,7 @@ const runAsync = (cwd: string, args: string[], timeoutMs: number, identity?: str
 
 // Pushes the task's branch to origin. When origin has moved on (the owner pressed "Update branch" on GitHub) it merges that in first. The branch is
 // the office's own, so nothing is ever forced.
-export const pushBranch = async (path: string, branch: string, name = 'Online Office'): Promise<Pushed> => {
+export const pushBranch = async (path: string, branch: string, name = OFFICE_NAME): Promise<Pushed> => {
   if (!run(path, ['remote', 'get-url', 'origin']).ok) return { kind: 'no-remote' };
   const push = () => runAsync(path, ['push', '--set-upstream', 'origin', `${branch}:${branch}`], 120_000);
   let pushed = await push();
