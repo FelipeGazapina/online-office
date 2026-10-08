@@ -209,7 +209,7 @@ console.log('\n# the office, with real git, a bare origin and a fake gh');
   const theTask = (title: string) => snap().tasks.find((t) => t.title === title)!;
   const ownerHead = git(repo, 'rev-parse', 'HEAD');
   const ownerUntouched = () => git(repo, 'rev-parse', '--abbrev-ref', 'HEAD') === 'main' && git(repo, 'rev-parse', 'HEAD') === ownerHead && git(repo, 'status', '--porcelain') === '';
-  const prCalls = (what: 'create' | 'list' | 'view') => fake.calls().filter((c) => c[0] === 'pr' && c[1] === what);
+  const prCalls = (what: 'create' | 'list' | 'view' | 'ready') => fake.calls().filter((c) => c[0] === 'pr' && c[1] === what);
 
   console.log('\n## one employee, one task');
   office.handle({ type: 'create_task', boardId: quick(blockA), title: 'Write the docs', notes: 'Short and plain', assignee: id('Ana') });
@@ -236,6 +236,8 @@ console.log('\n# the office, with real git, a bare origin and a fake gh');
   check(git(bare, 'log', '--format=%an', docs.git!.branch).split('\n').includes('Ana'), 'with her as the author');
   check(!existsSync(join(repo, 'docs.md')) && ownerUntouched() && git(bare, 'rev-parse', 'refs/heads/main') === ownerHead, 'nothing reached the owner\'s branch, here or on origin');
   check(prCalls('create').length === 1, 'and there is still one pull request');
+  check(await until(() => theTask('Write the docs').git?.pr?.state === 'open', 15000) && !fake.prs()[0]!.isDraft, 'a task in review takes its draft pull request out of draft', JSON.stringify([theTask('Write the docs').git, fake.prs()[0]]));
+  check(prCalls('ready').map((c) => c.join(' ')).join() === 'pr ready 1', 'with one gh pr ready, for its number', JSON.stringify(prCalls('ready')));
 
   console.log('\n## a PO delegates to two employees');
   office.handle({ type: 'create_task', boardId: quick(blockA), title: 'Ship the report', notes: 'two parts', assignee: id('Pia') });
@@ -256,6 +258,7 @@ console.log('\n# the office, with real git, a bare origin and a fake gh');
   await finishTurn(live('Pia'), 'report shipped');
   check(theTask('Ship the report').stage === 'review' && theTask('Ship the report').lastOutcome?.outcome === 'done', 'the PO\'s own run settles done once her pieces are in');
   check(await until(() => !!theTask('Ship the report').git?.pr, 15000) && prCalls('create').length === 2 && fake.prs().map((p) => p.number).join() === '1,2', 'each task has exactly one pull request');
+  check(await until(() => theTask('Ship the report').git?.pr?.state === 'open', 15000) && !fake.prs()[1]!.isDraft, 'the PO\'s task in review is ready for review on GitHub too');
   check(ownerUntouched() && !existsSync(join(repo, 'part-one.txt')), 'the owner\'s branch is still untouched');
   const bothAuthors = git(bare, 'log', '--format=%an', report.git!.branch).split('\n');
   check(bothAuthors.includes('Ana') && bothAuthors.includes('Bruno'), 'the commits are authored by the people who did the pieces');
@@ -269,6 +272,8 @@ console.log('\n# the office, with real git, a bare origin and a fake gh');
   write(live('Ana').host.block.cwd, 'docs2.md', 'more\n');
   await finishTurn(live('Ana'), 'more docs');
   check(await until(() => onOrigin(bare, docs.git!.branch, 'docs2.md') === 'more', 15000) && prCalls('create').length === created2, 'the second run lands on the same branch and opens no second pull request');
+  check(await until(() => snap().tasks.every((t) => t.stage !== 'review' || t.git?.pr?.state !== 'draft'), 15000), 'no task in review is left with a draft pull request');
+  const readyBefore = prCalls('ready').length;
   const before = JSON.stringify(snap().tasks.map((t) => [t.id, t.git]));
   const tipOnOrigin = git(bare, 'rev-parse', `refs/heads/${docs.git!.branch}`);
   office.shutdown();
@@ -276,6 +281,7 @@ console.log('\n# the office, with real git, a bare origin and a fake gh');
   await sleep(600);
   check(JSON.stringify(snap().tasks.map((t) => [t.id, t.git])) === before && prCalls('create').length === created2 && branchesIn(repo).length === 2, 'a restart makes no new branch and no new pull request, and the tasks keep what they had');
   check(git(bare, 'rev-parse', `refs/heads/${docs.git!.branch}`) === tipOnOrigin, 'and pushes nothing new');
+  check(prCalls('ready').length === readyBefore, 'and a pull request already out of draft is not asked again');
   rmSync(worktree(docs), { recursive: true, force: true });
   const tipBefore = git(repo, 'rev-parse', docs.git!.branch);
   office.handle({ type: 'assign_task', taskId: docs.id, employeeId: id('Bruno') });
@@ -345,6 +351,26 @@ console.log('\n# the office, with real git, a bare origin and a fake gh');
   }
   check(await until(() => !!theTask('Needs login').git?.pr && !theTask('Needs login').git?.note, 15000), 'refreshing the board opens the pull request once gh works, and clears the note', JSON.stringify([theTask('Needs login').git, fake.state().mode, fake.calls().slice(-6).map((c) => c.slice(0, 4).join(' '))]));
   check(prCalls('create').filter((c) => c.includes(login.git!.branch)).length === 1, 'with one gh pr create for it');
+  check(await until(() => theTask('Needs login').git?.pr?.state === 'open', 15000), 'a pull request opened for a task already in review leaves draft at once', JSON.stringify(theTask('Needs login').git));
+
+  office.handle({ type: 'create_task', boardId: quick(blockA), title: 'Ready refused', assignee: id('Ana') });
+  check(await until(() => theTask('Ready refused').git?.pr?.state === 'draft', 15000), 'another task gets its draft pull request');
+  const refusedNo = theTask('Ready refused').git!.pr!.number;
+  const readyFor = () => prCalls('ready').filter((c) => c[2] === String(refusedNo)).length;
+  fake.mode('logged-out');
+  write(live('Ana').host.block.cwd, 'refused.txt', 'r\n');
+  await finishTurn(live('Ana'), 'refused done');
+  check(theTask('Ready refused').stage === 'review', 'it moves to review while gh is signed out');
+  check(await until(() => /still a draft/.test(theTask('Ready refused').git?.note ?? ''), 15000) && theTask('Ready refused').git!.pr!.state === 'draft', 'gh cannot mark it ready, and the card says the pull request is still a draft and why', theTask('Ready refused').git?.note);
+  await sleep(700);
+  check(readyFor() === 1, 'a refusal is asked once, not again and again', String(readyFor()));
+  fake.mode('ok');
+  try {
+    office.handle({ type: 'refresh_board', boardId: quick(blockA) });
+  } catch {
+    // a quick board has nothing to pull
+  }
+  check(await until(() => theTask('Ready refused').git?.pr?.state === 'open' && !theTask('Ready refused').git?.note, 15000) && readyFor() === 2, 'the owner\'s refresh asks again, and the pull request leaves draft and the note goes', JSON.stringify([theTask('Ready refused').git, readyFor()]));
 
   office.handle({ type: 'create_task', boardId: quick(blockC), title: 'No repo here', assignee: id('Eve') });
   check(!theTask('No repo here').git && live('Eve').assigned.length === 1 && !live('Eve').assigned[0]!.includes('branch'), 'a block that is not a git repository gets no branch and no mention of one');
