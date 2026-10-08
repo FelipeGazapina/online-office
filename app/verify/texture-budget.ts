@@ -121,8 +121,9 @@ console.log(`\n${'files'.padEnd(46)}${''.padStart(15)}${mib(file.decoded).padSta
 console.log(`${'canvases'.padEnd(46)}${''.padStart(15)}${mib(canvas.decoded).padStart(13)}${mib(canvas.gpu).padStart(10)}${mib(canvas.kept).padStart(10)}`);
 console.log(`${'total'.padEnd(46)}${''.padStart(15)}${mib(all.decoded).padStart(13)}${mib(all.gpu).padStart(10)}${mib(all.kept).padStart(10)}\n`);
 
-// The budget. Base game/office measured 232 MiB of file textures on the GPU and kept the 174 MiB they decode to in the renderer.
-const BUDGET = { fileGpu: 232, canvasGpu: 80, kept: 80 };
+// The budget, a few percent over what the maps and canvases cost now. Base game/office at 73e7210 had 232 MiB of file textures on the GPU, kept
+// the 174 MiB they decode to in the renderer, and kept 57 MiB of canvas pixels next to the GPU copy of the canvases.
+const BUDGET = { fileGpu: 110, canvasGpu: 78, kept: 10 };
 check(closesBitmap, 'bitmap textures close their decoded image after the upload');
 check(file.gpu <= BUDGET.fileGpu * MiB, `file textures on the GPU ${mib(file.gpu).trim()} MiB <= ${BUDGET.fileGpu} MiB`);
 check(canvas.gpu <= BUDGET.canvasGpu * MiB, `canvas textures on the GPU ${mib(canvas.gpu).trim()} MiB <= ${BUDGET.canvasGpu} MiB`);

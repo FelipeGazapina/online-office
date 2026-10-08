@@ -113,14 +113,16 @@ export default async function (s) {
     return null;
   };
 
-  // Build mode at the nearest zoom, centred on a thing.
-  const build = async (p, aimY) => {
-    await s.eval(`__office.teleport(${p.x + 4}, ${p.z + 4}, 0)`);
-    await s.sleep(400);
+  // Build mode at the nearest zoom, looking at a thing. Build mode looks at where the owner stood when it was entered and keeps looking
+  // there, so the owner stands at the thing for that moment and then goes far away, out of the picture. The walls and furniture move the
+  // owner the same way each run, so a second run frames the same picture; panning by key would not.
+  const build = async (p) => {
+    await s.eval(`__office.teleport(${p.x}, ${p.z}); __office.step(0.5)`);
     await d.enterBuild();
+    await s.eval(`__office.teleport(${p.x + 40}, ${p.z + 40})`);
     await d.zoomTo(5);
-    await d.centerOn(p.x, aimY, p.z);
     await d.park();
+    await d.still();
     await s.sleep(500);
   };
 
@@ -166,16 +168,16 @@ export default async function (s) {
   await s.waitFor('window.__officeCamera && Math.abs(window.__officeCamera.blend) < 0.001', 10000);
 
   // build mode at 5 m
-  await build(found.sofa, 0.4);
+  await build(found.sofa);
   await shot('build-sofa');
   await d.exitBuild();
-  await build(found.bookshelf, 1.0);
+  await build(found.bookshelf);
   await shot('build-bookshelf');
   await d.exitBuild();
-  await build(found.laptop ?? found.vase ?? found.bench_desk, 0.8);
+  await build(found.laptop ?? found.vase ?? found.bench_desk);
   await shot('build-table');
   await d.exitBuild();
-  await build(found.bench_desk, 0.75);
+  await build(found.bench_desk);
   await shot('build-desks');
   await d.exitBuild();
 }
