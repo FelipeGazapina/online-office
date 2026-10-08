@@ -195,6 +195,7 @@ function Detail({ e }: { e: ActivityEntry }) {
         </>
       );
     case 'stage':
+    case 'handoff':
       return e.reason ? (
         <p className="tb-log-text" data-testid="entry-reason">
           <Words text={e.reason} limit={200} />

@@ -106,7 +106,8 @@ export const Card = memo(function Card({ task, stage, time, now, people, selecte
   const unsent = Object.values(time?.unsent ?? {}).reduce<number>((sum, ms) => sum + (ms ?? 0), 0);
   const providerStatus = providerNote(task, stage);
   const live = useTaskLive(task.id);
-  const line = cardLine(live, namerOf(people));
+  const name = namerOf(people);
+  const line = cardLine(live, name);
   const asks = questionCount(live);
   return (
     <div
@@ -147,6 +148,7 @@ export const Card = memo(function Card({ task, stage, time, now, people, selecte
           </span>
         )}
         {line && <span className={`tb-chip live st-${line.state}`} data-testid="card-live" data-state={line.state}>{line.text}</span>}
+        {task.handoff && <span className="tb-chip ghost" data-testid="card-handoff" title={task.handoff.reason}>To {name(task.handoff.to)}, waits on {name(task.handoff.awaits)}</span>}
         {outcome === 'done' && stage !== 'done' && <span className="tb-chip ok" title={task.lastOutcome?.text.slice(0, 200)}><Check size={11} />Run done</span>}
         {outcome && outcome !== 'done' && <span className="tb-chip bad" title={task.lastOutcome?.text.slice(0, 200)}><Alert size={11} />Run {outcome}</span>}
         {origin.priority && <span className="tb-chip">{origin.priority}</span>}
