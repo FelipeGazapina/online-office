@@ -11,9 +11,6 @@ const port = Number(flag('--port'));
 const prefix = flag('--request-path') ?? '';
 const delay = Number(process.env.FAKE_WHISPER_DELAY_MS ?? 200);
 const startDelay = Number(process.env.FAKE_WHISPER_START_MS ?? 0);
-// The service's warm-up is the first request. A check that wants a slow answer to a real request sets this to 1.
-const slowAfter = Number(process.env.FAKE_WHISPER_SLOW_AFTER ?? 0);
-let served = 0;
 // A server that takes its time to end after SIGTERM, so a check can send a request while the old one is dying.
 const dieAfter = Number(process.env.FAKE_WHISPER_DIE_MS ?? 0);
 if (dieAfter) process.on('SIGTERM', () => setTimeout(() => process.exit(0), dieAfter));
@@ -24,14 +21,13 @@ const server = createServer((req, res) => {
   if (req.url === `${prefix}/health`) return void res.end('{"status":"ok"}');
   if (req.method !== 'POST' || req.url !== `${prefix}/inference`) return void res.writeHead(404).end();
   running++;
-  const wait = served++ < slowAfter ? 20 : delay;
   if (log) appendFileSync(log, `start running=${running}\n`);
   req.resume();
   req.on('end', () =>
     setTimeout(() => {
       running--;
       res.end(JSON.stringify({ text: ' fake words' }));
-    }, wait),
+    }, delay),
   );
 });
 setTimeout(() => server.listen(port, '127.0.0.1'), startDelay);

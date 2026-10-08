@@ -11,7 +11,6 @@ import type { Language } from '../../shared/voice.ts';
 export type ServerExit = { stopped: boolean; reason: string };
 
 export type WhisperServer = {
-  // Resolves the words. The server answers one request at a time, and this waits behind the one it is answering.
   transcribe(pcm: Uint8Array, language: Language): Promise<string>;
   // SIGTERM has left before this returns, so a caller that quits right after cannot orphan the process. Resolves once it is gone.
   stop(): Promise<void>;
@@ -25,12 +24,6 @@ type StartOptions = { binary: string; model: string; vadModel: string; pidFile: 
 const READY_TIMEOUT_MS = 60_000;
 const REQUEST_TIMEOUT_MS = 60_000;
 const KILL_AFTER_MS = 3000;
-// The first request after a load is slower than the rest (on Accurate by up to 1.7 s), so one runs on silence while the owner
-// is still talking. It gives way to a real request: of the three the server used to run before it said ready, the second and
-// third gained nothing measurable, and they made a request that arrived early wait behind two more.
-const WARM_UPS = 1;
-// One second of 16 kHz Int16 silence.
-const SILENCE = new Uint8Array(32_000);
 
 // The server must not outlive the app, and an app that is killed cannot clean up after itself. macOS has no parent-death
 // signal, so a shell supervises the server. The app holds the write end of a pipe to the shell's stdin, and nothing else
@@ -198,13 +191,12 @@ function safeJson(raw: string): unknown {
   }
 }
 
-async function post(base: string, pcm: Uint8Array, language: Language, extra: Record<string, string> = {}): Promise<string> {
+async function post(base: string, pcm: Uint8Array, language: Language): Promise<string> {
   const body = new FormData();
   body.set('file', new Blob([wav16k(pcm)], { type: 'audio/wav' }), 'utterance.wav');
   body.set('response_format', 'json');
   body.set('temperature', '0.0');
   body.set('language', language);
-  for (const [key, value] of Object.entries(extra)) body.set(key, value);
   const res = await fetch(`${base}/inference`, { method: 'POST', body, signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) });
   if (!res.ok) throw new Error(`whisper-server answered HTTP ${res.status}`);
   return cleanTranscript(inferenceReply.parse(await res.json()).text);
@@ -286,26 +278,7 @@ export async function startServer(o: StartOptions): Promise<WhisperServer> {
     await stop();
     throw err;
   }
-
-  // The server holds one request at a time, so they are queued here and a real request can be told apart from a warm-up.
-  let line: Promise<unknown> = Promise.resolve();
-  const inLine = <T>(job: () => Promise<T>): Promise<T> => {
-    const run = line.then(job);
-    line = run.catch(() => {});
-    return run;
-  };
-  let waiting = 0;
-  // Server-side VAD would skip silence, so it is off for the warm-up. A warm-up that fails is not the owner's problem: the
-  // next real request meets the same fault and reports it.
-  void (async () => {
-    for (let i = 0; i < WARM_UPS && !stopping && waiting === 0; i++) await inLine(() => post(base, SILENCE, 'en', { vad: 'false' })).catch(() => {});
-  })();
-  return {
-    transcribe(pcm, language) {
-      waiting++;
-      return inLine(() => post(base, pcm, language)).finally(() => waiting--);
-    },
-    stop,
-    exited,
-  };
+  // No warm-up request runs before the first real one. On this machine it gained nothing on Fast, and on Accurate it kept a
+  // short utterance waiting up to 1.8 s behind it, where the first real request costs at most 0.4 s more than a later one.
+  return { transcribe: (pcm, language) => post(base, pcm, language), stop, exited };
 }

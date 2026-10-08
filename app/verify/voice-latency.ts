@@ -56,6 +56,7 @@ function footprintMiB(pid: number): number {
 const median = (xs: number[]) => [...xs].sort((a, b) => a - b)[Math.floor(xs.length / 2)]!;
 const settled = (ms: number) => sleep(ms);
 const IDLE_FOR_COLD_MS = 4500;
+const COLD_SAMPLES = 4;
 const report: Record<string, unknown> = { quality, build: lifecycle ? 'lifecycle' : 'always-on', loadAtStart: loadavg()[0]!.toFixed(1) };
 const log = (line: string) => console.log(line);
 
@@ -115,22 +116,34 @@ if (lifecycle) {
     await sleep(300);
   };
   const cold: Record<string, number[]> = {};
-  for (const [name, clip, base] of [['long', speech, median(warm)], ['short', short, median(warmShort)]] as const) {
-    for (const talkS of [0.5, 1, 2, 3]) {
+  const added: Record<string, number[]> = {};
+  // A short command is about a second of speech and a sentence about three, so each clip is tried at the lengths it could have.
+  // Every cold request is followed at once by the same request on the server it just started, so the two share the machine's load,
+  // and the difference between them is what the cold start cost.
+  const grid = [['short', short, [0.5, 1, 1.5]], ['long', speech, [2, 3.4]]] as const;
+  for (const [name, clip, talks] of grid) {
+    for (const talkS of talks) {
       const samples: number[] = [];
-      for (let i = 0; i < Math.max(2, Math.ceil(runs / 2)); i++) {
+      const extra: number[] = [];
+      for (let i = 0; i < COLD_SAMPLES; i++) {
         await asleep();
         const wokeAt = Date.now();
         void napper.wake!();
         await sleep(Math.max(0, talkS * 1000 - (Date.now() - wokeAt)));
         at = Date.now();
         await napper.transcribe(bytesOf(clip), 'en');
-        samples.push(Date.now() - at);
+        const coldMs = Date.now() - at;
+        at = Date.now();
+        await napper.transcribe(bytesOf(clip), 'en');
+        samples.push(coldMs);
+        extra.push(coldMs - (Date.now() - at));
       }
       cold[`${name}@${talkS}s`] = samples;
-      log(`cold, ${name} clip, owner spoke for ${talkS} s after the server woke: ${samples.join(' ')} ms (median ${median(samples)}, warm ${base}, added ${median(samples) - base})`);
+      added[`${name}@${talkS}s`] = extra;
+      log(`cold, ${name} clip, owner spoke for ${talkS} s after the server woke: ${samples.join(' ')} ms; each minus the same request right after: ${extra.join(' ')} (median added ${median(extra)} ms, load ${loadavg()[0]!.toFixed(1)})`);
     }
   }
+  report.added = added;
   report.cold = cold;
   await asleep();
   report.serverAfterSleep = serverPid() !== null;
