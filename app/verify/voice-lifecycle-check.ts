@@ -107,7 +107,7 @@ console.log('# nothing runs until the owner talks');
 console.log('\n# a request in flight is not idle');
 {
   process.env.FAKE_WHISPER_DELAY_MS = String(IDLE * 3);
-  process.env.FAKE_WHISPER_SLOW_AFTER = '3';
+  process.env.FAKE_WHISPER_SLOW_AFTER = '1';
   const { service } = newService('flight', { idleMs: IDLE });
   await service.wake();
   const pending = service.transcribe(new Uint8Array(64_000), 'en');

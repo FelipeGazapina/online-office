@@ -11,7 +11,7 @@ const port = Number(flag('--port'));
 const prefix = flag('--request-path') ?? '';
 const delay = Number(process.env.FAKE_WHISPER_DELAY_MS ?? 200);
 const startDelay = Number(process.env.FAKE_WHISPER_START_MS ?? 0);
-// The service's warm-ups are the first requests. A check that wants a slow answer to a real request sets this to 3.
+// The service's warm-up is the first request. A check that wants a slow answer to a real request sets this to 1.
 const slowAfter = Number(process.env.FAKE_WHISPER_SLOW_AFTER ?? 0);
 let served = 0;
 // A server that takes its time to end after SIGTERM, so a check can send a request while the old one is dying.

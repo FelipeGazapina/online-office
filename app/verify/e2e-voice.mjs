@@ -2,6 +2,8 @@
 // capture device, and a real Claude employee receives the right words, in English and in Portuguese, by hold-V push-to-talk
 // and by proximity with no key. It also proves that audio arriving while an employee speaks is dropped, that pressing V
 // stops an employee who is talking, that Accurate, Auto and a dead microphone behave, that an app killed with SIGKILL takes its whisper-server with it, and what the chip says in every state.
+// It also proves the server's lifecycle: no whisper-server exists until the owner talks, V or the detector starts it while they
+// speak, and it is gone again after the idle period (OFFICE_VOICE_IDLE_MS, 20 s here).
 // Run: pnpm build && OFFICE_CDP_PORT=9336 node verify/screen-watch.mjs node verify/cdp.mjs verify/e2e-voice.mjs
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
@@ -30,11 +32,43 @@ for (const [lang, p] of Object.entries(PHRASES)) {
 const deadClip = join(clips, 'dead.wav');
 writeWav(deadClip, new Int16Array(16_000 * 20));
 
-const base = { OFFICE_DATA_DIR: dataDir, OFFICE_START_LEVEL: '3', OFFICE_CLAUDE_MODEL: HAIKU, OFFICE_DEBUG: '1' };
+const base = { OFFICE_DATA_DIR: dataDir, OFFICE_START_LEVEL: '3', OFFICE_CLAUDE_MODEL: HAIKU, OFFICE_DEBUG: '1', OFFICE_VOICE_IDLE_MS: '20000' };
 export const env = { ...base, OFFICE_TEST_AUDIO: clipOf.en };
 
 const voiceOf = (s) => s.eval('JSON.parse(JSON.stringify(__office.store.getState().voice))');
 const measures = (s, name) => s.eval(`performance.getEntriesByName(${JSON.stringify(name)}).map(e => Math.round(e.duration))`);
+const engineOf = (s) => s.eval('__office.store.getState().voice.engine.kind');
+const pidFile = join(dataDir, 'whisper-server.pid');
+// The processes of this run's whisper-server (the supervising shell, its watcher and the server), found through the pid file
+// the app keeps while the server runs. Empty once the app has stopped it.
+const serverProcesses = () => {
+  if (!existsSync(pidFile)) return [];
+  const supervisor = String(JSON.parse(readFileSync(pidFile, 'utf8')).pid);
+  return execFileSync('ps', ['-axo', 'pid=,pgid=,command='], { encoding: 'utf8' })
+    .split('\n')
+    .filter((l) => l.trim().split(/\s+/)[1] === supervisor)
+    .map((l) => Number(l.trim().split(/\s+/)[0]));
+};
+const alive = (pid) => {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+};
+// Waits until the engine has stopped on its own, and says how long that took and that nothing of the server is left.
+async function engineFallsAsleep(s, how, ms = 70000) {
+  const was = serverProcesses();
+  assert(was.length > 0, `${how}: a whisper-server is running before the idle period`);
+  const t0 = Date.now();
+  await s.waitFor(`__office.store.getState().voice.engine.kind === 'asleep'`, ms);
+  const took = Date.now() - t0;
+  const t1 = Date.now();
+  while (was.some(alive) && Date.now() - t1 < 5000) await s.sleep(50);
+  assert(!was.some(alive) && serverProcesses().length === 0 && !existsSync(pidFile), `${how}: after the idle period the engine is asleep and no whisper-server process or pid file is left (${took} ms of quiet)`);
+  console.log(`lifecycle: ${how}: the whisper-server was gone ${took} ms after the last use`);
+}
 const norm = (t) =>
   t
     .toLowerCase()
@@ -66,6 +100,8 @@ const ANNOUNCEMENT = 'This is a long announcement from your colleague, so the mi
 const employeeSays = async (s, words) => s.eval(`__office.apply({ type: 'said', employeeId: ${claude}.id, text: ${JSON.stringify(words)} })`);
 
 const latencies = [];
+// Whether the owner found the engine running when they began to speak, which decides if the words waited for a load.
+const coldNow = async (s) => (await engineOf(s)) !== 'ready';
 
 // The owner steps away, so the microphone closes, and steps back, so it opens on a fresh stream and the clip plays again.
 async function freshMic(s) {
@@ -134,8 +170,13 @@ async function pushToTalk(s, lang, { bargeIn = false, shots = '' } = {}) {
     assert(await s.eval('speechSynthesis.speaking'), `${how}: an employee is talking`);
   }
   await s.sleep(Math.max(0, 1500 - (Date.now() - opened)));
+  const cold = await coldNow(s);
   await s.key('keyDown', 'KeyV', 'v');
   assert((await voiceOf(s)).phase === 'listening', `${how}: pressing V shows Listening`);
+  await s.waitFor(`document.querySelector('.talk-badge')?.innerText.includes('Listening')`, 2000).catch(() => {});
+  assert((await s.eval(text('.talk-badge'))).includes('Listening'), `${how}: and the chip says Listening, even while the engine loads (${await s.eval(text('.talk-badge'))})`);
+  await s.waitFor(`__office.store.getState().voice.engine.kind === 'ready'`, 30000);
+  assert(serverProcesses().length > 0, `${how}: holding V woke the engine (${cold ? 'it was asleep' : 'it was already up'}), so a whisper-server runs`);
   if (bargeIn) {
     await s.sleep(300);
     assert(!(await s.eval('speechSynthesis.speaking')), `${how}: pressing V stopped the employee mid-sentence`);
@@ -150,8 +191,8 @@ async function pushToTalk(s, lang, { bargeIn = false, shots = '' } = {}) {
   if (shots) await s.shot(`${shots}-transcribing`);
   const heard = await arrived(s, before, lang, how);
   const [ms] = (await measures(s, 'voice:ptt')).slice(heardBefore);
-  console.log(`latency: ${how}: V released to text in ${ms} ms ("${heard}")`);
-  latencies.push({ how, ms, note: 'V released to text' });
+  console.log(`latency: ${how}: V released to text in ${ms} ms, engine ${cold ? 'cold' : 'warm'} at the press ("${heard}")`);
+  latencies.push({ how: `${how} (${cold ? 'cold' : 'warm'})`, ms, note: 'V released to text' });
   await employeeUnderstood(s, lang, how);
 }
 
@@ -182,6 +223,7 @@ async function answerByVoice(s) {
   assert(sent.length === 1 && sent[0].type === 'answer', `${how}: the spoken answer reached the office as an answer to the question (${sent.map((m) => m.type)})`);
   assert(hears(wordsOf(sent[0]), PHRASES.en.words), `${how}: with the right words: "${wordsOf(sent[0])}"`);
   assert(!(await voiceOf(s)).cardMic, `${how}: the card mic switched itself off after one answer`);
+  assert((await engineOf(s)) === 'ready', `${how}: the detector hearing the answer woke the engine`);
   await quiet(s);
 }
 
@@ -190,21 +232,27 @@ async function proximity(s, lang) {
   await quiet(s);
   const before = routed(s).length;
   const heardBefore = (await measures(s, 'voice:proximity')).length;
+  const cold = await coldNow(s);
   await freshMic(s);
   const heard = await arrived(s, before, lang, how);
   const [ms] = (await measures(s, 'voice:proximity')).slice(heardBefore);
-  console.log(`latency: ${how}: end of speech detected to text in ${ms} ms, after the 600 ms the detector waits to be sure ("${heard}")`);
-  latencies.push({ how, ms, note: 'detected end of speech to text, after a 600 ms hangover' });
+  assert((await engineOf(s)) === 'ready', `${how}: hearing the owner speak woke the engine (${cold ? 'it was asleep' : 'it was already up'})`);
+  console.log(`latency: ${how}: end of speech detected to text in ${ms} ms, after the 600 ms the detector waits to be sure, engine ${cold ? 'cold' : 'warm'} when the owner started ("${heard}")`);
+  latencies.push({ how: `${how} (${cold ? 'cold' : 'warm'})`, ms, note: 'detected end of speech to text, after a 600 ms hangover' });
   await employeeUnderstood(s, lang, how);
 }
 
 export default async (s, { launch }) => {
   await hireClaudeInBlock(s, repo);
-  await s.waitFor(`__office.store.getState().voice.engine.kind === 'ready'`, 30000);
-  assert((await voiceOf(s)).engine.model === 'ggml-small-q5_1.bin', 'the engine is ready on the fast model');
+  await s.waitFor(`__office.store.getState().voice.engine.kind === 'asleep'`, 30000);
+  await s.sleep(3000);
+  assert(serverProcesses().length === 0 && !existsSync(pidFile), 'voice unused: the app has run for a while with the model on disk and no whisper-server process');
+  assert((await s.eval(text('.talk-badge'))).includes('Just talk, or hold V'), `and the chip reads as a working microphone, not as a model loading (${await s.eval(text('.talk-badge'))})`);
   assert(await click(s, 'Hold V'), 'chose the Hold V microphone mode');
   assert(await click(s, 'English'), 'chose English');
   await pushToTalk(s, 'en', { shots: 'u5-chip' });
+  assert((await voiceOf(s)).engine.model === 'ggml-small-q5_1.bin', 'after the talk the engine runs the fast model');
+  await engineFallsAsleep(s, 'after hold V');
   await pushToTalk(s, 'en', { bargeIn: true });
 
   assert(await click(s, 'Proximity'), 'chose the Proximity microphone mode');
@@ -226,14 +274,15 @@ export default async (s, { launch }) => {
 
   await answerByVoice(s);
 
+  // Choosing a model puts it on disk. A running engine moves onto it, and a sleeping one stays asleep until someone talks.
   assert(await click(s, 'Accurate'), 'chose Voice: Accurate');
-  await s.waitFor(`__office.store.getState().voice.engine.kind === 'ready' && __office.store.getState().voice.engine.model.includes('turbo')`, 90000);
-  assert((await voiceOf(s)).engine.model === 'ggml-large-v3-turbo-q5_0.bin', 'the engine reloaded on large-v3-turbo-q5_0');
+  await s.waitFor(`(__office.store.getState().voice.engine.kind === 'asleep') || (__office.store.getState().voice.engine.kind === 'ready' && __office.store.getState().voice.engine.model.includes('turbo'))`, 90000);
   assert(await click(s, 'Hold V'), 'chose the Hold V microphone mode again');
   await pushToTalk(s, 'en');
+  assert((await voiceOf(s)).engine.model === 'ggml-large-v3-turbo-q5_0.bin', 'after the talk the engine runs large-v3-turbo-q5_0');
   assert(await click(s, 'Fast'), 'chose Voice: Fast again');
-  await s.waitFor(`__office.store.getState().voice.engine.kind === 'ready' && __office.store.getState().voice.engine.model.includes('small')`, 60000);
-  assert((await voiceOf(s)).engine.model === 'ggml-small-q5_1.bin', 'and back on small-q5_1');
+  await s.waitFor(`(__office.store.getState().voice.engine.kind === 'asleep') || (__office.store.getState().voice.engine.kind === 'ready' && __office.store.getState().voice.engine.model.includes('small'))`, 60000);
+  await engineFallsAsleep(s, 'after Accurate and back');
 
   await chipStates(s);
   await s.close();
@@ -243,7 +292,7 @@ export default async (s, { launch }) => {
     await pt.waitFor('!!window.__office && !!window.office');
     await pt.waitFor(`!!${company} && ${company}.employees.length === 1`);
     await pt.eval('__office.step(25)');
-    await pt.waitFor(`__office.store.getState().voice.engine.kind === 'ready'`, 30000);
+    await pt.waitFor(`__office.store.getState().voice.engine.kind === 'asleep'`, 30000);
     assert(await click(pt, 'Português'), 'chose Português');
     assert(await click(pt, 'Hold V'), 'chose the Hold V microphone mode');
     await pushToTalk(pt, 'pt');
@@ -263,7 +312,7 @@ export default async (s, { launch }) => {
   await dead.waitFor('!!window.__office && !!window.office');
   await dead.waitFor(`!!${company} && ${company}.employees.length === 1`);
   await dead.eval('__office.step(25)');
-  await dead.waitFor(`__office.store.getState().voice.engine.kind === 'ready'`, 30000);
+  await dead.waitFor(`__office.store.getState().voice.engine.kind === 'asleep'`, 30000);
   const beforeDead = routed(dead).length;
   assert(await walkUpToClaude(dead), 'walked up to the employee with a microphone that only ever reads zeros');
   await dead.waitFor(`__office.store.getState().voice.access.kind === 'silent'`, 8000);
@@ -276,6 +325,8 @@ export default async (s, { launch }) => {
   await dead.sleep(2500);
   assert(routed(dead).length === beforeDead, 'holding V over silence sends nothing to the employee');
 
+  // Holding V over silence woke the engine, so a server runs.
+  await dead.waitFor(`__office.store.getState().voice.engine.kind === 'ready'`, 30000);
   const supervisor = JSON.parse(readFileSync(join(dataDir, 'whisper-server.pid'), 'utf8')).pid;
   const ofThisRun = () =>
     execFileSync('ps', ['-axo', 'pid=,pgid=,command='], { encoding: 'utf8' })
@@ -306,6 +357,7 @@ async function chipStates(s) {
     ['idle', {}, ['Just talk, or hold V'], null],
     ['downloading', { engine: { kind: 'downloading', file: 'ggml-small-q5_1.bin', received: 71_000_000, total: 190_085_487 } }, ['Downloading the voice model 37%'], null],
     ['starting', { engine: { kind: 'starting' } }, ['Loading the voice model'], null],
+    ['asleep', { engine: { kind: 'asleep' } }, ['Just talk, or hold V'], null],
     ['missing-binary', { engine: { kind: 'missing_binary' } }, ['brew install whisper-cpp'], 'Check again'],
     ['engine-error', { engine: { kind: 'error', message: 'whisper-server exited with code 3' } }, ['Voice failed', 'exited with code 3'], 'Try again'],
     ['mic-needs-prompt', { access: { kind: 'needs_prompt' } }, ['Allow the microphone in the macOS dialog'], null],

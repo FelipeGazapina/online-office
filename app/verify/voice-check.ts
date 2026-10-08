@@ -114,7 +114,8 @@ await section('cleaning transcripts', async () => {
   check(cleanTranscript('(clicking) (beeping)') === '', 'parenthesised sound tags are not speech');
   check(cleanTranscript('[Music]\n♪ ♪') === '', 'music is not speech');
   check(cleanTranscript('.') === '', 'a lone period is not speech');
-  check(cleanTranscript('(laughs) Use  Postgres,\nnot SQLite.') === 'Use Postgres, not SQLite.', 'a tag before speech is dropped and the speech is kept');
+  // "Postgres" becomes "PostgreSQL" in correctTechnicalTerms, so the kept words are compared after that.
+check(cleanTranscript('(laughs) Use  Postgres,\nnot SQLite.') === 'Use PostgreSQL, not SQLite.', 'a tag before speech is dropped and the speech is kept');
 });
 
 await section('the worklet', async () => {

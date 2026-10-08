@@ -5,7 +5,7 @@
 // Run from app/: node verify/voice-latency.ts [--quality=fast|accurate] [--runs=5]   Needs whisper-cpp, the models in the cache and macOS `say`.
 import { execFileSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
-import { homedir, tmpdir } from 'node:os';
+import { homedir, loadavg, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { VoiceEngine, VoiceQuality } from '../src/shared/voice.ts';
 import { createWhisper, type Whisper } from '../src/main/voice/whisper.ts';
@@ -55,8 +55,8 @@ function footprintMiB(pid: number): number {
 
 const median = (xs: number[]) => [...xs].sort((a, b) => a - b)[Math.floor(xs.length / 2)]!;
 const settled = (ms: number) => sleep(ms);
-const IDLE_FOR_COLD_MS = 800;
-const report: Record<string, unknown> = { quality, build: lifecycle ? 'lifecycle' : 'always-on' };
+const IDLE_FOR_COLD_MS = 4500;
+const report: Record<string, unknown> = { quality, build: lifecycle ? 'lifecycle' : 'always-on', loadAtStart: loadavg()[0]!.toFixed(1) };
 const log = (line: string) => console.log(line);
 
 const speech = say('Samantha', 'Can you draw a diagram of how the billing service talks to the queue?');
@@ -141,6 +141,7 @@ if (lifecycle) {
 }
 
 log(`engine events: ${events.map((e) => `${e.at}ms ${e.engine.kind}`).join(', ')}`);
+report.loadAtEnd = loadavg()[0]!.toFixed(1);
 log(`REPORT ${JSON.stringify(report)}`);
 rmSync(dir, { recursive: true, force: true });
 process.exit(0);
