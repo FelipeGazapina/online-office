@@ -72,18 +72,20 @@ export default async (s) => {
     });
   })()`);
 
-  // The same for a word said to someone who is busy (a steer): the first bubble is the first one that carries the marker the person
-  // was asked to repeat, so the words they were already writing do not count.
+  // The same for a request typed to someone who is busy with a task. The mailroom queues it behind the running turn ("queued"), and the
+  // first bubble is the first stream or message that answers that request. The words the person is writing for the task do not count.
   await s.eval(`(() => {
-    window.__firstMarked = (id, text, clientId, urgency, marker) => new Promise((resolve) => {
+    window.__firstAnswerTo = (id, text, clientId) => new Promise((resolve) => {
       let done = false;
       const finish = (kind) => { if (done) return; done = true; unsub(); resolve({ start: t0, end: performance.timeOrigin + performance.now(), kind }); };
       const unsub = __office.store.subscribe((st) => {
-        if (st.streams[id]?.text.includes(marker)) finish('stream');
-        else if (st.mail.tail.some((m) => m.from === id && m.kind === 'say' && m.text.includes(marker))) finish('say');
+        const request = st.mail.tail.find((m) => m.kind === 'request' && m.key === clientId);
+        if (!request) return;
+        if (st.streams[id]?.replyingTo === request.id) finish('stream');
+        else if (st.mail.tail.some((m) => m.from === id && m.kind === 'say' && m.parentId === request.id)) finish('say');
       });
       const t0 = performance.timeOrigin + performance.now();
-      window.office.send({ type: 'post', to: id, clientId, as: 'say', text, urgency });
+      window.office.send({ type: 'post', to: id, clientId, as: 'request', text });
       setTimeout(() => finish('timeout'), 90000);
     });
   })()`);
@@ -132,6 +134,23 @@ export default async (s) => {
   for (let i = 1; i <= TRIALS; i++) employee.push(await trial(`employee warm ${i}`, eli, `eli-${i}`, task(i, 'eli')));
   for (let i = 1; i <= COLD_TRIALS; i++) poCold.push(await cold(`PO cold ${i}`, pia, i, 'po'));
   for (let i = 1; i <= TRIALS; i++) po.push(await trial(`PO warm ${i}`, pia, `pia-${i}`, task(i, 'po')));
+  // A typed question is sorted before it is posted (the sort and the first words come from one call).
+  const questions = [];
+  for (let i = 1; i <= TRIALS; i++) questions.push(await trial(`employee question ${i}`, eli, `eli-q-${i}`, QUESTION));
+  // A request typed to someone in the middle of a task: queued behind the running turn, answered at once.
+  const busyTrial = async (i) => {
+    await s.eval(`window.office.send({ type: 'post', to: ${JSON.stringify(eli)}, clientId: 'busy-task-${i}', as: 'request', text: ${JSON.stringify(LONG_TASK)} })`);
+    await s.waitFor(`${company}.employees.find((e) => e.id === ${JSON.stringify(eli)}).status.kind === 'working'`, 60000);
+    await s.sleep(5000);
+    const status = await s.eval(`${company}.employees.find((e) => e.id === ${JSON.stringify(eli)}).status.kind`);
+    const r = await s.eval(`window.__firstAnswerTo(${JSON.stringify(eli)}, ${JSON.stringify(QUESTION)}, ${JSON.stringify(`busy-${i}`)})`);
+    const ms = Math.round(r.end - r.start);
+    console.log(`busy ${i}: ${ms} ms to the first ${r.kind} answering the request (the person was ${status} when it was typed)`);
+    await idle(eli);
+    return { ms, kind: r.kind, status };
+  };
+  const busy = [];
+  for (let i = 1; i <= BUSY_TRIALS; i++) busy.push(await busyTrial(i));
   // The company scenario's goal to a PO with a fresh session. Only the first bubble is timed, then both sessions restart.
   const poGoal = [];
   for (let i = 1; i <= COLD_TRIALS; i++) {
@@ -140,31 +159,9 @@ export default async (s) => {
     await s.sleep(HIRE_TO_FIRST_MESSAGE_MS);
     poGoal.push(await trial(`PO goal cold ${i}`, pia, `pia-goal-${i}`, GOAL, false));
   }
-  // A typed question is sorted before it is posted (the sort and the first words come from one call).
-  const questions = [];
-  for (let i = 1; i <= TRIALS; i++) questions.push(await trial(`employee question ${i}`, eli, `eli-q-${i}`, QUESTION));
-  // A word to someone in the middle of a task. This path goes to the running session, not to the acknowledger.
-  const busyTrial = async (style, i) => {
-    const clientId = `busy-${style}-${i}`;
-    await s.eval(`window.office.send({ type: 'post', to: ${JSON.stringify(eli)}, clientId: 'busy-task-${style}-${i}', as: 'request', text: ${JSON.stringify(LONG_TASK)} })`);
-    await s.waitFor(`${company}.employees.find((e) => e.id === ${JSON.stringify(eli)}).status.kind === 'working'`, 60000);
-    await s.sleep(5000);
-    const status = await s.eval(`${company}.employees.find((e) => e.id === ${JSON.stringify(eli)}).status.kind`);
-    const marker = `MARK-${style}-${i}`;
-    const r = await s.eval(`window.__firstMarked(${JSON.stringify(eli)}, ${JSON.stringify(`Quick word from the boss: in your very next message, write the exact token ${marker} and one short sentence on where you are. Then carry on.`)}, ${JSON.stringify(clientId)}, ${JSON.stringify(style)}, ${JSON.stringify(marker)})`);
-    const ms = Math.round(r.end - r.start);
-    console.log(`busy ${style} ${i}: ${ms} ms to the first ${r.kind} carrying the marker (the person was ${status} when the word was sent)`);
-    await idle(eli);
-    return { ms, kind: r.kind, status };
-  };
-  const busyNext = [];
-  const busyNow = [];
-  for (let i = 1; i <= BUSY_TRIALS; i++) busyNext.push(await busyTrial('next', i));
-  for (let i = 1; i <= BUSY_TRIALS; i++) busyNow.push(await busyTrial('now', i));
   report('PO goal cold', poGoal);
   report('employee question', questions);
-  report('busy employee, word at the next step (the default)', busyNext);
-  report('busy employee, word at once', busyNow);
+  report('busy employee (request typed mid-task)', busy);
   report('employee cold', employeeCold);
   report('employee warm', employee);
   report('PO cold', poCold);

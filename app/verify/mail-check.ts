@@ -501,6 +501,46 @@ console.log('\n# ledger: replay and restart');
   check(calls.length === 1, 'a plain message and a request from a teammate are not acknowledged');
   check(!/already being said/.test(lastPrompt(quiet, ANA)), 'and their turns carry no note');
 
+  // A request behind a running turn is answered at once, whole, and its delivery later does not ask again.
+  {
+    const asked: string[] = [];
+    const streamed: string[] = [];
+    let spoken!: (text: string | undefined) => void;
+    const waiting = world([], (to, request, onDelta) => {
+      asked.push(request.id);
+      onDelta('should not show');
+      return new Promise<string | undefined>((resolve) => (spoken = resolve));
+    });
+    const firstId = ids(waiting.room.post(owner('ana', 'write the slugify function')));
+    check(asked.length === 1 && asked[0] === firstId, 'an idle person is acknowledged when the request is delivered');
+    spoken('On it.');
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const before = waiting.streams.length;
+    const secondId = ids(waiting.room.post(owner('ana', 'and also add the tests')));
+    check(life(waiting, secondId) === 'queued' && asked.length === 2 && asked[1] === secondId, 'a request behind a running turn is acknowledged as soon as it is posted');
+    check(waiting.streams.length === before, 'without streaming into the bubble of the running turn', streamed.join('|'));
+    spoken('I will add the tests after the function.');
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const said = [...waiting.room.state.messages.values()].filter((m) => m.kind === 'say' && m.from === ANA && m.parentId === secondId);
+    check(said.length === 0 || (said.length === 1 && said[0]!.kind === 'say' && said[0]!.text === 'I will add the tests after the function.'), 'and the words land as one message, while the first turn still runs');
+    check(said.length === 1 && life(waiting, secondId) === 'queued', 'the request is still queued when they land');
+    waiting.room.turnEnded(ANA, 'first done', true);
+    check(asked.length === 2 && life(waiting, secondId) === 'delivered' && /already being said/.test(lastPrompt(waiting, ANA)) && /and also add the tests/.test(lastPrompt(waiting, ANA)), 'when its turn comes it is not acknowledged again, and the turn carries the note');
+    check([...waiting.room.state.messages.values()].filter((m) => m.kind === 'say' && m.from === ANA && m.parentId === secondId).length === 1, 'and no second acknowledgement lands');
+
+    // The turn ends before the words are ready: still no second acknowledgement.
+    const racing = world([], (_to, request) => new Promise<string | undefined>((resolve) => (spoken = resolve)));
+    ids(racing.room.post(owner('ana', 'first job')));
+    spoken('first words');
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const queuedId = ids(racing.room.post(owner('ana', 'second job')));
+    racing.room.turnEnded(ANA, 'done', true);
+    check(life(racing, queuedId) === 'delivered' && /already being said/.test(lastPrompt(racing, ANA)), 'a turn that ends before the words are ready is still told the boss will hear them');
+    spoken('second words');
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    check([...racing.room.state.messages.values()].filter((m) => m.kind === 'say' && m.from === ANA && m.parentId === queuedId).length === 1, 'and they land once');
+  }
+
   const failed = world([], () => Promise.resolve(undefined));
   const f = ids(failed.room.post(owner('ana', 'try')));
   await new Promise((resolve) => setTimeout(resolve, 0));

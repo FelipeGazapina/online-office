@@ -385,6 +385,9 @@ type Waiter = { who: EmployeeId; ids: MessageId[]; mode: 'any' | 'all'; poll(): 
 // Tells the real turn that the boss already heard from the employee, so it does not open with a second acknowledgement.
 const ACK_NOTE = '[Office note. A short acknowledgement of this request is already being said to the boss in your name. Skip the "reply first" step: do not send your own acknowledgement. Carry on with your usual steps from the next one, and use message only for what the boss has not heard.]';
 
+// The requests that get an acknowledgement: what the owner asks of someone, not a review.
+const isOwnerRequest = (m: Message): m is Message & { kind: 'request' } => m.kind === 'request' && m.from === 'owner' && (m.intent === 'work' || m.intent === 'help');
+
 const mid = (id: string) => id as MessageId;
 const tid = (id: string) => id as TurnId;
 
@@ -394,6 +397,8 @@ export class Mailroom {
   private waiters = new Set<Waiter>();
   // Employees whose acknowledgement is being written, so nothing else streams into their bubble.
   private acking = new Map<EmployeeId, { cancelled: boolean }>();
+  // Requests that were acknowledged while they waited behind a running turn, so their delivery does not ask again.
+  private ackedWhileWaiting = new Set<MessageId>();
   private dirty = false;
 
   constructor(ports: MailPorts, ledger: readonly LedgerEntry[] = []) {
@@ -479,6 +484,7 @@ export class Mailroom {
       this.put({ ...b, kind: 'request', intent: body.intent ?? 'work', title: body.title ?? titleOf(body.text), text: body.text, ...(body.bar?.length ? { bar: body.bar } : {}) });
     }
     this.pump(target.id);
+    this.acknowledgeWaiting(b.id);
     return this.posted(b.id, target.label);
   }
 
@@ -729,10 +735,10 @@ export class Mailroom {
   // A request from the owner is answered with a few words before the real turn gets going. A review is not: nobody reads
   // that bubble. One acknowledgement per request, found by its key, so a redelivery does not say it twice.
   private acknowledge(to: EmployeeId, batch: readonly Message[]): { cancel(): void } | undefined {
-    const request = batch.find((m) => m.kind === 'request' && m.from === 'owner' && (m.intent === 'work' || m.intent === 'help'));
+    const request = batch.find(isOwnerRequest);
     if (!request) return undefined;
     const key = `ack:${request.id}`;
-    if (this.state.keys.has(key)) return { cancel() {} };
+    if (this.state.keys.has(key) || this.ackedWhileWaiting.delete(request.id)) return { cancel() {} };
     const token = { cancelled: false };
     const spoken = this.ports.acknowledge?.(to, request, (delta) => {
       if (!token.cancelled) this.ports.stream(to, request.id, delta, false);
@@ -745,6 +751,22 @@ export class Mailroom {
       this.closeStream(to);
     });
     return { cancel: () => this.closeStream(to) };
+  }
+
+  // A request that has to wait behind a running turn is answered at once as well, so the owner hears from the person now and
+  // not when that turn ends. The words land whole: the person's bubble belongs to the turn that is running.
+  private acknowledgeWaiting(id: MessageId) {
+    const request = this.state.messages.get(id);
+    if (!request || !isOwnerRequest(request) || this.state.life.get(id)?.s !== 'queued') return;
+    const key = `ack:${id}`;
+    if (this.state.keys.has(key)) return;
+    const spoken = this.ports.acknowledge?.(request.to as EmployeeId, request, () => {});
+    if (!spoken) return;
+    this.ackedWhileWaiting.add(id);
+    void spoken.then((text) => {
+      const s = this.state.life.get(id)?.s;
+      if (text && (s === 'queued' || s === 'delivered')) this.post({ from: request.to, to: 'owner', parentId: id, body: { kind: 'say', text }, key });
+    });
   }
 
   // Nothing of this employee's is being written any more: the session ended, or the acknowledgement is over.

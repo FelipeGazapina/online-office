@@ -19,8 +19,9 @@ const CLIP = 2_000;
 // Most processes alive at once: one answering and the spare started behind it. A cold start is 2 to 6 s on a busy machine,
 // so a call cannot wait for a process to start, and a crowd of spares cannot be kept.
 const MAX_LIVE = 2;
-// A call nobody claimed, because its request is queued behind a long turn or was never posted, is let go after this.
-const UNCLAIMED_MS = 20_000;
+// A call whose request is queued behind a long turn, or was never posted, keeps only its words (the process is back as soon as it
+// has answered) and is let go after this.
+const UNCLAIMED_MS = 15 * 60_000;
 
 const SYSTEM = `Your boss has just written to a member of a small team, and you answer as that person. Reply in two parts.
 Part one, alone on the first line, is one word that sorts the boss's message:

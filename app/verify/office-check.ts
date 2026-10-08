@@ -845,6 +845,15 @@ console.log('\n# only what the owner typed is acknowledged');
   check(zed.fake.assigned.length === 2 && /already being said/.test(zed.fake.assigned[1]!), 'what the owner types starts the turn and tells it the acknowledgement is being said');
   check(said().map((m) => (m.kind === 'say' ? m.text : '')).join('|') === 'On it, adding the button.', 'and the acknowledgement lands in the thread without the sort word');
   check(started === 2, 'one process answered and one took its place', String(started));
+
+  // While that turn runs the owner types again. The words come at once, under the new request, and its turn is not acknowledged twice.
+  o.handle({ type: 'post', to: zed.id, clientId: 'typed-2', as: 'request', text: 'Also add a tooltip to it' });
+  await sleep(40);
+  const second = o.snapshot().mail.tail.find((m) => m.kind === 'request' && m.key === 'typed-2')!;
+  check(zed.fake.assigned.length === 2 && said().some((m) => m.parentId === second.id && m.kind === 'say' && m.text === 'On it, adding the button.'), 'a request typed to someone busy is acknowledged at once, while their turn runs');
+  check(started === 3, 'by the spare that was waiting, with a new one behind it', String(started));
+  await finishTurn(zed.fake, 'ok');
+  check(zed.fake.assigned.length === 3 && /already being said/.test(zed.fake.assigned[2]!) && said().filter((m) => m.parentId === second.id).length === 1 && started === 3, 'and when its turn comes nothing is said twice');
   await finishTurn(zed.fake, 'ok');
   o.shutdown();
 }
