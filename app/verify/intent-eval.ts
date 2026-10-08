@@ -1,4 +1,5 @@
 // Confusion matrix of the candidates that tell a question from a work order, on the fixed sets in owner-messages.ts.
+// The model call is the shipped one (ack.ts): the sort word comes first in the reply that also holds the acknowledgement.
 // h = offline text rules, the rejected candidate (git show 6c099bd:app/src/main/office/owner-intent.ts). l = a haiku call with
 // thinking off, like the acknowledgement's. q = the plain-order rule that skips the call (it only ever says work). ql = q, then l.
 // Run from app/: node verify/intent-eval.ts [--set A|B|AB] [--cand q,l,ql] [--n 3] [--par 6] [--probe texts.json]
@@ -19,6 +20,7 @@ const cands = arg('cand', 'q,l,ql').split(',');
 const N = Number(arg('n', '3'));
 const PAR = Number(arg('par', '6'));
 const PROBE = arg('probe', '');
+const ROLE = arg('role', 'employee');
 const LEASH_MS = 2500;
 const MODEL = process.env.OFFICE_ACK_MODEL ?? 'claude-haiku-4-5-20251001';
 
@@ -28,14 +30,15 @@ const items = [...(which.includes('A') ? SET_A.map((m) => ({ ...m, set: 'A' })) 
 
 type Call = { kind: Kind | 'none'; ms: number };
 
-// The shipped path: an Acknowledger with its spare process already warm, so the time is the call and not the start.
+// The shipped path: an Acknowledger with its spare process already warm, so the time is the call and not the start. The sort comes
+// from the same call that writes the acknowledgement, so the words are read as well and a reply that sorts but says nothing is a failure.
 const askModel = async (text: string): Promise<Call> => {
   const desk = new Acknowledger(query);
   desk.warm();
   await new Promise((r) => setTimeout(r, 6000));
   const t0 = performance.now();
   // No leash here, so a slow call is still sorted. Whether it would have been in time is read off `ms` against LEASH.
-  const said = await desk.triage(text, 30_000);
+  const said = await desk.hear('eval', { who: 'e1', name: 'Eli', role: ROLE, company: 'Acme', block: 'Web', teammates: ['Pia (orchestrator)'], request: text }, 30_000);
   const ms = performance.now() - t0;
   desk.stop();
   return { kind: said === 'help' ? 'question' : said === 'work' ? 'work' : 'none', ms };

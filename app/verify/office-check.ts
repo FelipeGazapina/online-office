@@ -10,8 +10,11 @@ import { covers, isAllow, ruleFor, sameRule, type PermissionBody } from '../src/
 import { SEAT_CEILING, type AllowRule, type Company, type Employee, type EmployeeId, type EmployeeStatus, type HarnessStatus, type ModelCatalog, type ModelId, type PermissionPolicy, type Provider, type Question, type Subagent } from '../src/shared/protocol.ts';
 import type { Message } from '../src/shared/mail.ts';
 import type { TerminalPush } from '../src/shared/terminal.ts';
+import type { SDKMessage, SDKUserMessage } from '@anthropic-ai/claude-agent-sdk';
 import { HARNESSES } from '../src/main/office/adapters/index.ts';
 import type { SessionHost } from '../src/main/office/adapters/types.ts';
+import { Acknowledger } from '../src/main/office/ack.ts';
+import { PushQueue, type ClaudeRun } from '../src/main/office/adapters/claude.ts';
 import { Office } from '../src/main/office/company.ts';
 import { OfficeError } from '../src/main/office/error.ts';
 import { startOfficeMcp } from '../src/main/office/mcp.ts';
@@ -733,7 +736,7 @@ console.log('\n# the owner\'s words: a question or a work order');
   type Triage = Promise<'work' | 'help' | undefined> | undefined;
   const answers = new Map<string, Triage>();
   const asked: string[] = [];
-  const desk = { warm() {}, ack: () => undefined, stop() {}, triage: (text: string): Triage => (asked.push(text), answers.get(text)) };
+  const desk = { warm() {}, ack: () => undefined, stop() {}, hear: (_key: string, input: { request: string }): Triage => (asked.push(input.request), answers.get(input.request)) };
   const trouble: string[] = [];
   const statuses = { 'claude-code': { kind: 'ready' as const, version: 'fake' }, codex: { kind: 'missing' as const }, hermes: { kind: 'missing' as const } };
   const o = new Office(join(dir, 'ask-company.json'), statuses, { ...noBuild, changed() {}, said() {}, log() {}, error: (m) => void trouble.push(m) }, { mcp, memory, acker: desk });
@@ -750,8 +753,10 @@ console.log('\n# the owner\'s words: a question or a work order');
   const intentOf = (text: string) => ownerRequests().find((m) => m.kind === 'request' && m.text === text);
   const finish1 = () => finishTurn(ana.fake, 'ok');
 
+  // The same call writes the first words, so a plain order is heard too. It must not wait for the sort, which could be late or never come.
+  answers.set('Add a logout button to the header', new Promise(() => {}));
   tell('Add a logout button to the header');
-  check(asked.length === 0 && intentOf('Add a logout button to the header')?.kind === 'request' && (intentOf('Add a logout button to the header') as { intent: string }).intent === 'work', 'a plain order is posted as work at once, without asking the model');
+  check(asked.length === 1 && intentOf('Add a logout button to the header')?.kind === 'request' && (intentOf('Add a logout button to the header') as { intent: string }).intent === 'work', 'a plain order is posted as work at once, without waiting for the sort');
   await finish1();
 
   answers.set('which file handles login?', Promise.resolve('help'));
@@ -800,6 +805,48 @@ console.log('\n# the owner\'s words: a question or a work order');
   late('help');
   await sleep(10);
   check(!o.snapshot().mail.tail.some((m) => m.kind === 'request' && m.text === 'which commit is this?') && fakes.length === sessions, 'an answer that arrives after shutdown posts nothing and starts no session')
+}
+
+console.log('\n# only what the owner typed is acknowledged');
+{
+  // The real acknowledger over a stand-in for the Agent SDK. Every process it starts is counted, and each answers "WORK" and a sentence.
+  let started = 0;
+  const run: ClaudeRun = ({ prompt }) => {
+    started++;
+    const out = new PushQueue<SDKMessage>();
+    void (async () => {
+      for await (const _ of prompt as AsyncIterable<SDKUserMessage>) {
+        out.push({ type: 'stream_event', event: { type: 'content_block_delta', delta: { type: 'text_delta', text: 'WORK\nOn it, adding the button.' } } } as unknown as SDKMessage);
+        out.push({ type: 'result', subtype: 'success', is_error: false, result: 'WORK\nOn it, adding the button.' } as unknown as SDKMessage);
+      }
+    })();
+    return { [Symbol.asyncIterator]: () => out[Symbol.asyncIterator](), close: () => out.close() } as unknown as ReturnType<ClaudeRun>;
+  };
+  const desk = new Acknowledger(run);
+  const statuses = { 'claude-code': { kind: 'ready' as const, version: 'fake' }, codex: { kind: 'missing' as const }, hermes: { kind: 'missing' as const } };
+  const o = new Office(join(dir, 'typed-company.json'), statuses, { ...noBuild, changed() {}, said() {}, log() {} }, { mcp, memory, acker: desk });
+  o.handle({ type: 'create_block', cwd: repo });
+  const block = o.snapshot().company.blocks[0]!.id;
+  const before = fakes.length;
+  o.handle({ type: 'hire', provider: 'claude-code', blockId: block, name: 'Zed' });
+  const zed = { fake: fakes[before]!, id: o.snapshot().company.employees.find((e) => e.name === 'Zed')!.id };
+  const said = () => o.snapshot().mail.tail.filter((m) => m.kind === 'say' && m.from === zed.id && m.to === 'owner');
+  check(started === 1, 'hiring a Claude employee starts one spare process', String(started));
+
+  const board = o.snapshot().boards.find((b) => b.blockId === block)!;
+  o.handle({ type: 'create_task', boardId: board.id, title: 'Tidy the changelog', assignee: zed.id });
+  await sleep(40);
+  check(zed.fake.assigned.length === 1 && /Tidy the changelog/.test(zed.fake.assigned[0]!), 'a task the board hands out starts the turn');
+  check(started === 1 && said().length === 0 && !/already being said/.test(zed.fake.assigned[0]!), 'and calls no process, says no acknowledgement, and leaves the turn to say its own first words', `${started} started`);
+  await finishTurn(zed.fake, 'ok');
+
+  o.handle({ type: 'post', to: zed.id, clientId: 'typed-1', as: 'request', text: 'Add a logout button to the header' });
+  await sleep(40);
+  check(zed.fake.assigned.length === 2 && /already being said/.test(zed.fake.assigned[1]!), 'what the owner types starts the turn and tells it the acknowledgement is being said');
+  check(said().map((m) => (m.kind === 'say' ? m.text : '')).join('|') === 'On it, adding the button.', 'and the acknowledgement lands in the thread without the sort word');
+  check(started === 2, 'one process answered and one took its place', String(started));
+  await finishTurn(zed.fake, 'ok');
+  o.shutdown();
 }
 
 console.log('\n# the terminals');

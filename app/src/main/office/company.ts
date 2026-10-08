@@ -1,4 +1,4 @@
-import { createAcknowledger, type Acknowledger } from './ack.ts';
+import { createAcknowledger, type AckInput, type Acknowledger } from './ack.ts';
 import { isPlainOrder, type OwnerIntent } from './owner-intent.ts';
 import { boardPage } from './board.ts';
 import { folderArtifacts } from './mail-artifacts.ts';
@@ -90,8 +90,8 @@ export type OfficeEvents = {
   terminal?(employeeId: EmployeeId, push: TerminalPush): void;
 };
 
-// What the office needs from the acknowledger. Without `triage` every owner message is work.
-type Acker = Pick<Acknowledger, 'warm' | 'ack' | 'stop'> & Partial<Pick<Acknowledger, 'triage'>>;
+// What the office needs from the acknowledger. Without `hear` every owner message is work and nobody acknowledges it.
+type Acker = Pick<Acknowledger, 'warm' | 'ack' | 'stop'> & Partial<Pick<Acknowledger, 'hear'>>;
 
 // The things every session leans on, started before the first employee so a session can connect the moment it is built.
 export type OfficeServices = { mcp: OfficeMcp; memory: MemoryStore; taskBoards?: TaskBoardService; acker?: Acker; gh?: Gh };
@@ -444,13 +444,8 @@ export class Office {
           this.events.changed();
         },
         stream: (employeeId, replyingTo, delta, done) => this.events.stream?.(employeeId, replyingTo, delta, done),
-        acknowledge: (to, request, onDelta) => {
-          const e = this.company.employees.find((x) => x.id === to);
-          const block = e && this.company.blocks.find((b) => b.id === e.blockId);
-          if (!e || !block || request.kind !== 'request') return undefined;
-          const teammates = this.company.employees.filter((x) => x.blockId === e.blockId && x.id !== e.id).map((x) => `${x.name} (${x.role ?? 'employee'})`);
-          return this.acker.ack({ who: e.id, name: e.name, role: e.role ?? 'employee', company: this.company.name, block: block.name, teammates, request: request.text, question: request.intent === 'help' }, onDelta);
-        },
+        // Only the owner's typed messages were heard (postFromOwner). A task the board starts has no key anyone heard, so no call is made.
+        acknowledge: (_to, request, onDelta) => this.acker.ack(request.key, onDelta),
         now: () => Date.now(),
         newId: defaultIds,
       },
@@ -736,9 +731,10 @@ export class Office {
     const e = this.employee(target.id);
     // A boss speaking to someone who is waiting on a decision is the decision.
     if (msg.as === 'say' && e.status.kind === 'blocked_on_owner') return this.answer(e.id, e.status.question.id, msg.text);
-    // A plain order is work at once. Anything else asks the model whether it is a question, which settles done with its
-    // answer where work has to show files. No model, a late answer or an unclear one counts as work.
-    const triage = msg.as === 'request' && !isPlainOrder(msg.text) ? this.acker.triage?.(msg.text)?.catch(() => undefined) : undefined;
+    // The one call that writes the first words also sorts the message. A plain order is work at once. Anything else waits for the
+    // sort: a question settles done with its answer where work has to show files. No model, a late answer or an unclear one counts as work.
+    const heard = msg.as === 'request' ? this.acker.hear?.(msg.clientId, this.ackInput(e, msg.text)) : undefined;
+    const triage = isPlainOrder(msg.text) ? undefined : heard?.catch(() => undefined);
     if (!triage && this.ownerPosts.waiting === 0) return this.postOwner(e.id, msg, 'work');
     // Posts keep the order the owner sent them in, even when an earlier one is still waiting for its answer.
     const before = this.ownerPosts.tail;
@@ -755,6 +751,12 @@ export class Office {
         this.ownerPosts.waiting--;
       }
     })();
+  }
+
+  private ackInput(e: Employee, request: string): AckInput {
+    const block = this.company.blocks.find((b) => b.id === e.blockId);
+    const teammates = this.company.employees.filter((x) => x.blockId === e.blockId && x.id !== e.id).map((x) => `${x.name} (${x.role ?? 'employee'})`);
+    return { who: e.id, name: e.name, role: e.role ?? 'employee', company: this.company.name, block: block?.name ?? '', teammates, request };
   }
 
   private postOwner(to: EmployeeId, msg: Extract<ClientMessage, { type: 'post' }>, intent: OwnerIntent) {

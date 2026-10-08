@@ -2,7 +2,7 @@
 // its phys_footprint (the Activity Monitor Memory column), sorts the processes into classes (procs.mjs), and records the machine's
 // swap and memory pressure and any other Online Office app that is running (listed under `others`, each with its kind). The figure of the bar is the sum of COUNTED classes;
 // employees' own agent processes are summed apart.
-import { CLASSES, COUNTED, classify, footprints, otherOfficeApps, processTable, systemMemory } from './procs.mjs';
+import { CLASSES, COUNTED, classify, footprints, isAckerRoot, otherOfficeApps, processTable, systemMemory } from './procs.mjs';
 
 const r1 = (n) => +n.toFixed(1);
 
@@ -100,4 +100,54 @@ export function startSampler({ rootPid, everyMs = 10_000, extra = () => ({}), t0
 export function rampEnd(samples, people) {
   const at = samples.find((s) => !s.error && (s.people?.working ?? 0) >= people - 1);
   return at ? at.tMin : null;
+}
+
+const percentile = (xs, q) => (xs.length ? [...xs].sort((a, b) => a - b)[Math.min(xs.length - 1, Math.floor(q * xs.length))] : null);
+
+// The acknowledger's processes on a faster beat than the memory samples: every `everyMs` the table is read and the claude processes that
+// run a single turn with no session (procs.mjs isAckerRoot) under `rootPid` are counted. Gives how many were alive at most, how many
+// were ever started, how long each lived (to within one beat) and how the ticks split by the number alive. The 10 s samples can step
+// over a burst of short lives; this cannot, unless one is shorter than the beat.
+export function startAckerCensus({ rootPid, everyMs = 500, t0 = Date.now() }) {
+  const seen = new Map();
+  const alive = [];
+  let stopped = false;
+  let timer;
+  const tick = () => {
+    if (stopped) return;
+    const at = Date.now();
+    try {
+      const table = processTable();
+      const tree = new Set(classify(table, rootPid).map((p) => p.pid));
+      const now = table.filter((p) => tree.has(p.pid) && isAckerRoot(p.command));
+      const sec = (at - t0) / 1000;
+      for (const p of now) {
+        const row = seen.get(p.pid) ?? { pid: p.pid, firstSec: sec, lastSec: sec };
+        row.lastSec = sec;
+        seen.set(p.pid, row);
+      }
+      alive.push(now.length);
+    } catch {}
+    if (!stopped) timer = setTimeout(tick, Math.max(0, everyMs - (Date.now() - at)));
+  };
+  tick();
+  return {
+    stop() {
+      stopped = true;
+      clearTimeout(timer);
+      const lives = [...seen.values()].map((r) => +(r.lastSec - r.firstSec + everyMs / 1000).toFixed(1));
+      const hist = {};
+      for (const n of alive) hist[n] = (hist[n] ?? 0) + 1;
+      return {
+        everyMs,
+        ticks: alive.length,
+        maxAlive: Math.max(0, ...alive),
+        meanAlive: +(alive.reduce((a, b) => a + b, 0) / Math.max(1, alive.length)).toFixed(2),
+        ticksByAlive: hist,
+        started: seen.size,
+        lifeSec: { p50: percentile(lives, 0.5), p95: percentile(lives, 0.95), max: Math.max(0, ...lives) },
+        processes: [...seen.values()].map((r) => ({ pid: r.pid, fromSec: +r.firstSec.toFixed(1), lifeSec: +(r.lastSec - r.firstSec + everyMs / 1000).toFixed(1) })),
+      };
+    },
+  };
 }
