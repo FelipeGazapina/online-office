@@ -4,7 +4,7 @@ import type { Employee, EmployeeId } from '../../../../shared/protocol.ts';
 import type { PrState, Task, TaskStage, TaskTime } from '../../../../shared/tasks.ts';
 import { fmtClock, fmtHours, isRunning, originOf, providerNote, sharesOf, taskMs } from '../../boardView.ts';
 import { avatarColor, isPo } from '../chat/model.ts';
-import { cardLine, namerOf, questionCount } from './activityView.ts';
+import { breakdownOf, cardLine, namerOf, questionCount } from './activityView.ts';
 import { useTaskLive } from './live.ts';
 import { openOnComputer } from '../../computer.ts';
 import { Alert, Branch, Check, Clock, External, OriginTile } from './icons.tsx';
@@ -110,6 +110,7 @@ export const Card = memo(function Card({ task, stage, time, now, people, selecte
   const name = namerOf(people);
   const line = cardLine(live, name);
   const asks = questionCount(live);
+  const first = live?.questions[0];
   return (
     <div
       className={`tb-card ${selected ? 'selected' : ''} ${dragging ? 'dragging' : ''} ${running ? 'running' : ''}`}
@@ -139,11 +140,16 @@ export const Card = memo(function Card({ task, stage, time, now, people, selecte
         <AvatarStack ids={task.assignees} people={people} />
       </div>
       <p className="tb-card-title">{task.title}</p>
+      {first && (
+        <p className="tb-card-ask" data-testid="card-question">
+          <b>{name(first.asker)} asks</b> {breakdownOf(first, name).question}
+        </p>
+      )}
       <div className="tb-chips">
         <TimeChip time={time} now={now} people={people} />
         <PrChip task={task} />
         {asks > 0 && (
-          <span className="tb-chip ask" data-testid="question-badge" data-count={asks} title={live?.questions.map((q) => `${people.get(q.asker)?.name ?? 'Someone'}: ${q.text.slice(0, 160)}`).join('\n')}>
+          <span className="tb-chip ask" data-testid="question-badge" data-count={asks} title={live?.questions.map((q) => `${name(q.asker)}: ${breakdownOf(q, name).question}`).join('\n')}>
             <b aria-hidden="true">?</b>
             {asks} {asks === 1 ? 'question' : 'questions'}
           </span>

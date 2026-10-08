@@ -122,6 +122,8 @@ export function Detail({ task, board, blockPeople, people, time, stage, now, onC
             <p className="tb-hint">The title comes from {origin.source}, so it is edited there.</p>
           </>
         )}
+        {/* What the owner has to answer comes first, so a blocked task is one click from its question. */}
+        <Questions task={task} questions={live?.questions ?? []} people={people} />
         <textarea className="tb-notes" aria-label="Notes" placeholder="Notes for whoever picks this up" rows={4} {...notes} />
 
         <dl className="tb-props">
@@ -188,8 +190,6 @@ export function Detail({ task, board, blockPeople, people, time, stage, now, onC
             </>
           )}
         </dl>
-
-        <Questions task={task} questions={live?.questions ?? []} people={people} />
 
         <section className="tb-section">
           <h3>Assign</h3>

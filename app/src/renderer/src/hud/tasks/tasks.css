@@ -122,6 +122,8 @@
 .tb-origin-tile { display: inline-grid; place-items: center; width: 17px; height: 17px; flex: none; border-radius: 5px; background: #eceaf3; color: #6c6f88; }
 .tb-origin-tile.linear { background: #ece6ff; color: #6944b1; }
 .tb-origin-tile.cronospark { background: #dcf7ed; color: #12744b; }
+.tb-card-ask { margin: 0; padding: 5px 8px; border-radius: 8px; background: #fff7e6; box-shadow: inset 0 0 0 1px rgba(232, 163, 23, 0.45); color: var(--ink); font-size: 12px; line-height: 1.4; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
+.tb-card-ask b { color: #7a4d00; font-weight: 600; }
 .tb-card-title { margin: 0; color: var(--ink); font-size: 13.5px; font-weight: 600; line-height: 1.38; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
 .tb-chips { display: flex; flex-wrap: wrap; gap: 5px; min-height: 0; }
 .tb-chips:empty { display: none; }
@@ -347,6 +349,13 @@ a.tb-chip { text-decoration: none; }
 .tb-ask-head span { color: #7a4d00; }
 .tb-ask-head time { margin-left: auto; color: var(--muted); font-size: 11.5px; font-variant-numeric: tabular-nums; }
 .tb-ask-about { margin: 0; color: var(--muted); font-size: 12px; }
+.tb-why { display: grid; grid-template-columns: max-content 1fr; gap: 5px 10px; margin: 0; font-size: 13px; line-height: 1.45; }
+.tb-why dt { color: #7a4d00; font-size: 11.5px; font-weight: 600; padding-top: 1px; }
+.tb-why dd { margin: 0; color: var(--ink); white-space: pre-wrap; overflow-wrap: anywhere; }
+.tb-why dd.tb-why-q { font-weight: 650; font-size: 14px; }
+.tb-ask-then { margin: 0; color: var(--muted); font-size: 12px; }
+.tb-ask-full summary { cursor: pointer; color: var(--muted); font-size: 12px; }
+.tb-ask-full .tb-ask-text { margin-top: 6px; }
 .tb-ask-text { margin: 0; font-size: 13px; line-height: 1.5; color: var(--ink); white-space: pre-wrap; overflow-wrap: anywhere; }
 .tb-words { white-space: pre-wrap; }
 .tb-ask-cmd { margin: 0; padding: 8px 10px; border-radius: 8px; background: var(--ink); color: var(--paper); font: 12px/1.4 ui-monospace, 'SF Mono', Menlo, monospace; white-space: pre-wrap; overflow-wrap: anywhere; }

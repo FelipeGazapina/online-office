@@ -245,6 +245,19 @@ console.log('\n# done means done');
   const b1 = ids(blk.room.post(owner('ana', 'try it')));
   check(blk.room.reply(ANA, requestIn(lastPrompt(blk, ANA)), { outcome: 'blocked', text: 'no access' }).ok && replyTo(blk, b1)?.outcome === 'blocked', 'blocked and failed replies need no artifacts');
 
+  const why = world();
+  const wb = ids(why.room.post(ask(PO, 'ana', 'write the README')));
+  const blocker = { why: 'Two layouts fit.', question: 'Short or long README?', next: 'I write the one you pick.' };
+  check(why.room.reply(ANA, requestIn(lastPrompt(why, ANA)), { outcome: 'blocked', text: 'stuck on the layout', blocker }).ok && JSON.stringify(replyTo(why, wb)?.blocker) === JSON.stringify(blocker), 'a blocked reply keeps its why, question and next step');
+  const toPo = lastPrompt(why, PO);
+  check(/Why it stopped: Two layouts fit\.\nQuestion: Short or long README\?\nProposed next step: I write the one you pick\./.test(toPo), 'and whoever asked reads all three under the reply', toPo);
+  const plain = world();
+  const p1 = ids(plain.room.post(owner('ana', 'try it')));
+  plain.setDirty(['notes.md']);
+  plain.fresh.add('notes.md');
+  plain.room.reply(ANA, requestIn(lastPrompt(plain, ANA)), { outcome: 'done', text: 'done', artifact: ['notes.md'], blocker });
+  check(replyTo(plain, p1)?.outcome === 'done' && replyTo(plain, p1)?.blocker === undefined, 'a done reply drops a breakdown it should not have');
+
   const help = world();
   const h1 = ids(help.room.post({ from: 'owner', to: 'ana', blockId: B1, body: { kind: 'request', intent: 'help', text: 'where is the router?' } }));
   check(help.room.reply(ANA, requestIn(lastPrompt(help, ANA)), { outcome: 'done', text: 'src/router.ts' }).ok && replyTo(help, h1)?.outcome === 'done', 'a help request is answered without artifacts');

@@ -35,7 +35,7 @@ export function sayLive(p: PersonLive, name: Namer): LiveWords {
     case 'queued':
       return { state: p.state, text: `Next up: ${piece(p.piece.title)}${p.behind ? `, after ${piece(p.behind, 36)}` : ''}` };
     case 'blocked':
-      return { state: p.state, text: `Blocked: ${piece(p.question.text, 90)}` };
+      return { state: p.state, text: `Blocked: ${piece(breakdownOf(p.question, name).question, 90)}` };
     case 'done':
       return { state: p.state, text: `Done ${piece(p.piece.title)}${p.artifact?.length ? `, ${p.artifact.length} file${p.artifact.length === 1 ? '' : 's'}` : ''}` };
     case 'stopped':
@@ -121,6 +121,32 @@ function sayHandoff(e: Extract<ActivityEntry, { kind: 'handoff' }>, name: Namer)
       return { head: `${name(e.by)} withdrew the handoff to ${to}`, tone: 'quiet' };
     case 'dropped':
       return { head: `The office dropped the handoff to ${to}`, tone: 'quiet' };
+  }
+}
+
+export type Breakdown = { why: string; question: string; next: string; then: string; full?: string };
+
+// The first sentence of a text that asks something, so an old blocked reply still leads with its question.
+const asked = (text: string): string | undefined => text.split(/(?<=[.!?])\s+|\n+/).map((q) => q.trim()).find((q) => q.length > 3 && q.endsWith('?'));
+
+// One question as the owner reads it: what stopped the work, what to answer, the step proposed after it, and what the owner's
+// answer does. A blocked reply that gave its breakdown is shown as given, with its full text kept behind. One that did not
+// keeps its text as the why.
+export function breakdownOf(q: OpenQuestion, name: Namer): Breakdown {
+  const who = name(q.asker);
+  switch (q.how) {
+    case 'blocked': {
+      const said = q.blocker;
+      const then = q.to === 'owner' ? `Your answer goes to ${who} as a new request, and ${who} picks ${piece(q.piece.title, 40)} up again.` : `Your answer goes to ${name(q.to)}, who asked ${who} for it, to send ${who} on.`;
+      if (said) return { why: said.why || `${who} stopped on ${piece(q.piece.title, 40)}.`, question: said.question, next: said.next || `${who} did not say.`, then, full: q.text };
+      return { why: q.text, question: asked(q.text) ?? `${who} did not ask anything. What should ${who} do next on ${piece(q.piece.title, 40)}?`, next: `${who} did not say.`, then };
+    }
+    case 'help':
+      return { why: `${who} asked ${name(q.to)} for help on ${piece(q.piece.title, 40)}.`, question: asked(q.text) ?? cut(q.text, 200), next: `${who} carries on with the answer.`, then: `Your answer goes to ${who}. ${name(q.to)} can still answer too.`, full: q.text };
+    case 'ask':
+      return { why: `${who} cannot go on without your decision.`, question: q.text, next: `${who} carries on with your answer.`, then: q.options?.length ? 'Pick one, or write your own answer.' : 'Write your answer below.' };
+    case 'permission':
+      return { why: `${who} needs your permission to run ${q.tool}.`, question: `Allow ${q.tool}?`, next: `${who} runs it and carries on.`, then: `Allow lets it run. Deny stops it, and ${who} looks for another way.`, full: q.detail };
   }
 }
 

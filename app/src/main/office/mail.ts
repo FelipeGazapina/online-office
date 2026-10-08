@@ -15,6 +15,7 @@ import {
   MAX_QUEUE_PER_ACTOR,
   type ActorId,
   type ActorView,
+  type Blocker,
   type ConvoKey,
   type GauntletSpec,
   type Intent,
@@ -241,8 +242,9 @@ export const renderBatch = (batch: readonly Message[], redelivered: boolean, nam
       case 'reply': {
         const verdict = m.verdict ? `\nVerdict: ${m.verdict.pass ? 'PASS' : 'FAIL'}${m.verdict.findings.length ? `\nFindings:\n${bullets(m.verdict.findings)}` : ''}` : '';
         const artifact = m.artifact?.length ? `\nArtifacts:\n${bullets(m.artifact)}` : '';
+        const blocker = m.blocker ? `\nWhy it stopped: ${m.blocker.why || 'not said'}\nQuestion: ${m.blocker.question}\nProposed next step: ${m.blocker.next || 'not said'}` : '';
         const retry = m.outcome === 'blocked' || m.outcome === 'failed' ? `\nThis piece is NOT done and ${nameOf(m.from)} stopped. A message alone does not restart them: send a new request with what was missing, or do the piece yourself. Do not reply done to your own requester while it is open.` : '';
-        return `[Reply from ${nameOf(m.from)} to your request ${m.requestId}: ${m.outcome}]\n${m.text}${verdict}${artifact}${retry}`;
+        return `[Reply from ${nameOf(m.from)} to your request ${m.requestId}: ${m.outcome}]\n${m.text}${blocker}${verdict}${artifact}${retry}`;
       }
       case 'event':
         return `[Office] ${m.text}`;
@@ -529,7 +531,7 @@ export class Mailroom {
   }
 
   // Idempotent. A second reply to a settled request is ok and changes nothing.
-  reply(from: EmployeeId, requestId: string, r: { outcome: Outcome; text: string; verdict?: Verdict; artifact?: string[] }): { ok: true } | { ok: false; reason: ReplyRefusal; detail?: string } {
+  reply(from: EmployeeId, requestId: string, r: { outcome: Outcome; text: string; verdict?: Verdict; artifact?: string[]; blocker?: Blocker }): { ok: true } | { ok: false; reason: ReplyRefusal; detail?: string } {
     const req = this.findRequest(requestId);
     if (!req || req.kind !== 'request') return { ok: false, reason: 'unknown' };
     if (req.to !== from || req.intent === 'gauntlet') return { ok: false, reason: 'not_yours' };
@@ -619,7 +621,7 @@ export class Mailroom {
     return out;
   }
 
-  private settleWith(req: Message, from: ActorId, r: { outcome: Outcome; text: string; verdict?: Verdict; artifact?: string[]; auto?: boolean }) {
+  private settleWith(req: Message, from: ActorId, r: { outcome: Outcome; text: string; verdict?: Verdict; artifact?: string[]; blocker?: Blocker; auto?: boolean }) {
     if (req.kind !== 'request' || !this.state.unsettled.has(req.id)) return;
     const b = this.base(from, req.from, req);
     this.put({
@@ -632,6 +634,7 @@ export class Mailroom {
       text: r.text,
       ...(r.verdict ? { verdict: r.verdict } : {}),
       ...(r.artifact?.length ? { artifact: r.artifact } : {}),
+      ...(r.outcome === 'blocked' && r.blocker ? { blocker: r.blocker } : {}),
       ...(r.auto ? { auto: true } : {}),
     });
     if (req.from === 'mailroom' && req.parentId) this.advance(req.parentId);

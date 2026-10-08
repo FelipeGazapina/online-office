@@ -5,7 +5,7 @@ import type { ActivityEntry, OpenQuestion, PersonLive, TaskLive } from '../src/s
 import type { MessageId } from '../src/shared/mail.ts';
 import type { EmployeeId } from '../src/shared/protocol.ts';
 import type { HandoffId, HandoffStep } from '../src/shared/tasks.ts';
-import { answerKind, cardLine, cut, questionCount, sayEntry, sayLive } from '../src/renderer/src/hud/tasks/activityView.ts';
+import { answerKind, breakdownOf, cardLine, cut, questionCount, sayEntry, sayLive } from '../src/renderer/src/hud/tasks/activityView.ts';
 import { check, finish } from './check.ts';
 
 const e = (s: string) => s as EmployeeId;
@@ -48,6 +48,23 @@ check(cardLine(live(...['a', 'b', 'c', 'd'].map((id): PersonLive => ({ employeeI
 check(questionCount(undefined) === 0 && questionCount({ ...live(), questions: [question, question] }) === 2, 'the badge counts the questions');
 
 check(answerKind(question) === 'text', 'a blocked question takes words');
+
+const told = breakdownOf({ ...question, text: 'I stopped. The README needs a decision.', blocker: { why: 'Two layouts fit the README.', question: 'Do you want the short or the long README?', next: 'I write the one you pick and send it for review.' } } as OpenQuestion, name);
+check(told.why === 'Two layouts fit the README.' && told.question === 'Do you want the short or the long README?', 'a blocked reply with a breakdown shows its why and its question as given');
+check(told.next === 'I write the one you pick and send it for review.' && /new request/.test(told.then) && /Quin picks “README” up again/.test(told.then), 'its next step is theirs, and apart from it what the owner\'s answer does', JSON.stringify(told));
+check(told.full === 'I stopped. The README needs a decision.', 'and the whole reply is kept behind it');
+const old = breakdownOf({ ...question, text: 'The tests fail on main. Should I fix them first or skip them? I can do either.' }, name);
+check(old.why === 'The tests fail on main. Should I fix them first or skip them? I can do either.' && old.question === 'Should I fix them first or skip them?' && old.next === 'Quin did not say.' && old.full === undefined, 'an old blocked reply keeps its text as the why and leads with the sentence that asks', JSON.stringify(old));
+check(breakdownOf({ ...question, text: 'End now. Which colour should colour.txt hold, red or blue?' }, name).question === 'Which colour should colour.txt hold, red or blue?', 'a full stop inside a file name does not cut the question');
+const silent = breakdownOf({ ...question, text: 'The build server is down.' }, name);
+check(/^Quin did not ask anything\. What should Quin do next on “README”\?$/.test(silent.question), 'one that asked nothing says so, and asks what Quin should do next', silent.question);
+const viaPo = breakdownOf({ ...question, to: e('rui'), text: 'stuck' }, name);
+check(/goes to Rui, who asked Quin for it/.test(viaPo.then), 'a block that went to the PO says the answer goes through the PO', viaPo.then);
+const perm = breakdownOf({ ...question, how: 'permission', tool: 'Bash', detail: 'rm -rf build' } as OpenQuestion, name);
+check(perm.question === 'Allow Bash?' && /Allow lets it run/.test(perm.then) && perm.full === 'rm -rf build', 'a permission card asks allow or deny and says what each does');
+const pick = breakdownOf({ ...question, how: 'ask', text: 'Which port?', options: ['3000', '8080'] } as OpenQuestion, name);
+check(pick.question === 'Which port?' && /^Pick one/.test(pick.then), 'an ask with options says to pick one');
+check(sayLive({ employeeId: e('quin'), state: 'blocked', question: { ...question, blocker: { why: 'w', question: 'Short or long?', next: 'n' } } as OpenQuestion }, name).text === 'Blocked: “Short or long?”', 'the person line leads with the question, not the whole reply');
 check(answerKind({ ...question, how: 'ask', options: ['A', 'B'] } as OpenQuestion) === 'options', 'a question with options takes a choice');
 check(answerKind({ ...question, how: 'ask' } as OpenQuestion) === 'text', 'an ask with no options takes words');
 check(answerKind({ ...question, how: 'permission', tool: 'Bash', detail: 'ls' } as OpenQuestion) === 'permission', 'a permission card takes allow or deny');

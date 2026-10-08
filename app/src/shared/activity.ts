@@ -4,7 +4,7 @@
 //
 // The fold keeps the ledger's own lifecycle rules (queued, delivered, settled, back to queued after a crash), so what it
 // says a person is doing is what the mailroom thinks. verify/activity-check.ts holds the two to each other.
-import type { ActorId, Intent, LedgerEntry, Lifecycle, Message, MessageId, Outcome, TurnId, Verdict } from './mail.ts';
+import type { ActorId, Blocker, Intent, LedgerEntry, Lifecycle, Message, MessageId, Outcome, TurnId, Verdict } from './mail.ts';
 import type { EmployeeId, Question, QuestionId } from './protocol.ts';
 import type { Task, TaskEvent, TaskId } from './tasks.ts';
 
@@ -35,7 +35,7 @@ export type ActivityEntry = Stamp &
     // A progress message, or a teammate's or the owner's word inside the chain.
     | { kind: 'say'; msg: MessageId; from: ActorId; to: ActorId; text: string; answers?: MessageId }
     // How a request ended: its files, and the critic's verdict when it was a review.
-    | { kind: 'reply'; msg: MessageId; request: MessageId; title: string; from: ActorId; to: ActorId; outcome: Outcome; text: string; artifact?: string[]; verdict?: Verdict; auto?: boolean; round?: Round }
+    | { kind: 'reply'; msg: MessageId; request: MessageId; title: string; from: ActorId; to: ActorId; outcome: Outcome; text: string; artifact?: string[]; verdict?: Verdict; blocker?: Blocker; auto?: boolean; round?: Round }
     | { kind: 'event'; event: 'hired' | 'fired'; subject?: EmployeeId; text: string }
     // The app died with these in someone's hands, and started again with them back in the queue.
     | { kind: 'recovered'; requeued: { msg: MessageId; who: EmployeeId; title: string }[] }
@@ -172,6 +172,7 @@ export function foldActivity(ix: ActivityIndex, entry: LedgerEntry): ActivityInd
             text: clipText(m.text),
             ...(m.artifact?.length ? { artifact: m.artifact } : {}),
             ...(m.verdict ? { verdict: m.verdict } : {}),
+            ...(m.blocker ? { blocker: m.blocker } : {}),
             ...(m.auto ? { auto: true } : {}),
             ...(round ? { round } : {}),
           };
@@ -254,7 +255,8 @@ export type OpenQuestion = {
   at: number;
   text: string;
 } & (
-  | { how: 'blocked' | 'help'; piece: PieceRef }
+  | { how: 'blocked'; piece: PieceRef; blocker?: Blocker }
+  | { how: 'help'; piece: PieceRef }
   | { how: 'ask'; options?: string[] }
   | { how: 'permission'; tool: string; detail: string }
 );
@@ -384,7 +386,7 @@ function questionsOf(task: Task, ix: ActivityIndex, chain: readonly Message[], r
       const asked = ix.msgs.get(m.requestId);
       if (asked?.kind !== 'request') continue;
       if (m.to === 'owner' ? (ix.ownerTo.get(m.from) ?? -1) > at : !asked.parentId || !ix.unsettled.has(asked.parentId)) continue;
-      out.push({ ref: { kind: 'mail', id: m.id }, asker: m.from, to: m.to, at: m.at, text: m.text, how: 'blocked', piece: pieceOf(asked) });
+      out.push({ ref: { kind: 'mail', id: m.id }, asker: m.from, to: m.to, at: m.at, text: m.text, how: 'blocked', piece: pieceOf(asked), ...(m.blocker ? { blocker: m.blocker } : {}) });
     } else if (m.kind === 'request' && m.intent === 'help' && isEmployee(m.from) && isEmployee(m.to) && ix.unsettled.has(m.id)) {
       out.push({ ref: { kind: 'mail', id: m.id }, asker: m.from, to: m.to, at: m.at, text: m.text, how: 'help', piece: pieceOf(m) });
     }

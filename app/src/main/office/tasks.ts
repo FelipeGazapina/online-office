@@ -557,7 +557,7 @@ export class Tasks {
     const mail = this.host.mail();
     const asked = this.activity.msgs.get(question.piece.id);
     if (asked?.kind !== 'request') throw new OfficeError('That question is not waiting for an answer any more.');
-    const said = clipText(question.text, QUESTION_QUOTE_CAP);
+    const said = clipText(question.how === 'blocked' && question.blocker ? `${question.blocker.why}\nQuestion: ${question.blocker.question}` : question.text, QUESTION_QUOTE_CAP);
     const asker = this.nameOf(question.asker);
     if (question.how === 'blocked' && question.to === 'owner') {
       const text = `The owner answers: ${answer}\n\nYou stopped on "${asked.title}" and told them:\n${quote(said)}\n\nCarry on with the task now.\n\n${runRequest(task, board).text}`;
