@@ -1,12 +1,14 @@
 import { Html } from '@react-three/drei';
 import { useFrame } from '@react-three/fiber';
-import { memo, useRef, type RefObject } from 'react';
+import { memo, useRef, type CSSProperties, type RefObject } from 'react';
 import { Vector3, type Mesh } from 'three';
 import { PROVIDERS, type Employee } from '../../../shared/protocol.ts';
+import { useAllLive } from '../hud/tasks/live.ts';
 import { fmtWait, useNow } from '../hud/hooks.ts';
 import { hash } from '../util.ts';
 import { runtime } from '../runtime.ts';
 import { get, set, useStore } from '../store.ts';
+import { taskHue, taskNumbersOf } from '../taskBadge.ts';
 import { ResizableHud } from '../hud/ResizableHud.tsx';
 import { useMonitor } from '../computer.ts';
 import { labelLayer } from './labelLayer.ts';
@@ -79,6 +81,9 @@ function Label({ employee: e, meetingDoor, gate }: { employee: Employee; meeting
   const bubble = useStore((s) => s.bubbles[e.id]);
   const p = PROVIDERS[e.provider];
   const said = bubble && bubble.until > now ? bubble.text : null;
+  const tasks = useStore((st) => st.tasks);
+  const live = useAllLive();
+  const numbers = taskNumbersOf(e.id, tasks, live);
   const s = e.status;
 
   let bubbleEl;
@@ -109,6 +114,15 @@ function Label({ employee: e, meetingDoor, gate }: { employee: Employee; meeting
   return (
     <div className="emp-label" ref={gate} data-hud-resize-target={`employee-label-${e.id}`}>
       {bubbleEl}
+      {numbers.length > 0 && (
+        <div className="task-nos">
+          {numbers.map((n) => (
+            <span key={n} className="task-no" data-task-no={n} style={{ '--task-hue': taskHue(n) } as CSSProperties}>
+              #{n}
+            </span>
+          ))}
+        </div>
+      )}
       <button className="tag" onClick={(ev) => set({ menu: { employeeId: e.id, x: ev.clientX, y: ev.clientY } })}>
         <i className="pdot" style={{ background: p.color }} />
         <b>{e.name}</b>

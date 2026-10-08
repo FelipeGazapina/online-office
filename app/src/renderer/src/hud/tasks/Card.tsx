@@ -139,7 +139,7 @@ export const Card = memo(function Card({ task, stage, time, now, people, selecte
         </span>
         <AvatarStack ids={task.assignees} people={people} />
       </div>
-      <p className="tb-card-title">{task.title}</p>
+      <p className="tb-card-title"><span className="tb-ref-text tb-no" data-task-no={task.number}>#{task.number}</span> {task.title}</p>
       {first && (
         <p className="tb-card-ask" data-testid="card-question">
           <b>{name(first.asker)} asks</b> {breakdownOf(first, name).question}

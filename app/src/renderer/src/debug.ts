@@ -7,7 +7,10 @@ import { DESKS_PER_BLOCK } from '../../shared/protocol.ts';
 import { applyOps, CELL, legacyBuilding, rectWalls, STORY_H, type BuildOp, type Item, type ItemId, type SpaceContext, type WallSeg } from '../../shared/space/index.ts';
 import { defOf, floorItems, itemRect } from '../../shared/space/geom.ts';
 import { benchItem } from '../../shared/space/kit.ts';
+import type { TaskLive } from '../../shared/activity.ts';
+import type { Board, BoardId, Task, TaskId } from '../../shared/tasks.ts';
 import { applyServerMessage } from './office.ts';
+import { useFeed } from './hud/tasks/live.ts';
 import { loadMailFixture } from './hud/chat/fixture.ts';
 import { renders } from './hud/chat/renders.ts';
 import { KEYS_INTENT, runtime } from './runtime.ts';
@@ -26,6 +29,24 @@ const intentState = () => {
 
 // Test-only: replaces the company in the renderer store with `count` fake employees spread over as many blocks as they
 // need, two thirds of them working so their avatars animate. Main never hears about them, so no snapshot may arrive after.
+// Test-only: tasks into the main store, with a quick board for each board they name that the store lacks, and what the
+// people on them are doing into the task feed. A task may carry `blockId` to say which block its new board is on.
+type SeedTask = Partial<Task> & { id: TaskId; number: number; boardId: BoardId; blockId?: BlockId };
+function seedTasks(seed: SeedTask[], live: Record<TaskId, TaskLive>) {
+  const { boards, company } = get();
+  const now = Date.now();
+  const tasks: Task[] = seed.map(({ blockId: _, ...t }) => ({ title: `Task ${t.number}`, origin: { kind: 'manual' }, stage: 'doing', assignees: [], runs: [], createdAt: now, updatedAt: now, ...t }));
+  const added: Board[] = [];
+  for (const t of seed) {
+    if (boards.some((b) => b.id === t.boardId) || added.some((b) => b.id === t.boardId)) continue;
+    const blockId = t.blockId ?? company?.blocks[0]?.id;
+    if (!blockId) throw new Error(`no block for board ${t.boardId}`);
+    added.push({ id: t.boardId, blockId, name: 'Seeded', kind: 'quick' });
+  }
+  set({ boards: [...boards, ...added], tasks });
+  useFeed.setState({ live });
+}
+
 function injectFake(count: number, floors = 1, tops = 0) {
   const company = get().company;
   if (!company) throw new Error('no company yet');
@@ -297,6 +318,7 @@ export function installDebug() {
     // The same walk a floor click starts, aimed at any story. The overview draws only the stories up to the owner's, so a click cannot reach a higher one yet.
     walkTo: (floor: number, x: number, z: number) => walkTo({ kind: 'point', at: { x, z }, floor }),
     injectFake,
+    seedTasks,
     // Test-only: the chat with a whole conversation in it. Main never hears about these people.
     loadMailFixture() {
       const company = get().company;

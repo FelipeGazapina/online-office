@@ -115,10 +115,16 @@ export function Detail({ task, board, blockPeople, people, time, stage, now, onC
       </header>
       <div className="tb-dock-body">
         {manual ? (
-          <input className="tb-title-input" aria-label="Title" {...title} />
+          <div className="tb-title-row">
+            <span className="tb-ref-text tb-no" data-task-no={task.number}>#{task.number}</span>
+            <input className="tb-title-input" aria-label="Title" {...title} />
+          </div>
         ) : (
           <>
-            <h2 className="tb-title-static">{task.title}</h2>
+            <div className="tb-title-row">
+              <span className="tb-ref-text tb-no" data-task-no={task.number}>#{task.number}</span>
+              <h2 className="tb-title-static">{task.title}</h2>
+            </div>
             <p className="tb-hint">The title comes from {origin.source}, so it is edited there.</p>
           </>
         )}

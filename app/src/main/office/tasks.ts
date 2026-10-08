@@ -103,7 +103,8 @@ export type TasksGit = {
   gh: Gh;
 };
 
-type TasksFile = { v: 1; boards: Board[]; tasks: Task[]; people: Record<string, string> };
+// `nextNumber` is the number the next task gets. It only grows, so a deleted task's number is never given again.
+type TasksFile = { v: 1; boards: Board[]; tasks: Task[]; people: Record<string, string>; nextNumber: number };
 
 // What a task made by hand may carry beyond its title. `assignee` hands it over in the same step.
 export type NewTask = { notes?: string; stage?: TaskStage; priority?: Priority; assignee?: EmployeeId };
@@ -172,6 +173,7 @@ export class Tasks {
   private tasks: Task[] = [];
   // The names of people who left, so hours they worked still go out under their name.
   private people: Record<string, string> = {};
+  private nextNumber = 1;
   private readonly sync = new Map<BoardId, BoardSync>();
   private linearPeople: LinearPeople = { kind: 'unknown' };
   private log: TurnLog;
@@ -202,7 +204,16 @@ export class Tasks {
     this.activity = activityIndexOf(ledger);
     const stored = read(file);
     this.existed = !!stored;
-    if (stored) ({ boards: this.boards, tasks: this.tasks, people: this.people } = stored);
+    if (stored) {
+      ({ boards: this.boards, tasks: this.tasks, people: this.people, nextNumber: this.nextNumber } = stored);
+      // A file from before task numbers: number its tasks in the order they were made, once, and write it back.
+      if (this.tasks.some((t) => !t.number)) {
+        const numbered = numberTasks(this.tasks, this.nextNumber);
+        this.tasks = numbered.tasks;
+        this.nextNumber = numbered.nextNumber;
+        this.save();
+      }
+    }
     for (const entry of ledger) if (entry.t === 'deliver') for (const id of entry.ids) this.delivered.add(id);
     for (const t of this.tasks) for (const run of t.runs) if (this.delivered.has(run)) this.begun.add(run);
   }
@@ -291,6 +302,7 @@ export class Tasks {
     this.boards = [];
     this.tasks = [];
     this.people = {};
+    this.nextNumber = 1;
     this.sync.clear();
     this.delivered.clear();
     this.begun.clear();
@@ -412,7 +424,7 @@ export class Tasks {
     if (!board || board.kind === 'quick') return;
     // What the board pulls changed while this was out, and the change asked for its own round.
     if (pulls(board) !== pulls(before)) return;
-    const synced = syncCards(board, this.tasks, result.cards, { now: this.host.now(), complete: result.errors.length === 0, newId: () => this.taskId() });
+    const synced = syncCards(board, this.tasks, result.cards, { now: this.host.now(), complete: result.errors.length === 0, newId: () => this.taskId(), nextNumber: () => this.nextNumber++ });
     this.tasks = this.noteMoves(synced.tasks, 'provider');
     if (synced.changed) {
       this.save();
@@ -447,7 +459,7 @@ export class Tasks {
     if (opt.assignee) this.assertMember(opt.assignee, board.blockId);
     const notes = opt.notes?.trim();
     const origin = { kind: 'manual' as const, ...(opt.priority ? { priority: opt.priority } : {}) };
-    const task = newTask({ id: this.taskId(), boardId, title: clean, ...(notes ? { notes } : {}), origin, stage: opt.stage ?? 'todo', now: this.host.now() });
+    const task = newTask({ id: this.taskId(), number: this.nextNumber++, boardId, title: clean, ...(notes ? { notes } : {}), origin, stage: opt.stage ?? 'todo', now: this.host.now() });
     this.tasks = [...this.tasks, task];
     this.save();
     if (!opt.assignee) return task;
@@ -1162,7 +1174,7 @@ export class Tasks {
   private save() {
     mkdirSync(dirname(this.file), { recursive: true });
     const tmp = `${this.file}.tmp`;
-    const body: TasksFile = { v: 1, boards: this.boards, tasks: this.tasks, people: this.people };
+    const body: TasksFile = { v: 1, boards: this.boards, tasks: this.tasks, people: this.people, nextNumber: this.nextNumber };
     writeFileSync(tmp, JSON.stringify(body, null, 2));
     renameSync(tmp, this.file);
   }
@@ -1173,8 +1185,16 @@ function read(file: string): TasksFile | undefined {
   try {
     const raw = JSON.parse(readFileSync(file, 'utf8')) as Partial<TasksFile> | null;
     if (!raw || raw.v !== 1 || !Array.isArray(raw.boards) || !Array.isArray(raw.tasks)) return undefined;
-    return { v: 1, boards: raw.boards, tasks: raw.tasks, people: raw.people ?? {} };
+    return { v: 1, boards: raw.boards, tasks: raw.tasks, people: raw.people ?? {}, nextNumber: typeof raw.nextNumber === 'number' ? raw.nextNumber : 1 };
   } catch {
     return undefined;
   }
+}
+
+// Tasks without a number get the next ones in the order they were made. The counter ends past every number in use.
+export function numberTasks(tasks: readonly Task[], next: number): { tasks: Task[]; nextNumber: number } {
+  let counter = Math.max(next, ...tasks.map((t) => (t.number ?? 0) + 1));
+  const given = new Map<TaskId, number>();
+  for (const t of [...tasks].filter((t) => !t.number).sort((a, b) => a.createdAt - b.createdAt)) given.set(t.id, counter++);
+  return { tasks: tasks.map((t) => (given.has(t.id) ? { ...t, number: given.get(t.id)! } : t)), nextNumber: counter };
 }
