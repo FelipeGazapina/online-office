@@ -114,6 +114,9 @@ export type TasksView = { boards: Board[]; tasks: Task[]; boardSync: Record<Boar
 // What pulling a board depends on: its sources, filters included, and the columns it has folded away.
 const pulls = (board: Board): string => (board.kind === 'quick' ? '' : JSON.stringify([board.sources, board.collapsed ?? []]));
 
+// The line a task routed to the PO carries, so the PO gives it to someone.
+export const ROUTED_NOTE = 'Nobody is assigned to this task yet. Pick the teammate whose role fits and give them the work; they become its assignee.';
+
 // The state of a root request as a task cares about it.
 function runStateOf(mail: MailState, id: MessageId): RunState | undefined {
   const life = mail.life.get(id);
@@ -318,6 +321,29 @@ export class Tasks {
     if (entry.t === 'deliver') for (const id of entry.ids) this.delivered.add(id);
     foldTurn(this.log, entry);
     foldActivity(this.activity, entry);
+    if (entry.t === 'post') this.delegated(entry.msg);
+  }
+
+  // The PO hands work on a task to a teammate: a work request, or a gauntlet whose builder they are, inside the task's chain.
+  // The teammate joins the task's assignees with no run of the owner's and no move. A help request, a review, a message,
+  // and a request outside any task change nothing.
+  private delegated(m: Message) {
+    if (m.kind !== 'request' || m.from === 'owner' || m.from === 'mailroom') return;
+    const to = m.intent === 'work' ? m.to : m.intent === 'gauntlet' ? m.gauntlet?.builder : undefined;
+    if (!to) return;
+    const members = this.host.members();
+    const po = members.find((x) => x.id === m.from);
+    if (po?.role !== 'orchestrator') return;
+    const task = this.taskOfRoot(m.rootId);
+    if (!task || !members.some((x) => x.id === to && x.id !== po.id && x.blockId === po.blockId)) return;
+    this.join(task, to as EmployeeId, po.id, m.id);
+  }
+
+  // `who` joins the task's assignees because `by` gave them work on it. Already there, nothing changes.
+  private join(task: Task, who: EmployeeId, by: EmployeeId, cause?: MessageId) {
+    if (task.assignees.includes(who)) return;
+    const at = this.host.now();
+    this.replace(withEvent({ ...task, assignees: [...task.assignees, who], updatedAt: at }, { kind: 'assign', at, employeeId: who, by, ...(cause ? { cause } : {}) }), false);
   }
 
   // Takes in how runs ended, and chases the handoffs nobody answers.
@@ -508,11 +534,11 @@ export class Tasks {
   // The block's PO or any of its employees takes the task, and starts on it now. Giving it to someone who is already on it
   // changes nothing, a retry of the same call does not post twice, and giving it to someone again once they settled posts
   // another run. A run the owner posts settles a handoff still waiting on someone's agreement: the owner has decided.
-  assign(taskId: TaskId, employeeId: EmployeeId) {
+  assign(taskId: TaskId, employeeId: EmployeeId, note?: string) {
     const task = this.task(taskId);
     const board = this.board(task.boardId);
     this.assertMember(employeeId, board.blockId);
-    const given = this.giveRun(task, employeeId);
+    const given = this.giveRun(task, employeeId, note ? { note } : {});
     if (!given.ok) throw new OfficeError(given.detail);
     if (!given.posted) return;
     this.replace(given.task);
@@ -532,7 +558,7 @@ export class Tasks {
       const po = this.host.members().find((m) => m.blockId === blockId && m.role === 'orchestrator');
       if (!po) continue;
       try {
-        this.assign(task.id, po.id);
+        this.assign(task.id, po.id, ROUTED_NOTE);
       } catch (err) {
         console.warn(`Could not hand "${task.title}" to ${po.name}:`, err instanceof Error ? err.message : err);
       }
@@ -558,7 +584,14 @@ export class Tasks {
       return elsewhere ? `${to} works on another block. Assign a teammate of your own block.` : `Nobody on your block is called ${to}.`;
     }
     if (mate.id === po) return 'You lead and do not build. Assign the task to a teammate, not to yourself.';
-    this.assign(found.id, mate.id);
+    // Someone already working a piece of the task only joins its assignees. Anyone else gets the owner's request for it.
+    const inChain = [...rootsOf(found, this.activity)].some((root) => (this.activity.members.get(root) ?? []).some((id) => {
+      const m = this.activity.msgs.get(id);
+      return m?.kind === 'request' && m.to === mate.id;
+    }));
+    if (inChain) this.join(found, mate.id, po);
+    else this.assign(found.id, mate.id);
+    if (inChain) this.host.changed();
     return `Assigned ${found.title} to ${mate.name}.`;
   }
 

@@ -56,6 +56,8 @@ export type StageBy = ActorId | 'provider';
 export type TaskEvent =
   // `reason` is what a teammate said when they moved the card themselves.
   | { kind: 'stage'; at: number; from: TaskStage; to: TaskStage; by: StageBy; cause?: MessageId; reason?: string }
+  // `employeeId` joined the task's assignees because `by` gave them work on it (`cause`), without a run of the owner's.
+  | { kind: 'assign'; at: number; employeeId: EmployeeId; by: EmployeeId; cause?: MessageId }
   // An hours entry sent to CronoSpark, or one that failed (`error`).
   | { kind: 'hours'; at: number; employeeId: EmployeeId; date: LocalDate; hours: number; error?: string }
   // One step of a handoff. `by` is who took it. A `dropped` step is the office clearing a proposal that can no longer apply,

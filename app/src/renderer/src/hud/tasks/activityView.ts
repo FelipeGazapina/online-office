@@ -100,6 +100,8 @@ export function sayEntry(e: ActivityEntry, name: Namer): EntryWords {
       return { head: `The app restarted. Back in the queue: ${e.requeued.map((r) => `${name(r.who)}’s ${piece(r.title, 40)}`).join(', ')}`, tone: 'warn' };
     case 'stage':
       return { head: `Moved to ${STAGE_LABEL[e.to]} by ${e.by === 'owner' ? 'you' : e.by === 'mailroom' ? 'the office' : e.by === 'provider' ? 'the provider' : name(e.by)}`, tone: 'plain' };
+    case 'assign':
+      return { head: `${name(e.by)} gave it to ${name(e.employeeId)}`, tone: 'plain' };
     case 'hours':
       return { head: e.error ? `Could not send ${e.hours} h for ${name(e.employeeId)} (${e.date})` : `Sent ${e.hours} h for ${name(e.employeeId)} (${e.date}) to CronoSpark`, tone: e.error ? 'bad' : 'plain' };
     case 'handoff':
