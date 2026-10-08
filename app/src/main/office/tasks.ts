@@ -69,7 +69,7 @@ import {
 } from '../../shared/tasks.ts';
 import { OfficeError } from './error.ts';
 import type { MailState, Mailroom } from './mail.ts';
-import { ensurePr, readPr, type Gh } from './pull-request.ts';
+import { ensurePr, markReady, readPr, type Gh } from './pull-request.ts';
 import type { HoursCall } from './task-board.ts';
 import { createTaskWorkspace, defaultBase, isGitRepo, pushBranch, removeTaskWorkspace, unpushed, type Workspace } from './workspace.ts';
 
@@ -187,6 +187,8 @@ export class Tasks {
   private readonly publishing = new Map<TaskId, Promise<void>>();
   private readonly publishAgain = new Set<TaskId>();
   private prRound: Promise<void> | undefined;
+  // Tasks in review whose draft pull request was asked to leave draft during this stay in review.
+  private readonly readyAsked = new Set<TaskId>();
   private readonly existed: boolean;
   // Requests the mailroom has handed to their person. A task waits in its column while its run sits in a queue, and the office
   // moves it to doing once, when the run is delivered: `begun` holds the runs that already moved their task.
@@ -332,7 +334,10 @@ export class Tasks {
       const noted = { ...t, ...taken, updatedAt: now };
       return stage ? restage(noted, stage, 'mailroom', now, outcome.lastOutcome.reply) : noted;
     });
-    if (moved) this.save();
+    if (moved) {
+      this.save();
+      this.readyDrafts();
+    }
   }
 
   // ── boards ──
@@ -409,7 +414,10 @@ export class Tasks {
     if (pulls(board) !== pulls(before)) return;
     const synced = syncCards(board, this.tasks, result.cards, { now: this.host.now(), complete: result.errors.length === 0, newId: () => this.taskId() });
     this.tasks = this.noteMoves(synced.tasks, 'provider');
-    if (synced.changed) this.save();
+    if (synced.changed) {
+      this.save();
+      this.readyDrafts();
+    }
     this.sync.set(boardId, result.errors.length && !result.cards.length ? { kind: 'error', message: result.errors.join(' ') } : { kind: 'ready', lastFetchedAt: this.host.now() });
     this.host.changed();
   }
@@ -981,6 +989,7 @@ export class Tasks {
   private async readPrs(retry: boolean) {
     const git = this.host.git;
     if (!git) return;
+    if (retry) this.readyAsked.clear();
     for (const { id } of [...this.tasks]) {
       // Read again each time: the ones before this took a while, and this one may have moved on meanwhile.
       const task = this.tasks.find((t) => t.id === id);
@@ -997,6 +1006,7 @@ export class Tasks {
       this.update(task.id, (t) => withPr(t, seen.pr, this.host.now()));
       this.settled(task.id);
     }
+    this.readyDrafts();
   }
 
   // Whether there is a pull request worth asking about again later.
@@ -1014,6 +1024,30 @@ export class Tasks {
       if (existsSync(path) && (!t.git.pr || unpushed(path, t.git.branch))) void this.publish(t.id);
     }
     void this.refreshPrs();
+    this.readyDrafts();
+  }
+
+  // A task in review is the team saying the work is ready to look at, so its draft pull request leaves draft too. That is
+  // asked once per stay in review: a refusal is a note on the card and is not retried in a loop, and the owner's retry on the
+  // board asks again. Moving the task out of review leaves the pull request as it is.
+  private readyDrafts() {
+    for (const t of this.tasks) {
+      if (t.stage !== 'review') this.readyAsked.delete(t.id);
+      else if (t.git?.pr?.state === 'draft' && !this.readyAsked.has(t.id)) {
+        this.readyAsked.add(t.id);
+        void this.readyPr(t.id).catch((err: unknown) => console.error('Could not mark a pull request ready for review:', err));
+      }
+    }
+  }
+
+  private async readyPr(taskId: TaskId) {
+    const git = this.host.git;
+    const task = this.tasks.find((t) => t.id === taskId);
+    if (!git || !task?.git?.pr) return;
+    const path = git.worktree(task.id);
+    const cwd = existsSync(path) ? path : (git.block(this.board(task.boardId).blockId)?.cwd ?? path);
+    const result = await markReady(git.gh, cwd, task.git.pr.number);
+    this.update(taskId, (t) => (result.kind === 'pr' ? withPr(t, result.pr, this.host.now()) : withGitNote(t, result.note, this.host.now())));
   }
 
   // A pull request that is over does not need its worktree any more. The branch stays.
@@ -1109,6 +1143,7 @@ export class Tasks {
     this.tasks = this.tasks.map((t) => (t.id === next.id ? next : t));
     this.save();
     if (notify) this.host.changed();
+    this.readyDrafts();
   }
 
   // Tasks a provider's cards moved to another stage, with the move on their history.

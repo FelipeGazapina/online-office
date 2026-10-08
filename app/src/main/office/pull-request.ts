@@ -97,6 +97,16 @@ export async function ensurePr(gh: Gh, cwd: string, spec: { branch: string; base
   return (await find(gh, cwd, spec.branch)) ?? { kind: 'none', note: `GitHub did not say where the pull request is: ${made.out.slice(0, 120) || 'no output'}` };
 }
 
+// Takes a draft pull request out of draft, then says where it stands. One that is already ready stays as it is.
+export async function markReady(gh: Gh, cwd: string, number: number): Promise<PrResult> {
+  const ready = await gh(cwd, ['pr', 'ready', String(number)]);
+  if (!ready.ok) {
+    const line = [ready.err, ready.out].join('\n').split('\n').find((l) => l.trim()) ?? 'gh failed';
+    return { kind: 'none', note: `Pull request #${number} is still a draft, because gh could not mark it ready for review: ${line.trim()}` };
+  }
+  return readPr(gh, cwd, number);
+}
+
 // Where a pull request stands now.
 export async function readPr(gh: Gh, cwd: string, number: number): Promise<PrResult> {
   const viewed = await gh(cwd, ['pr', 'view', String(number), '--json', JSON_FIELDS]);

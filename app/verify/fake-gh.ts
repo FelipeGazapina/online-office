@@ -93,6 +93,15 @@ function run(args: string[], stateFile: string) {
     const pr = state.prs.find((p) => String(p.number) === args[2]);
     return pr ? void writeSync(1, `${JSON.stringify(pick(pr, fields))}\n`) : fail(`GraphQL: Could not resolve to a PullRequest with the number of ${args[2]}. (repository.pullRequest)`);
   }
+  if (group === 'pr' && verb === 'ready') {
+    const pr = state.prs.find((p) => String(p.number) === args[2]) ?? fail(`GraphQL: Could not resolve to a PullRequest with the number of ${args[2]}. (repository.pullRequest)`);
+    if (pr.state !== 'OPEN') fail(`Pull request ${pr.url} is ${pr.state.toLowerCase()}. Only draft pull requests can be marked as "ready for review"`);
+    if (!pr.isDraft) return void writeSync(2, `! Pull request ${pr.url} is already "ready for review"\n`);
+    pr.isDraft = false;
+    save();
+    writeSync(2, `✓ Pull request ${pr.url} is marked as "ready for review"\n`);
+    return;
+  }
   if (group === 'pr' && verb === 'create') {
     const head = flag(args, '--head') ?? fail('--head is required here');
     const base = flag(args, '--base') ?? fail('--base is required here');
