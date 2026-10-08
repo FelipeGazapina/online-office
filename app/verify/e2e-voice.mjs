@@ -183,13 +183,19 @@ async function pushToTalk(s, lang, { bargeIn = false, shots = '' } = {}) {
   await quiet(s);
   const before = routed(s).length;
   const heardBefore = (await measures(s, 'voice:ptt')).length;
-  const opened = await freshMic(s);
+  let opened = await freshMic(s);
   if (bargeIn) {
     await employeeSays(s, ANNOUNCEMENT);
     await s.waitFor('speechSynthesis.speaking', 3000);
     assert(await s.eval('speechSynthesis.speaking'), `${how}: an employee is talking`);
   }
-  await s.sleep(Math.max(0, 1500 - (Date.now() - opened)));
+  // An employee who gets up and walks off takes the owner's microphone with them, so the owner steps up again if that happened.
+  for (let tries = 0; ; tries++) {
+    await s.sleep(Math.max(0, 1500 - (Date.now() - opened)));
+    if (await s.eval(`!!__office.state().talkingTo && __office.store.getState().voice.capture.kind === 'open'`)) break;
+    assert(tries < 2, `${how}: the owner stayed next to the employee`);
+    opened = await freshMic(s);
+  }
   const cold = await coldNow(s);
   if (cold) assert((await s.eval(text('.talk-badge'))).includes('Hold V to talk'), `${how}: with the engine asleep the chip reads as a working microphone, not as a model loading (${await s.eval(text('.talk-badge'))})`);
   // Selecting an employee puts the cursor in the chat box, and V typed there is a letter. The owner clicks out of it first.
@@ -232,6 +238,7 @@ async function answerByVoice(s) {
   await s.waitFor(`${status}.kind === 'blocked_on_owner'`, 120000);
   await stepUntil(s, `__office.state().askerId === ${claude}.id && !!document.querySelector('.qcard')`, 60000, 'the question card');
   await stopTalking(s);
+  await s.waitFor(`__office.store.getState().voice.engine.kind === 'asleep'`, IDLE_MS + 40000);
   const before = routed(s).length;
 
   const owner = await s.eval('__office.state().owner');
@@ -250,7 +257,7 @@ async function answerByVoice(s) {
   lastUse = Date.now();
   assert(hears(wordsOf(sent[0]), PHRASES.en.words), `${how}: with the right words: "${wordsOf(sent[0])}"`);
   assert(!(await voiceOf(s)).cardMic, `${how}: the card mic switched itself off after one answer`);
-  assert((await engineOf(s)) === 'ready', `${how}: the detector hearing the answer woke the engine`);
+  assert((await engineOf(s)) === 'ready', `${how}: the detector hearing the answer woke the engine that was asleep`);
   await quiet(s);
 }
 
@@ -259,12 +266,14 @@ async function proximity(s, lang) {
   await quiet(s);
   const before = routed(s).length;
   const heardBefore = (await measures(s, 'voice:proximity')).length;
+  // Only a detector that finds the engine asleep proves that hearing the owner wakes it.
+  await s.waitFor(`__office.store.getState().voice.engine.kind === 'asleep'`, IDLE_MS + 40000);
   const cold = await coldNow(s);
   await freshMic(s);
   const heard = await arrived(s, before, lang, how);
   lastUse = Date.now();
   const [ms] = (await measures(s, 'voice:proximity')).slice(heardBefore);
-  assert((await engineOf(s)) === 'ready', `${how}: hearing the owner speak woke the engine (${cold ? 'it was asleep' : 'it was already up'})`);
+  assert(cold && (await engineOf(s)) === 'ready', `${how}: hearing the owner speak woke the engine that was asleep (${cold ? 'it was asleep' : 'it was already up'})`);
   console.log(`latency: ${how}: end of speech detected to text in ${ms} ms, after the 600 ms the detector waits to be sure, engine ${cold ? 'cold' : 'warm'} when the owner started ("${heard}")`);
   latencies.push({ how: `${how} (${cold ? 'cold' : 'warm'})`, ms, note: 'detected end of speech to text, after a 600 ms hangover' });
   await employeeUnderstood(s, lang, how);
