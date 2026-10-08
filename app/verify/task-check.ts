@@ -364,7 +364,7 @@ function taskWorld(file = join(dir, `tasks-${Math.random().toString(36).slice(2)
     newId: () => `id${++ids}`,
     mail: () => w.room,
     blocks: () => [B1, B2],
-    members: () => w.members.map((x) => ({ id: x.id, name: x.name, blockId: x.blockId })),
+    members: () => w.members.map((x) => ({ id: x.id, name: x.name, blockId: x.blockId, role: x.role })),
     provider,
     changed() {},
   };

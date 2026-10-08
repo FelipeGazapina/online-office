@@ -4,6 +4,7 @@
 import type { ActivityEntry, OpenQuestion, PersonLive, TaskLive } from '../src/shared/activity.ts';
 import type { MessageId } from '../src/shared/mail.ts';
 import type { EmployeeId } from '../src/shared/protocol.ts';
+import type { HandoffId, HandoffStep } from '../src/shared/tasks.ts';
 import { answerKind, cardLine, cut, questionCount, sayEntry, sayLive } from '../src/renderer/src/hud/tasks/activityView.ts';
 import { check, finish } from './check.ts';
 
@@ -70,6 +71,11 @@ const failedHours = sayEntry(entry({ kind: 'hours', employeeId: e('tess'), date:
 check(/^Could not send 0\.25 h/.test(failedHours.head) && failedHours.tone === 'bad', 'a failed send is in the log as one');
 check(/^The app restarted\. Back in the queue: Tess’s “Piece”/.test(sayEntry(entry({ kind: 'recovered', requeued: [{ msg: m('r'), who: e('tess'), title: 'Piece' }] }), name).head), 'a restart says what went back in the queue');
 check(sayEntry(entry({ kind: 'started', msg: m('r'), who: e('tess'), title: 'Piece', again: true }), name).head === 'Tess picked it up again', 'a second pickup says again');
+const hand = (step: HandoffStep, by: string, from = 'rui') => sayEntry(entry({ kind: 'handoff', handoff: 'h-1' as HandoffId, step, from: e(from), to: e('tess'), by: e(by) }), name);
+check(hand('proposed', 'rui').head === 'Rui asked to hand this to Tess' && hand('proposed', 'jo').head === 'Jo asked Rui to hand this to Tess', 'a handoff proposal says who asked to hand the task to whom, and whom the PO asked to give it up');
+check(hand('accepted', 'jo').head === 'Jo agreed: Tess has it now' && hand('accepted', 'jo').tone === 'ok', 'an agreement says who agreed and who has the task now');
+check(hand('declined', 'jo').head === 'Jo declined the handoff to Tess' && hand('declined', 'jo').tone === 'warn', 'a decline is a warning that names the handoff');
+check(hand('withdrawn', 'rui').head === 'Rui withdrew the handoff to Tess' && hand('dropped', 'rui').head === 'The office dropped the handoff to Tess', 'a withdrawal is the proposer\'s, and a dropped handoff is the office\'s whoever proposed it');
 check(cut('a  b\n c', 20) === 'a b c' && cut('x'.repeat(50), 10) === `${'x'.repeat(9)}…`, 'cut flattens white space and ends with an ellipsis');
 
 finish();

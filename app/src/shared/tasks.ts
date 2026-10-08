@@ -8,6 +8,7 @@ import { DEFAULT_LINEAR_FILTERS, taskBoardStatusLabel, type BlockId, type Employ
 
 export type BoardId = string & { readonly __brand: 'BoardId' };
 export type TaskId = string & { readonly __brand: 'TaskId' };
+export type HandoffId = string & { readonly __brand: 'HandoffId' };
 // A calendar day in the owner's time zone, as CronoSpark takes it.
 export type LocalDate = `${number}-${number}-${number}`;
 
@@ -56,7 +57,10 @@ export type TaskEvent =
   // `reason` is what a teammate said when they moved the card themselves.
   | { kind: 'stage'; at: number; from: TaskStage; to: TaskStage; by: StageBy; cause?: MessageId; reason?: string }
   // An hours entry sent to CronoSpark, or one that failed (`error`).
-  | { kind: 'hours'; at: number; employeeId: EmployeeId; date: LocalDate; hours: number; error?: string };
+  | { kind: 'hours'; at: number; employeeId: EmployeeId; date: LocalDate; hours: number; error?: string }
+  // One step of a handoff. `by` is who took it. A `dropped` step is the office clearing a proposal that can no longer apply,
+  // and `by` is then whoever proposed it.
+  | { kind: 'handoff'; at: number; handoff: HandoffId; step: HandoffStep; from: EmployeeId; to: EmployeeId; by: EmployeeId; reason?: string };
 
 export type Task = {
   id: TaskId;
@@ -76,6 +80,8 @@ export type Task = {
   hours?: HoursLog;
   history?: TaskEvent[];
   git?: TaskGit;
+  // At most one proposal to give the task to someone else is open at a time.
+  handoff?: Handoff;
 };
 
 export const withEvent = (task: Task, event: TaskEvent): Task => ({ ...task, history: [...(task.history ?? []), event] });
@@ -141,7 +147,9 @@ export type MoveFacts = {
   open: readonly string[];
 };
 
-export type MoveRefusalReason = 'no_task' | 'unknown_task' | 'ambiguous' | 'not_on_task' | 'pinned' | 'not_allowed' | 'not_resumed' | 'open_pieces' | 'pr_open';
+// Why a teammate's words did not name one of their tasks.
+export type FindRefusalReason = 'no_task' | 'unknown_task' | 'ambiguous';
+export type MoveRefusalReason = FindRefusalReason | 'not_on_task' | 'pinned' | 'not_allowed' | 'not_resumed' | 'open_pieces' | 'pr_open';
 export type MoveRefusal = { reason: MoveRefusalReason; detail: string };
 
 const refuse = (reason: MoveRefusalReason, detail: string): MoveRefusal => ({ reason, detail });
@@ -169,6 +177,77 @@ export function agentMoveRefusal(task: Task, to: AgentStage, facts: MoveFacts): 
   if (to === 'doing') return facts.holding ? undefined : refuse('not_resumed', 'Only someone working on one of its requests takes a task back to doing, and you hold none of them now.');
   return to === 'done' ? doneRefusal(task, facts.open) : reviewRefusal(facts.open);
 }
+
+// ───────────────────────────── Handing a task over ─────────────────────────────
+
+// An open proposal to move a task from one person to another. Whoever proposed has said yes; `awaits` must answer. The two
+// who must agree are the person giving the task away and the block's PO. When they are the same person there is nobody to
+// wait for and the handoff applies at once, so an open Handoff always has awaits !== by.
+export type Handoff = {
+  id: HandoffId;
+  // An assignee of the task, who gives it away.
+  from: EmployeeId;
+  // A member of the task's block, other than `from`.
+  to: EmployeeId;
+  // `from`, or the block's PO.
+  by: EmployeeId;
+  // The other of `from` and the PO.
+  awaits: EmployeeId;
+  reason: string;
+  at: number;
+};
+
+// A task that keeps passing between two people is not getting done: after this many the owner decides who holds it.
+export const MAX_HANDOFFS = 3;
+
+// Proposals that are declined, withdrawn or dropped end nothing, so they are counted too, or two people could go on for ever.
+export const MAX_PROPOSALS = 6;
+
+export type HandoffEnding = 'accepted' | 'declined' | 'withdrawn' | 'dropped';
+export type HandoffStep = 'proposed' | HandoffEnding;
+export type HandoffEvent = Extract<TaskEvent, { kind: 'handoff' }>;
+
+export type HandoffRefusalReason =
+  | FindRefusalReason
+  // The proposer is neither an assignee of the task nor the block's PO.
+  | 'not_on_task'
+  | 'no_po'
+  // A task the owner closed is the owner's to reopen.
+  | 'done'
+  // It changed hands MAX_HANDOFFS times already.
+  | 'too_many'
+  // `to` or `from` is not a member of the block, `to` is `from`, or `from` is not on the task.
+  | 'bad_target'
+  // Another live proposal is open on the task. Asking for the same one again is not refused.
+  | 'open_handoff'
+  | 'unknown_handoff'
+  // Accepting or declining by someone other than `awaits`, or withdrawing by someone other than `by`.
+  | 'not_yours'
+  // The proposal can no longer apply. It is dropped as this is said.
+  | 'stale'
+  // The proposal already ended another way than the answer asks for.
+  | 'settled';
+export type HandoffRefusal = { reason: HandoffRefusalReason; detail: string };
+
+// Whether an open proposal can still apply: `from` is still on the task, and from, to and awaits still work in the block.
+export function handoffLive(task: Task, h: Handoff, members: ReadonlySet<EmployeeId>): boolean {
+  return task.assignees.includes(h.from) && members.has(h.from) && members.has(h.to) && members.has(h.awaits);
+}
+
+// How many proposals the task has had: each counts once however it ended, and so does a handoff applied at once, which has no
+// proposed step.
+export function handoffsProposed(task: Task): number {
+  const steps = (task.history ?? []).filter((e): e is HandoffEvent => e.kind === 'handoff');
+  const proposed = steps.filter((e) => e.step === 'proposed');
+  return proposed.length + steps.filter((e) => e.step === 'accepted' && !proposed.some((p) => p.handoff === e.handoff)).length;
+}
+
+// How many times the task has changed hands.
+export const handoffsMade = (task: Task): number => (task.history ?? []).filter((e) => e.kind === 'handoff' && e.step === 'accepted').length;
+
+// How a proposal ended, read from the task's history. Undefined while it is open, and for one the task never had.
+export const handoffEnding = (task: Task, id: HandoffId): (HandoffEvent & { step: HandoffEnding }) | undefined =>
+  task.history?.findLast((e): e is HandoffEvent & { step: HandoffEnding } => e.kind === 'handoff' && e.handoff === id && e.step !== 'proposed');
 
 // ───────────────────────────── Boards ─────────────────────────────
 

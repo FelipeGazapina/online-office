@@ -102,6 +102,25 @@ export function sayEntry(e: ActivityEntry, name: Namer): EntryWords {
       return { head: `Moved to ${STAGE_LABEL[e.to]} by ${e.by === 'owner' ? 'you' : e.by === 'mailroom' ? 'the office' : e.by === 'provider' ? 'the provider' : name(e.by)}`, tone: 'plain' };
     case 'hours':
       return { head: e.error ? `Could not send ${e.hours} h for ${name(e.employeeId)} (${e.date})` : `Sent ${e.hours} h for ${name(e.employeeId)} (${e.date}) to CronoSpark`, tone: e.error ? 'bad' : 'plain' };
+    case 'handoff':
+      return sayHandoff(e, name);
+  }
+}
+
+// A step of a handoff. `by` took it: the one who asked for a proposal, the one who answered for an answer.
+function sayHandoff(e: Extract<ActivityEntry, { kind: 'handoff' }>, name: Namer): EntryWords {
+  const to = name(e.to);
+  switch (e.step) {
+    case 'proposed':
+      return { head: `${name(e.by)} asked ${e.by === e.from ? 'to hand' : `${name(e.from)} to hand`} this to ${to}`, tone: 'plain' };
+    case 'accepted':
+      return { head: `${name(e.by)} agreed: ${to} has it now`, tone: 'ok' };
+    case 'declined':
+      return { head: `${name(e.by)} declined the handoff to ${to}`, tone: 'warn' };
+    case 'withdrawn':
+      return { head: `${name(e.by)} withdrew the handoff to ${to}`, tone: 'quiet' };
+    case 'dropped':
+      return { head: `The office dropped the handoff to ${to}`, tone: 'quiet' };
   }
 }
 

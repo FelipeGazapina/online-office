@@ -366,7 +366,8 @@ export class Office {
         newId: () => randomUUID(),
         mail: () => this.mail,
         blocks: () => this.company.blocks.map((b) => b.id),
-        members: () => this.company.employees.map((e) => ({ id: e.id, name: e.name, blockId: e.blockId })),
+        members: () => this.company.employees.map((e) => ({ id: e.id, name: e.name, blockId: e.blockId, role: e.role ?? 'employee' })),
+        branchOf: (who) => this.company.employees.find((e) => e.id === who)?.workspace?.branch,
         provider: this.services.taskBoards,
         changed: () => this.events.changed(),
         git: {
@@ -398,8 +399,12 @@ export class Office {
       if (this.tasks.watchingPrs()) void this.tasks.refreshPrs();
     }, PR_POLL_MS);
     this.prTimer.unref();
-    // Sessions exist now, so whatever a crash left half delivered can go out again.
-    if (!frozen) this.mail.recoverOnStart();
+    // Sessions exist now, so whatever a crash left half delivered can go out again, and a handoff whose people left while the app was
+    // closed can tell the ones who are still here.
+    if (!frozen) {
+      this.mail.recoverOnStart();
+      this.tasks.reconcileHandoffs();
+    }
   }
 
   private openMail(ledger: LedgerEntry[]): Mailroom {
@@ -948,6 +953,8 @@ export class Office {
         this.commit();
       },
       moveTask: (a) => this.tasks.moveByAgent(employee.id, a.to, a.reason, a.task),
+      handoffTask: (a) => this.tasks.proposeHandoff(employee.id, a),
+      answerHandoff: (a) => this.tasks.answerHandoff(employee.id, a),
       mail: mailTools(this.mail, employee.id, nameOf, (employee.role ?? 'employee') === 'orchestrator'),
       memory: notebook,
     });
@@ -1197,6 +1204,8 @@ export class Office {
 
   private fire(id: EmployeeId) {
     this.dismiss(this.employee(id));
+    // A handoff that waited on them, or was theirs to give or take, ends now. Closing a whole block drops its tasks instead.
+    this.tasks.reconcileHandoffs();
     this.commit();
   }
 
