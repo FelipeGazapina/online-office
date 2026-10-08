@@ -21,6 +21,10 @@ export type EmployeeTools = {
   openBoard(title: string, target: string): Promise<void>;
   // Moves the board card of a task this employee is on. Answers with how it went, refusals included.
   moveTask(a: { to: AgentStage; reason: string; task?: string }): unknown;
+  // Asks to give a task to a teammate. Answers with the proposal, or with the refusal.
+  handoffTask(a: { to: string; reason: string; task?: string; from?: string }): unknown;
+  // Answers a handoff that waits on this employee, or withdraws one they asked for.
+  answerHandoff(a: { id: string; answer: 'accept' | 'decline' | 'withdraw'; reason?: string }): unknown;
   mail: MailTools;
   memory: Notebook;
 };
@@ -237,6 +241,29 @@ export async function startOfficeMcp(): Promise<OfficeMcp> {
         task: z.string().max(200).optional().describe('The task title or id. Leave it out when you hold the request of one task.'),
       },
       (a) => tools.moveTask(a),
+    );
+
+    tool(
+      'handoffTask',
+      'Two people must agree before a task changes hands: the person on it and the PO. Giving your own task away, the PO answers. As the PO, the person on the task answers, and may decline. Use this tool to ask, naming a teammate of your block in to. A card changes hands only through this tool and answerHandoff: saying yes in a message changes nothing. It answers with an id, and the one who must agree is woken by a message that carries it. When you ask to give your own task away, you stop working on it now: end your turn, and if it stays with you it comes back as a new request. Accepting cancels the giver\'s open requests of the task and the pieces they handed out. As the PO, name from when more than one person is on the task, your own part included. Asking for the same handoff again returns the open one.',
+      {
+        to: z.string().min(1).max(120).describe('A name, or "po"'),
+        reason: z.string().trim().min(1).max(500).describe('One sentence: why this person should have it'),
+        task: z.string().max(200).optional().describe('The task title or id. Leave it out when you hold the request of one task.'),
+        from: z.string().max(120).optional().describe('Who gives it away. Only the PO names someone else; leave it out for your own part.'),
+      },
+      (a) => tools.handoffTask(a),
+    );
+
+    tool(
+      'answerHandoff',
+      'Answer a handoff that waits on you. The id is in the message you were sent. Answer before this turn ends. If you do not, the office reminds you once, and drops the handoff if your next turn also ends without an answer. accept: the task changes hands now, the giver\'s open requests of it and the pieces they handed out are cancelled, and the receiver gets a new request. decline: the task stays where it is; a giver who stepped off gets it back as a new request. withdraw: take back a handoff you asked for. Answering the same way again is fine; a different answer to one that already ended is told how it ended.',
+      {
+        id: z.string().min(1).max(80),
+        answer: z.enum(['accept', 'decline', 'withdraw']),
+        reason: z.string().max(500).optional().describe('One sentence for the other person, and for the task log'),
+      },
+      (a) => tools.answerHandoff(a),
     );
 
     tool('inbox', 'Read messages that arrived while you worked. peek keeps them unread.', { peek: z.boolean().optional() }, (a) => mail.inbox(a));

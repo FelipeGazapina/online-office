@@ -67,6 +67,8 @@ function sayEntry(e: ActivityEntry): string {
       return `${at} stage ${e.from} to ${e.to} by ${e.by === 'mailroom' ? 'the office' : e.by}`;
     case 'hours':
       return `${at} ${e.hours} h for ${name(e.employeeId)} on ${e.date}${e.error ? ` failed: ${e.error}` : ' sent'}`;
+    case 'handoff':
+      return `${at} handoff ${e.step}: ${name(e.from)} to ${name(e.to)}, by ${name(e.by)}`;
   }
 }
 

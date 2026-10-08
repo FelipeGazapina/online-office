@@ -45,6 +45,8 @@ function attach(employeeId: EmployeeId, blockId: BlockId) {
     ask: (body, signal) => inbox.ask(employeeId, body, signal),
     openBoard: async () => {},
     moveTask: () => ({ ok: false }),
+    handoffTask: () => ({ ok: false }),
+    answerHandoff: () => ({ ok: false }),
     mail: mailTools(mailWorld.room, employeeId, nameOf, false),
     drawDiagram: (title) => diagrams.push({ employeeId, title }),
     memory: memoryFor,
@@ -117,7 +119,7 @@ const c = await connect(urlC);
 check(a.client.getServerVersion()?.name === 'office', `server name is "office" (${a.client.getServerVersion()?.name})`);
 const listedTools = (await a.client.listTools()).tools;
 const listed = listedTools.map((t) => t.name).sort();
-check(JSON.stringify(listed) === JSON.stringify(['ask_owner', 'awaitReplies', 'cancelRequest', 'draw_diagram', 'forget', 'inbox', 'message', 'moveTask', 'open_board', 'recall', 'remember', 'reply', 'request', 'requestGauntlet', 'team']), `tools: ${listed.join(', ')}`);
+check(JSON.stringify(listed) === JSON.stringify(['answerHandoff', 'ask_owner', 'awaitReplies', 'cancelRequest', 'draw_diagram', 'forget', 'handoffTask', 'inbox', 'message', 'moveTask', 'open_board', 'recall', 'remember', 'reply', 'request', 'requestGauntlet', 'team']), `tools: ${listed.join(', ')}`);
 check(!listed.includes('delegate_to_teammate') && !listed.includes('hireTeammate'), 'delegate_to_teammate is gone and hireTeammate is not offered to an employee');
 const askOwnerDescription = listedTools.find((t) => t.name === 'ask_owner')?.description ?? '';
 check(/material .*decision|material .*product/i.test(askOwnerDescription) && /observable fact/i.test(askOwnerDescription) && /options.*tradeoffs/i.test(askOwnerDescription), 'ask_owner asks only material decisions and requests evidence-backed options');
@@ -304,6 +306,11 @@ const skillsPath = resolvePstackSkillsPath();
 check(isAbsolute(skillsPath) && p.includes(`PStack is installed at ${skillsPath}`), 'the persona carries the absolute PStack skills path');
 check(p.includes(`${join(skillsPath, 'poteto-mode', 'SKILL.md')}`), 'the persona points every provider at poteto-mode first');
 check(/moveTask/.test(p) && /Task board: \.\.\./.test(p) && /review/.test(p) && /done/.test(p), 'the persona tells everyone when to move the card of a board task');
+check(/handoffTask/.test(p) && /answerHandoff/.test(p) && /PO agrees/.test(p), 'the persona tells everyone a card changes hands only through handoffTask, with the PO\'s agreement');
+check(/handoffTask[^.]*\bto\b[^.]*\breason\b/.test(p) && !/handoffTask[^.]*awaitReplies/.test(p), 'and names its real parameters, and does not tell the giver to wait for the answer');
+const poPersona = persona({ name: 'Pia', company: 'x', block: 'y', role: 'orchestrator', digest: '', rules: '' });
+check(poPersona.includes('the person on it must agree') && !p.includes('the person on it must agree'), 'and the PO alone is told how to decide one');
+check(!/\btheirs\b/.test(p) && /the person you named has the task/.test(p), 'while an employee is told who has the task if the PO agrees, not that it is "theirs"');
 check(Object.isFrozen(PSTACK_WORKFLOW) && PSTACK_WORKFLOW.every((phase) => Object.isFrozen(phase)), 'the PStack workflow phases are immutable');
 check(PSTACK_WORKFLOW.every(({ name }, index) => p.indexOf(`${index + 1}. ${name}.`) < p.indexOf(`${index + 2}. `) || index === PSTACK_WORKFLOW.length - 1), 'the persona renders ordered PStack phases once');
 check(/acceptance criteria/i.test(p) && /real matching surface/i.test(p) && /final diff/i.test(p) && /DONE.*BLOCKED.*NEEDS_DECISION/s.test(p), 'the persona requires acceptance, real-surface verification, diff review, and explicit final states');
@@ -325,6 +332,8 @@ const mailUrl = (who: typeof PO) => mcp.attach(who, {
   openBoard: async () => {},
   drawDiagram: () => {},
   moveTask: () => ({ ok: false }),
+  handoffTask: () => ({ ok: false }),
+  answerHandoff: () => ({ ok: false }),
   memory: memory.notebook({ employeeId: who, blockId: BLOCK1, provider: 'claude-code' }),
   mail: mailTools(mailWorld.room, who, (actor) => mailWorld.members.find((m) => m.id === actor)?.name ?? actor, who === PO),
 });
@@ -368,7 +377,7 @@ console.log('\n# moveTask');
       newId: () => `t${++ids}`,
       mail: () => office.room,
       blocks: () => [B1, B2],
-      members: () => office.members.map((m) => ({ id: m.id, name: m.name, blockId: m.blockId })),
+      members: () => office.members.map((m) => ({ id: m.id, name: m.name, blockId: m.blockId, role: m.role })),
       provider: { fetchSources: async () => ({ cards: [], errors: [] }), linearPeople: async () => [], logHours: async () => {} },
       changed() {},
     },
@@ -392,6 +401,8 @@ console.log('\n# moveTask');
         feed();
         return tasks.moveByAgent(who, a.to, a.reason, a.task);
       },
+      handoffTask: () => ({ ok: false }),
+      answerHandoff: () => ({ ok: false }),
       mail: mailTools(office.room, who, (actor) => office.members.find((m) => m.id === actor)?.name ?? actor, who === PO),
     });
   const pia = await connect(urlOf(PO));

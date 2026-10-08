@@ -56,6 +56,8 @@ const url = mcp.attach(employeeId, {
   },
   openBoard: async () => {},
   moveTask: () => ({ ok: false }),
+  handoffTask: () => ({ ok: false }),
+  answerHandoff: () => ({ ok: false }),
   mail: mailTools(new Mailroom({ members: () => [], nameOf: () => '', deliver() {}, steer() {}, hire: () => ({ ok: false, reason: 'probe' }), artifacts: { check: () => [], changed: () => [] }, persist() {}, changed() {}, stream() {}, now: Date.now, newId: () => '0' }), employeeId, () => '', false),
   drawDiagram: () => {},
   memory: MemoryStore.open(join(dir, 'memory')).notebook({ employeeId, blockId: 'probe-block' as BlockId, provider: 'claude-code' }),

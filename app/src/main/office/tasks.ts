@@ -7,16 +7,22 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { activityIndexOf, answerKey, clipText, emptyActivity, foldActivity, liveOf, logOf, noInputs, noteKey, rootsOf, type ActivityEntry, type ActivityIndex, type LiveInputs, type TaskLive } from '../../shared/activity.ts';
-import type { LedgerEntry, Message, MessageId } from '../../shared/mail.ts';
-import type { BlockId, EmployeeId, LinearPeople, LinearPerson, TaskBoardSource, TaskCard } from '../../shared/protocol.ts';
+import type { LedgerEntry, Message, MessageId, Posted } from '../../shared/mail.ts';
+import type { BlockId, EmployeeId, EmployeeRole, LinearPeople, LinearPerson, TaskBoardSource, TaskCard } from '../../shared/protocol.ts';
 import {
   agentMoveRefusal,
   closedDayWork,
   emptyTurnLog,
   ensureBoards,
   foldTurn,
+  handoffEnding,
+  handoffsMade,
+  handoffsProposed,
+  handoffLive,
   hoursDue,
   makeBoard,
+  MAX_HANDOFFS,
+  MAX_PROPOSALS,
   moveMark,
   newTask,
   outcomeFromRuns,
@@ -42,6 +48,12 @@ import {
   type BoardPatch,
   type BoardSpec,
   type BoardSync,
+  type FindRefusalReason,
+  type Handoff,
+  type HandoffId,
+  type HandoffRefusal,
+  type HandoffRefusalReason,
+  type HandoffStep,
   type HoursEntry,
   type LegacySources,
   type MoveFacts,
@@ -61,6 +73,8 @@ import { ensurePr, readPr, type Gh } from './pull-request.ts';
 import type { HoursCall } from './task-board.ts';
 import { createTaskWorkspace, defaultBase, isGitRepo, pushBranch, removeTaskWorkspace, unpushed, type Workspace } from './workspace.ts';
 
+export type Teammate = { id: EmployeeId; name: string; blockId: BlockId; role: EmployeeRole };
+
 export type TasksHost = {
   now(): number;
   newId(): string;
@@ -68,7 +82,9 @@ export type TasksHost = {
   mail(): Mailroom;
   blocks(): readonly BlockId[];
   // Everyone who works anywhere, PO included.
-  members(): readonly { id: EmployeeId; name: string; blockId: BlockId }[];
+  members(): readonly Teammate[];
+  // The branch a person works on in their own worktree, when they have one. What is on it is not merged until they finish a request.
+  branchOf?(who: EmployeeId): string | undefined;
   provider: {
     // `keep` says which cards the board wants. A provider drops the others before it counts anything against a limit.
     fetchSources(sources: readonly TaskBoardSource[], keep: (card: TaskCard) => boolean): Promise<{ cards: TaskCard[]; errors: string[] }>;
@@ -106,9 +122,47 @@ function runStateOf(mail: MailState, id: MessageId): RunState | undefined {
   return reply?.kind === 'reply' ? { s: 'settled', reply: reply.id, outcome: life.outcome, text: reply.text, at: reply.at } : undefined;
 }
 
+// Whether a notice reached its person, read off the mail: the message under `key` and the turn it was delivered to. A notice
+// that is still queued is unseen, so is one whose turn the app died in once it has restarted (the mailroom queues it again),
+// and one delivered to a turn that goes on is not heard yet, since the person may still answer in it.
+export type NoticeSeen = 'unseen' | 'seen_in_open_turn' | 'seen_in_ended_turn';
+
+export function noticeSeen(mail: Pick<MailState, 'keys' | 'life' | 'turns'>, key: string): NoticeSeen {
+  const id = mail.keys.get(key);
+  const life = id && mail.life.get(id);
+  if (!life || life.s !== 'delivered') return 'unseen';
+  return mail.turns.get(life.turn)?.ended ? 'seen_in_ended_turn' : 'seen_in_open_turn';
+}
+
 // What the owner's retried assign_task shares with the first one: the same task, the same person, and how many runs that
 // person already had of it.
 const runKey = (task: TaskId, who: EmployeeId, nth: number) => `task:${task}:${who}:${nth}`;
+
+// The same for the run a handoff posts, whether to its receiver or, when it ends with the task staying, back to its giver.
+// It holds the handoff instead of a count, so a retry after a crash finds the run even once its person has finished it.
+const handoffRunKey = (task: TaskId, who: EmployeeId, handoff: HandoffId, back = false) => `task:${task}:${who}:${handoff}${back ? '-back' : ''}`;
+
+// How a handoff call went. An open proposal answers with who it waits on, a settled one with the people it moved between.
+export type HandoffResult =
+  | { ok: true; state: 'proposed'; id: HandoffId; task: string; from: string; to: string; awaits: string; next: string }
+  | { ok: true; state: 'accepted' | 'declined' | 'withdrawn'; id: HandoffId; task: string; from: string; to: string }
+  | ({ ok: false } & HandoffRefusal);
+
+const refused = (reason: HandoffRefusalReason, detail: string): HandoffResult => ({ ok: false, reason, detail });
+
+const poOf = (team: readonly Teammate[]): Teammate | undefined => team.find((m) => m.role === 'orchestrator');
+
+const STALE = 'someone on it left the task or the block.';
+const DONE = 'This task is done. Ask the owner to reopen it.';
+
+// The step each answer ends a proposal with.
+const ENDS = { accept: 'accepted', decline: 'declined', withdraw: 'withdrawn' } as const;
+
+// Each step of a proposal is told once, whoever asks again.
+const handoffKey = (id: HandoffId, step: Notice) => `handoff:${id}:${step}`;
+
+// Each step of a proposal is told, and the person it waits on is also reminded once.
+type Notice = HandoffStep | 'reminder' | 'accepted-to';
 
 const QUESTION_QUOTE_CAP = 1500;
 const quote = (text: string) => text.split('\n').map((l) => `> ${l}`).join('\n');
@@ -176,8 +230,8 @@ export class Tasks {
       this.tasks = this.tasks.map((t) => (t === task ? this.withRun(t, id, who as EmployeeId, 'mailroom') : t));
       changed = true;
     }
-    // A relinked run may already have been picked up.
-    if (changed) this.onMail();
+    // A relinked run may already have been picked up. Chasing handoffs posts words, and nobody has a session yet.
+    if (changed) this.follow();
     if (changed || !this.existed) this.save();
   }
 
@@ -252,8 +306,13 @@ export class Tasks {
     foldActivity(this.activity, entry);
   }
 
-  // Takes in how runs ended.
+  // Takes in how runs ended, and chases the handoffs nobody answers.
   onMail() {
+    this.follow();
+    this.chase();
+  }
+
+  private follow() {
     const mail = this.host.mail().state;
     let moved = false;
     this.tasks = this.tasks.map((t0) => {
@@ -424,23 +483,40 @@ export class Tasks {
 
   // The block's PO or any of its employees takes the task, and starts on it now. Giving it to someone who is already on it
   // changes nothing, a retry of the same call does not post twice, and giving it to someone again once they settled posts
-  // another run.
+  // another run. A run the owner posts settles a handoff still waiting on someone's agreement: the owner has decided.
   assign(taskId: TaskId, employeeId: EmployeeId) {
     const task = this.task(taskId);
     const board = this.board(task.boardId);
     this.assertMember(employeeId, board.blockId);
-    const mail = this.host.mail();
-    const theirs = task.runs.filter((r) => mail.state.messages.get(r)?.to === employeeId);
-    if (theirs.some((r) => mail.state.unsettled.has(r))) return;
-    // The branch exists before the request is posted, because the person's first sync already comes from it.
-    const branched = this.startBranch(task);
-    const { title, text } = runRequest(branched, board);
-    const posted = mail.post({ from: 'owner', to: employeeId, blockId: board.blockId, key: runKey(task.id, employeeId, theirs.length), body: { kind: 'request', intent: 'work', title, text } });
-    if (!posted.ok) throw new OfficeError(posted.detail);
-    this.replace(this.withRun(this.task(task.id), posted.id, employeeId, 'owner'));
+    const given = this.giveRun(task, employeeId);
+    if (!given.ok) throw new OfficeError(given.detail);
+    if (!given.posted) return;
+    this.replace(given.task);
+    this.drop(given.task, 'the owner assigned the task.', 'owner');
     // Someone free got the request as it was posted, before the task knew the run: it moves to doing now.
     this.onMail();
     void this.publish(task.id);
+  }
+
+  // The one request a person is given for a task: a work request from the owner, on the task's own branch. Like any assignment it
+  // lifts the owner's pin, which would keep the person from moving the card. Someone who already holds an open run is given no
+  // second. The task comes back with the run on it, unsaved, so a caller with more to change saves once.
+  private giveRun(task: Task, who: EmployeeId, opt: { note?: string; key?: string } = {}): { ok: true; task: Task; posted: boolean } | { ok: false; detail: string } {
+    const mail = this.host.mail();
+    const theirs = this.runsOf(task, who);
+    if (!(opt.key && mail.state.keys.has(opt.key)) && theirs.some((r) => mail.state.unsettled.has(r))) return { ok: true, task, posted: false };
+    const board = this.board(task.boardId);
+    // The branch exists before the request is posted, because the person's first sync already comes from it.
+    const { title, text } = runRequest(this.startBranch(task), board);
+    const posted = mail.post({ from: 'owner', to: who, blockId: board.blockId, key: opt.key ?? runKey(task.id, who, theirs.length), body: { kind: 'request', intent: 'work', title, text: opt.note ? `${opt.note}\n\n${text}` : text } });
+    if (!posted.ok) return { ok: false, detail: posted.detail };
+    return { ok: true, task: this.withRun(this.task(task.id), posted.id, who, 'owner'), posted: true };
+  }
+
+  // The runs of a task that were given to `who`.
+  private runsOf(task: Task, who: EmployeeId): MessageId[] {
+    const mail = this.host.mail().state;
+    return task.runs.filter((r) => mail.messages.get(r)?.to === who);
   }
 
   // The task with `who` taking the run that starts at `root`. It stays in its column while the run waits in `who`'s queue:
@@ -509,8 +585,8 @@ export class Tasks {
     return { ok: true, task: found.title, from: found.stage, to, changed };
   }
 
-  // The task a teammate means: the one they name among their block's tasks, else the one they hold a request of.
-  private taskFor(who: EmployeeId, ref?: string): Task | MoveRefusal {
+  // The task a teammate means: the one they name among their block's tasks, else the one they hold a request of, or that `also` picks.
+  private taskFor(who: EmployeeId, ref?: string, also: (t: Task) => boolean = () => false): Task | { reason: FindRefusalReason; detail: string } {
     const blockId = this.host.members().find((m) => m.id === who)?.blockId;
     const mine = this.tasks.filter((t) => this.board(t.boardId).blockId === blockId);
     const line = (t: Task) => `"${t.title}" (${t.id})`;
@@ -520,7 +596,7 @@ export class Tasks {
       if (found.length === 1) return found[0]!;
       return { reason: found.length ? 'ambiguous' : 'unknown_task', detail: found.length ? `More than one task is called "${ref}": ${found.map(line).join(', ')}. Name one by its id.` : `No task of your block is called or numbered "${ref}".` };
     }
-    const held = mine.filter((t) => this.movesOf(t, who).holding);
+    const held = mine.filter((t) => this.movesOf(t, who).holding || also(t));
     if (held.length === 1) return held[0]!;
     return held.length
       ? { reason: 'ambiguous', detail: `You are working on ${held.length} tasks: ${held.map(line).join(', ')}. Say which one with task.` }
@@ -538,6 +614,259 @@ export class Tasks {
       holding: mine.length > 0,
       open: open.filter((r) => !mine.includes(r)).map((r) => `${this.nameOf(r.to as EmployeeId)}: "${r.title}"`),
     };
+  }
+
+  // ── a task changes hands ──
+
+  // `who` asks to give a task to a teammate or, as the PO, asks the person holding it to. The other of the giver and the PO has to
+  // agree (answerHandoff), and when they are one person it applies at once. Names are looked up in `who`'s block, and "po" is its PO.
+  // One proposal is open on a task at a time, and asking for the same one again returns it and posts nothing.
+  proposeHandoff(who: EmployeeId, a: { to: string; reason: string; task?: string; from?: string }): HandoffResult {
+    // A giver who asked has stepped off, so asking again finds the task by its open handoff, not by a run.
+    const found = this.taskFor(who, a.task, (t) => t.handoff?.by === who);
+    if ('reason' in found) return refused(found.reason, found.detail);
+    const team = this.teamOf(found);
+    const po = poOf(team);
+    if (!found.assignees.includes(who) && who !== po?.id) {
+      return refused('not_on_task', this.movesOf(found, who).onTask
+        ? 'You hold a piece of this task that someone gave you, not the task. If another person should take your piece, reply blocked and name them: the one who sent it decides.'
+        : 'This task is not yours to hand over: you are not on it, and you are not the PO.');
+    }
+    if (!po) return refused('no_po', 'Your block has no PO to agree with. Message the owner instead.');
+    if (found.stage === 'done') return refused('done', DONE);
+    const task = this.dropStale(found, who);
+    const named = a.from === undefined ? undefined : this.teammate(team, a.from);
+    if (a.from !== undefined && !named) return refused('bad_target', `No teammate of your block is called "${a.from}".`);
+    const lone = task.assignees.length === 1 ? task.assignees[0] : undefined;
+    // An employee gives their own part. The PO's part goes only when the PO names it, or is all there is.
+    const own = who !== po.id && task.assignees.includes(who) ? who : undefined;
+    const from = named?.id ?? own ?? lone;
+    if (!from) return refused('bad_target', task.assignees.length ? `Say whose part to hand over with from. On this task: ${task.assignees.map((id) => this.nameOf(id)).join(', ')}.` : 'Nobody is on this task, so there is nothing to hand over.');
+    if (!task.assignees.includes(from)) return refused('bad_target', `${this.nameOf(from)} is not on this task.`);
+    if (from !== who && who !== po.id) return refused('bad_target', 'You can hand over only your own part of a task. The PO hands over anyone\'s.');
+    const to = this.teammate(team, a.to)?.id;
+    if (!to) return refused('bad_target', `No teammate of your block is called "${a.to}".`);
+    if (to === from) return refused('bad_target', 'A task cannot be handed to the person giving it away.');
+    const open = task.handoff;
+    if (open) {
+      if (open.by === who && open.from === from && open.to === to) {
+        if (open.by === open.from) this.stepOff(task, open);
+        return this.openResult(task, open);
+      }
+      const answer = open.awaits === who
+        ? ` It waits on you: answer it with answerHandoff { id: "${open.id}", answer: "accept" }, or "decline".`
+        : open.by === who ? ` To propose something else, withdraw it first with answerHandoff { id: "${open.id}", answer: "withdraw" }.` : '';
+      return refused('open_handoff', `Another handoff is open on this task: ${open.id}, ${this.nameOf(open.from)} to ${this.nameOf(open.to)}, waiting on ${this.nameOf(open.awaits)}.${answer}`);
+    }
+    if (handoffsMade(task) >= MAX_HANDOFFS) return refused('too_many', `This task changed hands ${MAX_HANDOFFS} times already. Message the owner to decide who holds it.`);
+    if (handoffsProposed(task) >= MAX_PROPOSALS) return refused('too_many', `This task was proposed for handing over ${MAX_PROPOSALS} times already. Message the owner to decide who holds it.`);
+    const h: Handoff = { id: `h-${this.host.newId().slice(0, 8)}` as HandoffId, from, to, by: who, awaits: who === from ? po.id : from, reason: a.reason.trim(), at: this.host.now() };
+    if (!this.live(task, h)) return refused('bad_target', `${this.nameOf(from)} no longer works in this block.`);
+    if (h.awaits === h.by) {
+      const done = this.transfer(task, h, who, h.reason);
+      return 'reason' in done ? refused(done.reason, done.detail) : this.result(done, h, 'accepted');
+    }
+    const stopped = h.by === h.from ? ` ${this.nameOf(h.by)} has stopped working on it until you answer.` : '';
+    const asked = `${this.nameOf(h.by)} asks ${h.by === h.from ? 'to hand over' : 'you to hand over'} the task "${task.title}" to ${this.nameOf(h.to)}.${stopped}\nReason: ${h.reason}\n\nIt changes hands only if you agree, and saying yes in a message changes nothing. Answer with answerHandoff { id: "${h.id}", answer: "accept" }, or answer "decline" and say why in reason. Answer before this turn ends. If you do not, the office reminds you once, and drops the handoff if your next turn also ends without an answer.`;
+    // Told first: a proposal nobody was told of is never recorded.
+    const told = this.tell(h.awaits, task, h, 'proposed', asked);
+    if (!told.ok) return refused('bad_target', `${this.nameOf(h.awaits)} cannot be asked right now: ${told.detail}`);
+    const now = this.host.now();
+    this.replace(withEvent({ ...task, handoff: h, updatedAt: now }, { kind: 'handoff', at: now, handoff: h.id, step: 'proposed', from, to, by: who, reason: h.reason }));
+    if (h.by === h.from) this.stepOff(this.task(task.id), h);
+    return this.openResult(this.task(task.id), h);
+  }
+
+  // Drops every open proposal that can no longer apply, for the office to run when someone leaves and when it starts. Running it
+  // again changes nothing.
+  reconcileHandoffs() {
+    for (const { id } of [...this.tasks]) {
+      const task = this.task(id);
+      if (task.handoff && !this.live(task, task.handoff)) this.drop(task, STALE);
+    }
+  }
+
+  // The person a handoff waits on accepts or declines it, or the one who proposed it withdraws it. Accepting is the one place the
+  // task changes hands. Answering a proposal that already settled says how it ended and does nothing else, so a retry is safe.
+  answerHandoff(who: EmployeeId, a: { id: string; answer: 'accept' | 'decline' | 'withdraw'; reason?: string }): HandoffResult {
+    const blockId = this.host.members().find((m) => m.id === who)?.blockId;
+    const task = this.tasks.find((t) => this.board(t.boardId).blockId === blockId && (t.handoff?.id === a.id || handoffEnding(t, a.id as HandoffId)));
+    if (!task) return refused('unknown_handoff', `No handoff ${a.id} is open on a task of your block.`);
+    const h = task.handoff?.id === a.id ? task.handoff : undefined;
+    if (!h) return this.endedResult(task, who, a.id as HandoffId, a.answer);
+    if (!this.live(task, h)) {
+      this.drop(task, STALE, who);
+      return refused('stale', `This handoff can no longer apply: ${STALE} The office dropped it.`);
+    }
+    if (who !== (a.answer === 'withdraw' ? h.by : h.awaits)) return refused('not_yours', a.answer === 'withdraw' ? 'Only the one who proposed a handoff withdraws it.' : `Only ${this.nameOf(h.awaits)} accepts or declines this handoff.`);
+    if (a.answer === 'accept' && task.stage === 'done') return refused('done', DONE);
+    const reason = a.reason?.trim() || undefined;
+    const title = task.title;
+    const [from, to, actor] = [this.nameOf(h.from), this.nameOf(h.to), this.nameOf(who)];
+    const why = reason ? `\nReason: ${reason}` : '';
+    switch (a.answer) {
+      case 'accept': {
+        const done = this.transfer(task, h, who, reason);
+        if ('reason' in done) return refused(done.reason, done.detail);
+        this.tell(h.by, done, h, 'accepted', `${actor} agreed: "${title}" is now ${to}'s, no longer ${from}'s.${why}`);
+        return this.result(done, h, 'accepted');
+      }
+      case 'decline': {
+        const closed = this.close(task, h, 'declined', who, reason);
+        this.replace(closed);
+        if (!this.giveBack(closed, h, `${actor} declined to hand this task over to ${to}. It stays with you: carry on with it.${why}`)) {
+          this.tell(h.by, closed, h, 'declined', `${actor} declined to hand "${title}" over to ${to}. It stays with ${from}.${why}`);
+        }
+        return this.result(closed, h, 'declined');
+      }
+      case 'withdraw': {
+        const closed = this.close(task, h, 'withdrawn', who, reason);
+        this.replace(closed);
+        this.tell(h.awaits, closed, h, 'withdrawn', `${actor} withdrew the request to hand "${title}" over to ${to}. Nothing is needed from you.${why}`);
+        this.giveBack(closed, h, `You withdrew the request to hand this task over to ${to}. It stays with you: carry on with it.${why}`);
+        return this.result(closed, h, 'withdrawn');
+      }
+    }
+  }
+
+  // The one place an agreement changes who has a task, in one synchronous step and one save. onMail sees the new person's open
+  // run together with the giver's cancelled ones, so the card does not drop back to todo. A refusal changes nothing.
+  private transfer(task: Task, h: Handoff, agreedBy: EmployeeId, reason: string | undefined): Task | HandoffRefusal {
+    const [by, agreed, from] = [this.nameOf(h.by), this.nameOf(h.awaits), this.nameOf(h.from)];
+    const theirs = this.host.branchOf?.(h.from);
+    const note = [
+      `${by} handed this task ${h.by === h.from ? '' : `from ${from} `}over to you${h.by === h.awaits ? '' : `, and ${agreed} agreed`}.`,
+      `Reason: ${h.reason}`,
+      theirs && `${from}'s unfinished work on it, if any, is on their own branch ${theirs} and is not merged: look at it before you start.`,
+      task.git && `Finished work of this task is on ${task.git.branch}.`,
+    ].filter(Boolean).join('\n');
+    const given = this.giveRun(task, h.to, { note, key: handoffRunKey(task.id, h.to, h.id) });
+    if (!given.ok) return { reason: 'bad_target', detail: `${this.nameOf(h.to)} cannot take the task now: ${given.detail}` };
+    // Someone who already holds a run gets no new one, so the word that says the task is theirs alone has to come another way.
+    if (!given.posted) this.tell(h.to, given.task, h, 'accepted-to', `${note}\nThe task is yours alone now: ${from} is off it.`);
+    this.release(given.task, h.from, `Handed over to ${this.nameOf(h.to)}.`);
+    const next = { ...this.close(given.task, h, 'accepted', agreedBy, reason), assignees: given.task.assignees.filter((id) => id !== h.from) };
+    this.replace(next);
+    this.onMail();
+    return next;
+  }
+
+  // The task without its open proposal, and the step that closed it on its history. A handoff applied at once was never open.
+  private close(task: Task, h: Handoff, step: Exclude<HandoffStep, 'proposed'>, by: EmployeeId, reason?: string): Task {
+    const { handoff: _, ...rest } = task;
+    const now = this.host.now();
+    return withEvent({ ...rest, updatedAt: now }, { kind: 'handoff', at: now, handoff: h.id, step, from: h.from, to: h.to, by, ...(reason ? { reason } : {}) });
+  }
+
+  // Clears a proposal nobody can act on any more. A giver who asked gets the task back, and the one who proposed is told, unless
+  // they are the one who ended it. `cause` is who ended it: the owner's own assignment gives nothing back, since the owner decided.
+  private drop(task: Task, because: string, cause?: EmployeeId | 'owner'): Task {
+    const h = task.handoff;
+    if (!h) return task;
+    const closed = this.close(task, h, 'dropped', h.by, because);
+    this.replace(closed);
+    const back = cause === 'owner' ? undefined : this.giveBack(closed, h, `The handoff of this task to ${this.nameOf(h.to)} was dropped: ${because} It stays with you: carry on with it.`);
+    if (!back && cause !== h.by) this.tell(h.by, closed, h, 'dropped', `The office dropped the handoff of "${task.title}" to ${this.nameOf(h.to)}: ${because}`);
+    return back ?? closed;
+  }
+
+  // A giver who asked has stepped off, so when the proposal ends with the task staying they get it back as a new request, with a
+  // note that says why. Not when they have gone, and not for a card the owner closed: that is the owner's to reopen.
+  private giveBack(task: Task, h: Handoff, note: string): Task | undefined {
+    if (h.by !== h.from || task.stage === 'done' || !task.assignees.includes(h.from) || !this.teamOf(task).some((m) => m.id === h.from)) return undefined;
+    const given = this.giveRun(task, h.from, { note, key: handoffRunKey(task.id, h.from, h.id, true) });
+    if (!given.ok || !given.posted) return undefined;
+    this.replace(given.task);
+    this.onMail();
+    return this.task(task.id);
+  }
+
+  // A giver who asks stops working on the task at once, so nothing they leave half done is settled or merged while they wait.
+  private stepOff(task: Task, h: Handoff) {
+    const po = poOf(this.teamOf(task));
+    this.release(task, h.from, `Handing over to ${this.nameOf(h.to)}; waiting on ${po ? this.nameOf(po.id) : 'the PO'}.`);
+    this.onMail();
+  }
+
+  // An open handoff ends within two turns of the person it waits on: the first turn that ends with its notice read gets them one
+  // reminder, and the first that ends with the reminder read drops it. Read off the mail, so running it again changes nothing.
+  private chase() {
+    const mail = this.host.mail().state;
+    for (const { id } of [...this.tasks]) {
+      const task = this.tasks.find((t) => t.id === id);
+      const h = task?.handoff;
+      if (!task || !h || !this.live(task, h)) continue;
+      const reminder = handoffKey(h.id, 'reminder');
+      if (noticeSeen(mail, reminder) === 'seen_in_ended_turn') this.drop(task, `${this.nameOf(h.awaits)} did not answer it.`);
+      else if (!mail.keys.has(reminder) && noticeSeen(mail, handoffKey(h.id, 'proposed')) === 'seen_in_ended_turn') {
+        const [from, to] = [this.nameOf(h.from), this.nameOf(h.to)];
+        const keeper = h.by === h.from ? `${from} gets the task back` : `${from} keeps the task`;
+        this.tell(h.awaits, task, h, 'reminder', `You ended a turn without answering the handoff of "${task.title}" from ${from} to ${to}. Answer it now with answerHandoff { id: "${h.id}", answer: "accept" }, or answer "decline" and say why in reason. If your next turn also ends without an answer, the office drops it and ${keeper}.`);
+      }
+    }
+  }
+
+  // Ends the open runs of the task that `who` holds. Their pieces end with them, for the same reason.
+  private release(task: Task, who: EmployeeId, because: string) {
+    const mail = this.host.mail();
+    for (const run of this.runsOf(task, who)) if (mail.state.unsettled.has(run)) mail.cancel('owner', run, because);
+  }
+
+  private dropStale(task: Task, actor: EmployeeId): Task {
+    return task.handoff && !this.live(task, task.handoff) ? this.drop(task, STALE, actor) : task;
+  }
+
+  private live(task: Task, h: Handoff): boolean {
+    return handoffLive(task, h, new Set(this.teamOf(task).map((m) => m.id)));
+  }
+
+  // What a proposal that already ended says to the two who must agree. The same answer again is ok, a different one is told how it
+  // ended, and a dropped one can no longer be answered.
+  private endedResult(task: Task, who: EmployeeId, id: HandoffId, answer: keyof typeof ENDS): HandoffResult {
+    const end = handoffEnding(task, id)!;
+    if (who !== end.from && who !== poOf(this.teamOf(task))?.id) return refused('not_yours', 'Only the PO and the person giving the task away can read how this handoff ended.');
+    if (end.step === 'dropped') return refused('stale', `This handoff was dropped by the office${end.reason ? `: ${end.reason}` : '.'}`);
+    if (end.step !== ENDS[answer]) return refused('settled', `This handoff already ended: ${end.step} by ${this.nameOf(end.by)}.`);
+    return { ok: true, state: end.step, id, task: task.title, from: this.nameOf(end.from), to: this.nameOf(end.to) };
+  }
+
+  private result(task: Task, h: Handoff, state: 'accepted' | 'declined' | 'withdrawn'): HandoffResult {
+    return { ok: true, state, id: h.id, task: task.title, from: this.nameOf(h.from), to: this.nameOf(h.to) };
+  }
+
+  private openResult(task: Task, h: Handoff): HandoffResult {
+    const awaits = this.nameOf(h.awaits);
+    const po = poOf(this.teamOf(task))?.id === h.awaits ? ' (PO)' : '';
+    const next = h.by === h.from
+      ? `${awaits}${po} must agree. You stop working on it now: end your turn. The answer reaches you as a message, and if the task stays with you it comes back as a new request.`
+      : `${awaits} must agree, and keeps working on it until they answer. The answer reaches you as a message.`;
+    return { ok: true, state: 'proposed', id: h.id, task: task.title, from: this.nameOf(h.from), to: this.nameOf(h.to), awaits, next };
+  }
+
+  // A word from the office to one person about a proposal. It joins the chain of their latest run of the task, else of the task's,
+  // so it shows in their thread and in the task's activity. Its key holds the proposal and the step, so a retry never posts it twice.
+  private tell(to: EmployeeId, task: Task, h: Handoff, step: Notice, text: string): Posted {
+    return this.host.mail().post({
+      from: 'mailroom',
+      to,
+      blockId: this.board(task.boardId).blockId,
+      parentId: this.runsOf(task, to).at(-1) ?? task.runs.at(-1),
+      key: handoffKey(h.id, step),
+      body: { kind: 'say', text: step === 'proposed' || step === 'reminder' ? text : `${text}\n\nNo reply needed.` },
+    });
+  }
+
+  private teamOf(task: Task): Teammate[] {
+    const blockId = this.board(task.boardId).blockId;
+    return this.host.members().filter((m) => m.blockId === blockId);
+  }
+
+  // The one teammate a name, an id or "po" stands for.
+  private teammate(team: readonly Teammate[], ref: string): Teammate | undefined {
+    const key = ref.trim().toLowerCase();
+    if (key === 'po') return poOf(team);
+    const hit = team.filter((m) => m.id === ref || m.name.toLowerCase() === key);
+    return hit.length === 1 ? hit[0] : undefined;
   }
 
   private assertMember(employeeId: EmployeeId, blockId: BlockId) {

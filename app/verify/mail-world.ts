@@ -22,14 +22,15 @@ const roster = (): Member[] => [
 
 export type Acknowledge = NonNullable<ConstructorParameters<typeof Mailroom>[0]['acknowledge']>;
 
-export function world(ledger: readonly LedgerEntry[] = [], acknowledge?: Acknowledge, clock?: () => number) {
+// `after` is the count of ids an earlier office already used, so a reopened one does not mint the same ids again.
+export function world(ledger: readonly LedgerEntry[] = [], acknowledge?: Acknowledge, clock?: () => number, after = 0) {
   const streams: { who: string; delta: string; done: boolean }[] = [];
   const members = roster();
   const prompts = new Map<string, string[]>();
   const steers: { to: string; text: string; style: string }[] = [];
   const persisted: LedgerEntry[] = [...ledger];
   const hires: HireSpec[] = [];
-  let n = 0;
+  let n = after;
   let failDeliver: EmployeeId | undefined;
   // What the folder holds. A ref in `fresh` changed since the request, a ref in `stale` did not, any other is missing.
   const fresh = new Set<string>();

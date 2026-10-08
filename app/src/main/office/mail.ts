@@ -682,14 +682,15 @@ export class Mailroom {
 
   // ── cancel, fire ──
 
-  cancel(by: ActorId, id: string): { ok: boolean } {
+  // `reason` is the text of the cancelled reply, for a cancel that is not the asker changing their mind.
+  cancel(by: ActorId, id: string, reason = 'Cancelled by the asker.'): { ok: boolean } {
     const req = this.findRequest(id);
     if (!req || req.kind !== 'request' || !this.state.unsettled.has(req.id)) return { ok: false };
     if (req.from !== by && by !== 'owner') return { ok: false };
     const delivered = this.state.life.get(req.id)?.s === 'delivered';
-    this.settleWith(req, 'mailroom', { outcome: 'cancelled', text: 'Cancelled by the asker.' });
+    this.settleWith(req, 'mailroom', { outcome: 'cancelled', text: reason });
     if (delivered && hasMailbox(req.to)) this.ports.steer(req.to as EmployeeId, `The request "${req.title}" was cancelled. Drop it and stop work on it.`, 'next');
-    for (const child of openChildren(this.state, req.id)) this.cancel(this.state.messages.get(child)!.from, child);
+    for (const child of openChildren(this.state, req.id)) this.cancel(this.state.messages.get(child)!.from, child, reason);
     return { ok: true };
   }
 
