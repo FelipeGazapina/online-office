@@ -37,7 +37,7 @@ export function slope(points) {
 }
 
 // Peak, per-class peak and the slope of the total (MiB per minute) over [fromMin, toMin] of the samples.
-export function summarize(all, { fromMin, toMin }) {
+export function summarize(all, { fromMin, toMin, rampMin = 2 }) {
   const samples = all.filter((s) => !s.error);
   const classPeak = Object.fromEntries(CLASSES.map((c) => [c, r1(Math.max(0, ...samples.map((s) => s.classes[c].mib)))]));
   const top = samples.reduce((best, s) => (!best || s.countedMiB > best.countedMiB ? s : best), null);
@@ -47,6 +47,11 @@ export function summarize(all, { fromMin, toMin }) {
   return {
     peakMiB: top ? top.countedMiB : null,
     peakAtMin: top ? +top.tMin.toFixed(2) : null,
+    // The same after the first `rampMin` minutes, when the fifteen tasks have started and their acknowledgements are done.
+    peakAfterRampMiB: (() => {
+      const after = samples.filter((s) => s.tMin >= rampMin);
+      return after.length ? Math.max(...after.map((s) => s.countedMiB)) : null;
+    })(),
     // The class values at the sample that held the peak, so they add up to it.
     atPeak: top ? Object.fromEntries(CLASSES.map((c) => [c, top.classes[c].mib])) : null,
     classPeak,

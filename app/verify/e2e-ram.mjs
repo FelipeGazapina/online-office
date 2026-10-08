@@ -38,6 +38,7 @@ const SHOTS = process.env.OFFICE_RAM_SHOTS ?? join(OUT, 'shots');
 const state = '__office.store.getState()';
 const r1 = (n) => +n.toFixed(1);
 const r2 = (n) => +n.toFixed(2);
+const mean = (xs) => xs.reduce((a, b) => a + b, 0) / xs.length;
 
 export const exclusive = true;
 export const viewport = { width: 1440, height: 900, scale: process.env.OFFICE_RAM_SCALE ? Number(process.env.OFFICE_RAM_SCALE) : 'native' };
@@ -147,7 +148,13 @@ export default async function (s) {
 
   // ---- The measured window starts when the first task goes out.
   const live = { working: 0, idle: 0, blocked: 0, error: 0, employees: 0, reinjected: 0 };
+  const preexisting = new Set(JSON.parse(await s.eval(`JSON.stringify(${state}.tasks.map((t) => t.id))`)));
+  // The tasks this run handed out that still wait for their person, by person: the one running is in doing, the next one waits in todo.
+  const waiting = new Map();
   const readPeople = async () => {
+    const mine = JSON.parse(await s.eval(`JSON.stringify(${state}.tasks.map((t) => [t.id, t.stage, t.assignees]))`)).filter(([id]) => !preexisting.has(id));
+    waiting.clear();
+    for (const [, stage, who] of mine) if (stage === 'todo') for (const w of who) waiting.set(w, (waiting.get(w) ?? 0) + 1);
     const now = JSON.parse(await s.eval(`JSON.stringify(${state}.company.employees.map((e) => ({ id: e.id, kind: e.status.kind, q: e.status.question?.id ?? null })))`));
     live.employees = now.length;
     live.working = now.filter((e) => e.kind === 'working').length;
@@ -171,7 +178,7 @@ export default async function (s) {
   const assign = async (person, index) => {
     const round = rounds.get(person.id) ?? 0;
     rounds.set(person.id, round + 1);
-    pending.set(person.id, Date.now() + 25_000);
+    pending.set(person.id, Date.now() + 6_000);
     const w = workFor(person.name, index, round);
     await s.eval(`(() => {
       const board = ${state}.boards.find((b) => b.blockId === ${JSON.stringify(person.blockId)} && b.kind === 'quick') ?? ${state}.boards.find((b) => b.blockId === ${JSON.stringify(person.blockId)});
@@ -220,9 +227,10 @@ export default async function (s) {
         } else if (e.kind === 'error' && Date.now() > (pending.get(e.id) ?? 0)) {
           await s.eval(`window.office.send({ type: 'fresh_session', employeeId: ${JSON.stringify(e.id)} })`);
           pending.set(e.id, Date.now() + 15_000);
-        } else if (e.kind === 'idle' && Date.now() > (pending.get(e.id) ?? 0)) {
+        } else if ((e.kind === 'idle' || e.kind === 'working') && !waiting.get(e.id) && Date.now() > (pending.get(e.id) ?? 0)) {
+          // Nobody runs dry: whoever has nothing waiting behind the task they are on (or nothing at all) is handed the next one now.
           await assign(person, index);
-        } else if (e.kind === 'working') pending.set(e.id, 0);
+        }
       }
     }
     if (!frameStarted && elapsed >= frameAt) {
@@ -267,8 +275,10 @@ export default async function (s) {
   const overlap = [...new Map(ok.flatMap((x) => x.others).map((o) => [o.pid, o])).values()];
   const reasons = [];
   if (overlap.length) reasons.push(`another Online Office app was running: ${overlap.map((o) => `pid ${o.pid} ${o.command}`).join('; ')}`);
-  const steady = working.filter((_, i) => ok[i].tMin >= 1);
-  if (steady.length && steady.filter((n) => n < EMPLOYEES).length > steady.length * 0.25) reasons.push(`fewer than ${EMPLOYEES} people were working at ${steady.filter((n) => n < EMPLOYEES).length} of ${steady.length} samples after the first minute`);
+  // The first two minutes are the ramp: main starts the fifteen tasks one after the other (about 4 s each, in git work), and each start is
+  // acknowledged by a claude process of its own. After it everybody has a task running and the next one waiting.
+  const steady = working.filter((_, i) => ok[i].tMin >= 2);
+  if (steady.length && mean(steady) < EMPLOYEES - 0.5) reasons.push(`only ${mean(steady).toFixed(1)} of ${EMPLOYEES} people were working on average after the first two minutes`);
   if (!ok.length || ok.length < MINUTES * 5) reasons.push(`only ${ok.length} samples`);
   const sha = execFileSync('git', ['rev-parse', '--short', 'HEAD'], { cwd: new URL('..', import.meta.url).pathname, encoding: 'utf8' }).trim();
   const peakRow = ok.find((x) => x.countedMiB === summary.peakMiB) ?? ok[0];
@@ -281,7 +291,7 @@ export default async function (s) {
     office: { ...office, plan: office.plan.map((p) => ({ story: p.story, deskId: p.deskId })) },
     summary,
     classTotals: { counted: 'main + renderer + gpu + utility + other + ackers', agents: 'the employees own claude/codex/hermes processes and their descendants' },
-    working: { perSample: working, min: Math.min(...working), mean: r1(working.reduce((a, b) => a + b, 0) / working.length), tasksHandedOut: assigned, reinjected: live.reinjected },
+    working: { perSample: working, min: Math.min(...working), mean: r1(mean(working)), meanAfterTwoMinutes: steady.length ? r1(mean(steady)) : null, tasksHandedOut: assigned, reinjected: live.reinjected },
     frames: frameResult,
     breakdown,
     heap,
