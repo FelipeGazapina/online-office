@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
 import type { Employee } from '../../../../shared/protocol.ts';
-import { useMonitor } from '../../computer.ts';
 import { get, send, set, useStore } from '../../store.ts';
 import { isPo } from './model.ts';
 
@@ -21,10 +20,9 @@ export function Composer({ who, po, assignee }: { who: Employee; po: Employee | 
   const canSwitch = Boolean(po) && !isPo(base);
   const busy = target.status.kind === 'working';
 
-  // A thread opens ready to type in, unless a dialog is open: walking past someone must not take the cursor out of it. At their desk
-  // the keys are the owner's: F opens their terminal, and Enter is what takes the cursor to this field.
+  // A thread the owner opened is ready to type in, unless a dialog is open. One the sim opened keeps the keys for walking (Enter focuses it).
   useEffect(() => {
-    if (!get().modal && useMonitor.getState().near !== who.id) field.current?.focus();
+    if (!get().modal && get().chatFocus) field.current?.focus();
   }, [who.id, sub]);
   useEffect(() => {
     setSteer(false);

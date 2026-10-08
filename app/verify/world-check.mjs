@@ -172,7 +172,7 @@ const stand = (p, yaw) => {
 };
 const drawerCase = (camera) => {
   reset();
-  set({ camera, selectedId: null, talkingTo: null });
+  set({ camera, selectedId: null, talkingTo: null, chatFocus: true });
   step(0.1);
 };
 const walkPast = (route) => {
@@ -212,6 +212,7 @@ check(early.inRange > 0 && early.drawer === null, `iso: while the walk to her la
 check(!walking() && get().selectedId === 'ann', 'iso: the frame the walk ends, her chat opens', `walking ${walking()}, drawer ${get().selectedId}`);
 step(0.5);
 check(get().selectedId === 'ann' && owner.approach === null, 'iso: on arrival her chat opens and the approach is spent', `drawer ${get().selectedId}, approach ${owner.approach}`);
+check(get().chatFocus === false, 'iso: the drawer opened on arrival does not take the keyboard (chatFocus false)', `chatFocus ${get().chatFocus}`);
 
 drawerCase('iso');
 walkTo({ kind: 'employee', employeeId: 'ann' });
@@ -241,6 +242,7 @@ drawerCase('iso');
 stand(route.from, route.yaw);
 step(0.2);
 set({ selectedId: 'ann' });
+check(get().chatFocus === true, 'a deliberate open (set selectedId alone) leaves chatFocus true', `chatFocus ${get().chatFocus}`);
 const nearAnn = passBy(annAt, 1.0);
 stand({ x: (nearAnn.from.x + nearAnn.to.x) / 2, z: (nearAnn.from.z + nearAnn.to.z) / 2 }, nearAnn.yaw);
 step(1);
@@ -259,6 +261,7 @@ check(get().selectedId === null, 'first: just outside PI/4 of the look direction
 runtime.view.yaw = toward + IN_VIEW_HALF_ANGLE - 0.15;
 step(0.2);
 check(get().selectedId === 'ann', 'first: turning to face her while in range opens her chat', `drawer ${get().selectedId}`);
+check(get().chatFocus === false, 'first: the drawer opened by turning to face her does not take the keyboard (chatFocus false)', `chatFocus ${get().chatFocus}`);
 
 set({ selectedId: null });
 step(2);

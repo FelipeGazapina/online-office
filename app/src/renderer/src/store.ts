@@ -122,6 +122,8 @@ type State = Settings & {
   streams: Record<string, { text: string; replyingTo: string | null; at: number }>;
   bubbles: Record<string, { text: string; until: number }>;
   selectedId: EmployeeId | null;
+  // False while the open drawer was opened by the sim (proximity), so its composer does not take the keyboard from walking.
+  chatFocus: boolean;
   menu: { employeeId: EmployeeId; x: number; y: number } | null;
   modal: Modal;
   helpOpen: boolean;
@@ -175,6 +177,7 @@ export const useStore = create<State>()(() => ({
   streams: {},
   bubbles: {},
   selectedId: null,
+  chatFocus: true,
   menu: null,
   modal: null,
   helpOpen: false,

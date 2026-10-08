@@ -25,7 +25,7 @@ function useChatKeys() {
           if (!first) return;
           set({ selectedId: first.id });
         }
-        set({ chatDetails: false });
+        set({ chatDetails: false, chatFocus: true });
         focusComposer();
         return;
       }
@@ -34,7 +34,7 @@ function useChatKeys() {
       if (el instanceof HTMLElement && (el.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT', 'BUTTON', 'A'].includes(el.tagName))) return;
       ev.preventDefault();
       ev.stopPropagation();
-      set({ chatDetails: false });
+      set({ chatDetails: false, chatFocus: true });
       focusComposer();
     };
     document.addEventListener('keydown', onKey, true);

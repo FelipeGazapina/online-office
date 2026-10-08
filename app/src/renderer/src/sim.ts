@@ -591,7 +591,7 @@ export function stepSim(rawDt: number) {
       nearComputer,
       nearProjectComputer,
       nearTaskBoard,
-      ...(open ? { selectedId: open } : {}),
+      ...(open ? { selectedId: open, chatFocus: false } : {}),
       // Close the drawer when the owner leaves the employee who opened it through proximity chat.
       ...(state.talkingTo && !talkingTo && state.selectedId === state.talkingTo ? { selectedId: null } : {}),
       ...(askerId !== state.askerId ? { cardMinimized: false } : {}),
