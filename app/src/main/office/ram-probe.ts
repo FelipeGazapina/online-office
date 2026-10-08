@@ -1,11 +1,11 @@
-// Test-only: what the main process holds, for the RAM harness (verify/e2e-ram.mjs). ipc.ts publishes `globalThis.__officeRam` and
-// `__officeRamSnapshot` when a test or debug run started the app; the harness reads them over the Node inspector (--inspect), so
-// nothing here is reachable from the page and nothing runs unless it is asked for.
+// Test-only: what the main process holds, for the RAM harness (verify/e2e-ram.mjs). ipc.ts publishes `globalThis.__officeRam` when a
+// test or debug run started the app; the harness reads it over the Node inspector (--inspect), so nothing here is reachable from the
+// page and nothing runs unless it is asked for. Heap snapshots go through the same inspector (HeapProfiler).
 //
 // The structures are found by walking the Office object the way a person would browse it: every field, two levels of the objects
 // inside the fields that hold state (the mailroom, the tasks), with a rough byte count per field (strings by length, numbers 8,
 // every object and entry a small overhead). The count ranks the fields; the heap snapshot has the exact figures.
-import { writeHeapSnapshot, getHeapStatistics, getHeapSpaceStatistics } from 'node:v8';
+import { getHeapStatistics, getHeapSpaceStatistics } from 'node:v8';
 import { app } from 'electron';
 
 type Row = { path: string; kind: string; count: number | null; approxBytes: number };
@@ -90,6 +90,3 @@ export function ramProbe(roots: Record<string, object>) {
     walkedMs: +(performance.now() - t0).toFixed(1),
   };
 }
-
-// Blocks the main process for the seconds a snapshot takes and needs memory of its own, so the harness asks only after it has stopped measuring.
-export const ramSnapshot = (file: string) => writeHeapSnapshot(file);

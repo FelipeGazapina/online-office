@@ -7,7 +7,7 @@
 // Every instance started this way is closed when the scenario ends, whether it passed or not.
 // Every launch waits for the machine-wide run lock (run-lock.mjs) and holds it until the apps have quit, so two runs never overlap
 // and a memory or frame figure is never taken beside another app of ours. It cannot be turned off.
-// A scenario may also export `viewport` ({ width, height }), `prepare` (an async function run once the lock is held and before the
+// A scenario may also export `viewport` ({ width, height, scale }), `prepare` (an async function run once the lock is held and before the
 // app starts, for work that must be in place at startup such as a data folder) and `exclusive` (true: also wait until no other
 // Online Office app is running, lock or not).
 import { spawn } from 'node:child_process';
@@ -24,7 +24,7 @@ export const OUT = '/tmp/office-shots';
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const launched = [];
 
-export async function launch({ env = {}, width = 1280, height = 800, exe, exclusive = false } = {}) {
+export async function launch({ env = {}, width = 1280, height = 800, scale = 1, exe, exclusive = false } = {}) {
   await acquire(process.argv[2] ? basename(process.argv[2]) : basename(process.argv[1] ?? 'cdp'), { exclusive });
   mkdirSync(OUT, { recursive: true });
   const electron = createRequire(import.meta.url)('electron');
@@ -101,13 +101,19 @@ export async function launch({ env = {}, width = 1280, height = 800, exe, exclus
     });
   await call('Runtime.enable');
   await call('Page.enable');
-  await call('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false });
+  // 1 keeps every shot and measurement independent of the display. 'native' keeps the display's own pixel ratio (2 on a Retina screen),
+  // which is what the owner's window draws at, for a run whose memory has to be the owner's.
+  const dsf = scale === 'native' ? (await call('Runtime.evaluate', { expression: 'window.devicePixelRatio', returnByValue: true })).result.value : scale;
+  await call('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: dsf, mobile: false });
 
   const api = {
     sleep,
     // The Electron main process. Everything the app runs is below it.
     pid: proc.pid,
     port: PORT,
+    // A raw DevTools call on the page, for what the driver has no helper for (Page.bringToFront, heap usage).
+    cdp: call,
+    deviceScaleFactor: dsf,
     logs,
     mainLogs,
     async eval(expression) {
@@ -117,7 +123,7 @@ export async function launch({ env = {}, width = 1280, height = 800, exe, exclus
     },
     // Shrinks or grows the page the way a window resize would, so a scenario can test layout at a new size.
     async resize(width, height) {
-      await call('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false });
+      await call('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: dsf, mobile: false });
     },
     async shot(name) {
       const r = await call('Page.captureScreenshot', { format: 'png' });

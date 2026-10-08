@@ -97,8 +97,10 @@ export async function acquire(scenario, { exclusive = false, maxWaitMs = 60 * 60
   // A signal ends the process through process.exit (cdp.mjs closes its apps first), and exit releases.
   process.on('exit', release);
   if (exclusive) {
+    // The installed app is the owner's own office, open for as long as they work; waiting for it would never end. A run that overlaps it
+    // says so in its result instead (e2e-ram.mjs marks itself invalid). Test and dev builds started without the lock do finish.
     for (;;) {
-      const others = otherOfficeApps(processTable(), null);
+      const others = otherOfficeApps(processTable(), null).filter((p) => !/Online Office\.app/.test(p.command));
       if (!others.length) break;
       note(`holding the lock, waiting for ${others.length} other Online Office app(s) to quit: ${others.map((p) => `pid ${p.pid}`).join(', ')} (they started without the lock)`);
       if (Date.now() - t0 > maxWaitMs) {
