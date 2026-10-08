@@ -25,6 +25,8 @@ export type EmployeeTools = {
   handoffTask(a: { to: string; reason: string; task?: string; from?: string }): unknown;
   // Answers a handoff that waits on this employee, or withdraws one they asked for.
   answerHandoff(a: { id: string; answer: 'accept' | 'decline' | 'withdraw'; reason?: string }): unknown;
+  // Present for a block's PO only: gives a task of the block to a teammate. Answers with how it went, refusals included.
+  assignTask?(a: { task: string; to: string; reason?: string }): unknown;
   mail: MailTools;
   memory: Notebook;
 };
@@ -272,6 +274,25 @@ export async function startOfficeMcp(): Promise<OfficeMcp> {
     tool('inbox', 'Read messages that arrived while you worked. peek keeps them unread.', { peek: z.boolean().optional() }, (a) => mail.inbox(a));
 
     tool('cancelRequest', 'Cancel a request you made that is not settled yet.', { id: z.string().min(1).max(80) }, (a) => mail.cancelRequest(a));
+
+    if (tools.assignTask) {
+      const { assignTask } = tools;
+      const shape = {
+        task: z.string().trim().min(1).max(200).describe('The task title or id'),
+        to: z.string().trim().min(1).max(120).describe('The teammate\'s name, on your block'),
+        reason: z.string().max(500).optional().describe('Why this person, in one sentence'),
+      };
+      // The answer is one plain sentence, "Assigned <title> to <name>." or why not.
+      server.registerTool(
+        'assignTask',
+        {
+          description:
+            'For the block PO only. Give a task on your block\'s boards to a teammate: they get the owner\'s work request for it and join its assignees. Tasks nobody is assigned to come to you as work requests; pick the teammate whose role fits and assign them here. You cannot assign yourself or a done task. The refusal says why.',
+          inputSchema: shape,
+        },
+        (args, extra) => run('assignTask', extra, async () => text(String(assignTask(z.object(shape).parse(args))))),
+      );
+    }
 
     if (mail.hireTeammate) {
       const { hireTeammate } = mail;

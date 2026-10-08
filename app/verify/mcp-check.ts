@@ -380,7 +380,8 @@ console.log('\n# moveTask');
       newId: () => `t${++ids}`,
       mail: () => office.room,
       blocks: () => [B1, B2],
-      members: () => office.members.map((m) => ({ id: m.id, name: m.name, blockId: m.blockId, role: m.role })),
+      // Nobody is reported as a PO, so tasks made here stay where the check puts them. assignTask below routes for real.
+      members: () => office.members.map((m) => ({ id: m.id, name: m.name, blockId: m.blockId, role: 'employee' as const })),
       provider: { fetchSources: async () => ({ cards: [], errors: [] }), linearPeople: async () => [], logHours: async () => {} },
       changed() {},
     },
@@ -451,6 +452,55 @@ console.log('\n# moveTask');
   const pinned = await call(ana.client, 'moveTask', { to: 'doing', reason: 'Picking it up.' });
   check(pinned.json().ok === false && pinned.json().reason === 'pinned' && view('Write the export').stage === 'todo', 'a card the owner moved stays where the owner put it', pinned.text);
   for (const x of [pia, ana, bruno]) await x.client.close();
+}
+
+console.log('\n# assignTask');
+{
+  const office = world();
+  let ids = 0;
+  const tasks = new Tasks(
+    join(dir, 'tasks-assign.json'),
+    {
+      now: Date.now,
+      newId: () => `a${++ids}`,
+      mail: () => office.room,
+      blocks: () => [B1, B2],
+      members: () => office.members.map((m) => ({ id: m.id, name: m.name, blockId: m.blockId, role: m.role })),
+      provider: { fetchSources: async () => ({ cards: [], errors: [] }), linearPeople: async () => [], logHours: async () => {} },
+      changed() {},
+    },
+    [],
+  );
+  tasks.recover([B1, B2], []);
+  // What company.ts builds: assignTask only for the block's orchestrator.
+  const urlOf = (who: typeof PO) =>
+    mcp.attach(who, {
+      ask: async () => '',
+      openBoard: async () => {},
+      drawDiagram: () => {},
+      memory: memory.notebook({ employeeId: who, blockId: BLOCK1, provider: 'claude-code' }),
+      moveTask: () => ({ ok: false }),
+      ...(who === PO ? { assignTask: (a: { task: string; to: string }) => tasks.assignByPo(who, a.task, a.to) } : {}),
+      mail: mailTools(office.room, who, (actor) => office.members.find((m) => m.id === actor)?.name ?? actor, who === PO),
+    });
+  const pia = await connect(urlOf(PO));
+  const ana = await connect(urlOf(ANA));
+  const spec = (await pia.client.listTools()).tools.find((t) => t.name === 'assignTask');
+  check(!!spec && !(await ana.client.listTools()).tools.some((t) => t.name === 'assignTask'), 'assignTask is offered to the PO and not to an employee');
+  const props = (spec?.inputSchema.properties ?? {}) as Record<string, { type?: string }>;
+  check((spec?.inputSchema.required ?? []).slice().sort().join() === 'task,to' && props.task?.type === 'string' && props.to?.type === 'string' && props.reason?.type === 'string', 'its schema requires task and to as strings, with an optional reason', JSON.stringify(spec?.inputSchema));
+
+  const quick = tasks.boardsOf(B1).find((b) => b.kind === 'quick')!;
+  const made = tasks.createTask(quick.id, 'Write the changelog');
+  const routed = tasks.view(Date.now()).tasks.find((t) => t.id === made.id)!;
+  check(routed.assignees.join() === PO, 'a task made with nobody on it goes to the PO');
+  const done = await call(pia.client, 'assignTask', { task: 'write the changelog', to: 'Ana', reason: 'Ana knows the release' });
+  const after = tasks.view(Date.now()).tasks.find((t) => t.id === made.id)!;
+  check(!done.isError && done.text === 'Assigned Write the changelog to Ana.', 'the PO assigns Ana through the tool and gets one plain sentence back', done.text);
+  check(after.assignees.includes(PO) && after.assignees.includes(ANA) && office.prompts.get(ANA)?.some((p) => /Write the changelog/.test(p)), 'Ana got the owner\'s work request for it and both are assignees');
+  const self = await call(pia.client, 'assignTask', { task: made.id, to: 'Pia' });
+  check(/not to yourself/.test(self.text) && tasks.view(Date.now()).tasks.find((t) => t.id === made.id)!.runs.length === after.runs.length, 'a refusal comes back as text and changes nothing', self.text);
+  for (const x of [pia, ana]) await x.client.close();
 }
 
 console.log('\n# lifecycle');

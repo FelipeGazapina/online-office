@@ -1,5 +1,5 @@
-// Tasks end to end with real Claude agents and a fake CronoSpark. A manual task on a quick board goes to the PO, who delegates
-// a piece to the one employee. A CronoSpark card does the same and posts no hours until the owner sends them, then exactly the
+// Tasks end to end with real Claude agents and a fake CronoSpark. A manual task on a quick board goes to the PO by itself, with
+// nobody assigning it, and the PO gives it to the one employee. A CronoSpark card does the same and posts no hours until the owner sends them, then exactly the
 // time worked, once. A hire starts a task on its own. Then the app restarts. Time is checked against numbers computed here from mail.jsonl, not read from the app.
 // Run: pnpm build:verify && OFFICE_OUT_DIR=out/verify OFFICE_CDP_PORT=9342 node verify/cdp.mjs verify/e2e-tasks.mjs
 // OFFICE_TASKS_WAIT_MIN caps each run of an agent (default 8).
@@ -25,8 +25,10 @@ git('commit', '-q', '-m', 'initial');
 
 const fake = await startFakeCronoSpark({
   tasks: [
-    { _id: 'fake-task-501', code: 'CS-501', title: 'Add crono.txt', status: 'pending', priority: 2 },
-    { _id: 'fake-task-502', code: 'CS-502', title: 'Nobody works on this', status: 'in-progress', priority: 3 },
+    // The PO gets a synced card the moment it arrives, so the card's title is the whole brief.
+    { _id: 'fake-task-501', code: 'CS-501', title: 'Add crono.txt whose only line is: hello from crono', status: 'pending', priority: 2 },
+    // A card that is done upstream is not routed to anyone, so nobody works on it.
+    { _id: 'fake-task-502', code: 'CS-502', title: 'Nobody works on this', status: 'Done', priority: 3 },
   ],
 });
 
@@ -173,10 +175,9 @@ export default async (s, { launch }) => {
     await s.eval(`window.office.send({ type: 'create_task', boardId: ${JSON.stringify(quickId)}, title: 'Add hello.txt', notes: ${JSON.stringify(deliverable('hello.txt', 'hello from tasks'))} })`);
     await s.waitFor(`${state}.tasks.some((t) => t.title === 'Add hello.txt')`);
     const hello = await s.eval(`${state}.tasks.find((t) => t.title === 'Add hello.txt')`);
-    assert(hello.stage === 'todo' && hello.origin.kind === 'manual' && hello.boardId === quickId, 'a manual task lands in todo on the quick board');
-    await s.eval(`window.office.send({ type: 'assign_task', taskId: ${JSON.stringify(hello.id)}, employeeId: ${JSON.stringify(pia)} })`);
-    await s.waitFor(`${taskExpr(hello.id)}.stage === 'doing' && ${taskExpr(hello.id)}.runs.length === 1`);
-    ok('assigning to the PO puts the task in doing with one run');
+    assert(hello.origin.kind === 'manual' && hello.boardId === quickId, 'a manual task lands on the quick board');
+    await s.waitFor(`${taskExpr(hello.id)}.stage === 'doing' && ${taskExpr(hello.id)}.runs.length >= 1 && ${taskExpr(hello.id)}.assignees[0] === ${JSON.stringify(pia)}`);
+    ok('nobody assigned it, so it went to the PO by itself: in doing, with the PO first among the assignees');
     await s.waitFor(`${state}.company.employees.find((e) => e.id === ${JSON.stringify(pia)}).status.kind === 'working'`, 20000);
     ok('the PO is working on it without anyone else doing anything');
     await s.waitFor(`${state}.taskTime[${JSON.stringify(hello.id)}]?.running.some((r) => r.employeeId === ${JSON.stringify(pia)})`, 20000);
@@ -205,10 +206,10 @@ export default async (s, { launch }) => {
     const sprint = await s.eval(`${state}.boards.find((b) => b.name === 'Sprint')`);
     const card = await s.eval(`${state}.tasks.find((t) => t.origin.identifier === 'CS-501')`);
     const other = await s.eval(`${state}.tasks.find((t) => t.origin.identifier === 'CS-502')`);
-    assert(card.boardId === sprint.id && card.origin.kind === 'cronospark' && card.origin.externalId === 'fake-task-501' && card.stage === 'todo' && other.stage === 'doing', 'a synced card becomes a task, staged by its status');
+    assert(card.boardId === sprint.id && card.origin.kind === 'cronospark' && card.origin.externalId === 'fake-task-501' && other.stage === 'done' && other.assignees.length === 0, 'a synced card becomes a task, and a card done upstream is staged done and given to nobody');
+    await s.waitFor(`${taskExpr(card.id)}.assignees[0] === ${JSON.stringify(pia)} && ${taskExpr(card.id)}.stage === 'doing'`);
+    ok('the new card went to the PO by itself');
     assert(fake.headers.length > 0 && fake.headers.every((h) => h.authorization === 'Bearer fake-key' && h.user === 'fake-user'), 'the cards came from the fake server with its credentials, never the real one');
-    await s.eval(`window.office.send({ type: 'update_task', taskId: ${JSON.stringify(card.id)}, notes: ${JSON.stringify(deliverable('crono.txt', 'hello from crono'))} })`);
-    await s.eval(`window.office.send({ type: 'assign_task', taskId: ${JSON.stringify(card.id)}, employeeId: ${JSON.stringify(pia)} })`);
     await waitForStage(s, card.id, 'review', 'crono.txt');
     // The reply that moves the task to review can come in the middle of the PO's last turn, so wait until nobody is running it.
     await quiet(s, [card.id]);
@@ -289,10 +290,11 @@ export default async (s, { launch }) => {
     await s.waitFor(`${state}.company.employees.some((e) => e.name === 'Cleo')`);
     const cleo = await s.eval(`${state}.company.employees.find((e) => e.name === 'Cleo')`);
     assert(cleo.seat === desk, 'the hire sits at the desk the owner chose');
-    await s.waitFor(`${taskExpr(hireTask.id)}.runs.length === 1 && ${taskExpr(hireTask.id)}.assignees.includes(${JSON.stringify(cleo.id)})`, 20000);
+    // The task went to the PO when it was made, so the hire's run is the second one.
+    await s.waitFor(`${taskExpr(hireTask.id)}.runs.length >= 2 && ${taskExpr(hireTask.id)}.assignees.includes(${JSON.stringify(cleo.id)})`, 20000);
     const run = ledger().flatMap((e) => (e.t === 'post' && e.msg.kind === 'request' && e.msg.to === cleo.id && e.msg.from === 'owner' ? [e.msg] : []))[0];
-    const linked = await s.eval(`${taskExpr(hireTask.id)}.runs[0]`);
-    assert(!!run && run.id === linked && run.intent === 'work' && run.title === 'Add hire.txt', 'a request from the owner with the new hire as the addressee is the task\'s run, posted by the hire itself');
+    const linked = await s.eval(`${taskExpr(hireTask.id)}.runs`);
+    assert(!!run && linked.includes(run.id) && run.intent === 'work' && run.title === 'Add hire.txt', 'a request from the owner with the new hire as the addressee is one of the task\'s runs, posted by the hire itself');
     await waitForStage(s, hireTask.id, 'review', 'hire.txt');
     const hireBranch = await s.eval(`${taskExpr(hireTask.id)}.git.branch`);
     assert(git('show', `${hireBranch}:hire.txt`).trim() === 'hello from the new hire' && !existsSync(join(repo, 'hire.txt')), 'the new hire did the task without any further owner action, and it is on the task branch');
