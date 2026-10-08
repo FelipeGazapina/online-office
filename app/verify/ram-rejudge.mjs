@@ -1,7 +1,8 @@
 // Reads an e2e-ram result.json again and re-derives what depends on the judging rules (the end of the ramp, the peak after it, the
-// working average after it, the verdict) from the recorded samples, then writes the file back. The memory figures are never touched.
+// working average after it, which apps overlapped, the verdict) from the recorded samples, then writes the file back. The memory figures are never touched.
 //   node verify/ram-rejudge.mjs <run/result.json> [...]
 import { readFileSync, writeFileSync } from 'node:fs';
+import { isOfficeAppMain, officeAppKind } from './procs.mjs';
 
 const mean = (xs) => xs.reduce((a, b) => a + b, 0) / xs.length;
 const r1 = (n) => +n.toFixed(1);
@@ -19,8 +20,11 @@ for (const file of process.argv.slice(2)) {
   r.working.rampMin = ramp === null ? null : +ramp.toFixed(2);
   r.working.meanAfterRamp = steady.length ? r1(mean(steady)) : null;
   const reasons = [];
-  const overlap = [...new Map(ok.flatMap((x) => x.others ?? []).map((o) => [o.pid, o])).values()];
-  if (overlap.length) reasons.push(`another Online Office app was running: ${overlap.map((o) => `pid ${o.pid} ${o.command}`).join('; ')}`);
+  // Only a test or dev build overlapping the run invalidates it; the owner's installed app is listed, not judged (procs.mjs officeAppKind).
+  const apps = [...new Map(ok.flatMap((x) => x.others ?? []).filter((o) => isOfficeAppMain(o.command)).map((o) => [o.pid, { ...o, kind: officeAppKind(o.command) }])).values()];
+  const overlap = apps.filter((o) => o.kind === 'test');
+  if (overlap.length) reasons.push(`another test or dev build of Online Office was running: ${overlap.map((o) => `pid ${o.pid} ${o.command}`).join('; ')}`);
+  r.otherApps = apps.filter((o) => o.kind !== 'test');
   if (ramp === null) reasons.push(`never ${PEOPLE - 1} people working at once`);
   else if (ramp > r.meta.minutes * 0.5) reasons.push(`the ramp took ${ramp.toFixed(1)} min of ${r.meta.minutes}`);
   else if (steady.length && mean(steady) < PEOPLE - 0.5) reasons.push(`only ${mean(steady).toFixed(1)} of ${PEOPLE} people were working on average after the ramp`);

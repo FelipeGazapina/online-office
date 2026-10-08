@@ -1,6 +1,6 @@
 // Samples the memory of the app's whole process tree on a fixed beat. One sample reads, for every process under the Electron main PID,
 // its phys_footprint (the Activity Monitor Memory column), sorts the processes into classes (procs.mjs), and records the machine's
-// swap and memory pressure and any other Online Office app that is running. The figure of the bar is the sum of COUNTED classes;
+// swap and memory pressure and any other Online Office app that is running (listed under `others`, each with its kind). The figure of the bar is the sum of COUNTED classes;
 // employees' own agent processes are summed apart.
 import { CLASSES, COUNTED, classify, footprints, otherOfficeApps, processTable, systemMemory } from './procs.mjs';
 
@@ -21,7 +21,8 @@ export function sampleOnce(rootPid) {
   }
   for (const c of CLASSES) classes[c].mib = r1(classes[c].mib);
   const countedMiB = r1(COUNTED.reduce((sum, c) => sum + classes[c].mib, 0));
-  const others = otherOfficeApps(table, rootPid).map((p) => ({ pid: p.pid, command: p.command.slice(0, 120) }));
+  // Every other Online Office app, with its kind: only a `test` one makes a run invalid (procs.mjs officeAppKind).
+  const others = otherOfficeApps(table, rootPid).map((p) => ({ pid: p.pid, kind: p.kind, command: p.command.slice(0, 120) }));
   return { classes, countedMiB, agentsMiB: classes.agents.mib, rows: rows.sort((a, b) => b.mib - a.mib), others, system: systemMemory() };
 }
 

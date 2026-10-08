@@ -1,6 +1,6 @@
 // Ranks the biggest owners of the app's memory in an e2e-ram result.json, from the breakdown taken at about 90% of the run. An owner is a
 // leaf that no other row contains: a memory region category of the main, renderer or GPU process (the `footprint` tool's own
-// categories, dirty MiB, which add up to the process's footprint), or a whole process that has no regions listed (whisper-server, the
+// categories, dirty MiB, which add up to the process's footprint; swapped and compressed pages are part of dirty), or a whole process that has no regions listed (whisper-server, the
 // acknowledgers, the other helpers). Notes put the page's own numbers beside the regions they should explain.
 //   node verify/ram-owners.mjs <run/result.json> [count]
 import { readFileSync } from 'node:fs';
@@ -47,4 +47,4 @@ for (const row of byPid.values()) owners.push({ owner: `${row.owner}${row.n > 1 
 owners.sort((a, c) => c.MiB - a.MiB);
 const total = r1(owners.reduce((s, o) => s + o.MiB, 0));
 console.log(`breakdown at ${b.at}; owners listed add up to ${total} MiB of the app (agents are not in it)`);
-owners.slice(0, Number(count)).forEach((o, i) => console.log(`${String(i + 1).padStart(2)}. ${String(o.MiB).padStart(7)} MiB  ${o.owner}${o.swappedMiB ? ` (+${o.swappedMiB} swapped)` : ''}${o.note ? `\n              ${o.note}` : ''}`));
+owners.slice(0, Number(count)).forEach((o, i) => console.log(`${String(i + 1).padStart(2)}. ${String(o.MiB).padStart(7)} MiB  ${o.owner}${o.swappedMiB ? ` (${o.swappedMiB} of it swapped or compressed, still counted)` : ''}${o.note ? `\n              ${o.note}` : ''}`));

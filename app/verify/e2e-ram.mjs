@@ -11,8 +11,12 @@
 //   OFFICE_RAM_UNIT, OFFICE_RAM_ROUND   the first two columns of the ram.tsv line
 //   OFFICE_RAM_KEEP_HEAP=1   keep the .heapsnapshot files (hundreds of MB); the summaries are always kept
 //   OFFICE_RAM_SCALE=1       force the device pixel ratio (default: the display's own)
-// The run is invalid, and says so, when another Online Office app was running at any sample (the owner's included) or fewer than 15
-// people were working for most of the window. The result JSON is written either way.
+// The run is invalid, and says so, when another test or dev build of Online Office (Electron from a worktree, or any app holding a DevTools
+// port) was running at any sample, or fewer than 15 people were working after the ramp. The owner's installed app does not invalidate it:
+// it is not in the tree, so not in the sum; each sample lists it under `others` with its kind. The result JSON is written either way.
+// phys_footprint counts pages that are compressed or swapped out (footprint(1): Dirty "includes (Swapped) memory", and a process's
+// footprint is the total of its Dirty memory), so memory pressure does not lower the figure. `swappedMiB` in the regions below is part of
+// `dirtyMiB`, not added to it.
 // The owner's data folder is only read (ram-office.mjs). Linear is a fake MCP server, gh is a fake on PATH, the repos have no remote.
 import { execFileSync } from 'node:child_process';
 import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -273,9 +277,10 @@ export default async function (s) {
   const summary = summarize(samples, { fromMin: MINUTES / 2, toMin: MINUTES, rampMin: ramp ?? 2 });
   const ok = samples.filter((x) => !x.error);
   const working = ok.map((x) => x.people?.working ?? 0);
-  const overlap = [...new Map(ok.flatMap((x) => x.others).map((o) => [o.pid, o])).values()];
+  const apps = [...new Map(ok.flatMap((x) => x.others).map((o) => [o.pid, o])).values()];
+  const overlap = apps.filter((o) => o.kind === 'test');
   const reasons = [];
-  if (overlap.length) reasons.push(`another Online Office app was running: ${overlap.map((o) => `pid ${o.pid} ${o.command}`).join('; ')}`);
+  if (overlap.length) reasons.push(`another test or dev build of Online Office was running: ${overlap.map((o) => `pid ${o.pid} ${o.command}`).join('; ')}`);
   // The ramp is the time main takes to start the fifteen tasks one after the other (git work, a few seconds each) and the page to hear of
   // it. After it everybody has a task running and the next one waiting; one person between tasks now and then is the handoff.
   const steady = working.filter((_, i) => ramp !== null && ok[i].tMin >= ramp);
@@ -291,6 +296,8 @@ export default async function (s) {
     meta: { mode: FAKE ? 'fake' : 'real', minutes: MINUTES, sha, branch: execFileSync('git', ['branch', '--show-current'], { cwd: new URL('..', import.meta.url).pathname, encoding: 'utf8' }).trim(), viewport: { width: viewport.width, height: viewport.height, deviceScaleFactor: s.deviceScaleFactor }, out: OUT, startedAt: new Date(startedAt).toISOString(), model: HAIKU },
     valid: reasons.length === 0,
     invalidReasons: reasons,
+    // Apps of ours that were up beside the run and are not in its sum (the owner's installed app), listed, not judged.
+    otherApps: apps.filter((o) => o.kind !== 'test'),
     office: { ...office, plan: office.plan.map((p) => ({ story: p.story, deskId: p.deskId })) },
     summary,
     classTotals: { counted: 'main + renderer + gpu + utility + other + ackers', agents: 'the employees own claude/codex/hermes processes and their descendants' },
@@ -323,8 +330,8 @@ function footprintCategories(pid) {
     return {
       footprintMiB: r1(p.footprint / MIB),
       top: Object.entries(p.categories)
-        .map(([name, c]) => ({ name, dirtyMiB: r1(c.dirty / MIB), swappedMiB: r1(c.swapped / MIB), regions: c.regions }))
-        .sort((a, b) => b.dirtyMiB + b.swappedMiB - (a.dirtyMiB + a.swappedMiB))
+        .map(([name, c]) => ({ name, dirtyMiB: r1(c.dirty / MIB), swappedMiB: r1(c.swapped / MIB) /* part of dirty */, regions: c.regions }))
+        .sort((a, b) => b.dirtyMiB - a.dirtyMiB)
         .slice(0, 8),
     };
   } catch (e) {

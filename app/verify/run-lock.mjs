@@ -70,8 +70,8 @@ export function release() {
 
 const out = (msg) => console.log(`[run-lock] ${msg}`);
 
-// Waits for the lock and takes it. Taking it twice in one process is one hold. `exclusive` also waits until no other Online Office
-// app is running at all, whether it holds the lock or not (an older cdp.mjs does not know the lock), which a memory figure needs.
+// Waits for the lock and takes it. Taking it twice in one process is one hold. `exclusive` also waits until no other test or dev
+// build of Online Office is running, whether it holds the lock or not (an older cdp.mjs does not know the lock), which a memory figure needs.
 export async function acquire(scenario, { exclusive = false, maxWaitMs = 60 * 60_000 } = {}) {
   if (held) return;
   const t0 = Date.now();
@@ -97,10 +97,10 @@ export async function acquire(scenario, { exclusive = false, maxWaitMs = 60 * 60
   // A signal ends the process through process.exit (cdp.mjs closes its apps first), and exit releases.
   process.on('exit', release);
   if (exclusive) {
-    // The installed app is the owner's own office, open for as long as they work; waiting for it would never end. A run that overlaps it
-    // says so in its result instead (e2e-ram.mjs marks itself invalid). Test and dev builds started without the lock do finish.
+    // The installed app is the owner's own office, open for as long as they work: it is not ours to wait for and it does not enter any
+    // sum. Test and dev builds started without the lock do finish, so those are waited for.
     for (;;) {
-      const others = otherOfficeApps(processTable(), null).filter((p) => !/Online Office\.app/.test(p.command));
+      const others = otherOfficeApps(processTable(), null).filter((p) => p.kind === 'test');
       if (!others.length) break;
       note(`holding the lock, waiting for ${others.length} other Online Office app(s) to quit: ${others.map((p) => `pid ${p.pid}`).join(', ')} (they started without the lock)`);
       if (Date.now() - t0 > maxWaitMs) {

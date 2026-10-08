@@ -126,15 +126,22 @@ export function systemMemory() {
   return { swapUsedMiB: swap ? Number(swap[1]) : null, pressureLevel: level, freePct: free ? Number(free[1]) : null };
 }
 
-// Electron apps of ours that are running and are not in the tree under `root`: another test run, a beta, the installed app.
-// Helpers (--type=) are left out, one main per app is enough to name it.
+// Whether a command line is the main process of an Online Office app of ours: the executable is the first word of the line (so a shell
+// whose script merely mentions it is not one), and it is Electron under a path that names the project, or the installed app.
+export const isOfficeAppMain = (command) =>
+  !/--type=/.test(command) &&
+  ((/^\/(?:[^ ]+\/)*Electron\.app\/Contents\/MacOS\/Electron( |$)/.test(command) && /online-office/i.test(command)) ||
+    /^\/(?:[^ ]+\/)*Online Office\.app\/Contents\/MacOS\/Online Office( |$)/.test(command));
+
+// Which kind of Online Office app a main process is. A `test` app is one of ours that a run can overlap: Electron started from a
+// worktree's node_modules (a verify run, a dev run, a beta) or any app holding a DevTools port. The `installed` app is the owner's own
+// office in /Applications: nobody here controls it, its processes are not in the app's tree and so not in its sum, and it does not
+// invalidate a run (the sampler still lists it).
+export const officeAppKind = (command) => (/--remote-debugging-port=/.test(command) || /Electron\.app\/Contents\/MacOS\/Electron( |$)/.test(command) ? 'test' : 'installed');
+
+// Online Office apps that are running and are not in the tree under `root`: another test run, a beta, the installed app, each with its
+// kind. Helpers (--type=) are left out, one main per app is enough to name it.
 export function otherOfficeApps(table, root) {
   const mine = new Set(root ? treeOf(table, root).map((p) => p.pid) : []);
-  return table.filter(
-    (p) =>
-      !mine.has(p.pid) &&
-      !/--type=/.test(p.command) &&
-      /(Electron\.app\/Contents\/MacOS\/Electron|Online Office\.app\/Contents\/MacOS\/Online Office)( |$)/.test(p.command) &&
-      /online-office|Online Office/i.test(p.command),
-  );
+  return table.filter((p) => !mine.has(p.pid) && isOfficeAppMain(p.command)).map((p) => ({ ...p, kind: officeAppKind(p.command) }));
 }
