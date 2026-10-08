@@ -18,7 +18,9 @@ export const chipLine = (chip: Chip) => (chip.command ? `${chip.text} ${chip.com
 const warn = (text: string, rest: Partial<Chip> = {}): Chip => ({ tone: 'warn', text, meter: false, ...rest });
 
 // The first thing that stops the owner from being heard wins, and the owner can only fix one at a time.
-export function chipOf({ engine, access, capture, phase }: VoiceState, mode: 'proximity' | 'push'): Chip {
+export function chipOf({ engine, access, capture, phase }: VoiceState, mode: 'proximity' | 'push', micMuted = false): Chip {
+  // Muted on purpose comes first: nothing else about the mic matters while it is off.
+  if (micMuted) return { tone: 'idle', text: 'Your mic is muted. Type in the chat', meter: false };
   if (engine.kind === 'missing_binary') return warn('Voice needs whisper.cpp. Run', { command: 'brew install whisper-cpp', action: 'check_again' });
   if (engine.kind === 'error') return warn(`Voice failed: ${engine.message}`, { action: 'try_again' });
   switch (access.kind) {

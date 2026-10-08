@@ -68,9 +68,10 @@ export type PendingPost = { clientId: string; to: string; text: string; as: 'req
 export type Toast = { id: number; text: string; tone: 'info' | 'warn' | 'ok' };
 
 // Settings the user is tuning while deciding how this should feel; kept across reloads.
-type Settings = { camera: CameraMode; interrupt: InterruptStyle; mic: MicMode; lang: Lang; voiceQuality: VoiceQuality };
+// `micMuted` keeps the owner's microphone shut and `voicesMuted` keeps the employees from speaking out loud: work by chat only.
+type Settings = { camera: CameraMode; interrupt: InterruptStyle; mic: MicMode; lang: Lang; voiceQuality: VoiceQuality; micMuted: boolean; voicesMuted: boolean };
 const SETTINGS_KEY = 'online-office.settings';
-const defaults: Settings = { camera: 'iso', interrupt: 'next', mic: 'proximity', lang: 'en-US', voiceQuality: 'fast' };
+const defaults: Settings = { camera: 'iso', interrupt: 'next', mic: 'proximity', lang: 'en-US', voiceQuality: 'fast', micMuted: false, voicesMuted: false };
 
 function loadSettings(): Settings {
   try {
@@ -202,7 +203,7 @@ export function setSetting<K extends keyof Settings>(key: K, value: Settings[K])
   const s = get();
   localStorage.setItem(
     SETTINGS_KEY,
-    JSON.stringify({ camera: s.camera, interrupt: s.interrupt, mic: s.mic, lang: s.lang, voiceQuality: s.voiceQuality }),
+    JSON.stringify({ camera: s.camera, interrupt: s.interrupt, mic: s.mic, lang: s.lang, voiceQuality: s.voiceQuality, micMuted: s.micMuted, voicesMuted: s.voicesMuted }),
   );
 }
 
