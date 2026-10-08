@@ -429,6 +429,7 @@ export class Tasks {
     if (synced.changed) {
       this.save();
       this.readyDrafts();
+      this.routeUnassigned();
     }
     this.sync.set(boardId, result.errors.length && !result.cards.length ? { kind: 'error', message: result.errors.join(' ') } : { kind: 'ready', lastFetchedAt: this.host.now() });
     this.host.changed();
@@ -462,7 +463,10 @@ export class Tasks {
     const task = newTask({ id: this.taskId(), number: this.nextNumber++, boardId, title: clean, ...(notes ? { notes } : {}), origin, stage: opt.stage ?? 'todo', now: this.host.now() });
     this.tasks = [...this.tasks, task];
     this.save();
-    if (!opt.assignee) return task;
+    if (!opt.assignee) {
+      this.routeUnassigned();
+      return this.task(task.id);
+    }
     try {
       this.assign(task.id, opt.assignee);
     } catch (err) {
@@ -516,6 +520,46 @@ export class Tasks {
     // Someone free got the request as it was posted, before the task knew the run: it moves to doing now.
     this.onMail();
     void this.publish(task.id);
+  }
+
+  // Every task nobody is assigned to, not done, on a block that has a PO, goes to that PO as the owner's work request. The PO
+  // then gives it to the teammate whose role fits (assignTask). A task with anyone on it is left alone, so running this
+  // again posts nothing. One that cannot be assigned is skipped and stays in todo for the owner.
+  routeUnassigned() {
+    for (const task of this.tasks) {
+      if (task.assignees.length || task.stage === 'done') continue;
+      const blockId = this.board(task.boardId).blockId;
+      const po = this.host.members().find((m) => m.blockId === blockId && m.role === 'orchestrator');
+      if (!po) continue;
+      try {
+        this.assign(task.id, po.id);
+      } catch (err) {
+        console.warn(`Could not hand "${task.title}" to ${po.name}:`, err instanceof Error ? err.message : err);
+      }
+    }
+  }
+
+  // The PO gives a task of their block to a teammate. `ref` is the task's title or id, `to` the teammate's name. Refusals
+  // come back as text and change nothing.
+  assignByPo(po: EmployeeId, ref: string, to: string): string {
+    const me = this.host.members().find((m) => m.id === po);
+    if (me?.role !== 'orchestrator') return 'Only the block PO assigns tasks.';
+    const found = this.taskFor(po, ref);
+    if ('reason' in found) {
+      const key = ref.trim().toLowerCase();
+      const elsewhere = found.reason === 'unknown_task' && this.tasks.some((t) => t.id === ref || t.title.toLowerCase() === key);
+      return elsewhere ? `"${ref}" is a task of another block. Assign only your own block's tasks.` : found.detail;
+    }
+    if (found.stage === 'done') return `"${found.title}" is done. Nothing is left to assign.`;
+    const name = to.trim().toLowerCase();
+    const mate = this.host.members().find((m) => m.blockId === me.blockId && m.name.toLowerCase() === name);
+    if (!mate) {
+      const elsewhere = this.host.members().some((m) => m.name.toLowerCase() === name);
+      return elsewhere ? `${to} works on another block. Assign a teammate of your own block.` : `Nobody on your block is called ${to}.`;
+    }
+    if (mate.id === po) return 'You lead and do not build. Assign the task to a teammate, not to yourself.';
+    this.assign(found.id, mate.id);
+    return `Assigned ${found.title} to ${mate.name}.`;
   }
 
   // The one request a person is given for a task: a work request from the owner, on the task's own branch. Like any assignment it

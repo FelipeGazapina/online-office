@@ -420,11 +420,12 @@ export class Office {
       this.signerTimer = setInterval(ask, SIGNER_POLL_MS);
       this.signerTimer.unref();
     }
-    // Sessions exist now, so whatever a crash left half delivered can go out again, and a handoff whose people left while the app was
-    // closed can tell the ones who are still here.
+    // Sessions exist now, so whatever a crash left half delivered can go out again, a handoff whose people left while the app was
+    // closed can tell the ones who are still here, and tasks nobody took go to their PO.
     if (!frozen) {
       this.mail.recoverOnStart();
       this.tasks.reconcileHandoffs();
+      this.tasks.routeUnassigned();
     }
   }
 
@@ -979,6 +980,7 @@ export class Office {
       moveTask: (a) => this.tasks.moveByAgent(employee.id, a.to, a.reason, a.task),
       handoffTask: (a) => this.tasks.proposeHandoff(employee.id, a),
       answerHandoff: (a) => this.tasks.answerHandoff(employee.id, a),
+      ...((employee.role ?? 'employee') === 'orchestrator' ? { assignTask: (a: { task: string; to: string; reason?: string }) => this.tasks.assignByPo(employee.id, a.task, a.to) } : {}),
       mail: mailTools(this.mail, employee.id, nameOf, (employee.role ?? 'employee') === 'orchestrator'),
       memory: notebook,
     });
@@ -1197,6 +1199,8 @@ export class Office {
     this.sessions.get(employee.id)?.warm?.();
     if (provider === 'claude-code') this.acker.warm();
     this.commit();
+    // A new PO takes the block's tasks that nobody is on.
+    if (orchestrator) this.tasks.routeUnassigned();
     return employee;
   }
 
