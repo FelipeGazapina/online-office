@@ -45,6 +45,16 @@ export function openMirror() {
   set({ computerView: 'mirror' });
 }
 
+// A link to GitHub, like a task's pull request, takes the owner to their Mac: they sit down at it, the live mirror opens,
+// and the page opens in the Mac's browser underneath. From wherever they are, since a link is not a walk.
+export function openOnComputer(url: string) {
+  if (get().build) return;
+  window.office.portal.enter();
+  useMonitor.setState({ open: null });
+  set({ projectComputerId: null, computerState: 'seated', computerView: 'mirror', portalMode: true, computerMenu: false, modal: null, selectedId: null, menu: null });
+  window.office.portal.openUrl(url);
+}
+
 export function leaveComputer() {
   const s = get();
   if (!s.projectComputerId && s.computerView === 'mirror') window.office.portal.leave();

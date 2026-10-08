@@ -6,6 +6,7 @@ import { fmtClock, fmtHours, isRunning, originOf, providerNote, sharesOf, taskMs
 import { avatarColor, isPo } from '../chat/model.ts';
 import { cardLine, namerOf, questionCount } from './activityView.ts';
 import { useTaskLive } from './live.ts';
+import { openOnComputer } from '../../computer.ts';
 import { Alert, Branch, Check, Clock, External, OriginTile } from './icons.tsx';
 
 export function Avatar({ person, size = 22, layer }: { person: Employee | undefined; size?: number; layer?: number }) {
@@ -77,7 +78,7 @@ export function PrChip({ task }: { task: Task }) {
   if (!git.pr) return git.note ? <span className="tb-chip ghost" data-testid="card-pr-note" title={git.note}><Branch size={11} />No PR</span> : null;
   const { number, url, state } = git.pr;
   return (
-    <a className={`tb-chip tb-pr ${state}`} href={url} target="_blank" rel="noreferrer" data-testid="card-pr" data-pr-state={state} title={`Pull request #${number} is ${PR_STATE_LABEL[state].toLowerCase()}. Open it on GitHub.`} onClick={(e) => e.stopPropagation()}>
+    <a className={`tb-chip tb-pr ${state}`} href={url} target="_blank" rel="noreferrer" data-testid="card-pr" data-pr-state={state} title={`Pull request #${number} is ${PR_STATE_LABEL[state].toLowerCase()}. Open it on GitHub at your Mac.`} onClick={(e) => { e.preventDefault(); e.stopPropagation(); openOnComputer(url); }}>
       <Branch size={11} />#{number} {PR_STATE_LABEL[state]}
     </a>
   );

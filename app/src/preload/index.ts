@@ -19,6 +19,7 @@ const office: OfficeApi = {
     openHome: () => ipcRenderer.send(IPC.portalOpenHome),
     openTerminal: () => ipcRenderer.send(IPC.portalOpenTerminal),
     openSlack: () => ipcRenderer.send(IPC.portalOpenSlack),
+    openUrl: (url) => ipcRenderer.send(IPC.portalOpenUrl, url),
     onExit(cb) {
       const listener = () => cb();
       ipcRenderer.on(IPC.portalExit, listener);

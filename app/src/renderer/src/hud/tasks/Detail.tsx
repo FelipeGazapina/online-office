@@ -8,6 +8,7 @@ import { ActivityLog, Questions } from './Activity.tsx';
 import { namerOf, sayLive } from './activityView.ts';
 import { useActivity, useTaskLive } from './live.ts';
 import { moveTask } from './actions.ts';
+import { openOnComputer } from '../../computer.ts';
 import { Avatar, PR_STATE_LABEL } from './Card.tsx';
 import { Alert, Branch, Check, Close, External, OriginTile, PriorityIcon, StageIcon } from './icons.tsx';
 
@@ -166,7 +167,7 @@ export function Detail({ task, board, blockPeople, people, time, stage, now, onC
               <dd>
                 {task.git.pr ? (
                   <>
-                    <a href={task.git.pr.url} target="_blank" rel="noreferrer" data-testid="task-pr-link">
+                    <a href={task.git.pr.url} target="_blank" rel="noreferrer" data-testid="task-pr-link" title="Open it on GitHub at your Mac" onClick={(e) => { e.preventDefault(); openOnComputer(e.currentTarget.href); }}>
                       #{task.git.pr.number}
                       <External size={12} />
                     </a>

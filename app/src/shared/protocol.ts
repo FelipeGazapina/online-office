@@ -383,6 +383,8 @@ export type OfficeApi = {
     openHome(): void;
     openTerminal(): void;
     openSlack(): void;
+    // Opens a GitHub page in the Mac's own browser, under the mirror.
+    openUrl(url: string): void;
     onExit(cb: () => void): () => void;
   };
   update: {
@@ -418,6 +420,7 @@ export const IPC = {
   portalOpenHome: 'office:portal-open-home',
   portalOpenTerminal: 'office:portal-open-terminal',
   portalOpenSlack: 'office:portal-open-slack',
+  portalOpenUrl: 'office:portal-open-url',
   portalExit: 'office:portal-exit',
   updateCheck: 'office:update-check',
   updateInstall: 'office:update-install',
