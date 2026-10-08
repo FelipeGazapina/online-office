@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { headcountCap, MAX_LEVEL, PROVIDERS, XP_FOR_LEVEL, type BlockId, type Employee } from '../../../shared/protocol.ts';
 import type { VoiceQuality } from '../../../shared/voice.ts';
-import { send, set, setSetting, useStore, waitingQueue, type CameraMode, type Lang, type MicMode } from '../store.ts';
+import { openChat, send, set, setSetting, useStore, waitingQueue, type CameraMode, type Lang, type MicMode } from '../store.ts';
 import { fmtWait, tailPath, useNow } from './hooks.ts';
 import { UpdateSetting } from './UpdateControl.tsx';
 import { setVoicesMuted } from '../audio.ts';
@@ -114,7 +114,7 @@ export function CompanyPanel({ allowOverLimit = false }: { allowOverLimit?: bool
               {company.employees
                 .filter((e) => e.blockId === b.id)
                 .map((e) => (
-                  <button key={e.id} className={`person ${statusClass(e)}`} onClick={() => set({ selectedId: e.id })}>
+                  <button key={e.id} className={`person ${statusClass(e)}`} onClick={() => openChat(e.id)}>
                     <i className="sdot" />
                     {e.name}{(e.role ?? 'employee') === 'orchestrator' && <small>PO</small>}
                   </button>
@@ -260,7 +260,7 @@ export function WaitingMeter() {
         {queue.length > 0 && (
           <div className="chips oo:flex oo:flex-wrap oo:items-center oo:justify-center oo:gap-1">
             {queue.map((e, i) => (
-              <button key={e.id} className={`${waits[i] > URGENT_MS ? 'late' : ''} oo:inline-flex oo:items-center oo:gap-1 oo:rounded-full oo:border oo:border-hud-border oo:bg-hud-card/90 oo:px-2 oo:py-0.5 oo:text-xs oo:font-semibold oo:text-hud-text oo:shadow-lg oo:transition-colors oo:duration-150 oo:hover:border-hud-accent oo:hover:bg-hud-surface`} onClick={() => set({ selectedId: e.id })}>
+              <button key={e.id} className={`${waits[i] > URGENT_MS ? 'late' : ''} oo:inline-flex oo:items-center oo:gap-1 oo:rounded-full oo:border oo:border-hud-border oo:bg-hud-card/90 oo:px-2 oo:py-0.5 oo:text-xs oo:font-semibold oo:text-hud-text oo:shadow-lg oo:transition-colors oo:duration-150 oo:hover:border-hud-accent oo:hover:bg-hud-surface`} onClick={() => openChat(e.id)}>
                 <i style={{ background: PROVIDERS[e.provider].color }} />
                 {e.name}
                 <span className="oo:text-hud-muted">{fmtWait(waits[i])}</span>

@@ -10,7 +10,7 @@ import { send, useStore } from '../../store.ts';
 type Log = { entries: ActivityEntry[]; live: TaskLive };
 type Feed = { live: Record<TaskId, TaskLive>; logs: Record<TaskId, Log> };
 
-const useFeed = create<Feed>(() => ({ live: {}, logs: {} }));
+export const useFeed = create<Feed>(() => ({ live: {}, logs: {} }));
 
 // A snapshot rebuilds every summary. One that did not change keeps the object it had, so a card only draws again for its own.
 const lastText = new Map<TaskId, string>();
@@ -36,6 +36,12 @@ function start() {
   };
   window.office.subscribe(take);
   void window.office.getSnapshot().then(take);
+}
+
+// What the people on every task are doing, keyed by task. The tags above people's heads read it.
+export function useAllLive(): Record<TaskId, TaskLive> {
+  useEffect(start, []);
+  return useFeed((s) => s.live);
 }
 
 // What the people on one task are doing, from the latest snapshot. Undefined for a task nobody has worked on.

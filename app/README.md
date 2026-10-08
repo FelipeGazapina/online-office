@@ -60,7 +60,9 @@ The project computer's **Task boards** app has a CronoSpark credentials section.
 
 Click an employee, on the avatar or the name tag, for a menu with **Open chat** and **Go to**. In the isometric camera, click the floor to walk there and drag to turn the view. Press **F** near a task board or click its whiteboard to enlarge it. Click **Reveal** on a block to open its folder in Finder.
 
-The project computer's **Task boards** app has a CronoSpark credentials section. Enter `CRONOSPARK_MCP_API_KEY` as the API key and `CRONOSPARK_MCP_USER_ID` as the MCP user ID, then click **Save CronoSpark**. The key is kept in the app's private credentials file (encrypted with the macOS keychain when available), never in `company.json` or renderer storage. A key already supplied in the app's environment can be kept by leaving the API key field blank.
+Within 1.5 m of an employee you can talk to them, but the chat drawer does not open because you walk past. In first person it opens when the nearest employee is in front of you, within 45 degrees of where you look. Turning to face someone already in range opens it too. In the isometric camera it opens only when you arrive after **Go to**, or when you choose **Open chat** from the menu. A drawer that opened this way closes when you leave the 1.5 m range. If you close it with Esc, it stays closed while you stand there.
+
+Tasks are numbered #1, #2 and so on, in the order they are created. The number shows before the title on the task card, and in a pill above the head of everyone who is working on the task, waiting on a reply for it, queued behind it or blocked on it. Pills with the same number and color mean those people work on the same task. Someone on two tasks wears two pills, and someone who finished their part wears none.
 
 ## How it works
 
@@ -180,6 +182,7 @@ node verify/space-check.ts
 node verify/building-check.ts
 node --no-warnings verify/world-check.mjs
 node --no-warnings verify/chat-check.mjs
+node --no-warnings verify/badge-check.mjs
 node verify/voice-check.ts
 node verify/voice-logic-check.ts
 node verify/mcp-check.ts
@@ -188,6 +191,8 @@ node verify/claude-check.ts
 node verify/e2e-update.mjs
 node verify/cdp.mjs verify/e2e-real.mjs
 node verify/cdp.mjs verify/e2e-nav.mjs
+node verify/cdp.mjs verify/e2e-proximity-chat.mjs
+node verify/cdp.mjs verify/e2e-task-badge.mjs
 node verify/cdp.mjs verify/e2e-contract.mjs
 node verify/cdp.mjs verify/e2e-memory.mjs
 node verify/cdp.mjs verify/e2e-queue.mjs
@@ -196,8 +201,9 @@ node verify/cdp.mjs verify/e2e-voice.mjs
 ```
 
 - `verify/building-check.ts` needs no model or Electron. It opens the real Office on a company.json from before the building and checks the migration (every employee on a desk item, the orchestrator at the PO desk), that a second launch leaves the file byte-identical, hire and fire seating, and build, reject, undo and redo.
-- `verify/world-check.mjs` needs no model or Electron. It runs the real sim and store on a building: click walks that detour around desks, a walk up the stairs to another story, steering keys winning over a walk, going to an employee, and employees routing around the meeting room whose door opens and closes.
+- `verify/world-check.mjs` needs no model or Electron. It runs the real sim and store on a building: click walks that detour around desks, a walk up the stairs to another story, steering keys winning over a walk, going to an employee, and employees routing around the meeting room whose door opens and closes. It also checks when the chat drawer opens near an employee. Walking past does not open it. In first person it opens for someone within 45 degrees of the look, and in the isometric camera only after "Go to" or "Open chat". Leaving the 1.5 m range closes it, and after Esc it stays closed.
 - `verify/chat-check.mjs` needs no model or Electron. It checks that what the owner says and what an employee says land in that employee's transcript, in order, capped at 200 lines.
+- `verify/badge-check.mjs` needs no model or Electron. It checks which people on a task wear its number. Someone working, waiting, queued or blocked on it does, and someone done, stopped or idle does not. A teammate on a piece of the task wears it without being an assignee. Two people on one task get the same number, and someone on several tasks gets each number once, smallest first. The colors of #1 to #8 are all different and at least 20 degrees of hue apart.
 - `verify/voice-check.ts` runs the real whisper service against the real `whisper-server` and models, with clips made by `say`. It checks English and Portuguese, that requests wait their turn, downloads that resume, and that no server outlives the service. It needs macOS and whisper-cpp. `--offline` skips the one download from Hugging Face.
 - `verify/voice-logic-check.ts` needs neither. It checks the ring buffer, the half-duplex gate, and the line the HUD chip shows for every state.
 - `verify/mcp-check.ts` needs no model. It starts the MCP server, the inbox, and the memory store in a scratch folder, and drives them with an MCP client. It checks the Origin, Host, and token rules, `ask_owner` waiting, cancelling, and queueing, and the memory limits, secret refusal, block visibility, firing, and the digest size. It exits 1 on any failed check.
@@ -206,6 +212,8 @@ node verify/cdp.mjs verify/e2e-voice.mjs
 - `verify/e2e-update.mjs` needs no model. Run it by itself, not through `cdp.mjs`. It packages two versions of the app with this repo's build config under a test identity (`com.gazapina.onlineoffice.e2e`, `Online Office E2E`), installs the older one into a scratch folder, and serves the newer one from a local feed. It launches the installed app and drives the update button through CDP. A feed with a wrong sha512 must end in "Update failed. Check again". After the real feed comes back, checking again must reach the update, and one more click must download it, quit the app, and relaunch the bundle at the same path as the newer version, still signed and pinned to its bundle identifier. It packages twice, so it needs Apple Silicon, about 4 GB free and about three minutes, and it stops before the first build if less than 4 GB is free. It removes its builds, the updater and Squirrel caches, and the test profile on success and on failure. The relaunched app does not get the test environment, so its window opens for a moment until the script closes it.
 - `verify/e2e-real.mjs` launches the built app against a scratch data folder and a scratch git repo, then does everything through the UI. It creates a block through the stubbed picker, hires a Claude Code employee, and gives it a task by typing. The employee walks over to ask, the script answers on the card, and then checks the file the agent wrote. It also checks the main log for `ask_owner` arriving over HTTP. A second task covers a shell permission card. A third makes the employee use its `Agent` tool once, and checks that the subagent shows on the employee while it runs, for as long as it runs, and is gone after, and that `company.json` never holds it. A whiteboard diagram closes the run. Screenshots land in `/tmp/office-shots`.
 - `verify/e2e-nav.mjs` uses real mouse and key events only. In the Overview it clicks the floor across a desk and checks the owner arrives, drags to turn the view without walking, and cancels a walk with a key. It clicks an employee's avatar and name tag for the menu, closes it with Esc and with a click elsewhere, walks to the employee with "Go to", and opens the chat, sends a message and waits for the real reply. Screenshots of the marker, the menu and the chat land in `/tmp/office-shots`.
+- `verify/e2e-proximity-chat.mjs` uses real pointer and key events and needs no model. It checks that walking past an employee leaves the drawer shut, that "Go to" and "Open chat" open it, that in first person facing away keeps it shut and facing toward opens it, and that leaving the range closes it.
+- `verify/e2e-task-badge.mjs` needs no model. It seeds fake employees and tasks in the built app and reads the labels above their heads. Two people on task #7 wear matching #7 pills, a blocked employee on #8 wears a pill in another color, and someone who finished wears none. When one of the pair finishes, their pill goes away, and someone who joins #7 gets the same pill. Screenshots land in `/tmp/office-shots`.
 - `verify/e2e-contract.mjs` starts the app on the old-format company file and drives the messages above through the real IPC boundary with real Claude employees. It checks the migration, a refused bad mode, Always allow (an exact rule for a `node` command, with no card for the identical command and a card for a different one), `remove_allow_rule`, a live `set_model` (the next turn's `init` shows the new model), a refused model reported in the log, a `fresh_session` on a stale `sessionId`, and a background subagent that outlives the turn that launched it.
 - `verify/e2e-memory.mjs` tells an employee a fact, quits the app, deletes the employee's `sessionId`, starts the app again on the same data folder, and asks a question only the notes can answer.
 - `verify/e2e-queue.mjs` makes two subagents ask permission at the same moment, and checks that the second card waits behind the first.

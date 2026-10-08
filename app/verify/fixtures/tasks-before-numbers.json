@@ -1,0 +1,13 @@
+{
+  "v": 1,
+  "boards": [
+    { "id": "board-q1", "blockId": "b1", "name": "Quick tasks", "kind": "quick" },
+    { "id": "board-q2", "blockId": "b2", "name": "Quick tasks", "kind": "quick" }
+  ],
+  "tasks": [
+    { "id": "task-c", "boardId": "board-q1", "title": "Made third", "origin": { "kind": "manual" }, "stage": "todo", "assignees": [], "runs": [], "createdAt": 3000, "updatedAt": 3000 },
+    { "id": "task-a", "boardId": "board-q2", "title": "Made first", "origin": { "kind": "manual" }, "stage": "todo", "assignees": [], "runs": [], "createdAt": 1000, "updatedAt": 1000 },
+    { "id": "task-b", "boardId": "board-q1", "title": "Made second", "origin": { "kind": "manual" }, "stage": "doing", "assignees": [], "runs": [], "createdAt": 2000, "updatedAt": 4000 }
+  ],
+  "people": {}
+}

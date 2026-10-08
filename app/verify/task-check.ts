@@ -262,26 +262,28 @@ console.log('\n# provider cards become tasks');
   const card = (n: number, status: string, title = `Card ${n}`): TaskCard => ({ id: `cronospark:x${n}`, provider: 'cronospark', externalId: `x${n}`, identifier: `CS-${n}`, title, status, sourceLabel: 'CronoSpark' });
   let n = 0;
   const newId = () => task(`t${++n}`);
-  const first = syncCards(b, [], [card(1, 'pending'), card(2, 'in-progress'), card(1, 'pending')], { now: 5, complete: true, newId });
+  let num = 0;
+  const nextNumber = () => ++num;
+  const first = syncCards(b, [], [card(1, 'pending'), card(2, 'in-progress'), card(1, 'pending')], { now: 5, complete: true, newId, nextNumber });
   check(first.tasks.length === 2 && first.tasks[0]!.stage === 'todo' && first.tasks[1]!.stage === 'doing', 'cards become tasks (a card listed twice is one), staged by their status');
   check(first.tasks[0]!.origin.kind === 'cronospark' && first.tasks[0]!.origin.externalId === 'x1' && first.tasks[0]!.origin.identifier === 'CS-1', 'the task keeps where it came from');
-  const again = syncCards(b, first.tasks, [card(1, 'pending'), card(2, 'in-progress')], { now: 6, complete: true, newId });
+  const again = syncCards(b, first.tasks, [card(1, 'pending'), card(2, 'in-progress')], { now: 6, complete: true, newId, nextNumber });
   check(!again.changed && again.tasks.length === 2 && again.tasks.every((x, i) => x === first.tasks[i]), 'the same cards change nothing');
   const manual = newTask({ id: task('m'), boardId: b.id, title: 'mine', origin: { kind: 'manual' }, stage: 'todo', now: 1 });
   const worked: Task = { ...first.tasks[0]!, runs: [m('r1')], stage: 'doing' };
-  const next = syncCards(b, [worked, first.tasks[1]!, manual], [card(1, 'completed', 'Card 1 renamed'), card(2, 'Done')], { now: 7, complete: true, newId });
+  const next = syncCards(b, [worked, first.tasks[1]!, manual], [card(1, 'completed', 'Card 1 renamed'), card(2, 'Done')], { now: 7, complete: true, newId, nextNumber });
   check(next.tasks.find((x) => x.id === worked.id)!.stage === 'doing' && next.tasks.find((x) => x.id === worked.id)!.title === 'Card 1 renamed', 'a card\'s status maps to stage only while the task has no runs; its title still follows');
   check(next.tasks.find((x) => x.id === first.tasks[1]!.id)!.stage === 'done', 'a task with no runs follows its card to done');
   const pinned: Task = { ...first.tasks[0]!, stage: 'review', stagePinned: true };
-  const kept = syncCards(b, [pinned, first.tasks[1]!], [card(1, 'pending'), card(2, 'Done')], { now: 7, complete: true, newId });
+  const kept = syncCards(b, [pinned, first.tasks[1]!], [card(1, 'pending'), card(2, 'Done')], { now: 7, complete: true, newId, nextNumber });
   check(kept.tasks.find((x) => x.id === pinned.id)!.stage === 'review', 'a stage the owner pinned is not overridden by the card, though the task has no runs');
   check(kept.tasks.find((x) => x.id === first.tasks[1]!.id)!.stage === 'done', 'and a card the owner never moved keeps following its status');
-  const vanished = syncCards(b, [worked, first.tasks[1]!, manual], [], { now: 8, complete: true, newId });
+  const vanished = syncCards(b, [worked, first.tasks[1]!, manual], [], { now: 8, complete: true, newId, nextNumber });
   check(vanished.tasks.length === 2 && vanished.tasks.some((x) => x.id === worked.id) && vanished.tasks.some((x) => x.id === manual.id), 'a card gone upstream drops its task unless it has runs; manual tasks stay');
-  const partial = syncCards(b, [worked, first.tasks[1]!], [], { now: 8, complete: false, newId });
+  const partial = syncCards(b, [worked, first.tasks[1]!], [], { now: 8, complete: false, newId, nextNumber });
   check(partial.tasks.length === 2, 'a source that failed cannot empty the board');
   const other: Board = { ...b, id: board('b2') };
-  check(syncCards(other, first.tasks, [], { now: 9, complete: true, newId }).tasks.length === 2, 'a board only touches its own tasks');
+  check(syncCards(other, first.tasks, [], { now: 9, complete: true, newId, nextNumber }).tasks.length === 2, 'a board only touches its own tasks');
 }
 
 console.log('\n# hours are sent once');
@@ -1247,6 +1249,7 @@ console.log('\n# the office, with a scripted harness');
   check(ben.seat === wanted, 'the new hire takes the desk they were given');
   check(fakes.at(-1)!.assigned.length === 1 && /Fix the login bug/.test(fakes.at(-1)!.assigned[0]!) && ben.status.kind === 'working', 'a hire with a task starts on it without anyone telling them');
   check(snap().tasks.find((x) => x.id === bug.id)!.assignees.includes(ben.id) && snap().tasks.find((x) => x.id === bug.id)!.runs.length === 1, 'the task records the hire as its assignee with a run');
+  check(snap().tasks.find((x) => x.id === bug.id)!.number === bug.number && bug.number > 0 && new Set(snap().tasks.map((x) => x.number)).size === snap().tasks.length, `a hire with a task keeps the task's number (#${bug.number}) and every task has its own`);
   const taken = snap().company.employees.find((x) => x.name === 'Ana')!.seat;
   office.handle({ type: 'hire', provider: 'claude-code', blockId, name: 'Cal', deskId: taken! });
   const cal = snap().company.employees.find((x) => x.name === 'Cal')!;
@@ -1279,6 +1282,41 @@ console.log('\n# the office, with a scripted harness');
   check(reopened.snapshot().boards.length === 2 && reopened.snapshot().tasks.length === 1, 'opening it again makes no second board and no second task');
   reopened.shutdown();
   await mcp.close();
+}
+
+console.log('\n# task numbers');
+{
+  const x = taskWorld();
+  const quick = x.tasks.boardsOf(B1).find((b) => b.kind === 'quick')!;
+  const one = x.tasks.createTask(quick.id, 'First');
+  const other = x.tasks.boardsOf(B2).find((b) => b.kind === 'quick')!;
+  const two = x.tasks.createTask(other.id, 'Second, on another block');
+  const sprint = x.tasks.createBoard(B1, 'Sprint', { kind: 'feature', sources: [{ provider: 'cronospark', projectId: 'p' }] });
+  x.provider.cards = [crono(1)];
+  await x.tasks.refresh(sprint.id);
+  const synced = x.tasks.view(x.now()).tasks.find((t) => t.origin.kind === 'cronospark')!;
+  check(one.number === 1 && two.number === 2 && synced.number === 3, 'numbers run 1, 2, 3 office-wide across a manual task, another block and a provider-synced card', `${one.number}, ${two.number}, ${synced.number}`);
+  const withAssignee = x.tasks.createTask(quick.id, 'Handed over', { assignee: PO });
+  check(withAssignee.number === 4, 'a task made and assigned in one step gets the next number', String(withAssignee.number));
+  x.tasks.deleteTask(withAssignee.id);
+  const stored = JSON.parse(readFileSync(x.file, 'utf8'));
+  check(stored.nextNumber === 5 && stored.tasks.map((t: Task) => t.number).join() === '1,2,3', 'tasks.json keeps each number and the counter past a deleted task', JSON.stringify([stored.nextNumber, stored.tasks.map((t: Task) => t.number)]));
+  const again = taskWorld(x.file);
+  check(again.tasks.view(again.now()).tasks.map((t) => t.number).join() === '1,2,3', 'a reloaded store keeps the numbers');
+  const next = again.tasks.createTask(quick.id, 'After the reload');
+  check(next.number === 5, 'and continues the counter, so the deleted task\'s #4 is never given again', String(next.number));
+
+  const legacy = join(dir, 'tasks-before-numbers.json');
+  writeFileSync(legacy, readFileSync(new URL('./fixtures/tasks-before-numbers.json', import.meta.url), 'utf8'));
+  const old = taskWorld(legacy);
+  const byId = (id: string) => old.tasks.view(old.now()).tasks.find((t) => t.id === id)!.number;
+  check(byId('task-a') === 1 && byId('task-b') === 2 && byId('task-c') === 3, 'a tasks.json without numbers numbers its tasks in createdAt order', `${byId('task-a')}, ${byId('task-b')}, ${byId('task-c')}`);
+  const written = JSON.parse(readFileSync(legacy, 'utf8'));
+  check(written.nextNumber === 4 && written.tasks.every((t: Task) => t.number > 0), 'and the migrated file is written back with the counter', JSON.stringify([written.nextNumber, written.tasks.map((t: Task) => t.number)]));
+  const before = readFileSync(legacy, 'utf8');
+  taskWorld(legacy);
+  check(readFileSync(legacy, 'utf8') === before, 'loading the migrated file again leaves it byte-identical');
+  check(old.tasks.createTask(old.tasks.boardsOf(B1)[0]!.id, 'New after the migration').number === 4, 'a task made after the migration gets #4');
 }
 
 finish();

@@ -64,6 +64,8 @@ export type TaskEvent =
 
 export type Task = {
   id: TaskId;
+  // Office-wide and sequential from 1, given when the task is made and never reused. The owner sees it as "#N".
+  number: number;
   boardId: BoardId;
   title: string;
   notes?: string;
@@ -352,8 +354,9 @@ export function ensureBoards(blocks: readonly BlockId[], boards: readonly Board[
 
 // ───────────────────────────── Tasks ─────────────────────────────
 
-export function newTask(a: { id: TaskId; boardId: BoardId; title: string; notes?: string; origin: TaskOrigin; stage: TaskStage; now: number }): Task {
-  return { id: a.id, boardId: a.boardId, title: a.title, ...(a.notes ? { notes: a.notes } : {}), origin: a.origin, stage: a.stage, assignees: [], runs: [], createdAt: a.now, updatedAt: a.now };
+// `number` comes from the store's counter. A task built outside the store, as checks do, gets 0.
+export function newTask(a: { id: TaskId; number?: number; boardId: BoardId; title: string; notes?: string; origin: TaskOrigin; stage: TaskStage; now: number }): Task {
+  return { id: a.id, number: a.number ?? 0, boardId: a.boardId, title: a.title, ...(a.notes ? { notes: a.notes } : {}), origin: a.origin, stage: a.stage, assignees: [], runs: [], createdAt: a.now, updatedAt: a.now };
 }
 
 // What a person is told at the end of a task's request about its card. A model reads this where it is working far more
@@ -414,7 +417,7 @@ const sourceKey = (o: ProviderOrigin) => `${o.kind}:${o.externalId}`;
 // has no say: once the task has runs or the owner pinned its stage, the office knows better. A card that is gone upstream
 // takes its task with it unless the task has runs, and only when every source answered, so a source that failed cannot
 // empty the board.
-export function syncCards(board: Board, tasks: readonly Task[], cards: readonly TaskCard[], opt: { now: number; complete: boolean; newId: () => TaskId }): { tasks: Task[]; changed: boolean } {
+export function syncCards(board: Board, tasks: readonly Task[], cards: readonly TaskCard[], opt: { now: number; complete: boolean; newId: () => TaskId; nextNumber: () => number }): { tasks: Task[]; changed: boolean } {
   const mine = new Map<string, Task>();
   for (const t of tasks) if (t.boardId === board.id && t.origin.kind !== 'manual') mine.set(sourceKey(t.origin), t);
   const next = new Map<TaskId, Task>();
@@ -436,7 +439,7 @@ export function syncCards(board: Board, tasks: readonly Task[], cards: readonly 
     const had = mine.get(key);
     if (!had) {
       const id = opt.newId();
-      next.set(id, newTask({ id, boardId: board.id, title: card.title, origin, stage: stageOfStatus(card.status), now: opt.now }));
+      next.set(id, newTask({ id, number: opt.nextNumber(), boardId: board.id, title: card.title, origin, stage: stageOfStatus(card.status), now: opt.now }));
       changed = true;
       continue;
     }

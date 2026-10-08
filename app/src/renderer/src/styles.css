@@ -1949,3 +1949,44 @@ body.hud-moving, body.hud-moving * { cursor: grabbing !important; user-select: n
 @media (prefers-reduced-motion: reduce) {
   .cp-av::after, .cp-live, .cp-caret { animation: none; }
 }
+
+/* The numbers of the tasks a person is on, above the name tag. Same number, same colour, so a team reads at a glance. */
+.task-nos {
+  display: flex;
+  gap: 3px;
+}
+.task-no {
+  background: hsl(var(--task-hue) 70% 42%);
+  color: #fff;
+  border-radius: 999px;
+  padding: 0 6px;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 15px;
+  font-variant-numeric: tabular-nums;
+  box-shadow: 0 1px 4px rgba(20, 15, 40, 0.3);
+}
+
+/* "#N" before a task's title on the board, in the muted look of the origin ref. */
+.tb-no {
+  color: #6c6f88;
+  font-size: 0.85em;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+}
+.tb-card-title .tb-no {
+  display: inline;
+}
+.tb-title-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+.tb-title-row .tb-no {
+  flex: none;
+  font-size: 15px;
+}
+.tb-title-row .tb-title-input {
+  flex: 1;
+  width: auto;
+}

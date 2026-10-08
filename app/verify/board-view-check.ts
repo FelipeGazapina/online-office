@@ -15,6 +15,7 @@ const block = (n: number) => `block-${n}` as BlockId;
 const board = (id: string, blockId: BlockId, extra: Partial<Board> = {}): Board => ({ id: id as BoardId, blockId, name: id, kind: 'quick', ...extra }) as Board;
 const task = (id: string, boardId: string, over: Partial<Task> = {}): Task => ({
   id: id as TaskId,
+  number: 0,
   boardId: boardId as BoardId,
   title: id,
   origin: { kind: 'manual' },

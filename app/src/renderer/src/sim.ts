@@ -53,6 +53,19 @@ const CLIMB_DONE = 0.2;
 const SEATED_DRIFT = 0.05;
 
 const dist2 = (a: Vec2, b: Vec2) => Math.hypot(a.x - b.x, a.z - b.z);
+// In first person someone is in view within this angle of where the owner looks.
+export const IN_VIEW_HALF_ANGLE = Math.PI / 4;
+
+export function inView(id: EmployeeId | null): boolean {
+  const av = id ? runtime.avatars.get(id) : undefined;
+  if (!av) return false;
+  const { pos } = runtime.owner;
+  const to = { x: av.pos.x - pos.x, z: av.pos.z - pos.z };
+  const len = Math.hypot(to.x, to.z);
+  if (len < 1e-6) return true;
+  const cos = (Math.sin(runtime.view.yaw) * to.x + Math.cos(runtime.view.yaw) * to.z) / len;
+  return cos >= Math.cos(IN_VIEW_HALF_ANGLE) - 1e-9;
+}
 const ease = (dt: number, rate: number) => 1 - Math.exp(-dt * rate);
 
 export function queueSlot(k: number): Vec2 {
@@ -194,7 +207,11 @@ export function walkTo(goal: WalkGoal) {
   const door = get().meetingDoor;
   const world = worldFor(get().building, door);
   const walk = world && plan(goal, world);
-  if (walk) runtime.owner.intent = walk;
+  if (walk) {
+    runtime.owner.intent = walk;
+    runtime.owner.approach = goal.kind === 'employee' ? goal.employeeId : null;
+    runtime.owner.approachArrived = false;
+  }
   else toast(door === 'closed' ? 'The meeting room door is closed.' : 'There is no way there.', 'warn');
 }
 
@@ -231,6 +248,7 @@ function walkVelocity(world: World): Vec2 | null {
   if (intent.kind !== 'walk') return null;
   const aim = nextAim(owner, intent.trip, ARRIVE);
   if (!aim) {
+    if (intent.goal.kind === 'employee' && intent.goal.employeeId === owner.approach) owner.approachArrived = true;
     owner.intent = KEYS_INTENT;
     return null;
   }
@@ -311,7 +329,13 @@ function stepOwner(dt: number, world: World, talkingTo: EmployeeId | null) {
   }
   owner.running = keys.has('ShiftLeft') || keys.has('ShiftRight');
   // Keys always win. input.ts also drops the walk on the key down itself, because a tap can end between two frames.
-  if (!owner.climb && STEER_KEYS.some((c) => keys.has(c))) owner.intent = KEYS_INTENT;
+  if (!owner.climb && STEER_KEYS.some((c) => keys.has(c))) {
+    owner.intent = KEYS_INTENT;
+    owner.approach = null;
+  }
+  // The choice to go to someone lasts while walking to them and once there. Any other end of that walk drops it: a key
+  // held here, a key tapped between two frames (input.ts), or the person going away.
+  if (owner.approach && owner.intent.kind !== 'walk' && !owner.approachArrived) owner.approach = null;
 
   const want = walkVelocity(world) ?? (owner.climb ? finishClimb(owner.climb) : keyVelocity());
   const a = ease(dt, 12);
@@ -543,10 +567,21 @@ export function stepSim(rawDt: number) {
   }
   const askerId = meetingDoor === 'open' && front && front.status.kind === 'blocked_on_owner' && runtime.arrived.get(front.id) === front.status.question.id ? front.id : null;
 
+  // Proximity opens the chat only in first person and only for someone in view, on the step they become so. In the
+  // overview it opens only for the person the owner chose to walk to, once they are the one in range.
+  const nowOpenable = state.camera === 'first' && talkingTo && inView(talkingTo) ? talkingTo : null;
+  let open = nowOpenable !== runtime.chatOpenable ? nowOpenable : null;
+  runtime.chatOpenable = nowOpenable;
+  if (talkingTo && talkingTo === runtime.owner.approach && runtime.owner.approachArrived) {
+    open = talkingTo;
+    runtime.owner.approach = null;
+    runtime.owner.approachArrived = false;
+  }
+
   const nearbyChanged = nearbyIds.length !== state.nearbyIds.length || nearbyIds.some((id, i) => id !== state.nearbyIds[i]);
   // While the owner builds, the story on screen is the one they chose, not the one they stand on.
   const shown = get().build ? state.story : story;
-  if (shown !== state.story || talkingTo !== state.talkingTo || askerId !== state.askerId || nearbyChanged || nearComputer !== state.nearComputer || nearProjectComputer !== state.nearProjectComputer || nearTaskBoard !== state.nearTaskBoard) {
+  if (shown !== state.story || talkingTo !== state.talkingTo || askerId !== state.askerId || nearbyChanged || nearComputer !== state.nearComputer || nearProjectComputer !== state.nearProjectComputer || nearTaskBoard !== state.nearTaskBoard || (open && open !== state.selectedId)) {
     if (talkingTo !== state.talkingTo) cancelSpeech();
     set({
       story: shown,
@@ -556,8 +591,7 @@ export function stepSim(rawDt: number) {
       nearComputer,
       nearProjectComputer,
       nearTaskBoard,
-      // Proximity opens the side chat and follows the closest person as the owner moves.
-      ...(talkingTo && talkingTo !== state.talkingTo ? { selectedId: talkingTo } : {}),
+      ...(open ? { selectedId: open, chatFocus: false } : {}),
       // Close the drawer when the owner leaves the employee who opened it through proximity chat.
       ...(state.talkingTo && !talkingTo && state.selectedId === state.talkingTo ? { selectedId: null } : {}),
       ...(askerId !== state.askerId ? { cardMinimized: false } : {}),

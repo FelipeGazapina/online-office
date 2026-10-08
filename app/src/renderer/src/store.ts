@@ -122,6 +122,8 @@ type State = Settings & {
   streams: Record<string, { text: string; replyingTo: string | null; at: number }>;
   bubbles: Record<string, { text: string; until: number }>;
   selectedId: EmployeeId | null;
+  // False while the open drawer was opened by the sim (proximity), so its composer does not take the keyboard from walking.
+  chatFocus: boolean;
   menu: { employeeId: EmployeeId; x: number; y: number } | null;
   modal: Modal;
   helpOpen: boolean;
@@ -175,6 +177,7 @@ export const useStore = create<State>()(() => ({
   streams: {},
   bubbles: {},
   selectedId: null,
+  chatFocus: true,
   menu: null,
   modal: null,
   helpOpen: false,
@@ -197,6 +200,11 @@ export const useStore = create<State>()(() => ({
 
 export const set = useStore.setState;
 export const get = useStore.getState;
+
+// Every open the owner asks for goes through here, so the composer takes the keyboard; only the sim opens a drawer without it.
+export function openChat(id: EmployeeId, extra: Partial<State> = {}) {
+  set({ ...extra, selectedId: id, chatFocus: true });
+}
 
 export function setSetting<K extends keyof Settings>(key: K, value: Settings[K]) {
   set({ [key]: value } as Pick<State, K>);
@@ -244,5 +252,7 @@ export function send(m: ClientMessage) {
 
 // A new conversation starts from the person's own thread, aimed at them.
 useStore.subscribe((s, prev) => {
+  // Picking a thread is the owner's own click, so the composer takes the keyboard again.
+  if (s.chatSub && s.chatSub !== prev.chatSub && !s.chatFocus) set({ chatFocus: true });
   if (s.selectedId !== prev.selectedId && (s.chatSub || s.chatToPo || s.chatDetails)) set({ chatSub: null, chatToPo: false, chatDetails: false });
 });

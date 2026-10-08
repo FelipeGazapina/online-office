@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { PROVIDERS, type Employee } from '../../../shared/protocol.ts';
-import { get, send, set, useStore } from '../store.ts';
+import { get, openChat, send, set, useStore } from '../store.ts';
 import { Composer } from './chat/Composer.tsx';
 import { avatarColor, isPo, liveState, mergeMessages, rosterOf, textOf } from './chat/model.ts';
 import { countRender } from './chat/renders.ts';
@@ -23,9 +23,9 @@ function useChatKeys() {
         if (!s.selectedId) {
           const first = s.company?.employees.find((e) => (e.role ?? 'employee') === 'orchestrator') ?? s.company?.employees[0];
           if (!first) return;
-          set({ selectedId: first.id });
+          openChat(first.id);
         }
-        set({ chatDetails: false });
+        set({ chatDetails: false, chatFocus: true });
         focusComposer();
         return;
       }
@@ -34,7 +34,7 @@ function useChatKeys() {
       if (el instanceof HTMLElement && (el.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT', 'BUTTON', 'A'].includes(el.tagName))) return;
       ev.preventDefault();
       ev.stopPropagation();
-      set({ chatDetails: false });
+      set({ chatDetails: false, chatFocus: true });
       focusComposer();
     };
     document.addEventListener('keydown', onKey, true);
