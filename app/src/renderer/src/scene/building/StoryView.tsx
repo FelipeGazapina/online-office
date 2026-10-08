@@ -6,7 +6,7 @@ import { hasFloorAt, tileIndex } from '../../../../shared/space/geom.ts';
 import { runtime } from '../../runtime.ts';
 import { buildView, draft } from '../../hud/build/state.ts';
 import { get, set, useStore } from '../../store.ts';
-import { walkTo } from '../../sim.ts';
+import { takeStairs, walkTo } from '../../sim.ts';
 import { chairOf } from '../../world.ts';
 import { blobShadowTexture, ceilingTexture, poolTexture, wallAoTexture } from '../textures.ts';
 import { carpetSurface, concreteSurface, PLASTER_MEAN, PLASTER_METRES, plasterSurface, tileSurface, woodSurface, type Surface } from '../surfaceTextures.ts';
@@ -262,9 +262,11 @@ function Furniture({ geom }: { geom: FloorGeometry }) {
 
   const pick = (ids: readonly ItemId[]) => (e: ThreeEvent<MouseEvent>) => {
     if (e.delta >= 6 || e.instanceId === undefined) return;
-    set({ pickedItem: ids[e.instanceId] ?? null });
+    const id = ids[e.instanceId] ?? null;
+    set({ pickedItem: id });
     if (get().camera !== 'iso') return;
     e.stopPropagation();
+    if (id && takeStairs(id)) return;
     walkTo({ kind: 'point', at: { x: e.point.x, z: e.point.z }, floor: geom.index });
   };
 
