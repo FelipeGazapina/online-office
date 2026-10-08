@@ -10,6 +10,9 @@ export type TurnId = string & { readonly __brand: 'TurnId' };
 export type Outcome = 'done' | 'blocked' | 'failed' | 'declined' | 'cancelled';
 // A review reply only. Compared against the bar, never against the builder's claims.
 export type Verdict = { pass: boolean; findings: string[] };
+// A blocked reply only. The breakdown the owner answers from: what stopped the work, the one question that unblocks it, and
+// the step the employee will take once it is answered.
+export type Blocker = { why: string; question: string; next: string };
 export type Urgency = 'queue' | 'next' | 'now';
 export type Intent = 'work' | 'help' | 'review' | 'gauntlet';
 export type GauntletSpec = { builder: EmployeeId; critic: EmployeeId; maxRounds: number };
@@ -36,7 +39,7 @@ export type Message = Base &
     // Work or help. A reply is owed. A gauntlet request is never delivered: the mailroom runs its rounds.
     | { kind: 'request'; intent: Intent; title: string; text: string; bar?: string[]; artifact?: string[]; gauntlet?: GauntletSpec }
     // The result. Settles `requestId` exactly once. `auto` means the office wrote it from the turn's final text.
-    | { kind: 'reply'; requestId: MessageId; outcome: Outcome; text: string; verdict?: Verdict; artifact?: string[]; auto?: boolean }
+    | { kind: 'reply'; requestId: MessageId; outcome: Outcome; text: string; verdict?: Verdict; artifact?: string[]; blocker?: Blocker; auto?: boolean }
     // Facts shown inline in the thread.
     | { kind: 'event'; event: 'hired' | 'fired'; subject?: EmployeeId; text: string }
   );

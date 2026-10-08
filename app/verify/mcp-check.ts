@@ -363,6 +363,9 @@ const hired = await call(po.client, 'hireTeammate', { key: 'h1', name: 'Dora' })
 const hired2 = await call(po.client, 'hireTeammate', { key: 'h1', name: 'Dora' });
 check(hired.json().ok === true && hired2.json().id === hired.json().id, 'hireTeammate hires once per key');
 check(gh.ok && BRUNO !== ANA, 'the owner request reached the PO', JSON.stringify(gh));
+const stuck = await call(ana.client, 'reply', { requestId: second.json().id, outcome: 'blocked', text: 'cannot answer yet', why: 'The API has no spec.', question: 'Should the CSV use commas or semicolons?', next: 'I answer as soon as you pick.' });
+const stuckReply = [...mailWorld.room.state.messages.values()].find((m) => m.kind === 'reply' && m.requestId === second.json().id);
+check(stuck.json().ok === true && stuckReply?.kind === 'reply' && stuckReply.blocker?.question === 'Should the CSV use commas or semicolons?' && stuckReply.blocker.why === 'The API has no spec.' && stuckReply.blocker.next === 'I answer as soon as you pick.', 'a blocked reply through the tool carries why, question and next', JSON.stringify(stuckReply));
 await po.client.close();
 await ana.client.close();
 

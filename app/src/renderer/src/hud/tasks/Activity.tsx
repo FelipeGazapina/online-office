@@ -4,7 +4,7 @@ import type { Employee, EmployeeId } from '../../../../shared/protocol.ts';
 import type { Task } from '../../../../shared/tasks.ts';
 import { send } from '../../store.ts';
 import { Avatar } from './Card.tsx';
-import { answerKind, cut, hhmm, namerOf, sayEntry } from './activityView.ts';
+import { answerKind, breakdownOf, cut, hhmm, namerOf, sayEntry } from './activityView.ts';
 
 type People = ReadonlyMap<EmployeeId, Employee>;
 
@@ -46,6 +46,7 @@ function Question({ task, q, people }: { task: Task; q: OpenQuestion; people: Pe
   };
   const kind = answerKind(q);
   const who = people.get(q.asker);
+  const b = breakdownOf(q, name);
   return (
     <li className="tb-ask" data-testid="task-question" data-asker={q.asker} data-how={q.how}>
       <div className="tb-ask-head">
@@ -55,9 +56,27 @@ function Question({ task, q, people }: { task: Task; q: OpenQuestion; people: Pe
         <time>{hhmm(q.at)}</time>
       </div>
       {(q.how === 'blocked' || q.how === 'help') && <p className="tb-ask-about">about “{cut(q.piece.title, 70)}”{q.how === 'blocked' ? ', stopped blocked' : ''}</p>}
-      <p className="tb-ask-text" data-testid="question-text">
-        <Words text={q.text} />
-      </p>
+      <dl className="tb-why" data-testid="question-breakdown" data-structured={q.how === 'blocked' && q.blocker ? 'yes' : 'no'}>
+        <dt>Why it stopped</dt>
+        <dd data-testid="question-why">
+          <Words text={b.why} />
+        </dd>
+        <dt>The question</dt>
+        <dd className="tb-why-q" data-testid="question-text">
+          {b.question}
+        </dd>
+        <dt>Proposed next step</dt>
+        <dd data-testid="question-next">{b.next}</dd>
+      </dl>
+      <p className="tb-ask-then" data-testid="question-then">{b.then}</p>
+      {b.full && q.how !== 'permission' && (
+        <details className="tb-ask-full">
+          <summary>{q.how === 'blocked' ? 'Their whole reply' : 'Their whole message'}</summary>
+          <p className="tb-ask-text">
+            <Words text={b.full} limit={1200} />
+          </p>
+        </details>
+      )}
       {q.how === 'permission' && (
         <pre className="tb-ask-cmd">
           <span>{q.tool}</span>

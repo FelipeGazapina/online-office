@@ -124,6 +124,20 @@ console.log('# a delegation tree with a gauntlet');
   ledgers.push({ name: 'delegation tree', ledger: w.persisted });
 }
 
+console.log('\n# a blocked reply with its breakdown');
+{
+  const w = fresh();
+  const root = ownerPost(w, 'ana', 'Add the export');
+  const blocker = { why: 'The format was never chosen.', question: 'CSV or JSON?', next: 'I build the one you pick.' };
+  reply(w, ANA, root, { outcome: 'blocked', text: 'stopped before writing anything', blocker });
+  w.room.turnEnded(ANA, 'blocked', true);
+  const l = live(taskOf([root]), w);
+  const q = l.questions[0]!;
+  check(q?.how === 'blocked' && JSON.stringify(q.blocker) === JSON.stringify(blocker) && q.text === 'stopped before writing anything', 'the open question carries the why, the question and the next step, beside the reply text', JSON.stringify(l.questions));
+  const said = activityOf(taskOf([root]), w.persisted, idle).entries.find((e) => e.kind === 'reply');
+  check(said?.kind === 'reply' && said.blocker?.question === 'CSV or JSON?', 'and the log entry of the reply carries them too');
+}
+
 console.log('\n# a blocked reply is a question the owner answers');
 {
   const w = fresh();
@@ -136,6 +150,7 @@ console.log('\n# a blocked reply is a question the owner answers');
   const q = l.questions[0]!;
   check(l.questions.length === 1 && q.how === 'blocked' && q.asker === ANA && q.to === 'owner' && q.text === 'Which format do you want, CSV or JSON?', 'a blocked reply to the owner is an open question with its asker and text', JSON.stringify(l.questions));
   check(q.how === 'blocked' && q.piece.title === 'Add the export', 'the question names the request it blocked');
+  check(q.how === 'blocked' && q.blocker === undefined, 'a blocked reply without a breakdown carries none');
   check(who(l, ANA).state === 'blocked' && (who(l, ANA) as { question: { text: string } }).question.text === q.text, 'the asker is shown blocked on the question, not idle');
 
   const answer = ownerPost(w, 'ana', 'CSV.', { parentId: root, key: answerKey(tid, ANA, q.ref.kind === 'mail' ? q.ref.id : m('')) });
