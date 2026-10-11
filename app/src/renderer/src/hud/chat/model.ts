@@ -1,6 +1,6 @@
 // What the chat shows, derived from the mailroom's messages. Pure: no store, no React.
 import type { Employee, EmployeeId } from '../../../../shared/protocol.ts';
-import type { ActorId, ActorView, MailView, Message, MessageId, Outcome, RequestView, Verdict } from '../../../../shared/mail.ts';
+import { betweenPair, pairKey, type ActorId, type ActorView, type ConvoKey, type MailView, type Message, type MessageId, type Outcome, type RequestView, type Verdict } from '../../../../shared/mail.ts';
 
 export type Req = Extract<Message, { kind: 'request' }>;
 export type Say = Extract<Message, { kind: 'say' }>;
@@ -111,6 +111,38 @@ export function chainThread(messages: Message[], rootId: MessageId): Item[] {
   }
   return out;
 }
+
+// What two teammates said and asked each other, in either direction: their private thread. A request is a card, so the reader
+// can open the work under it. Nobody else's words are in it, not the PO's and not the owner's.
+export function pairThread(messages: Message[], a: EmployeeId, b: EmployeeId): Item[] {
+  const out: Item[] = [];
+  for (const m of messages) {
+    if (m.kind === 'event' || !betweenPair(m, a, b)) continue;
+    out.push(m.kind === 'request' ? { t: 'card', m } : { t: 'bubble', m, side: 'them' });
+  }
+  return out;
+}
+
+export type PairRow = { key: ConvoKey; a: Employee; b: Employee; last: Message; count: number };
+
+// Every pair of teammates on one block who have said anything to each other, the most recent first. The PO leads a pair it is
+// in, and otherwise the two go in desk order, so a pair reads the same way every time.
+export function teamPairs(employees: Employee[], blockId: Employee['blockId'], messages: Message[]): PairRow[] {
+  const mine = new Map(employees.filter((e) => e.blockId === blockId).map((e) => [e.id as ActorId, e]));
+  const rows = new Map<ConvoKey, PairRow>();
+  for (const m of messages) {
+    const x = mine.get(m.from);
+    const y = mine.get(m.to);
+    if (m.kind === 'event' || !x || !y || x.id === y.id) continue;
+    const [a, b] = isPo(y) || (!isPo(x) && (y.seat ?? '') < (x.seat ?? '')) ? [y, x] : [x, y];
+    const key = pairKey(a.id, b.id);
+    rows.set(key, { key, a, b, last: m, count: (rows.get(key)?.count ?? 0) + 1 });
+  }
+  return [...rows.values()].sort((p, q) => q.last.at - p.last.at);
+}
+
+// Messages someone other than the owner wrote after `seen`: the unread count of a conversation.
+export const unreadSince = (messages: Message[], seen: number) => messages.filter((m) => m.kind !== 'event' && m.from !== 'owner' && m.at > seen).length;
 
 export const textOf = (m: Message) => (m.kind === 'request' ? m.title || m.text : m.text);
 

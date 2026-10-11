@@ -24,7 +24,12 @@ export async function launch({ env = {}, width = 1280, height = 800, exe } = {})
   // Set by Electron-based hosts (editors, agent shells). With it the binary runs as plain Node and never opens a window.
   const { ELECTRON_RUN_AS_NODE: _, ...inherited } = process.env;
   const entry = process.env.OFFICE_OUT_DIR ? join(resolve(APP_DIR, process.env.OFFICE_OUT_DIR), 'main', 'index.js') : '.';
-  const proc = spawn(exe ?? electron, [...(exe ? [] : [entry]), `--remote-debugging-port=${PORT}`], {
+  // Chromium refuses to start as root with its sandbox on, which is how a Linux container runs.
+  const sandbox = process.platform === 'linux' && process.getuid?.() === 0 ? ['--no-sandbox'] : [];
+  // More switches for Chromium, space separated. A box with no GPU needs WebGL on SwiftShader:
+  //   OFFICE_ELECTRON_ARGS='--ignore-gpu-blocklist --use-angle=swiftshader --enable-unsafe-swiftshader --disable-gpu-watchdog'
+  const extra = (process.env.OFFICE_ELECTRON_ARGS ?? '').split(/\s+/).filter(Boolean);
+  const proc = spawn(exe ?? electron, [...(exe ? [] : [entry]), `--remote-debugging-port=${PORT}`, ...sandbox, ...extra], {
     cwd: APP_DIR,
     // OFFICE_TEST_RUN keeps the window hidden and out of the Dock. A scenario can set it to '' to watch a run by eye.
     env: { ...inherited, OFFICE_TEST_RUN: '1', ...env },

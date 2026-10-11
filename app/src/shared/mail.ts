@@ -69,8 +69,20 @@ export const MAX_BATCH = { messages: 8, chars: 12_000 } as const;
 export const DEFAULT_GAUNTLET_ROUNDS = 6;
 export const MAIL_TAIL = 40;
 
-// 'dm:E' is the owner and E plus every chain rooted there. A view, never stored.
-export type ConvoKey = `dm:${EmployeeId}`;
+// 'dm:E' is the owner and E plus every chain rooted there. 'pair:A:B' is what two teammates said and asked each other,
+// with A and B in sorted order, so the pair has one key whichever of them wrote first. Views, never stored.
+export type ConvoKey = `dm:${EmployeeId}` | `pair:${EmployeeId}:${EmployeeId}`;
+
+export const pairKey = (a: EmployeeId, b: EmployeeId): ConvoKey => (a < b ? `pair:${a}:${b}` : `pair:${b}:${a}`);
+
+// The two people of a pair key, or null for any other key.
+export const pairOf = (convo: string): [EmployeeId, EmployeeId] | null => {
+  const m = /^pair:([^:]+):([^:]+)$/.exec(convo);
+  return m && m[1] !== m[2] ? [m[1] as EmployeeId, m[2] as EmployeeId] : null;
+};
+
+// A message straight between two teammates. Requests the mailroom makes for a gauntlet and the owner's own posts are not.
+export const betweenPair = (m: { from: ActorId; to: ActorId }, a: EmployeeId, b: EmployeeId) => (m.from === a && m.to === b) || (m.from === b && m.to === a);
 
 export type ActorState = 'idle' | 'running' | 'awaiting';
 export type ActorView = { state: ActorState; queued: number; serving: MessageId | null; awaiting: MessageId[] };

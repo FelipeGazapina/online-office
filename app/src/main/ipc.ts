@@ -151,7 +151,7 @@ const clientMessage = z.discriminatedUnion('type', [
     urgency: z.enum(['queue', 'next', 'now']).optional(),
   }),
   z.object({ type: z.literal('cancel_message'), messageId: z.string().min(1).transform((s) => s as MessageId) }),
-  z.object({ type: z.literal('load_history'), convo: z.string().regex(/^dm:.+/).transform((s) => s as ConvoKey), before: z.string().min(1).transform((s) => s as MessageId).optional(), limit: z.number().int().min(1).max(200) }),
+  z.object({ type: z.literal('load_history'), convo: z.string().regex(/^(dm:[^:]+|pair:[^:]+:[^:]+)$/).transform((s) => s as ConvoKey), before: z.string().min(1).transform((s) => s as MessageId).optional(), limit: z.number().int().min(1).max(200) }),
   z.object({ type: z.literal('answer'), employeeId, questionId, text: z.string(), always: z.boolean().optional() }),
   z.object({ type: z.literal('meeting_door'), state: meetingDoor }),
   z.object({ type: z.literal('load_models'), provider }),
