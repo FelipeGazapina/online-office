@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { set, useStore } from '../store.ts';
 import { CompanyPanel, SettingsPanel, TaskBoardsPanel } from './Panels.tsx';
-import { enterComputer, leaveComputer, openMirror } from '../computer.ts';
+import { closeLaptop, enterComputer, leaveComputer, openMirror, openMirrorFromLaptop } from '../computer.ts';
 
 type DisplayCaptureVideoConstraints = MediaTrackConstraints & { cursor: 'never' };
 const DISPLAY_CAPTURE_VIDEO: DisplayCaptureVideoConstraints = { frameRate: { ideal: 30, max: 60 }, cursor: 'never' };
@@ -23,13 +23,16 @@ export function ComputerMenu() {
   );
 }
 
-function OfficeDesktop() {
+// The owner's computer. The Mac at the owner's desk and the laptop they carry run this one desktop, so whatever one can do the
+// other can. Only the way out differs: standing up from the desk, or closing the laptop.
+export function MyMacDesktop({ device }: { device: 'desk' | 'laptop' }) {
   const company = useStore((s) => s.company);
+  const laptop = device === 'laptop';
   return (
     <main className="mac-portal">
-      <header className="mac-bar"><div className="mac-brand"><span className="mac-logo">⌘</span><b>My Mac</b></div><span className="mac-live">OFFICE DESKTOP</span><button className="btn ghost" onClick={() => leaveComputer()}>Stand up (F)</button></header>
+      <header className="mac-bar"><div className="mac-brand"><span className="mac-logo">⌘</span><b>My Mac</b></div><span className="mac-live">{laptop ? 'LAPTOP' : 'OFFICE DESKTOP'}</span>{laptop ? <button className="btn ghost" onClick={() => closeLaptop()}>Close laptop (Esc)</button> : <button className="btn ghost" onClick={() => leaveComputer()}>Stand up (F)</button>}</header>
       <section className="mac-desktop"><div className="mac-workspace">
-        <div className="mac-app-window"><div className="mac-window-head"><span className="traffic red" /><span className="traffic amber" /><span className="traffic green" /><b>My Mac</b></div><div className="mac-window-body"><p className="mac-kicker">Your computer</p><h1>My Mac</h1><p className="muted">Manage your office here, or open the live view of your native Mac when you need it.</p><div className="mac-actions"><button className="mac-action" onClick={() => document.getElementById('mac-configuration')?.scrollIntoView({ block: 'start' })}><span>⚙️</span><b>Configuration</b><small>Hiring and blocks</small></button><button className="mac-action" onClick={openMirror}><span>🖥️</span><b>Live Mac mirror</b><small>Open your native desktop</small></button></div></div></div>
+        <div className="mac-app-window"><div className="mac-window-head"><span className="traffic red" /><span className="traffic amber" /><span className="traffic green" /><b>My Mac</b></div><div className="mac-window-body"><p className="mac-kicker">Your computer</p><h1>My Mac</h1><p className="muted">Manage your office here, or open the live view of your native Mac when you need it.</p><div className="mac-actions"><button className="mac-action" onClick={() => document.getElementById('mac-configuration')?.scrollIntoView({ block: 'start' })}><span>⚙️</span><b>Configuration</b><small>Hiring and blocks</small></button><button className="mac-action" onClick={laptop ? openMirrorFromLaptop : openMirror}><span>🖥️</span><b>Live Mac mirror</b><small>Open your native desktop</small></button></div></div></div>
         <div id="mac-configuration" className="mac-app-window mac-office-window"><div className="mac-window-head"><span className="traffic red" /><span className="traffic amber" /><span className="traffic green" /><b>Configuration · {company?.name ?? 'Company'}</b></div><CompanyPanel allowOverLimit /></div>
         <div className="mac-app-window mac-settings-window"><div className="mac-window-head"><span className="traffic red" /><span className="traffic amber" /><span className="traffic green" /><b>Office settings</b></div><SettingsPanel /></div>
       </div></section>
@@ -133,5 +136,5 @@ export function MacPortal() {
       </main>
     );
   }
-  return computerView === 'office' ? <OfficeDesktop /> : <MirrorDesktop />;
+  return computerView === 'office' ? <MyMacDesktop device="desk" /> : <MirrorDesktop />;
 }

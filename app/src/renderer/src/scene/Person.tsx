@@ -4,6 +4,9 @@ import { crowd, type CrowdEntry, type Look } from './people/crowd.ts';
 
 export type { Look };
 export type Pose = { pos: Vector3; yaw: number; speed: number; seated: boolean };
+// Both hands on two points in the person's own frame and metres (x across the body, y up from the floor, z forward), `w` of
+// the way from whatever the arms were doing.
+export type Reach = { w: number; left: Vector3; right: Vector3 };
 
 // The model stands 1.7 m; a touch over so a person reads next to a desk and a nameplate.
 const PERSON_SCALE = 1.1;
@@ -11,6 +14,28 @@ const HIP = 0.86;
 // Where the hips sit in world metres while seated, which is the height of the chair seat.
 const SEAT_HIP = 0.47;
 const sm = (x: number) => x * x * (3 - 2 * x);
+const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
+// The arm as the joints below build it: the shoulder on the body, the upper arm to the elbow, the forearm to the middle of the hand.
+const SHOULDER_X = 0.215;
+const SHOULDER_Y = HIP + 0.46;
+const UPPER = 0.27;
+const FORE = 0.285;
+
+/** The shoulder and elbow angles that put the hand of the arm on `side` (-1 left of the body, 1 right) on `hand`, for an upright body.
+ * The elbow folds to make the reach as long as the hand is far; the shoulder rolls the arm across, then swings it up to the hand. */
+function armTo(side: number, hand: Vector3) {
+  const dx = hand.x / PERSON_SCALE - side * SHOULDER_X;
+  const dy = hand.y / PERSON_SCALE - SHOULDER_Y;
+  const dz = hand.z / PERSON_SCALE;
+  const d = clamp(Math.hypot(dx, dy, dz), Math.abs(UPPER - FORE) + 1e-3, UPPER + FORE - 1e-3);
+  const bend = Math.PI - Math.acos(clamp((UPPER * UPPER + FORE * FORE - d * d) / (2 * UPPER * FORE), -1, 1));
+  // The hand in the arm's own frame once the elbow has folded: `down` along the hanging arm, `ahead` in front of it.
+  const down = UPPER + FORE * Math.cos(bend);
+  const ahead = FORE * Math.sin(bend);
+  const roll = Math.asin(clamp(dx / down, -1, 1));
+  const pitch = Math.atan2(dz, dy) - Math.atan2(ahead, -down * Math.cos(roll));
+  return { pitch, roll, elbow: -bend };
+}
 
 // One person. Both the owner and every employee are posed with this; the sim owns where they are.
 // The group tree below holds only the joints the animation moves and the children that follow the person (labels, rings).
@@ -18,6 +43,7 @@ const sm = (x: number) => x * x * (3 - 2 * x);
 export function Person({
   look,
   read,
+  reach,
   typing = false,
   hidden = false,
   onPick,
@@ -25,6 +51,7 @@ export function Person({
 }: {
   look: Look;
   read: () => Pose | null;
+  reach?: () => Reach | null;
   typing?: boolean;
   hidden?: boolean;
   onPick?: (at: { x: number; y: number }) => void;
@@ -45,6 +72,8 @@ export function Person({
   typingRef.current = typing;
   const readRef = useRef(read);
   readRef.current = read;
+  const reachRef = useRef(reach);
+  reachRef.current = reach;
   const anim = useRef({ phase: Math.random() * 6, seat: 0, walk: 0, type: 0, talk: Math.random() * 40 });
 
   const update = (t: number, dt: number) => {
@@ -98,6 +127,24 @@ export function Person({
     armR.current!.rotation.z -= 0.25 * talk;
     armL.current!.rotation.x += -0.25 * talk;
     elbowL.current!.rotation.x += -0.5 * talk;
+
+    // Holding something: the body straightens and both hands go to it.
+    const r = reachRef.current?.();
+    if (r && r.w > 0) {
+      const w = r.w;
+      body.current!.rotation.x *= 1 - w;
+      body.current!.rotation.y *= 1 - w;
+      body.current!.rotation.z *= 1 - w;
+      head.current!.rotation.x += (0.32 - head.current!.rotation.x) * w;
+      head.current!.rotation.y *= 1 - w;
+      const arms = [[armL.current!, elbowL.current!, -1, r.left], [armR.current!, elbowR.current!, 1, r.right]] as const;
+      for (const [arm, elbow, side, hand] of arms) {
+        const to = armTo(side, hand);
+        arm.rotation.x += (to.pitch - arm.rotation.x) * w;
+        arm.rotation.z += (to.roll - arm.rotation.z) * w;
+        elbow.rotation.x += (to.elbow - elbow.rotation.x) * w;
+      }
+    }
   };
 
   const [entry] = useState<CrowdEntry>(() => ({ joints: null as never, look, hidden, update: () => {}, onPick }));

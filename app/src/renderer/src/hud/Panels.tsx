@@ -311,7 +311,7 @@ const KEYS: [string, string][] = [
   ['F near a board', 'Open the task board or project computer'],
   ['Click the whiteboard', 'Open the diagram large'],
   ['B', 'Build mode: move furniture and whole blocks. Works in first person too'],
-  ['Esc', 'Close whatever is open'],
+  ['Esc', 'Close whatever is open. With nothing open, take out your laptop; Esc again puts it away'],
   ['H', 'This help'],
 ];
 

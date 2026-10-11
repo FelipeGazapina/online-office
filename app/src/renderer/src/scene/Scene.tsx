@@ -10,6 +10,7 @@ import { EmployeeView } from './EmployeeView.tsx';
 import { Office } from './Office.tsx';
 import { CrowdMeshes } from './people/CrowdMeshes.tsx';
 import { OwnerView } from './OwnerView.tsx';
+import { OwnerLaptop } from './OwnerLaptop.tsx';
 import { DeskAim } from './DeskAim.tsx';
 import { setPickView } from './pickView.ts';
 import { Staged } from './Staged.tsx';
@@ -60,6 +61,7 @@ function World({ onReady }: { onReady: () => void }) {
         </>
         <CrowdMeshes />
         <OwnerView />
+        <OwnerLaptop />
         <WalkMarker />
         <DeskAim />
         <>
