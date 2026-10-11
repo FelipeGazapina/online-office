@@ -1,4 +1,4 @@
-import { scratch, assert } from './lib.mjs';
+import { scratch, assert, sceneReady } from './lib.mjs';
 
 const { dataDir, repo } = scratch();
 export const env = { OFFICE_DATA_DIR: dataDir, OFFICE_START_LEVEL: '5', OFFICE_TEST_PICK_FOLDER: repo };
@@ -7,6 +7,8 @@ export default async (s) => {
   await s.waitFor('!!window.__office && !!window.office');
   await s.eval(`window.office.send({ type: 'create_block', cwd: ${JSON.stringify(repo)} })`);
   await s.waitFor('__office.store.getState().company.blocks.length === 1');
+  // The owner's desk is part of the building, which arrives after the company: teleporting before it lands finds no computer.
+  await sceneReady(s);
   await s.eval("window.__office.teleport(-15.6, 5.2, Math.PI); window.__office.step(0.5)");
   assert(await s.eval("__office.store.getState().nearComputer"), 'the owner is near the computer');
   await s.press('KeyF', 'f');
