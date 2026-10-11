@@ -2,7 +2,7 @@ import { dismissed, get, set, setSetting, toggleCamera } from './store.ts';
 import { KEYS_INTENT, runtime, STEER_KEYS } from './runtime.ts';
 import { setPtt } from './talk.ts';
 import { toggleMeetingDoor } from './meeting.ts';
-import { enterComputer, enterMonitor, enterProjectComputer, escapeMonitor, leaveComputer, leaveMonitor, useMonitor } from './computer.ts';
+import { closeLaptop, enterComputer, enterMonitor, enterProjectComputer, escapeMonitor, laptopOut, leaveComputer, leaveMonitor, openLaptop, useLaptop, useMonitor } from './computer.ts';
 import { holdModifier } from './hud/build/actions.ts';
 import { buildKey } from './hud/build/keys.ts';
 import { buildView } from './hud/build/state.ts';
@@ -17,6 +17,18 @@ export function installInput() {
     holdModifier(e.code, true);
     if (isTyping(e.target)) {
       if (e.key === 'Escape') (e.target as HTMLElement).blur();
+      return;
+    }
+    // The laptop is out, or on its way: Esc closes what is open over it, then puts it away (or takes it out again while it goes).
+    // Nothing else moves the owner while both hands are on it, and the other keys stay with the page, so Tab walks its buttons.
+    if (laptopOut()) {
+      if (e.code !== 'Escape' || e.metaKey || e.ctrlKey || e.altKey) return;
+      const s = get();
+      if (s.modal) set({ modal: dismissed(s.modal) });
+      else if (s.menu) set({ menu: null });
+      else if (s.helpOpen) set({ helpOpen: false });
+      else if (useLaptop.getState().open) closeLaptop();
+      else openLaptop();
       return;
     }
     if (buildKey(e)) return;
@@ -82,7 +94,9 @@ export function installInput() {
         if (s.menu) return set({ menu: null });
         if (s.helpOpen) return set({ helpOpen: false });
         if (s.modal) return set({ modal: dismissed(s.modal) });
-        return set({ selectedId: null });
+        if (s.selectedId) return set({ selectedId: null });
+        // Nothing is open: the owner takes out the laptop they always carry.
+        return openLaptop();
     }
 
     if (s.modal) return;

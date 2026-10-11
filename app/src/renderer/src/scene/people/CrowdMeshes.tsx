@@ -108,6 +108,8 @@ function faceMaterial(m: MeshStandardMaterial) {
 }
 
 const HIT = new CylinderGeometry(0.42, 0.42, 1.8, 8);
+// Tags the meshes that draw people, so a probe can look past them.
+const CROWD = { crowd: true };
 const HIT_MATERIAL = new MeshBasicMaterial({ transparent: true, opacity: 0, depthWrite: false });
 const HIT_OFFSET = at(0, 0.9, 0);
 // Instances move every frame, so the culling and raycast bounds must cover the whole world.
@@ -182,6 +184,7 @@ export function CrowdMeshes() {
             }
           }}
           args={[kind.geometry, MATERIALS[k], capacity * kind.slots.length]}
+          userData={CROWD}
           castShadow={kind.shadow}
         />
       ))}
@@ -196,6 +199,7 @@ export function CrowdMeshes() {
           }
         }}
         args={[HIT, HIT_MATERIAL, capacity]}
+        userData={CROWD}
         onClick={(e) => {
           const who = e.instanceId === undefined ? undefined : pickable.current[e.instanceId];
           if (!who) return;

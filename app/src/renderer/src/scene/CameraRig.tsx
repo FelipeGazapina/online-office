@@ -1,14 +1,15 @@
 import { useFrame, useThree } from '@react-three/fiber';
 import { useEffect, useRef } from 'react';
-import { Vector3, type Object3D, type PerspectiveCamera } from 'three';
+import { Matrix4, Vector3, type Object3D, type PerspectiveCamera } from 'three';
 import { angleDiff } from '../util.ts';
 import { runtime } from '../runtime.ts';
 import { get, useStore } from '../store.ts';
 import { stepSim } from '../sim.ts';
 import { crowd } from './people/crowd.ts';
 import { buildView } from '../hud/build/state.ts';
-import { useMonitor } from '../computer.ts';
-import { monitorPoses, zoomFrame } from './monitorPose.ts';
+import { laptopAnim, laptopOut, stepLaptop, useLaptop, useMonitor } from '../computer.ts';
+import { monitorPoses, zoomFrame, type MonitorPose } from './monitorPose.ts';
+import { LAPTOP_FILL, laptopScreen, ownerMatrix, phases, SHOW_FOV, showPoint } from './laptopPose.ts';
 import { STORY_H } from '../../../shared/space/index.ts';
 
 const ISO_PITCH = 0.58;
@@ -45,7 +46,7 @@ export function SimDriver() { useFrame((_, dt) => stepSim(dt), -2); return null;
 // Anything on screen that wants the cursor: the mouse must be free for it.
 const uiOpen = () => {
   const s = get();
-  return Boolean(s.modal || s.menu || s.helpOpen || s.computerMenu || s.portalMode || s.selectedId || useMonitor.getState().open);
+  return Boolean(s.modal || s.menu || s.helpOpen || s.computerMenu || s.portalMode || s.selectedId || useMonitor.getState().open || laptopOut());
 };
 
 export function CameraRig() {
@@ -53,6 +54,7 @@ export function CameraRig() {
   const mode = useStore((s) => s.camera);
   const ui = useStore(() => uiOpen());
   const monitor = useMonitor((s) => s.open);
+  const laptop = useLaptop((s) => s.open);
   const focus = useRef(new Vector3());
   const snap = useRef(true);
   const placed = useRef(false);
@@ -63,7 +65,7 @@ export function CameraRig() {
   const locked = useRef(false);
   // How far the camera has flown into the monitor of the open terminal (1) and the pose it flew to, kept while it flies back.
   const zoom = useRef({ t: 0, id: null as string | null });
-  const scratch = useRef({ zoomPos: new Vector3(), zoomLook: new Vector3(), iso: new Vector3(), isoPos: new Vector3(), isoLook: new Vector3(), eye: new Vector3(), eyeLook: new Vector3(), look: new Vector3(), want: new Vector3() });
+  const scratch = useRef({ zoomPos: new Vector3(), zoomLook: new Vector3(), iso: new Vector3(), isoPos: new Vector3(), isoLook: new Vector3(), eye: new Vector3(), eyeLook: new Vector3(), look: new Vector3(), want: new Vector3(), owner: new Matrix4(), shoulder: new Vector3(), screen: { center: new Vector3(), normal: new Vector3(), w: 0, h: 0, floor: 0 } as MonitorPose });
 
   useEffect(() => { runtime.view.isoDist = ISO_START; }, []);
 
@@ -88,8 +90,8 @@ export function CameraRig() {
   }, [gl, mode]);
 
   useEffect(() => {
-    if ((ui || monitor) && document.pointerLockElement === gl.domElement) document.exitPointerLock();
-  }, [gl, ui, monitor]);
+    if ((ui || monitor || laptop) && document.pointerLockElement === gl.domElement) document.exitPointerLock();
+  }, [gl, ui, monitor, laptop]);
 
   useEffect(() => {
     const el = gl.domElement;
@@ -227,6 +229,24 @@ export function CameraRig() {
       look.lerp(zoomLook, k);
       fov += (frame.fov - fov) * k;
     } else if (z.t === 0) z.id = null;
+    // The laptop: the camera steps out to the owner's shoulder while they bring it up and open it, then goes into its screen.
+    stepLaptop(dt);
+    if (laptopAnim.s > 0) {
+      const { zoomPos, zoomLook, shoulder, screen } = scratch.current;
+      const at = phases(laptopAnim.s);
+      const frame = ownerMatrix(owner.pos, owner.yaw, scratch.current.owner);
+      laptopScreen(frame, laptopAnim.s, screen);
+      showPoint(frame, shoulder);
+      cam.position.lerp(shoulder, at.show);
+      look.lerp(screen.center, at.show);
+      fov += (SHOW_FOV - fov) * at.show;
+      const close = zoomFrame(screen, state.size.width / state.size.height, LAPTOP_FILL);
+      zoomPos.copy(screen.normal).multiplyScalar(close.dist).add(screen.center);
+      zoomLook.copy(screen.center);
+      cam.position.lerp(zoomPos, at.zoom);
+      look.lerp(zoomLook, at.zoom);
+      fov += (close.fov - fov) * at.zoom;
+    }
     cam.lookAt(look);
     if (Math.abs(cam.fov - fov) > 0.001 || cam.near !== 0.1) { cam.fov = fov; cam.near = 0.1; cam.updateProjectionMatrix(); }
     // Read by verify/e2e-camera.mjs. ownerVisible asks the scene graph itself whether the owner's body would be drawn.

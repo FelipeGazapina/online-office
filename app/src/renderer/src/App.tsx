@@ -7,6 +7,8 @@ import { Bottom } from './hud/Talk.tsx';
 import { MonitorPrompt, TerminalPanel } from './hud/terminal/TerminalPanel.tsx';
 import { UpdateChip } from './hud/UpdateControl.tsx';
 import { ComputerMenu, MacPortal } from './hud/MacPortal.tsx';
+import { Inventory } from './hud/Inventory.tsx';
+import { LaptopPanel } from './hud/LaptopPanel.tsx';
 import { CameraToggle } from './hud/CameraToggle.tsx';
 import { Clock } from './hud/Clock.tsx';
 import { TasksChip } from './hud/tasks/TasksChip.tsx';
@@ -37,12 +39,14 @@ export function App() {
         <ResizableHud itemKey="waiting-meter"><WaitingMeter /></ResizableHud>
         <ResizableHud itemKey="update-chip"><UpdateChip /></ResizableHud>
         <ResizableHud itemKey="bottom-talk"><Bottom /></ResizableHud>
+        <ResizableHud itemKey="inventory"><Inventory /></ResizableHud>
       </div>
       {portalMode && <MacPortal />}
       <ResizableHud itemKey="toasts"><Toasts /></ResizableHud>
       <ResizableHud itemKey="computer-prompt"><ComputerPrompt /></ResizableHud>
       <MonitorPrompt />
       <TerminalPanel />
+      <LaptopPanel />
       <ResizableHud itemKey="drawer"><Drawer /></ResizableHud>
       <ModalsHud />
       <ResizableHud itemKey="employee-menu"><EmployeeMenu /></ResizableHud>

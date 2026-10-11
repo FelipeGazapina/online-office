@@ -39,6 +39,7 @@ const HUD_ITEMS = {
   'employee-menu': 'Employee menu',
   'help-overlay': 'Help dialog',
   'computer-menu': 'Computer menu',
+  inventory: 'Inventory',
   'owner-label': 'Your name tag',
 } as const;
 

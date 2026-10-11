@@ -10,6 +10,7 @@ import { announceArrival, cancelSpeech, LISTEN_RADIUS } from './audio.ts';
 import { KEYS_INTENT, runtime, STEER_KEYS, type AvatarRT, type OwnerIntent, type WalkGoal } from './runtime.ts';
 import { get, set, toast, waitingQueue } from './store.ts';
 import { ownerInsideMeetingRoom } from './meeting.ts';
+import { laptopOut } from './computer.ts';
 import { angleDiff } from './util.ts';
 import {
   approachTo,
@@ -202,8 +203,9 @@ function plan(goal: WalkGoal, world: World): Walk | null {
   return walk;
 }
 
-// A walk that cannot be planned leaves the owner doing what they were doing, and says why.
+// A walk that cannot be planned leaves the owner doing what they were doing, and says why. With the laptop out they walk nowhere.
 export function walkTo(goal: WalkGoal) {
+  if (laptopOut()) return;
   const door = get().meetingDoor;
   const world = worldFor(get().building, door);
   const walk = world && plan(goal, world);
@@ -369,7 +371,7 @@ function stepOwner(dt: number, world: World, talkingTo: EmployeeId | null) {
     runtime.queueYaw += angleDiff(runtime.queueYaw, heading) * ease(dt, 2.5);
   } else if (first) {
     owner.yaw = view.yaw;
-  } else if (talkingTo) {
+  } else if (talkingTo && !laptopOut()) {
     const av = runtime.avatars.get(talkingTo);
     if (av) {
       const target = Math.atan2(av.pos.x - owner.pos.x, av.pos.z - owner.pos.z);
@@ -568,8 +570,8 @@ export function stepSim(rawDt: number) {
   const askerId = meetingDoor === 'open' && front && front.status.kind === 'blocked_on_owner' && runtime.arrived.get(front.id) === front.status.question.id ? front.id : null;
 
   // Proximity opens the chat only in first person and only for someone in view, on the step they become so. In the
-  // overview it opens only for the person the owner chose to walk to, once they are the one in range.
-  const nowOpenable = state.camera === 'first' && talkingTo && inView(talkingTo) ? talkingTo : null;
+  // overview it opens only for the person the owner chose to walk to, once they are the one in range. Never over the laptop.
+  const nowOpenable = state.camera === 'first' && talkingTo && inView(talkingTo) && !laptopOut() ? talkingTo : null;
   let open = nowOpenable !== runtime.chatOpenable ? nowOpenable : null;
   runtime.chatOpenable = nowOpenable;
   if (talkingTo && talkingTo === runtime.owner.approach && runtime.owner.approachArrived) {
