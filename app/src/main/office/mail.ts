@@ -32,6 +32,8 @@ import {
   type Urgency,
   type Verdict,
   WAITING_TEXT,
+  betweenPair,
+  pairOf,
 } from '../../shared/mail.ts';
 import type { ArtifactPort } from './mail-artifacts.ts';
 import type { Integration } from './workspace.ts';
@@ -326,8 +328,11 @@ export const gauntletNext = (s: MailState, gid: MessageId): GauntletStep | null 
   return { act: 'work', round: rounds + 1, findings: verdict.findings };
 };
 
-// dm:E is the owner and E, plus every chain rooted in a message between them.
+// dm:E is the owner and E, plus every chain rooted in a message between them. pair:A:B is only what A and B said and
+// asked each other, in either direction, so each pair of teammates has a thread of its own and nobody else's words.
 export const convoMessages = (s: MailState, convo: ConvoKey): Message[] => {
+  const pair = pairOf(convo);
+  if (pair) return s.order.map((id) => s.messages.get(id)!).filter((m) => betweenPair(m, pair[0], pair[1]));
   const e = convo.slice(3);
   const between = (m: Message) => (m.from === 'owner' && m.to === e) || (m.from === e && m.to === 'owner');
   const roots = new Set<MessageId>();

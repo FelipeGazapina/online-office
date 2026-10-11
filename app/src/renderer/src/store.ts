@@ -18,7 +18,7 @@ import type {
 import type { Board, BoardId, BoardSync, Task, TaskId, TaskTime } from '../../shared/tasks.ts';
 import type { StageHolds } from './boardView.ts';
 import type { Aim } from './deskDrop.ts';
-import { emptyMailView, type MailView, type Message, type MessageId } from '../../shared/mail.ts';
+import { emptyMailView, type ConvoKey, type MailView, type Message, type MessageId } from '../../shared/mail.ts';
 import type { Building, ItemId, PaintId, Rot, Vec2 } from '../../shared/space/index.ts';
 import type { Language, VoiceQuality } from '../../shared/voice.ts';
 import { initialVoice, type VoiceState } from './voice/chip.ts';
@@ -63,6 +63,8 @@ export type BuildState = { tool: BuildTool; tab: string; search: string; searchi
 export type BuildCursor = { readout: { text: string; x: number; y: number; bad: boolean; anchored?: boolean } | null; verdict: { ok: boolean; text: string } | null; hover: ItemId | null };
 
 export type LogLine = { line: string; at: number };
+export type MacApp = 'home' | 'chat';
+export type TeamChat = { blockId: BlockId | null; convo: ConvoKey | null; thread: MessageId | null };
 // A post the owner just sent, shown at once. The mail view takes over when it carries the same `clientId` as its key.
 export type PendingPost = { clientId: string; to: string; text: string; as: 'request' | 'say'; at: number };
 export type Toast = { id: number; text: string; tone: 'info' | 'warn' | 'ok' };
@@ -132,6 +134,12 @@ type State = Settings & {
   portalMode: boolean;
   computerState: 'away' | 'seated';
   computerView: ComputerView;
+  // The app the owner's Mac shows, at the desk and on the laptop alike.
+  macApp: MacApp;
+  // The Chat app: the project it shows, the conversation open in it (null picks the PO's), and the request whose thread
+  // is open beside it. `chatSeen` is when the owner last looked at each conversation, for the unread counts.
+  teamChat: TeamChat;
+  chatSeen: Record<string, number>;
   nearComputer: boolean;
   nearProjectComputer: BlockId | null;
   nearTaskBoard: BlockId | null;
@@ -186,6 +194,9 @@ export const useStore = create<State>()(() => ({
   portalMode: false,
   computerState: 'away',
   computerView: 'office',
+  macApp: 'home',
+  teamChat: { blockId: null, convo: null, thread: null },
+  chatSeen: {},
   nearComputer: false,
   nearProjectComputer: null,
   nearTaskBoard: null,

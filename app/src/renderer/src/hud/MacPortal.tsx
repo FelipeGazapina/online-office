@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { set, useStore } from '../store.ts';
 import { CompanyPanel, SettingsPanel, TaskBoardsPanel } from './Panels.tsx';
 import { closeLaptop, enterComputer, leaveComputer, openMirror, openMirrorFromLaptop } from '../computer.ts';
+import { TeamChat, useChatUnread } from './teamchat/TeamChat.tsx';
 
 type DisplayCaptureVideoConstraints = MediaTrackConstraints & { cursor: 'never' };
 const DISPLAY_CAPTURE_VIDEO: DisplayCaptureVideoConstraints = { frameRate: { ideal: 30, max: 60 }, cursor: 'never' };
@@ -27,15 +28,17 @@ export function ComputerMenu() {
 // other can. Only the way out differs: standing up from the desk, or closing the laptop.
 export function MyMacDesktop({ device }: { device: 'desk' | 'laptop' }) {
   const company = useStore((s) => s.company);
+  const app = useStore((s) => s.macApp);
+  const unread = useChatUnread();
   const laptop = device === 'laptop';
   return (
-    <main className="mac-portal">
-      <header className="mac-bar"><div className="mac-brand"><span className="mac-logo">⌘</span><b>My Mac</b></div><span className="mac-live">{laptop ? 'LAPTOP' : 'OFFICE DESKTOP'}</span>{laptop ? <button className="btn ghost" onClick={() => closeLaptop()}>Close laptop (Esc)</button> : <button className="btn ghost" onClick={() => leaveComputer()}>Stand up (F)</button>}</header>
-      <section className="mac-desktop"><div className="mac-workspace">
-        <div className="mac-app-window"><div className="mac-window-head"><span className="traffic red" /><span className="traffic amber" /><span className="traffic green" /><b>My Mac</b></div><div className="mac-window-body"><p className="mac-kicker">Your computer</p><h1>My Mac</h1><p className="muted">Manage your office here, or open the live view of your native Mac when you need it.</p><div className="mac-actions"><button className="mac-action" onClick={() => document.getElementById('mac-configuration')?.scrollIntoView({ block: 'start' })}><span>⚙️</span><b>Configuration</b><small>Hiring and blocks</small></button><button className="mac-action" onClick={laptop ? openMirrorFromLaptop : openMirror}><span>🖥️</span><b>Live Mac mirror</b><small>Open your native desktop</small></button></div></div></div>
+    <main className="mac-portal" data-app={app}>
+      <header className="mac-bar"><div className="mac-brand"><span className="mac-logo">⌘</span><b>My Mac</b></div><nav className="mac-tabs" role="tablist" aria-label="Apps"><button role="tab" className="mac-tab" aria-selected={app === 'home'} onClick={() => set({ macApp: 'home' })}>Home</button><button role="tab" className="mac-tab" data-tab="chat" aria-selected={app === 'chat'} onClick={() => set({ macApp: 'chat' })}>Chat{unread > 0 && <i className="mac-tab-badge">{unread}</i>}</button></nav><span className="mac-live">{laptop ? 'LAPTOP' : 'OFFICE DESKTOP'}</span>{laptop ? <button className="btn ghost" onClick={() => closeLaptop()}>Close laptop (Esc)</button> : <button className="btn ghost" onClick={() => leaveComputer()}>Stand up (F)</button>}</header>
+      {app === 'chat' ? <section className="mac-desktop tc-desktop"><TeamChat /></section> : <section className="mac-desktop"><div className="mac-workspace">
+        <div className="mac-app-window"><div className="mac-window-head"><span className="traffic red" /><span className="traffic amber" /><span className="traffic green" /><b>My Mac</b></div><div className="mac-window-body"><p className="mac-kicker">Your computer</p><h1>My Mac</h1><p className="muted">Manage your office here, or open the live view of your native Mac when you need it.</p><div className="mac-actions"><button className="mac-action" onClick={() => set({ macApp: 'chat' })}><span>💬</span><b>Chat</b><small>Talk with your teams</small></button><button className="mac-action" onClick={() => document.getElementById('mac-configuration')?.scrollIntoView({ block: 'start' })}><span>⚙️</span><b>Configuration</b><small>Hiring and blocks</small></button><button className="mac-action" onClick={laptop ? openMirrorFromLaptop : openMirror}><span>🖥️</span><b>Live Mac mirror</b><small>Open your native desktop</small></button></div></div></div>
         <div id="mac-configuration" className="mac-app-window mac-office-window"><div className="mac-window-head"><span className="traffic red" /><span className="traffic amber" /><span className="traffic green" /><b>Configuration · {company?.name ?? 'Company'}</b></div><CompanyPanel allowOverLimit /></div>
         <div className="mac-app-window mac-settings-window"><div className="mac-window-head"><span className="traffic red" /><span className="traffic amber" /><span className="traffic green" /><b>Office settings</b></div><SettingsPanel /></div>
-      </div></section>
+      </div></section>}
     </main>
   );
 }

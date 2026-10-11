@@ -1,8 +1,8 @@
 // No model, no Electron, no sessions. The pure mailroom core and its shell, driven through fake ports.
 // Run from app/: node verify/mail-check.ts   Exits 1 on any failed check.
 import type { EmployeeId } from '../src/shared/protocol.ts';
-import type { LedgerEntry, MessageId } from '../src/shared/mail.ts';
-import { MAX_HOPS } from '../src/shared/mail.ts';
+import type { ConvoKey, LedgerEntry, MessageId } from '../src/shared/mail.ts';
+import { betweenPair, MAX_HOPS, pairKey, pairOf } from '../src/shared/mail.ts';
 import { emptyMail, fold, Mailroom, recover, serving, type MailState } from '../src/main/office/mail.ts';
 import { check, finish } from './check.ts';
 
@@ -178,6 +178,32 @@ console.log('\n# asking a peer and waiting');
   check(answer.length === 1 && answer[0]!.kind === 'reply' && answer[0]!.text === 'yes', 'awaitReplies returns the reply as a result');
   const none = await w.room.await(BRUNO, { ids: [], timeoutSec: 0.05 });
   check(none.length === 0, 'awaitReplies times out with nothing');
+}
+
+console.log('\n# one thread per pair of teammates');
+{
+  const w = world();
+  const root = ids(w.room.post(owner('po', 'ship csv export')));
+  const toAna = ids(w.room.post(ask(PO, 'Ana', 'backend', ['route returns csv'])));
+  const toBruno = ids(w.room.post(ask(PO, 'Bruno', 'ui')));
+  w.room.turnEnded(PO, 'Split into two pieces.', true);
+  const help = ids(w.room.post({ from: ANA, to: 'bruno', body: { kind: 'request', intent: 'help', text: 'which column name does the ui expect?' } }));
+  check(life(w, help) === 'queued', 'Bruno is still on the PO\'s piece, so Ana\'s question waits for him');
+  w.room.turnEnded(BRUNO, 'ui done', true);
+  w.room.turnEnded(BRUNO, 'It expects created_at.', true);
+  w.room.turnEnded(ANA, 'backend done', true);
+  const thread = (a: EmployeeId, b: EmployeeId) => w.room.history(pairKey(a, b), undefined, 200).messages;
+  const anaBruno = thread(ANA, BRUNO);
+  check(pairKey(ANA, BRUNO) === pairKey(BRUNO, ANA), 'a pair has one key whichever of them comes first');
+  check(anaBruno.length === 2 && anaBruno[0]!.id === help && anaBruno[1]!.kind === 'reply' && anaBruno[1]!.requestId === help, 'the pair thread holds the question and its answer', JSON.stringify(anaBruno.map((m) => [m.kind, m.from, m.to])));
+  check(anaBruno.every((m) => betweenPair(m, ANA, BRUNO)), 'nothing from the PO or the owner lands in the pair thread of two teammates');
+  const poAna = thread(PO, ANA);
+  check(poAna.some((m) => m.id === toAna) && poAna.some((m) => m.kind === 'reply' && m.requestId === toAna) && !poAna.some((m) => m.id === toBruno || m.id === help), 'the PO and Ana have their own thread, without Bruno in it');
+  const poBruno = thread(PO, BRUNO);
+  check(poBruno.some((m) => m.id === toBruno) && !poBruno.some((m) => m.id === toAna), 'and so do the PO and Bruno');
+  const dm = w.room.history('dm:po' as ConvoKey, undefined, 200).messages;
+  check(dm.some((m) => m.id === root) && dm.some((m) => m.id === toAna), 'the owner\'s thread with the PO still carries the whole chain under the owner\'s request');
+  check(pairOf('pair:ana:ana') === null && pairOf('dm:ana') === null && pairOf(pairKey(ANA, BRUNO))?.join() === 'ana,bruno', 'only a key of two different people is a pair');
 }
 
 console.log('\n# gauntlet');

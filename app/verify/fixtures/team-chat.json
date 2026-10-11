@@ -1,0 +1,826 @@
+{
+ "generatedAt": 1791740583744,
+ "view": {
+  "seq": 37,
+  "actors": {
+   "po": {
+    "state": "idle",
+    "queued": 0,
+    "serving": "m0023",
+    "awaiting": []
+   },
+   "ana": {
+    "state": "running",
+    "queued": 0,
+    "serving": "m0026",
+    "awaiting": []
+   },
+   "bruno": {
+    "state": "idle",
+    "queued": 0,
+    "serving": null,
+    "awaiting": []
+   },
+   "cleo": {
+    "state": "idle",
+    "queued": 0,
+    "serving": null,
+    "awaiting": []
+   },
+   "zed": {
+    "state": "idle",
+    "queued": 0,
+    "serving": null,
+    "awaiting": []
+   }
+  },
+  "open": [
+   {
+    "id": "m0023",
+    "rootId": "m0023",
+    "parentId": null,
+    "from": "owner",
+    "to": "po",
+    "intent": "work",
+    "title": "Next: add a PDF export of the same report.",
+    "at": 1791740523744,
+    "life": {
+     "s": "delivered",
+     "turn": "m0024"
+    },
+    "ahead": 0
+   },
+   {
+    "id": "m0026",
+    "rootId": "m0023",
+    "parentId": "m0023",
+    "from": "po",
+    "to": "ana",
+    "intent": "work",
+    "title": "PDF: render the report",
+    "at": 1791740559744,
+    "life": {
+     "s": "delivered",
+     "turn": "m0027"
+    },
+    "ahead": 0
+   }
+  ],
+  "tail": [
+   {
+    "id": "m0001",
+    "rootId": "m0001",
+    "parentId": null,
+    "from": "owner",
+    "to": "po",
+    "at": 1791739023744,
+    "hops": 0,
+    "kind": "request",
+    "intent": "work",
+    "title": "Add CSV export to the reports page, with tests and a docs section.",
+    "text": "Add CSV export to the reports page, with tests and a docs section."
+   },
+   {
+    "id": "m0003",
+    "rootId": "m0001",
+    "parentId": "m0001",
+    "from": "po",
+    "to": "owner",
+    "at": 1791739035744,
+    "hops": 1,
+    "kind": "say",
+    "text": "On it. I will split this into the API, the UI and the docs, one piece each.",
+    "wake": false,
+    "urgency": "queue"
+   },
+   {
+    "id": "m0004",
+    "rootId": "m0001",
+    "parentId": "m0001",
+    "from": "po",
+    "to": "ana",
+    "at": 1791739059744,
+    "hops": 1,
+    "kind": "request",
+    "intent": "work",
+    "title": "API: GET /reports.csv",
+    "text": "Expose GET /reports.csv returning RFC 4180 CSV of the visible rows. Only touch src/routes/reports.ts and its test.",
+    "bar": [
+     "returns text/csv with a header row",
+     "quotes commas and line breaks",
+     "has a test for quoting"
+    ]
+   },
+   {
+    "id": "m0006",
+    "rootId": "m0001",
+    "parentId": "m0001",
+    "from": "po",
+    "to": "bruno",
+    "at": 1791739059744,
+    "hops": 1,
+    "kind": "request",
+    "intent": "work",
+    "title": "UI: Export button",
+    "text": "Add an Export button to /reports that downloads from GET /reports.csv. Only touch src/pages/Reports.tsx.",
+    "bar": [
+     "button sits next to the filters",
+     "downloads a .csv file"
+    ]
+   },
+   {
+    "id": "m0008",
+    "rootId": "m0001",
+    "parentId": "m0001",
+    "from": "po",
+    "to": "cleo",
+    "at": 1791739059744,
+    "hops": 1,
+    "kind": "request",
+    "intent": "work",
+    "title": "Docs: Export to CSV",
+    "text": "Write an \"Export to CSV\" section in README.md that says what the file holds."
+   },
+   {
+    "id": "m0010",
+    "rootId": "m0001",
+    "parentId": "m0001",
+    "from": "po",
+    "to": "ana",
+    "at": 1791739071744,
+    "hops": 1,
+    "kind": "say",
+    "text": "Bruno builds the button against your route. Agree the column names with him directly, not through me.",
+    "wake": true,
+    "urgency": "queue"
+   },
+   {
+    "id": "m0011",
+    "rootId": "m0001",
+    "parentId": "m0004",
+    "from": "ana",
+    "to": "bruno",
+    "at": 1791739203744,
+    "hops": 2,
+    "kind": "say",
+    "text": "The route returns id, title, owner and created_at, in that order. Does the button need anything else?",
+    "wake": true,
+    "urgency": "queue"
+   },
+   {
+    "id": "m0012",
+    "rootId": "m0001",
+    "parentId": "m0004",
+    "from": "ana",
+    "to": "bruno",
+    "at": 1791739233744,
+    "hops": 2,
+    "kind": "request",
+    "intent": "help",
+    "title": "Download file name",
+    "text": "Which file name should the download use? I will send it in Content-Disposition."
+   },
+   {
+    "id": "m0013",
+    "rootId": "m0001",
+    "parentId": "m0006",
+    "from": "bruno",
+    "to": "po",
+    "at": 1791739383744,
+    "hops": 1,
+    "kind": "reply",
+    "requestId": "m0006",
+    "outcome": "done",
+    "text": "The Export button is next to the filters and downloads the file.",
+    "artifact": [
+     "out.txt"
+    ],
+    "auto": true
+   },
+   {
+    "id": "m0016",
+    "rootId": "m0001",
+    "parentId": "m0012",
+    "from": "bruno",
+    "to": "ana",
+    "at": 1791739443744,
+    "hops": 3,
+    "kind": "say",
+    "text": "Those columns work for the button. Nothing else needed.",
+    "wake": true,
+    "urgency": "queue"
+   },
+   {
+    "id": "m0017",
+    "rootId": "m0001",
+    "parentId": "m0012",
+    "from": "bruno",
+    "to": "ana",
+    "at": 1791739443744,
+    "hops": 2,
+    "kind": "reply",
+    "requestId": "m0012",
+    "outcome": "done",
+    "text": "Use reports-YYYY-MM-DD.csv. The button reads it from Content-Disposition, so nothing is hard coded on my side."
+   },
+   {
+    "id": "m0018",
+    "rootId": "m0001",
+    "parentId": "m0004",
+    "from": "ana",
+    "to": "po",
+    "at": 1791739563744,
+    "hops": 1,
+    "kind": "reply",
+    "requestId": "m0004",
+    "outcome": "done",
+    "text": "GET /reports.csv returns RFC 4180 CSV named reports-YYYY-MM-DD.csv. The quoting test covers commas, quotes and line breaks.",
+    "artifact": [
+     "src/routes/reports.ts",
+     "test/reports.test.ts"
+    ]
+   },
+   {
+    "id": "m0020",
+    "rootId": "m0001",
+    "parentId": "m0008",
+    "from": "cleo",
+    "to": "po",
+    "at": 1791739623744,
+    "hops": 1,
+    "kind": "reply",
+    "requestId": "m0008",
+    "outcome": "done",
+    "text": "Added the \"Export to CSV\" section to README.md: columns, file name, and the row limit.",
+    "artifact": [
+     "out.txt"
+    ],
+    "auto": true
+   },
+   {
+    "id": "m0021",
+    "rootId": "m0001",
+    "parentId": "m0001",
+    "from": "po",
+    "to": "owner",
+    "at": 1791739683744,
+    "hops": 0,
+    "kind": "reply",
+    "requestId": "m0001",
+    "outcome": "done",
+    "text": "CSV export shipped: the API with its quoting test (Ana), the Export button (Bruno) and the README section (Cleo). All three pieces passed my check.",
+    "artifact": [
+     "out.txt",
+     "src/routes/reports.ts",
+     "test/reports.test.ts"
+    ],
+    "auto": true
+   },
+   {
+    "id": "m0023",
+    "rootId": "m0023",
+    "parentId": null,
+    "from": "owner",
+    "to": "po",
+    "at": 1791740523744,
+    "hops": 0,
+    "kind": "request",
+    "intent": "work",
+    "title": "Next: add a PDF export of the same report.",
+    "text": "Next: add a PDF export of the same report."
+   },
+   {
+    "id": "m0025",
+    "rootId": "m0023",
+    "parentId": "m0023",
+    "from": "po",
+    "to": "owner",
+    "at": 1791740541744,
+    "hops": 1,
+    "kind": "say",
+    "text": "Starting on PDF. Ana takes the renderer and will split it with subagents.",
+    "wake": false,
+    "urgency": "queue"
+   },
+   {
+    "id": "m0026",
+    "rootId": "m0023",
+    "parentId": "m0023",
+    "from": "po",
+    "to": "ana",
+    "at": 1791740559744,
+    "hops": 1,
+    "kind": "request",
+    "intent": "work",
+    "title": "PDF: render the report",
+    "text": "Render the visible report rows to PDF at GET /reports.pdf. Split the work with subagents if it helps.",
+    "bar": [
+     "one page per 40 rows",
+     "same columns as the CSV",
+     "snapshot test of page one"
+    ]
+   },
+   {
+    "id": "m0028",
+    "rootId": "m0023",
+    "parentId": "m0026",
+    "from": "ana",
+    "to": "owner",
+    "at": 1791740583744,
+    "hops": 2,
+    "kind": "say",
+    "text": "Got the PDF piece. I am running two subagents: one reads the report templates, one writes the snapshot test.",
+    "wake": false,
+    "urgency": "queue"
+   }
+  ]
+ },
+ "histories": {
+  "dm:po": [
+   {
+    "id": "m0001",
+    "rootId": "m0001",
+    "parentId": null,
+    "from": "owner",
+    "to": "po",
+    "at": 1791739023744,
+    "hops": 0,
+    "kind": "request",
+    "intent": "work",
+    "title": "Add CSV export to the reports page, with tests and a docs section.",
+    "text": "Add CSV export to the reports page, with tests and a docs section."
+   },
+   {
+    "id": "m0003",
+    "rootId": "m0001",
+    "parentId": "m0001",
+    "from": "po",
+    "to": "owner",
+    "at": 1791739035744,
+    "hops": 1,
+    "kind": "say",
+    "text": "On it. I will split this into the API, the UI and the docs, one piece each.",
+    "wake": false,
+    "urgency": "queue"
+   },
+   {
+    "id": "m0004",
+    "rootId": "m0001",
+    "parentId": "m0001",
+    "from": "po",
+    "to": "ana",
+    "at": 1791739059744,
+    "hops": 1,
+    "kind": "request",
+    "intent": "work",
+    "title": "API: GET /reports.csv",
+    "text": "Expose GET /reports.csv returning RFC 4180 CSV of the visible rows. Only touch src/routes/reports.ts and its test.",
+    "bar": [
+     "returns text/csv with a header row",
+     "quotes commas and line breaks",
+     "has a test for quoting"
+    ]
+   },
+   {
+    "id": "m0006",
+    "rootId": "m0001",
+    "parentId": "m0001",
+    "from": "po",
+    "to": "bruno",
+    "at": 1791739059744,
+    "hops": 1,
+    "kind": "request",
+    "intent": "work",
+    "title": "UI: Export button",
+    "text": "Add an Export button to /reports that downloads from GET /reports.csv. Only touch src/pages/Reports.tsx.",
+    "bar": [
+     "button sits next to the filters",
+     "downloads a .csv file"
+    ]
+   },
+   {
+    "id": "m0008",
+    "rootId": "m0001",
+    "parentId": "m0001",
+    "from": "po",
+    "to": "cleo",
+    "at": 1791739059744,
+    "hops": 1,
+    "kind": "request",
+    "intent": "work",
+    "title": "Docs: Export to CSV",
+    "text": "Write an \"Export to CSV\" section in README.md that says what the file holds."
+   },
+   {
+    "id": "m0010",
+    "rootId": "m0001",
+    "parentId": "m0001",
+    "from": "po",
+    "to": "ana",
+    "at": 1791739071744,
+    "hops": 1,
+    "kind": "say",
+    "text": "Bruno builds the button against your route. Agree the column names with him directly, not through me.",
+    "wake": true,
+    "urgency": "queue"
+   },
+   {
+    "id": "m0011",
+    "rootId": "m0001",
+    "parentId": "m0004",
+    "from": "ana",
+    "to": "bruno",
+    "at": 1791739203744,
+    "hops": 2,
+    "kind": "say",
+    "text": "The route returns id, title, owner and created_at, in that order. Does the button need anything else?",
+    "wake": true,
+    "urgency": "queue"
+   },
+   {
+    "id": "m0012",
+    "rootId": "m0001",
+    "parentId": "m0004",
+    "from": "ana",
+    "to": "bruno",
+    "at": 1791739233744,
+    "hops": 2,
+    "kind": "request",
+    "intent": "help",
+    "title": "Download file name",
+    "text": "Which file name should the download use? I will send it in Content-Disposition."
+   },
+   {
+    "id": "m0013",
+    "rootId": "m0001",
+    "parentId": "m0006",
+    "from": "bruno",
+    "to": "po",
+    "at": 1791739383744,
+    "hops": 1,
+    "kind": "reply",
+    "requestId": "m0006",
+    "outcome": "done",
+    "text": "The Export button is next to the filters and downloads the file.",
+    "artifact": [
+     "out.txt"
+    ],
+    "auto": true
+   },
+   {
+    "id": "m0016",
+    "rootId": "m0001",
+    "parentId": "m0012",
+    "from": "bruno",
+    "to": "ana",
+    "at": 1791739443744,
+    "hops": 3,
+    "kind": "say",
+    "text": "Those columns work for the button. Nothing else needed.",
+    "wake": true,
+    "urgency": "queue"
+   },
+   {
+    "id": "m0017",
+    "rootId": "m0001",
+    "parentId": "m0012",
+    "from": "bruno",
+    "to": "ana",
+    "at": 1791739443744,
+    "hops": 2,
+    "kind": "reply",
+    "requestId": "m0012",
+    "outcome": "done",
+    "text": "Use reports-YYYY-MM-DD.csv. The button reads it from Content-Disposition, so nothing is hard coded on my side."
+   },
+   {
+    "id": "m0018",
+    "rootId": "m0001",
+    "parentId": "m0004",
+    "from": "ana",
+    "to": "po",
+    "at": 1791739563744,
+    "hops": 1,
+    "kind": "reply",
+    "requestId": "m0004",
+    "outcome": "done",
+    "text": "GET /reports.csv returns RFC 4180 CSV named reports-YYYY-MM-DD.csv. The quoting test covers commas, quotes and line breaks.",
+    "artifact": [
+     "src/routes/reports.ts",
+     "test/reports.test.ts"
+    ]
+   },
+   {
+    "id": "m0020",
+    "rootId": "m0001",
+    "parentId": "m0008",
+    "from": "cleo",
+    "to": "po",
+    "at": 1791739623744,
+    "hops": 1,
+    "kind": "reply",
+    "requestId": "m0008",
+    "outcome": "done",
+    "text": "Added the \"Export to CSV\" section to README.md: columns, file name, and the row limit.",
+    "artifact": [
+     "out.txt"
+    ],
+    "auto": true
+   },
+   {
+    "id": "m0021",
+    "rootId": "m0001",
+    "parentId": "m0001",
+    "from": "po",
+    "to": "owner",
+    "at": 1791739683744,
+    "hops": 0,
+    "kind": "reply",
+    "requestId": "m0001",
+    "outcome": "done",
+    "text": "CSV export shipped: the API with its quoting test (Ana), the Export button (Bruno) and the README section (Cleo). All three pieces passed my check.",
+    "artifact": [
+     "out.txt",
+     "src/routes/reports.ts",
+     "test/reports.test.ts"
+    ],
+    "auto": true
+   },
+   {
+    "id": "m0023",
+    "rootId": "m0023",
+    "parentId": null,
+    "from": "owner",
+    "to": "po",
+    "at": 1791740523744,
+    "hops": 0,
+    "kind": "request",
+    "intent": "work",
+    "title": "Next: add a PDF export of the same report.",
+    "text": "Next: add a PDF export of the same report."
+   },
+   {
+    "id": "m0025",
+    "rootId": "m0023",
+    "parentId": "m0023",
+    "from": "po",
+    "to": "owner",
+    "at": 1791740541744,
+    "hops": 1,
+    "kind": "say",
+    "text": "Starting on PDF. Ana takes the renderer and will split it with subagents.",
+    "wake": false,
+    "urgency": "queue"
+   },
+   {
+    "id": "m0026",
+    "rootId": "m0023",
+    "parentId": "m0023",
+    "from": "po",
+    "to": "ana",
+    "at": 1791740559744,
+    "hops": 1,
+    "kind": "request",
+    "intent": "work",
+    "title": "PDF: render the report",
+    "text": "Render the visible report rows to PDF at GET /reports.pdf. Split the work with subagents if it helps.",
+    "bar": [
+     "one page per 40 rows",
+     "same columns as the CSV",
+     "snapshot test of page one"
+    ]
+   },
+   {
+    "id": "m0028",
+    "rootId": "m0023",
+    "parentId": "m0026",
+    "from": "ana",
+    "to": "owner",
+    "at": 1791740583744,
+    "hops": 2,
+    "kind": "say",
+    "text": "Got the PDF piece. I am running two subagents: one reads the report templates, one writes the snapshot test.",
+    "wake": false,
+    "urgency": "queue"
+   }
+  ],
+  "dm:ana": [
+   {
+    "id": "m0028",
+    "rootId": "m0023",
+    "parentId": "m0026",
+    "from": "ana",
+    "to": "owner",
+    "at": 1791740583744,
+    "hops": 2,
+    "kind": "say",
+    "text": "Got the PDF piece. I am running two subagents: one reads the report templates, one writes the snapshot test.",
+    "wake": false,
+    "urgency": "queue"
+   }
+  ],
+  "dm:bruno": [],
+  "dm:cleo": [],
+  "pair:ana:po": [
+   {
+    "id": "m0004",
+    "rootId": "m0001",
+    "parentId": "m0001",
+    "from": "po",
+    "to": "ana",
+    "at": 1791739059744,
+    "hops": 1,
+    "kind": "request",
+    "intent": "work",
+    "title": "API: GET /reports.csv",
+    "text": "Expose GET /reports.csv returning RFC 4180 CSV of the visible rows. Only touch src/routes/reports.ts and its test.",
+    "bar": [
+     "returns text/csv with a header row",
+     "quotes commas and line breaks",
+     "has a test for quoting"
+    ]
+   },
+   {
+    "id": "m0010",
+    "rootId": "m0001",
+    "parentId": "m0001",
+    "from": "po",
+    "to": "ana",
+    "at": 1791739071744,
+    "hops": 1,
+    "kind": "say",
+    "text": "Bruno builds the button against your route. Agree the column names with him directly, not through me.",
+    "wake": true,
+    "urgency": "queue"
+   },
+   {
+    "id": "m0018",
+    "rootId": "m0001",
+    "parentId": "m0004",
+    "from": "ana",
+    "to": "po",
+    "at": 1791739563744,
+    "hops": 1,
+    "kind": "reply",
+    "requestId": "m0004",
+    "outcome": "done",
+    "text": "GET /reports.csv returns RFC 4180 CSV named reports-YYYY-MM-DD.csv. The quoting test covers commas, quotes and line breaks.",
+    "artifact": [
+     "src/routes/reports.ts",
+     "test/reports.test.ts"
+    ]
+   },
+   {
+    "id": "m0026",
+    "rootId": "m0023",
+    "parentId": "m0023",
+    "from": "po",
+    "to": "ana",
+    "at": 1791740559744,
+    "hops": 1,
+    "kind": "request",
+    "intent": "work",
+    "title": "PDF: render the report",
+    "text": "Render the visible report rows to PDF at GET /reports.pdf. Split the work with subagents if it helps.",
+    "bar": [
+     "one page per 40 rows",
+     "same columns as the CSV",
+     "snapshot test of page one"
+    ]
+   }
+  ],
+  "pair:bruno:po": [
+   {
+    "id": "m0006",
+    "rootId": "m0001",
+    "parentId": "m0001",
+    "from": "po",
+    "to": "bruno",
+    "at": 1791739059744,
+    "hops": 1,
+    "kind": "request",
+    "intent": "work",
+    "title": "UI: Export button",
+    "text": "Add an Export button to /reports that downloads from GET /reports.csv. Only touch src/pages/Reports.tsx.",
+    "bar": [
+     "button sits next to the filters",
+     "downloads a .csv file"
+    ]
+   },
+   {
+    "id": "m0013",
+    "rootId": "m0001",
+    "parentId": "m0006",
+    "from": "bruno",
+    "to": "po",
+    "at": 1791739383744,
+    "hops": 1,
+    "kind": "reply",
+    "requestId": "m0006",
+    "outcome": "done",
+    "text": "The Export button is next to the filters and downloads the file.",
+    "artifact": [
+     "out.txt"
+    ],
+    "auto": true
+   }
+  ],
+  "pair:cleo:po": [
+   {
+    "id": "m0008",
+    "rootId": "m0001",
+    "parentId": "m0001",
+    "from": "po",
+    "to": "cleo",
+    "at": 1791739059744,
+    "hops": 1,
+    "kind": "request",
+    "intent": "work",
+    "title": "Docs: Export to CSV",
+    "text": "Write an \"Export to CSV\" section in README.md that says what the file holds."
+   },
+   {
+    "id": "m0020",
+    "rootId": "m0001",
+    "parentId": "m0008",
+    "from": "cleo",
+    "to": "po",
+    "at": 1791739623744,
+    "hops": 1,
+    "kind": "reply",
+    "requestId": "m0008",
+    "outcome": "done",
+    "text": "Added the \"Export to CSV\" section to README.md: columns, file name, and the row limit.",
+    "artifact": [
+     "out.txt"
+    ],
+    "auto": true
+   }
+  ],
+  "pair:ana:bruno": [
+   {
+    "id": "m0011",
+    "rootId": "m0001",
+    "parentId": "m0004",
+    "from": "ana",
+    "to": "bruno",
+    "at": 1791739203744,
+    "hops": 2,
+    "kind": "say",
+    "text": "The route returns id, title, owner and created_at, in that order. Does the button need anything else?",
+    "wake": true,
+    "urgency": "queue"
+   },
+   {
+    "id": "m0012",
+    "rootId": "m0001",
+    "parentId": "m0004",
+    "from": "ana",
+    "to": "bruno",
+    "at": 1791739233744,
+    "hops": 2,
+    "kind": "request",
+    "intent": "help",
+    "title": "Download file name",
+    "text": "Which file name should the download use? I will send it in Content-Disposition."
+   },
+   {
+    "id": "m0016",
+    "rootId": "m0001",
+    "parentId": "m0012",
+    "from": "bruno",
+    "to": "ana",
+    "at": 1791739443744,
+    "hops": 3,
+    "kind": "say",
+    "text": "Those columns work for the button. Nothing else needed.",
+    "wake": true,
+    "urgency": "queue"
+   },
+   {
+    "id": "m0017",
+    "rootId": "m0001",
+    "parentId": "m0012",
+    "from": "bruno",
+    "to": "ana",
+    "at": 1791739443744,
+    "hops": 2,
+    "kind": "reply",
+    "requestId": "m0012",
+    "outcome": "done",
+    "text": "Use reports-YYYY-MM-DD.csv. The button reads it from Content-Disposition, so nothing is hard coded on my side."
+   }
+  ],
+  "pair:ana:cleo": [],
+  "pair:bruno:cleo": []
+ },
+ "ids": {
+  "goal": "m0001",
+  "api": "m0004",
+  "ui": "m0006",
+  "docs": "m0008",
+  "help": "m0012",
+  "pdf": "m0026",
+  "next": "m0023"
+ }
+}
