@@ -5,7 +5,7 @@ import { box, cyl, leafMass, merge } from './building/models.ts';
 import { bbox } from './building/parts.ts';
 import { detail } from './shading.ts';
 import type { Company } from '../../../shared/protocol.ts';
-import { BLOCK_D, BLOCK_W, blockCenter, DOOR_X } from '../../../shared/space/index.ts';
+import { BLOCK_D, BLOCK_W, blockCenter, DOOR_X, hasMeeting } from '../../../shared/space/index.ts';
 import { enterComputer } from '../computer.ts';
 import { toggleMeetingDoor } from '../meeting.ts';
 import { set, useStore } from '../store.ts';
@@ -196,7 +196,6 @@ function SharedFacilities({ b }: { b: Bounds }) {
   const cx = (b.x0 + b.x1) / 2;
   const right = b.x1 - 4;
   return <>
-    <SharedMeetingRoom x={cx} z={-0.45} />
     <Reception x={cx} z={b.z1 - 1.25} />
     <Kitchen x={right} z={b.z1 - 4.15} />
     <Lounge x={right} z={b.z1 - 1.75} />
@@ -286,6 +285,8 @@ export function Office({ company }: { company: Company | null }) {
   if (!world) return null;
   const { lot } = world.building;
   const b: Bounds = { x0: lot.x0, x1: lot.x0 + lot.w, z0: lot.z0, z1: lot.z0 + lot.h };
+  const stock = !world.building.bare;
+  const meeting = hasMeeting(world.building);
   return (
     <Staged>
       <Lights b={b} />
@@ -293,10 +294,11 @@ export function Office({ company }: { company: Company | null }) {
       <Environment b={b} />
       <Exterior b={b} />
       <CompanySign name={company?.name ?? 'Online Office'} b={b} />
-      {!world.building.bare && (
+      {meeting && <SharedMeetingRoom x={(b.x0 + b.x1) / 2} z={-0.45} />}
+      {(stock || meeting) && <LobbyDecor cx={(b.x0 + b.x1) / 2} z1={b.z1} right={b.x1 - 4} doorX={DOOR_X} stock={stock} meeting={meeting} />}
+      {stock && (
         <>
           <SharedFacilities b={b} />
-          <LobbyDecor cx={(b.x0 + b.x1) / 2} z1={b.z1} right={b.x1 - 4} doorX={DOOR_X} />
           <BrickWall b={b} building={world.building} />
           <PatternRug x={(b.x0 + b.x1) / 2 + 1.5} z={5} w={9.4} d={5.2} />
           <group position={[DOOR_X, 0, b.z1 - 1.1]}>

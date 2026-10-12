@@ -1,4 +1,4 @@
-import { blockItems, cellBounds, CELL, ITEM_DEFS, missingEssentials, type BuildOp, type FloorItem, type Item, type ItemId, type Rot, type TopItem, type Vec2 } from '../../../../shared/space/index.ts';
+import { blockItems, cellBounds, CELL, hasMeeting, ITEM_DEFS, meetingOps, missingEssentials, type BuildOp, type FloorItem, type Item, type ItemId, type Rot, type TopItem, type Vec2 } from '../../../../shared/space/index.ts';
 import { leaveComputer } from '../../computer.ts';
 import { runtime } from '../../runtime.ts';
 import { get, send, set, setSetting, toast, useStore, type BuildState, type BuildTool } from '../../store.ts';
@@ -57,6 +57,16 @@ export function discardBuild() {
 }
 
 export const clearBuild = () => send({ type: 'build_clear' });
+
+/** Removes the shared meeting room, or puts it back. A piece of it that no longer fits is left out, and the owner is told. */
+export function toggleMeeting() {
+  const s = get();
+  if (!s.build || !s.building) return;
+  const on = !hasMeeting(s.building);
+  const { ops, skipped } = meetingOps(s.building, on, spaceContext(s.company));
+  if (skipped) toast(`The meeting room is back, without ${skipped === 1 ? 'one piece' : `${skipped} pieces`} of its furniture that no longer fit there.`, 'warn');
+  sendOps(ops);
+}
 
 export const toggleBuild = () => (get().build ? saveBuild() : enterBuild());
 

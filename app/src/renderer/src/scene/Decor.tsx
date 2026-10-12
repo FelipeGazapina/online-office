@@ -141,18 +141,17 @@ function lobby(cx: number, z1: number, doorX: number): BufferGeometry[] {
   return out;
 }
 
-export type DecorSpec = { cx: number; z1: number; right: number; doorX: number };
+// `stock` is the kitchen, lounge and lobby of an office that is not bare; `meeting` is the shared meeting room, which the owner adds and removes on its own.
+export type DecorSpec = { cx: number; z1: number; right: number; doorX: number; stock: boolean; meeting: boolean };
 
-export function LobbyDecor({ cx, z1, right, doorX }: DecorSpec) {
+export function LobbyDecor({ cx, z1, right, doorX, stock, meeting: withMeeting }: DecorSpec) {
   const { geo, plants } = useMemo(() => {
     const rooms = [
-      move(kitchen(), right, z1 - 4.15),
-      move(lounge(), right, z1 - 1.75),
-      move(meeting(), cx, -0.45),
-      lobby(cx, z1, doorX),
+      ...(stock ? [move(kitchen(), right, z1 - 4.15), move(lounge(), right, z1 - 1.75), lobby(cx, z1, doorX)] : []),
+      ...(withMeeting ? [move(meeting(), cx, -0.45)] : []),
     ];
     return mergeRoom(rooms.flat());
-  }, [cx, z1, right, doorX]);
+  }, [cx, z1, right, doorX, stock, withMeeting]);
   return (
     <>
       <mesh geometry={geo} material={decorMaterial} castShadow receiveShadow />
