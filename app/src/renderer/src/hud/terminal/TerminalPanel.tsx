@@ -3,12 +3,14 @@
 // cards. What the owner types goes where it goes in the chat: a message to an idle employee is a request, one to someone who is working
 // is said to them, and one to someone who asked is the answer.
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
+import { withImages } from '../../../../shared/mail.ts';
 import { ALLOW_ANSWER } from '../../../../shared/permissions.ts';
 import type { Employee, Question } from '../../../../shared/protocol.ts';
 import { layoutLog, MODE_LINE, optionsOf, questionRows, quartersOf, spinnerRows, wrap, type Act, type Plan, type Row, type Span } from '../../../../shared/terminal.ts';
 import { escapeMonitor, leaveMonitor, useMonitor } from '../../computer.ts';
 import { monitorPoses, zoomFrame } from '../../scene/monitorPose.ts';
 import { get, send, useStore } from '../../store.ts';
+import { useImageDraft } from '../chat/images.tsx';
 import { modelLabel, terminalBlocks, terminalLive, useTerminalVersion } from './feed.ts';
 import { BGS, FONT, SCREEN_BG, TONES } from './theme.ts';
 import './terminal.css';
@@ -117,6 +119,8 @@ function Panel({ employee }: { employee: Employee }) {
   const status = employee.status;
   const question = status.kind === 'blocked_on_owner' ? status.question : null;
   const permission = question?.kind === 'permission' ? question : null;
+  // Pasted or dropped pictures wait above the prompt, the way a terminal names them. A permission card takes none.
+  const draftImages = useImageDraft(!permission);
 
   useEffect(() => {
     const onResize = () => setSize({ w: window.innerWidth, h: window.innerHeight });
@@ -210,16 +214,21 @@ function Panel({ employee }: { employee: Employee }) {
 
   const submit = () => {
     const text = draft.trim();
-    if (!text) return;
+    const images = question?.kind === 'permission' ? [] : draftImages.uploads;
+    if (!text && images.length === 0) return;
+    const attached = images.length ? { images } : {};
     if (question) {
-      answer(question.kind === 'permission' ? `No, ${text}` : text);
+      if (question.kind === 'permission') answer(`No, ${text}`);
+      else send({ type: 'answer', employeeId: employee.id, questionId: question.id, text, ...attached });
     } else {
       const clientId = crypto.randomUUID();
-      if (status.kind === 'working') send({ type: 'post', to: employee.id, clientId, as: 'say', text, urgency: get().interrupt });
-      else send({ type: 'post', to: employee.id, clientId, as: 'request', text });
-      setSent((list) => [...list.filter((m) => Date.now() - m.at < 20_000), { text, at: Date.now() }]);
+      if (status.kind === 'working') send({ type: 'post', to: employee.id, clientId, as: 'say', text, urgency: get().interrupt, ...attached });
+      else send({ type: 'post', to: employee.id, clientId, as: 'request', text, ...attached });
+      // The echo of a post of pictures alone opens with the words the office puts in for it.
+      setSent((list) => [...list.filter((m) => Date.now() - m.at < 20_000), { text: withImages(text, images.map((i) => i.name)).split('\n')[0]!, at: Date.now() }]);
     }
     setDraft('');
+    draftImages.clear();
     pinned.current = true;
   };
 
@@ -230,7 +239,7 @@ function Panel({ employee }: { employee: Employee }) {
       e.preventDefault();
       return escapeMonitor();
     }
-    if (question && (permission || !draft)) {
+    if (question && (permission || (!draft && draftImages.images.length === 0))) {
       const n = optionsOf(question).length;
       if (permission && e.key === 'Tab') {
         e.preventDefault();
@@ -336,8 +345,15 @@ function Panel({ employee }: { employee: Employee }) {
               ))}
             </div>
           )}
-          <div className={permission ? 'term-box term-hidden' : 'term-box'}>
+          <div className={permission ? 'term-box term-hidden' : 'term-box'} onDragOver={draftImages.onDragOver} onDrop={draftImages.onDrop}>
             <div className="term-rule" />
+            {draftImages.images.length > 0 && (
+              <div className="term-images" data-image-tray>
+                {draftImages.images.map((i, n) => (
+                  <span key={i.id} title={`${i.name}: click to remove`} onClick={() => draftImages.remove(i.id)}>{`[Image #${n + 1}] `}</span>
+                ))}
+              </div>
+            )}
             <div className="term-prompt">
               <span className="term-caret">❯</span>
               <textarea
@@ -347,6 +363,7 @@ function Panel({ employee }: { employee: Employee }) {
                 spellCheck={false}
                 placeholder={question ? 'or type an answer' : `Message ${employee.name}…`}
                 onChange={(e) => setDraft(e.target.value)}
+                onPaste={draftImages.onPaste}
                 onKeyDown={onKey}
                 autoFocus
                 aria-label={`Message to ${employee.name}`}

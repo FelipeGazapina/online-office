@@ -119,8 +119,35 @@ export type MailServerMessage =
   | { type: 'stream'; employeeId: EmployeeId; replyingTo: MessageId | null; delta: string; done?: boolean }
   | { type: 'history'; convo: ConvoKey; messages: Message[]; hasMore: boolean };
 
+// A picture the owner attaches to what they say. `data` is the file in base64. The office saves it and the message carries
+// its path, so every harness reads it with the file tool it already has.
+export const IMAGE_TYPES = { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/gif': 'gif', 'image/webp': 'webp' } as const;
+export type ImageMime = keyof typeof IMAGE_TYPES;
+export type ImageUpload = { name: string; mime: ImageMime; data: string };
+export const MAX_IMAGES = 6;
+export const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
+
+const IMAGES_NOTE = '[The owner attached these images. Open each file to see it.]';
+const IMAGE_LINE = /^\[image: (.+)\]$/;
+
+// The text an employee reads: what the owner wrote, then one line per saved picture.
+export const withImages = (text: string, paths: readonly string[]): string =>
+  paths.length === 0 ? text : `${text.trim() || (paths.length === 1 ? 'Look at this image.' : 'Look at these images.')}\n\n${IMAGES_NOTE}\n${paths.map((p) => `[image: ${p}]`).join('\n')}`;
+
+// The other way round, for the chat: the words the owner wrote, and the pictures beside them.
+export const splitImages = (text: string): { text: string; images: string[] } => {
+  if (!text.includes(IMAGES_NOTE)) return { text, images: [] };
+  const images: string[] = [];
+  const kept = text.split('\n').filter((line) => {
+    const path = IMAGE_LINE.exec(line)?.[1];
+    if (path) images.push(path);
+    return !path && line !== IMAGES_NOTE;
+  });
+  return { text: kept.join('\n').trim(), images };
+};
+
 export type MailClientMessage =
   // `to` is an employee id, a name, or 'po' (the block's orchestrator, which needs `blockId`).
-  | { type: 'post'; to: string; blockId?: BlockId; clientId: string; as: 'request' | 'say'; text: string; urgency?: Urgency }
+  | { type: 'post'; to: string; blockId?: BlockId; clientId: string; as: 'request' | 'say'; text: string; urgency?: Urgency; images?: ImageUpload[] }
   | { type: 'cancel_message'; messageId: MessageId }
   | { type: 'load_history'; convo: ConvoKey; before?: MessageId; limit: number };

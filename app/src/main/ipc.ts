@@ -18,9 +18,10 @@ import {
 } from '../shared/protocol.ts';
 import { PRIORITIES, type BoardId, type BoardSpec, type Priority, type TaskId, type TaskStage } from '../shared/tasks.ts';
 import type { BuildOp, Item, ItemId, WallSeg } from '../shared/space/types.ts';
-import type { ConvoKey, MessageId } from '../shared/mail.ts';
+import { IMAGE_TYPES, MAX_IMAGES, MAX_IMAGE_BYTES, type ConvoKey, type ImageMime, type ImageUpload, type MessageId } from '../shared/mail.ts';
 import { Office, type OfficeServices } from './office/company.ts';
 import { OfficeError } from './office/error.ts';
+import { attachmentsDir, readImage } from './office/attachments.ts';
 
 // The one place untrusted input becomes a ClientMessage. Ids are opaque strings to the renderer.
 const employeeId = z.string().min(1).transform((s) => s as EmployeeId);
@@ -62,6 +63,12 @@ const boardSpec = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('quick') }),
   z.object({ kind: z.enum(['feature', 'bug']), sources: taskSources }),
 ]) satisfies z.ZodType<BoardSpec>;
+
+// Base64 is four characters for every three bytes. The decoded size is checked again where the file is written.
+const images = z
+  .array(z.object({ name: z.string().max(300), mime: z.enum(Object.keys(IMAGE_TYPES) as [ImageMime, ...ImageMime[]]), data: z.string().min(1).max(Math.ceil(MAX_IMAGE_BYTES / 3) * 4) }))
+  .max(MAX_IMAGES)
+  .optional() satisfies z.ZodType<ImageUpload[] | undefined>;
 
 const tile = z.number().int().min(-4096).max(4096);
 const rot = z.union([z.literal(0), z.literal(1), z.literal(2), z.literal(3)]);
@@ -147,12 +154,14 @@ const clientMessage = z.discriminatedUnion('type', [
     blockId: blockId.optional(),
     clientId: z.string().min(1).max(200),
     as: z.enum(['request', 'say']),
-    text: z.string().min(1).max(20_000),
+    // A post of pictures alone has no words.
+    text: z.string().max(20_000),
     urgency: z.enum(['queue', 'next', 'now']).optional(),
+    images,
   }),
   z.object({ type: z.literal('cancel_message'), messageId: z.string().min(1).transform((s) => s as MessageId) }),
   z.object({ type: z.literal('load_history'), convo: z.string().regex(/^(dm:[^:]+|pair:[^:]+:[^:]+)$/).transform((s) => s as ConvoKey), before: z.string().min(1).transform((s) => s as MessageId).optional(), limit: z.number().int().min(1).max(200) }),
-  z.object({ type: z.literal('answer'), employeeId, questionId, text: z.string(), always: z.boolean().optional() }),
+  z.object({ type: z.literal('answer'), employeeId, questionId, text: z.string(), always: z.boolean().optional(), images }),
   z.object({ type: z.literal('meeting_door'), state: meetingDoor }),
   z.object({ type: z.literal('load_models'), provider }),
   z.object({ type: z.literal('login_cursor') }),
@@ -258,6 +267,11 @@ export function startOffice({ dataFile, harnesses, window, services }: Options) 
     if (!win) return null;
     const result = await dialog.showOpenDialog(win, { properties: ['openDirectory', 'createDirectory'] });
     return result.canceled ? null : (result.filePaths[0] ?? null);
+  });
+
+  ipcMain.handle(IPC.readImage, (e, raw: unknown): string | null => {
+    const path = folderPath.safeParse(raw);
+    return trusted(e) && path.success ? readImage(attachmentsDir(dataFile), path.data) : null;
   });
 
   ipcMain.on(IPC.revealFolder, (e, raw: unknown) => {

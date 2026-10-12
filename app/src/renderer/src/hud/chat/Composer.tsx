@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { Employee } from '../../../../shared/protocol.ts';
 import { get, send, set, useStore } from '../../store.ts';
+import { AttachButton, ImageTray, useImageDraft } from './images.tsx';
 import { isPo } from './model.ts';
 
 const MAX_ROWS = 6;
@@ -19,6 +20,9 @@ export function Composer({ who, po, assignee }: { who: Employee; po: Employee | 
   const viaPo = target.id === po?.id && target.id !== base.id;
   const canSwitch = Boolean(po) && !isPo(base);
   const busy = target.status.kind === 'working';
+  // A permission card is answered yes or no, so it takes no picture.
+  const permission = !viaPo && target.status.kind === 'blocked_on_owner' && target.status.question.kind === 'permission';
+  const draftImages = useImageDraft(!permission);
 
   // A thread the owner opened is ready to type in, unless a dialog is open. One the sim opened keeps the keys for walking (Enter focuses it).
   useEffect(() => {
@@ -41,14 +45,17 @@ export function Composer({ who, po, assignee }: { who: Employee; po: Employee | 
 
   const submit = () => {
     const text = draft.trim();
-    if (!text) return;
+    const images = permission ? [] : draftImages.uploads;
+    if (!text && images.length === 0) return;
     const clientId = crypto.randomUUID();
     const status = target.status;
-    if (status.kind === 'blocked_on_owner' && !viaPo) send({ type: 'answer', employeeId: target.id, questionId: status.question.id, text });
-    else if (viaPo) send({ type: 'post', to: 'po', blockId: target.blockId, clientId, as: 'request', text });
-    else if (steer && busy) send({ type: 'post', to: target.id, clientId, as: 'say', text, urgency: interrupt });
-    else send({ type: 'post', to: target.id, clientId, as: 'request', text });
+    const attached = images.length ? { images } : {};
+    if (status.kind === 'blocked_on_owner' && !viaPo) send({ type: 'answer', employeeId: target.id, questionId: status.question.id, text, ...attached });
+    else if (viaPo) send({ type: 'post', to: 'po', blockId: target.blockId, clientId, as: 'request', text, ...attached });
+    else if (steer && busy) send({ type: 'post', to: target.id, clientId, as: 'say', text, urgency: interrupt, ...attached });
+    else send({ type: 'post', to: target.id, clientId, as: 'request', text, ...attached });
     setDraft('');
+    draftImages.clear();
     setSteer(false);
     requestAnimationFrame(() => {
       if (field.current) field.current.style.height = 'auto';
@@ -62,6 +69,8 @@ export function Composer({ who, po, assignee }: { who: Employee; po: Employee | 
         ev.preventDefault();
         submit();
       }}
+      onDragOver={draftImages.onDragOver}
+      onDrop={draftImages.onDrop}
     >
       <div className="cp-compose-top">
         <button
@@ -81,7 +90,9 @@ export function Composer({ who, po, assignee }: { who: Employee; po: Employee | 
           </button>
         )}
       </div>
+      <ImageTray draft={draftImages} />
       <div className="cp-compose-row">
+        <AttachButton draft={draftImages} className="img-attach" disabled={permission} />
         <textarea
           id="drawer-input"
           ref={field}
@@ -89,6 +100,7 @@ export function Composer({ who, po, assignee }: { who: Employee; po: Employee | 
           value={draft}
           placeholder={viaPo ? 'Give the PO a task' : `Message ${target.name}`}
           onChange={(ev) => setDraft(ev.target.value)}
+          onPaste={draftImages.onPaste}
           onKeyDown={(ev) => {
             if (ev.key === 'Escape') {
               ev.preventDefault();
@@ -100,7 +112,7 @@ export function Composer({ who, po, assignee }: { who: Employee; po: Employee | 
             }
           }}
         />
-        <button type="submit" className="btn ink" disabled={!draft.trim()}>
+        <button type="submit" className="btn ink" disabled={!draft.trim() && draftImages.images.length === 0}>
           Send
         </button>
       </div>
