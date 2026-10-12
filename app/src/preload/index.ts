@@ -13,6 +13,7 @@ const office: OfficeApi = {
   },
   pickFolder: () => ipcRenderer.invoke(IPC.pickFolder),
   revealFolder: (path) => ipcRenderer.send(IPC.revealFolder, path),
+  readImage: (path) => ipcRenderer.invoke(IPC.readImage, path),
   portal: {
     enter: () => ipcRenderer.send(IPC.portalEnter),
     leave: () => ipcRenderer.send(IPC.portalLeave),

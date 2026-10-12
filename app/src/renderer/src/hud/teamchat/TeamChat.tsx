@@ -4,9 +4,10 @@
 // mailroom, and the owner's words go into it as `post`, the same way the chat drawer in the office sends them.
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { PROVIDERS, type Employee, type EmployeeId, type ProjectBlock } from '../../../../shared/protocol.ts';
-import { betweenPair, pairKey, pairOf, type ConvoKey, type Message, type MessageId } from '../../../../shared/mail.ts';
+import { betweenPair, pairKey, pairOf, splitImages, type ConvoKey, type Message, type MessageId } from '../../../../shared/mail.ts';
 import { send, set, useStore } from '../../store.ts';
 import { avatarColor, chainThread, clock, isPo, liveState, mergeMessages, nameOf, pairThread, personThread, requestStates, rosterOf, teamPairs, textOf, unreadSince, type Item, type PairRow, type ReqState } from '../chat/model.ts';
+import { AttachButton, Attached, ImageTray, useImageDraft } from '../chat/images.tsx';
 import './teamchat.css';
 
 const HISTORY = 200;
@@ -291,7 +292,8 @@ function Feed({ items, states, employees, who, empty }: { items: Item[]; states:
             <i className="tc-av owner" aria-hidden>Y</i>
             <div className="tc-msg-body">
               <div className="tc-msg-head"><b>You</b><time>sending…</time></div>
-              <div className="tc-text">{p.text}</div>
+              {p.text && <div className="tc-text">{p.text}</div>}
+              <Attached urls={p.images} />
             </div>
           </div>
         ))}
@@ -334,6 +336,8 @@ function Line({ row, states, employees }: { row: Row; states: Map<MessageId, Req
   const m = item.m;
   const name = nameOf(employees, author);
   const bot = author !== 'owner';
+  // Only the owner attaches pictures, so nobody else's text is read for them.
+  const said = item.t === 'bubble' && author === 'owner' ? splitImages(m.text) : { text: m.text, images: [] };
   const openThread = (id: MessageId) => set((s) => ({ teamChat: { ...s.teamChat, thread: id } }));
   return (
     <div className={`tc-msg ${compact ? 'compact' : ''}`} data-msg={m.id} data-kind={m.kind}>
@@ -349,8 +353,9 @@ function Line({ row, states, employees }: { row: Row; states: Map<MessageId, Req
         )}
         {item.t === 'bubble' && (
           <>
-            {m.kind === 'request' && m.title && m.title !== m.text && <b className="tc-title">{m.title}</b>}
-            <div className="tc-text">{m.kind === 'request' ? m.text : textOf(m)}</div>
+            {m.kind === 'request' && m.title && m.title !== said.text && <b className="tc-title">{m.title}</b>}
+            {said.text && <div className="tc-text">{said.text}</div>}
+            <Attached paths={said.images} />
             {(m.kind === 'reply' || (m.kind === 'request' && m.from === 'owner')) && (
               <div className="tc-meta">
                 {m.kind === 'reply' && <span className={`tc-chip ${m.outcome}`}>{m.outcome}</span>}
@@ -419,19 +424,26 @@ function Composer({ who }: { who: Employee }) {
   const field = useRef<HTMLTextAreaElement>(null);
   const busy = who.status.kind === 'working';
   const asking = who.status.kind === 'blocked_on_owner';
+  // A permission card is answered yes or no, so it takes no picture.
+  const permission = who.status.kind === 'blocked_on_owner' && who.status.question.kind === 'permission';
+  const draftImages = useImageDraft(!permission);
   useEffect(() => field.current?.focus(), [who.id]);
   const submit = () => {
     const text = draft.trim();
-    if (!text) return;
+    const images = permission ? [] : draftImages.uploads;
+    if (!text && images.length === 0) return;
     const clientId = crypto.randomUUID();
-    if (who.status.kind === 'blocked_on_owner') send({ type: 'answer', employeeId: who.id, questionId: who.status.question.id, text });
-    else if (steer && busy) send({ type: 'post', to: who.id, clientId, as: 'say', text, urgency: interrupt });
-    else send({ type: 'post', to: who.id, clientId, as: 'request', text });
+    const attached = images.length ? { images } : {};
+    if (who.status.kind === 'blocked_on_owner') send({ type: 'answer', employeeId: who.id, questionId: who.status.question.id, text, ...attached });
+    else if (steer && busy) send({ type: 'post', to: who.id, clientId, as: 'say', text, urgency: interrupt, ...attached });
+    else send({ type: 'post', to: who.id, clientId, as: 'request', text, ...attached });
     setDraft('');
+    draftImages.clear();
     setSteer(false);
   };
   return (
-    <form className="tc-compose" onSubmit={(ev) => (ev.preventDefault(), submit())}>
+    <form className="tc-compose" onSubmit={(ev) => (ev.preventDefault(), submit())} onDragOver={draftImages.onDragOver} onDrop={draftImages.onDrop}>
+      <ImageTray draft={draftImages} />
       <textarea
         ref={field}
         id="teamchat-input"
@@ -439,6 +451,7 @@ function Composer({ who }: { who: Employee }) {
         value={draft}
         placeholder={asking ? `Answer ${who.name}` : isPo(who) ? `Give ${who.name} a goal for the team` : `Message ${who.name}`}
         onChange={(ev) => setDraft(ev.target.value)}
+        onPaste={draftImages.onPaste}
         onKeyDown={(ev) => {
           if (ev.key === 'Enter' && !ev.shiftKey && !ev.nativeEvent.isComposing) {
             ev.preventDefault();
@@ -448,8 +461,9 @@ function Composer({ who }: { who: Employee }) {
       />
       <div className="tc-compose-bar">
         <small>{asking ? 'Your answer goes straight to the question.' : busy ? (steer ? `Interrupts ${who.name} now.` : `Queues after what ${who.name} is doing.`) : 'Enter sends · Shift+Enter for a new line'}</small>
+        <AttachButton draft={draftImages} className="img-attach" disabled={permission} />
         {busy && <button type="button" className={`tc-btn ${steer ? 'on' : ''}`} aria-pressed={steer} onClick={() => setSteer(!steer)}>{steer ? 'Steering now' : 'Steer instead'}</button>}
-        <button type="submit" className="tc-btn send" disabled={!draft.trim()}>Send</button>
+        <button type="submit" className="tc-btn send" disabled={!draft.trim() && draftImages.images.length === 0}>Send</button>
       </div>
     </form>
   );

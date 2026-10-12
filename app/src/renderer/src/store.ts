@@ -66,7 +66,7 @@ export type LogLine = { line: string; at: number };
 export type MacApp = 'home' | 'chat';
 export type TeamChat = { blockId: BlockId | null; convo: ConvoKey | null; thread: MessageId | null };
 // A post the owner just sent, shown at once. The mail view takes over when it carries the same `clientId` as its key.
-export type PendingPost = { clientId: string; to: string; text: string; as: 'request' | 'say'; at: number };
+export type PendingPost = { clientId: string; to: string; text: string; as: 'request' | 'say'; at: number; images?: string[] };
 export type Toast = { id: number; text: string; tone: 'info' | 'warn' | 'ok' };
 
 // Settings the user is tuning while deciding how this should feel; kept across reloads.
@@ -256,7 +256,7 @@ export function askedAt(e: Employee) {
 export const sendTap: { fn: ((m: ClientMessage) => void) | null } = { fn: null };
 
 export function send(m: ClientMessage) {
-  if (m.type === 'post') set((s) => ({ pending: [...s.pending, { clientId: m.clientId, to: m.to, text: m.text, as: m.as, at: Date.now() }] }));
+  if (m.type === 'post') set((s) => ({ pending: [...s.pending, { clientId: m.clientId, to: m.to, text: m.text, as: m.as, at: Date.now(), ...(m.images?.length ? { images: m.images.map((i) => `data:${i.mime};base64,${i.data}`) } : {}) }] }));
   if (sendTap.fn) sendTap.fn(m);
   else window.office.send(m);
 }

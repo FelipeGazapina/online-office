@@ -1,6 +1,6 @@
 // What the chat shows, derived from the mailroom's messages. Pure: no store, no React.
 import type { Employee, EmployeeId } from '../../../../shared/protocol.ts';
-import { betweenPair, pairKey, type ActorId, type ActorView, type ConvoKey, type MailView, type Message, type MessageId, type Outcome, type RequestView, type Verdict } from '../../../../shared/mail.ts';
+import { betweenPair, pairKey, splitImages, type ActorId, type ActorView, type ConvoKey, type MailView, type Message, type MessageId, type Outcome, type RequestView, type Verdict } from '../../../../shared/mail.ts';
 
 export type Req = Extract<Message, { kind: 'request' }>;
 export type Say = Extract<Message, { kind: 'say' }>;
@@ -144,7 +144,7 @@ export function teamPairs(employees: Employee[], blockId: Employee['blockId'], m
 // Messages someone other than the owner wrote after `seen`: the unread count of a conversation.
 export const unreadSince = (messages: Message[], seen: number) => messages.filter((m) => m.kind !== 'event' && m.from !== 'owner' && m.at > seen).length;
 
-export const textOf = (m: Message) => (m.kind === 'request' ? m.title || m.text : m.text);
+export const textOf = (m: Message) => (m.kind === 'request' ? m.title || m.text : m.kind === 'say' ? splitImages(m.text).text || 'Image' : m.text);
 
 export type Roster = { employee: Employee; last: Message | null };
 

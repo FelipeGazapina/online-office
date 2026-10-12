@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef } from 'react';
 import type { Employee } from '../../../../shared/protocol.ts';
-import { MAIL_TAIL, type MessageId } from '../../../../shared/mail.ts';
+import { MAIL_TAIL, splitImages, type MessageId } from '../../../../shared/mail.ts';
+import { Attached } from './images.tsx';
 import { send, set, useStore } from '../../store.ts';
 import { avatarColor, chainThread, mergeMessages, nameOf, personThread, requestStates, type Item, type Req, type ReqState } from './model.ts';
 import { countRender } from './renders.ts';
@@ -91,11 +92,14 @@ function Line({ item, states, employees, labels, waitingOn }: { item: Item; stat
       return <Tracker item={item} state={states.get(item.m.id) ?? { kind: 'unknown' }} employees={employees} />;
     case 'bubble': {
       const { m, side } = item;
+      // Only the owner attaches pictures, so nobody else's text is read for them.
+      const said = m.from === 'owner' ? splitImages(m.text) : { text: m.text, images: [] };
       const state = m.kind === 'request' && side === 'owner' ? (states.get(m.id) ?? { kind: 'unknown' }) : null;
       return (
         <div className={`cp-line ${side}`}>
           {labels && side === 'them' && <small className="cp-from">{nameOf(employees, m.from)}</small>}
-          <div className={`msg ${side === 'owner' ? 'owner' : 'employee'}`}>{m.text}</div>
+          {said.text && <div className={`msg ${side === 'owner' ? 'owner' : 'employee'}`}>{said.text}</div>}
+          <Attached paths={said.images} />
           <div className="cp-meta">
             {m.kind === 'reply' && m.auto && <span className="cp-auto" title="The office wrote this from the end of the turn">auto</span>}
             {m.kind === 'reply' && m.artifact?.map((a) => (
@@ -186,7 +190,8 @@ export function Thread({ who }: { who: Employee }) {
         ))}
         {mine.map((p) => (
           <div key={p.clientId} className="cp-line owner">
-            <div className="msg owner">{p.text}</div>
+            {p.text && <div className="msg owner">{p.text}</div>}
+            <Attached urls={p.images} />
             <div className="cp-meta">
               <span className="cp-chip sending">sending…</span>
             </div>
