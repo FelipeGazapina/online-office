@@ -68,7 +68,8 @@ import {
   type SpaceContext,
   type ViolationKind,
 } from '../src/shared/space/index.ts';
-import { coreItems } from '../src/shared/space/kit.ts';
+import { coreItems, meetingItems } from '../src/shared/space/kit.ts';
+import { clearOps, hasMeeting, meetingOps } from '../src/shared/space/index.ts';
 import { itemRect } from '../src/shared/space/geom.ts';
 import { check, finish } from './check.ts';
 
@@ -1055,6 +1056,48 @@ const flat = (stories = 1, size = 20): Building => {
   const mean = (performance.now() - t0) / runs;
   console.log(`checkOps one item move: mean ${mean.toFixed(3)} ms, worst ${worst.toFixed(3)} ms over ${runs} runs`);
   check(mean < 1, 'checkOps for one item move under 1 ms');
+}
+
+// ---------------------------------------------------------------- the shared meeting room
+{
+  console.log('# the shared meeting room comes and goes');
+  const b0 = legacyBuilding([], []).building;
+  const stock = meetingItems(b0.lot).map((i) => i.id);
+  const has = (b: Building, ids: readonly ItemId[] = stock) => ids.filter((i) => b.stories.some((s) => s.items.some((x) => x.id === i))).length;
+  check(hasMeeting(b0) && b0.meeting === undefined && has(b0) === 9, 'a stock office has the meeting room, its table and eight chairs, with nothing stored about it');
+  check(!hasMeeting({ ...b0, bare: true }), 'a bare office has none until the owner adds it');
+
+  const off = meetingOps(b0, false, noCtx);
+  const removed = applyOps(b0, off.ops, noCtx);
+  const gone = must(removed);
+  check(!hasMeeting(gone) && has(gone) === 0 && gone.stories[0].items.length === b0.stories[0].items.length - 9, 'removing takes the room, the table and the chairs, and nothing else');
+  check(!gone.bare, 'and leaves the reception, kitchen and lounge');
+  check(eq(parseBuilding(encodeBuilding(gone)).meeting, false) && !hasMeeting(parseBuilding(JSON.parse(JSON.stringify(encodeBuilding(gone))))), 'a removed room stays removed through a save and a load');
+  check(parseBuilding(JSON.parse(JSON.stringify(encodeBuilding(b0)))).meeting === undefined, 'an office the owner never touched saves nothing new');
+  const undone = removed.ok ? must(applyOps(gone, removed.inverse, noCtx)) : gone;
+  check(hasMeeting(undone) && eq(undone.stories[0].items, b0.stories[0].items), 'undo brings the room and every piece back where it was');
+
+  const on = meetingOps(gone, true, noCtx);
+  const back = must(applyOps(gone, on.ops, noCtx));
+  check(on.skipped === 0 && hasMeeting(back) && eq(back.stories[0].items, b0.stories[0].items), 'adding it again puts the room and all nine pieces back');
+  check(meetingOps(back, true, noCtx).ops.length === 0 && meetingOps(gone, false, noCtx).ops.length === 0, 'adding a room that is there, or removing one that is not, does nothing');
+
+  const table = meetingItems(b0.lot)[0];
+  const moved = must(applyOps(b0, [put(0, { ...table, x: table.x + 14 })], noCtx));
+  check(has(must(applyOps(moved, meetingOps(moved, false, noCtx).ops, noCtx))) === 0, 'removing finds a table the owner moved');
+
+  const blocked = must(applyOps(gone, [put(0, item('in_the_way', 'sofa', table.x, table.z))], noCtx));
+  const squeezed = meetingOps(blocked, true, noCtx);
+  const partly = must(applyOps(blocked, squeezed.ops, noCtx));
+  check(squeezed.skipped > 0 && hasMeeting(partly) && has(partly) === 9 - squeezed.skipped && has(partly, [id('in_the_way')]) === 1, 'furniture in the way costs the room only the pieces it blocks', String(squeezed.skipped));
+
+  const empty = must(applyOps(b0, clearOps(b0), noCtx));
+  check(!hasMeeting(empty), 'Clear all takes the meeting room too');
+  const added = must(applyOps(empty, meetingOps(empty, true, noCtx).ops, noCtx));
+  check(hasMeeting(added) && added.bare === true && added.meeting === true, 'a cleared office can have the room back on its own');
+  const again = applyOps(added, clearOps(added), noCtx);
+  check(!hasMeeting(must(again)), 'and Clear all takes that one as well');
+  check(again.ok && hasMeeting(must(applyOps(must(again), again.inverse, noCtx))), 'whose undo brings it back');
 }
 
 finish();

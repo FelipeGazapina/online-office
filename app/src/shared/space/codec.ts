@@ -131,7 +131,7 @@ export function parseBuilding(raw: unknown, warn: (msg: string) => void = (m) =>
   });
   // A file from the build that made the pods items says `true`: that is level 1.
   const shelled = raw.shelled === 2 ? 2 : raw.shelled === 1 || raw.shelled === true ? 1 : undefined;
-  return { v: 1, lot, stories, ...(shelled && { shelled }), ...(raw.bare === true && { bare: true as const }) };
+  return { v: 1, lot, stories, ...(shelled && { shelled }), ...(raw.bare === true && { bare: true as const }), ...(typeof raw.meeting === 'boolean' && { meeting: raw.meeting }) };
 }
 
 /** Plain JSON: paint as a run-length string, everything else as it is. */
@@ -141,6 +141,7 @@ export function encodeBuilding(b: Building): unknown {
     lot: { ...b.lot },
     ...(b.shelled && { shelled: b.shelled }),
     ...(b.bare && { bare: true }),
+    ...(b.meeting !== undefined && { meeting: b.meeting }),
     stories: b.stories.map((s) => ({ paint: encodePaint(s.paint), halfB: { ...s.halfB }, walls: s.walls.map((w) => ({ ...w })), items: s.items.map((i) => ({ ...i })) })),
   };
 }

@@ -1,8 +1,10 @@
 import { ITEM_DEFS, rotateLocal } from './catalog.ts';
 import { deriveFloors } from './derive.ts';
 import { route } from './nav.ts';
+import { meetingItems } from './kit.ts';
 import { deskOf, freeDesk } from './seats.ts';
-import { entryOf, locateItem, validate } from './validate.ts';
+import { hasMeeting } from './story.ts';
+import { checkOps, entryOf, locateItem, validate } from './validate.ts';
 import type { BlockId, Building, BuildOp, EmployeeId, FloorCell, ItemId, SpaceContext } from './types.ts';
 
 /** What a building still lacks before build mode may save it. */
@@ -91,6 +93,34 @@ export function clearOps(b: Building): BuildOp[] {
     if (cells.length) ops.push({ t: 'floor', story, cells });
   });
   if (b.stories.length > 1) ops.push({ t: 'stories', count: 1 });
+  if (b.meeting) ops.push({ t: 'meeting', on: false });
   if (!b.bare) ops.push({ t: 'bare', on: true });
   return ops;
+}
+
+/**
+ * Adds or removes the shared meeting room as one thing: the room the scene draws, and its table and eight chairs. Removing takes
+ * the table and chairs from wherever the owner moved them. Adding puts back each one that is gone and still fits where it
+ * stood, so furniture the owner has put there since costs the room that piece and nothing else. `skipped` counts those.
+ */
+export function meetingOps(b: Building, on: boolean, ctx: SpaceContext): { ops: BuildOp[]; skipped: number } {
+  const stock = meetingItems(b.lot);
+  const ids = new Set(stock.map((i) => i.id));
+  const ops: BuildOp[] = hasMeeting(b) === on ? [] : [{ t: 'meeting', on }];
+  if (!on) {
+    b.stories.forEach((s, story) => {
+      const del = s.items.filter((i) => ids.has(i.id)).map((i) => i.id);
+      if (del.length) ops.push({ t: 'items', story, put: [], del });
+    });
+    return { ops, skipped: 0 };
+  }
+  const put: BuildOp[] = [];
+  let skipped = 0;
+  for (const piece of stock) {
+    if (locateItem(b, piece.id)) continue;
+    const op: BuildOp = { t: 'items', story: 0, put: [piece], del: [] };
+    if (checkOps(b, [...put, op], ctx).length) skipped++;
+    else put.push(op);
+  }
+  return { ops: [...ops, ...put], skipped };
 }

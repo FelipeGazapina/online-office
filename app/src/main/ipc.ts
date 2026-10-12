@@ -93,6 +93,7 @@ const buildOp: z.ZodType<BuildOp> = z.discriminatedUnion('t', [
   }),
   z.object({ t: z.literal('items'), story: z.number().int().min(0).max(3), put: z.array(item).max(MANY), del: z.array(itemIdSchema).max(MANY) }),
   z.object({ t: z.literal('bare'), on: z.boolean() }),
+  z.object({ t: z.literal('meeting'), on: z.boolean() }),
 ]);
 
 const clientMessage = z.discriminatedUnion('type', [

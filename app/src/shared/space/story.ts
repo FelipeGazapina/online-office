@@ -103,6 +103,9 @@ function droppedContent(story: Story, to: Lot, from: Lot, index: number, out: Vi
   if (story.walls.some((w) => !wallInLot(to, w)) || story.items.some((i) => !itemInLot(to, i))) out.push({ kind: 'out_of_lot', story: index });
 }
 
+/** Whether the shared meeting room stands: what the owner last said, else a stock office has it and a bare one does not. */
+export const hasMeeting = (b: Building): boolean => b.meeting ?? !b.bare;
+
 /** Applies one op. Problems the op itself causes (bad indices, dropped content) go to `report`. Returns the same building when nothing changes. */
 export function applyOp(b: Building, op: BuildOp, report: Violation[]): { b: Building; inverse: BuildOp } {
   switch (op.t) {
@@ -111,6 +114,10 @@ export function applyOp(b: Building, op: BuildOp, report: Violation[]): { b: Bui
       if (op.on === !!b.bare) return { b, inverse };
       const { bare: _, ...rest } = b;
       return { b: op.on ? { ...rest, bare: true } : rest, inverse };
+    }
+    case 'meeting': {
+      const inverse: BuildOp = { t: 'meeting', on: hasMeeting(b) };
+      return { b: op.on === hasMeeting(b) ? b : { ...b, meeting: op.on }, inverse };
     }
     case 'lot': {
       const to = op.lot;

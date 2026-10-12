@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { Company } from '../../../../shared/protocol.ts';
-import { ITEM_DEFS, missingEssentials, placementOf, type Missing } from '../../../../shared/space/index.ts';
+import { hasMeeting, ITEM_DEFS, missingEssentials, placementOf, type Missing } from '../../../../shared/space/index.ts';
 import { get, useStore, type BuildTool } from '../../store.ts';
-import { addFloor, canTurn, chooseEntry, clearBuild, discardBuild, enterBuild, isActive, saveBuild, patchBuild, peek, redo, rotate, selectTab, setLevel, setTool, stepBack, undo } from './actions.ts';
+import { addFloor, canTurn, chooseEntry, clearBuild, discardBuild, enterBuild, isActive, saveBuild, toggleMeeting, patchBuild, peek, redo, rotate, selectTab, setLevel, setTool, stepBack, undo } from './actions.ts';
 import { ENTRIES, footprintText, TABS, visibleEntries, type Entry } from './catalog.ts';
 import { BlockIcon, BuildIcon, FillIcon, FloorIcon, PieceIcon, Redo, Search, TabIcon, ToolIcon, Turn, Undo, WALL_MODES, WallsIcon } from './icons.tsx';
 import { consequences, keepBlock, removal, removeBlock } from './removal.ts';
@@ -52,10 +52,27 @@ function TopBar() {
       <button className="bh-ico" onClick={undo} title="Undo (Ctrl+Z)" aria-label="Undo"><Undo /></button>
       <button className="bh-ico" onClick={redo} title="Redo (Ctrl+Shift+Z)" aria-label="Redo"><Redo /></button>
       <span className="bh-sep" />
+      <MeetingRoom />
       <ClearAll />
       <button className="bh-discard" onClick={discardBuild} title="Leave without keeping the changes" data-testid="build-discard">Discard</button>
       <button className="bh-done" onClick={saveBuild} title="Keep the changes and go back to the office (B)" data-testid="build-save">Save <kbd>B</kbd></button>
     </div>
+  );
+}
+
+// The shared meeting room comes and goes whole, with its table and chairs. Undo brings it back, so it asks nothing first.
+function MeetingRoom() {
+  const on = useStore((s) => !!s.building && hasMeeting(s.building));
+  return (
+    <button
+      className="bh-discard"
+      onClick={(e) => { toggleMeeting(); e.currentTarget.blur(); }}
+      title={on ? 'Take out the shared meeting room, its table and its chairs' : 'Put the shared meeting room back in the middle of the office'}
+      data-testid="build-meeting"
+      data-on={on}
+    >
+      {on ? 'Remove meeting room' : 'Add meeting room'}
+    </button>
   );
 }
 
