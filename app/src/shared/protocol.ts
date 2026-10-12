@@ -6,7 +6,7 @@ import type { ActivityEntry, QuestionRef, TaskLive } from './activity.ts';
 import type { TerminalPush } from './terminal.ts';
 import type { Building, BuildOp, ItemId, Violation } from './space/types.ts';
 import type { Missing } from './space/essentials.ts';
-import type { MailClientMessage, MailServerMessage, MailView } from './mail.ts';
+import type { ImageUpload, MailClientMessage, MailServerMessage, MailView } from './mail.ts';
 import type { Board, BoardId, BoardPatch, BoardSpec, BoardSync, Priority, Task, TaskId, TaskStage, TaskTime } from './tasks.ts';
 import type { VoiceApi } from './voice.ts';
 
@@ -302,7 +302,7 @@ export type ClientMessage =
   | { type: 'send_hours'; taskId: TaskId }
   // `always` counts only on a permission card, and only when `text` allows it. The office then adds a rule for that
   // employee that covers the same command or tool from now on.
-  | { type: 'answer'; employeeId: EmployeeId; questionId: QuestionId; text: string; always?: boolean }
+  | { type: 'answer'; employeeId: EmployeeId; questionId: QuestionId; text: string; always?: boolean; images?: ImageUpload[] }
   | { type: 'meeting_door'; state: MeetingDoor }
   // Asks a harness for its model list. The answer arrives as that provider's catalog in the next snapshots.
   | { type: 'load_models'; provider: Provider }
@@ -378,6 +378,8 @@ export type OfficeApi = {
   // The OS folder picker. Resolves null when the owner cancels.
   pickFolder(): Promise<string | null>;
   revealFolder(path: string): void;
+  // A picture the owner attached, as a data URL for the chat. Resolves null when it is not one of the office's attachments.
+  readImage(path: string): Promise<string | null>;
   portal: {
     enter(): void;
     leave(): void;
@@ -416,6 +418,7 @@ export const IPC = {
   event: 'office:event',
   pickFolder: 'office:pick-folder',
   revealFolder: 'office:reveal-folder',
+  readImage: 'office:read-image',
   portalEnter: 'office:portal-enter',
   portalLeave: 'office:portal-leave',
   portalOpenHome: 'office:portal-open-home',

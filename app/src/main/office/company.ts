@@ -44,7 +44,8 @@ import { TerminalBuffer, type TermEvent, type TerminalPush } from '../../shared/
 import type { LegacySources, TaskId } from '../../shared/tasks.ts';
 import { addShells, applyOps, assignSeats, BuildHistory, clearOps, deskOf, encodeBuilding, missingEssentials, freeDesk, legacyBuilding, parseBuilding, placeDesk, shellItems, teamKit, ITEM_DEFS } from '../../shared/space/index.ts';
 import type { Applied, Building, BuildOp, EmployeeId as SpaceEmployeeId, ItemId, Missing, SpaceContext, Violation } from '../../shared/space/index.ts';
-import type { ActorId, ConvoKey, LedgerEntry, MailView, Message, MessageId } from '../../shared/mail.ts';
+import { withImages, type ActorId, type ConvoKey, type ImageUpload, type LedgerEntry, type MailView, type Message, type MessageId } from '../../shared/mail.ts';
+import { attachmentsDir, saveImages } from './attachments.ts';
 import { HARNESSES } from './adapters/index.ts';
 import type { EmployeeSession, SessionHost } from './adapters/types.ts';
 import { logger } from './debug.ts';
@@ -725,7 +726,7 @@ export class Office {
         return this.events.history?.(msg.convo, page.messages, page.hasMore);
       }
       case 'answer':
-        return this.answer(msg.employeeId, msg.questionId, msg.text, msg.always);
+        return this.answer(msg.employeeId, msg.questionId, msg.text, msg.always, msg.images);
       case 'meeting_door':
         return this.setMeetingDoor(msg.state);
       case 'load_models':
@@ -784,11 +785,14 @@ export class Office {
     if (target.id === 'owner' || target.id === 'mailroom') throw new OfficeError('Pick someone on a block to talk to.');
     const e = this.employee(target.id);
     // A boss speaking to someone who is waiting on a decision is the decision.
-    if (msg.as === 'say' && e.status.kind === 'blocked_on_owner') return this.answer(e.id, e.status.question.id, msg.text);
+    if (msg.as === 'say' && e.status.kind === 'blocked_on_owner') return this.answer(e.id, e.status.question.id, msg.text, false, msg.images);
+    if (!msg.text.trim() && !msg.images?.length) throw new OfficeError('Write something or attach an image.');
     // A plain order is work at once. Anything else asks the model whether it is a question, which settles done with its
     // answer where work has to show files. No model, a late answer or an unclear one counts as work.
-    const triage = msg.as === 'request' && !isPlainOrder(msg.text) ? this.acker.triage?.(msg.text)?.catch(() => undefined) : undefined;
-    if (!triage && this.ownerPosts.waiting === 0) return this.postOwner(e.id, msg, 'work');
+    // Pictures with no words ask for a look, and there is nothing to ask the model about.
+    const fallback: OwnerIntent = msg.text.trim() ? 'work' : 'help';
+    const triage = msg.as === 'request' && msg.text.trim() && !isPlainOrder(msg.text) ? this.acker.triage?.(msg.text)?.catch(() => undefined) : undefined;
+    if (!triage && this.ownerPosts.waiting === 0) return this.postOwner(e.id, msg, fallback);
     // Posts keep the order the owner sent them in, even when an earlier one is still waiting for its answer.
     const before = this.ownerPosts.tail;
     this.ownerPosts.waiting++;
@@ -797,7 +801,7 @@ export class Office {
       await before;
       trace(msg.clientId, 'triaged');
       try {
-        if (!this.ownerPosts.closed) this.postOwner(e.id, msg, asked ?? 'work');
+        if (!this.ownerPosts.closed) this.postOwner(e.id, msg, asked ?? fallback);
       } catch (err) {
         this.events.error?.(err instanceof Error ? err.message : String(err));
       } finally {
@@ -806,12 +810,18 @@ export class Office {
     })();
   }
 
+  // What the owner wrote, with the pictures they attached saved and named under it.
+  private withAttached(text: string, images: readonly ImageUpload[] | undefined): string {
+    return images?.length ? withImages(text, saveImages(attachmentsDir(this.dataFile), images)) : text;
+  }
+
   private postOwner(to: EmployeeId, msg: Extract<ClientMessage, { type: 'post' }>, intent: OwnerIntent) {
+    const text = this.withAttached(msg.text, msg.images);
     const posted = this.mail.post({
       from: 'owner',
       to,
       key: msg.clientId,
-      body: msg.as === 'say' ? { kind: 'say', text: msg.text, ...(msg.urgency ? { urgency: msg.urgency } : {}) } : { kind: 'request', intent, text: msg.text },
+      body: msg.as === 'say' ? { kind: 'say', text, ...(msg.urgency ? { urgency: msg.urgency } : {}) } : { kind: 'request', intent, text },
     });
     if (!posted.ok) throw new OfficeError(posted.detail);
   }
@@ -1362,12 +1372,15 @@ export class Office {
     if (!existsSync(block.cwd)) throw new OfficeError(`${block.name}'s folder ${block.cwd} no longer exists. Restore it, or make a new block on a folder that does.`);
   }
 
-  private answer(id: EmployeeId, questionId: QuestionId, text: string, always = false) {
+  private answer(id: EmployeeId, questionId: QuestionId, said: string, always = false, images?: readonly ImageUpload[]) {
     const e = this.employee(id);
     if (e.status.kind !== 'blocked_on_owner' || e.status.question.id !== questionId) {
       throw new OfficeError(`${e.name} has no open question ${questionId}`);
     }
     const { question } = e.status;
+    // A permission card is read as allow or deny, so a picture has no place in its answer.
+    if (images?.length && question.kind === 'permission') throw new OfficeError(`Answer ${e.name}'s permission question first, then send the image.`);
+    const text = this.withAttached(said, images);
     if (!this.inbox.answer(id, questionId, text)) throw new OfficeError(`${e.name} has no open question ${questionId}`);
     debug(`owner answered ${e.name} after ${((Date.now() - question.askedAt) / 1000).toFixed(1)}s: ${JSON.stringify(short(text, 120))}`);
     if (always && question.kind === 'permission' && isAllow(text)) this.allowAlways(e, question);
@@ -1473,6 +1486,7 @@ export class Office {
     this.draft = null;
     this.setBuilding(fresh.building);
     rmSync(this.ledgerFile, { force: true });
+    rmSync(attachmentsDir(this.dataFile), { recursive: true, force: true });
     this.tasks.reset();
     this.mail = this.openMail([]);
     this.meetingDoor = 'open';
